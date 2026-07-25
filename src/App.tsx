@@ -128,7 +128,6 @@ import {
   buildSaIrsaliyeFormPrefill,
   type SaIrsaliyeFormPrefill,
 } from './lib/evrakDonusum';
-import { repairCorruptedIseGirisTarihi } from './lib/repairIseGirisTarihi';
 
 /** Lazy ekran paketi indirilirken içerik alanında gösterilen kısa yükleme animasyonu */
 const ScreenLoader: React.FC = () => (
@@ -238,6 +237,7 @@ export default function App() {
   const [loadingMsg, setLoadingMsg] = useState('Google Cloud Veritabanı bağlantısı kuruluyor...');
   const [startupError, setStartupError] = useState<{ message: string; step: string; technical?: string } | null>(null);
   const [geminiApiAlert, setGeminiApiAlert] = useState<string | null>(null);
+  const [dashboardDataReady, setDashboardDataReady] = useState(false);
 
   // Global State Engine
   
@@ -570,6 +570,27 @@ export default function App() {
         bootstrapDoneRef.current = true;
 
         const allowDemoSeed = initialSeedAllowed();
+
+        // Canlı üretimde veriler aşağıdaki onSnapshot dinleyicilerinden gelir.
+        // Aynı koleksiyonları burada da seed/fetch ederek iki kez okumak açılışı
+        // ciddi biçimde yavaşlatıyordu. Sadece canlı dinleyicisi olmayan küçük
+        // yardımcı koleksiyonları arka planda yükle.
+        if (!allowDemoSeed) {
+          void Promise.allSettled([
+            fetchCollection<Demisbas>('demirbaslar').then(setDemirbaslar),
+            fetchCollection<EpostaGonderim>('epostaGonderimleri').then(setEpostaGonderimleri),
+            fetchCollection<PersonelIslemGecmisi>('personelIslemGecmisi').then(setPersonelIslemGecmisi),
+            fetchCollection<CariKartIslem>('cariIslemGecmisi').then(setCariIslemGecmisi),
+            fetchCollection<StokKartIslem>('stokIslemGecmisi').then(setStokIslemGecmisi),
+          ]).then((results) => {
+            results.forEach((result, index) => {
+              if (result.status === 'rejected') {
+                console.warn(`Yardımcı koleksiyon ${index} arka planda yüklenemedi:`, result.reason);
+              }
+            });
+          });
+          return;
+        }
 
         const safeLoad = async <T,>(promise: Promise<T>, fallback: T, name: string): Promise<T> => {
           try {
@@ -938,13 +959,24 @@ export default function App() {
   useEffect(() => {
     if (dbStatus !== 'synced' || !currentUser) return;
 
+    const dashboardSnapshots = new Set<string>();
+    const markDashboardSnapshot = (name: string) => {
+      dashboardSnapshots.add(name);
+      if (dashboardSnapshots.size >= 4) setDashboardDataReady(true);
+    };
+    const markDashboardSnapshotError = (name: string) => (error: unknown) => {
+      console.warn(`${name} canlı verisi yüklenemedi:`, error);
+      markDashboardSnapshot(name);
+    };
+
     const unsubIrsaliyeler = onSnapshot(collection(db, 'irsaliyeler'), (snapshot) => {
       const list: Irsaliye[] = [];
       snapshot.forEach((doc) => {
         list.push({ id: doc.id, ...doc.data() } as any);
       });
       setIrsaliyeler(list);
-    });
+      markDashboardSnapshot('irsaliyeler');
+    }, markDashboardSnapshotError('irsaliyeler'));
 
     const unsubFaturalar = onSnapshot(collection(db, 'faturalar'), (snapshot) => {
       const list: Fatura[] = [];
@@ -952,7 +984,8 @@ export default function App() {
         list.push({ id: doc.id, ...doc.data() } as any);
       });
       setFaturalar(list);
-    });
+      markDashboardSnapshot('faturalar');
+    }, markDashboardSnapshotError('faturalar'));
 
     const unsubEvrakBaglanti = onSnapshot(collection(db, 'evrakBaglantiGruplari'), (snapshot) => {
       const list: EvrakBaglantiGrubu[] = [];
@@ -976,7 +1009,8 @@ export default function App() {
         list.push({ id: doc.id, ...doc.data() } as any);
       });
       setSatinAlmaTalepleri(list);
-    });
+      markDashboardSnapshot('satinAlmaTalepleri');
+    }, markDashboardSnapshotError('satinAlmaTalepleri'));
 
     const unsubPersonel = onSnapshot(collection(db, 'personeller'), (snapshot) => {
       const list: Personel[] = [];
@@ -984,6 +1018,7 @@ export default function App() {
         list.push({ id: doc.id, ...doc.data() } as any);
       });
       setPersoneller(list);
+      markDashboardSnapshot('personeller');
       if (list.length >= 20) markProductionLive();
 
       // Eksik idari kadro TC'leri bir kez tamamla (snapshot üzerine yazılmaz; sadece eksikler kaydedilir)
@@ -1060,7 +1095,7 @@ export default function App() {
           })();
         });
       }
-    });
+    }, markDashboardSnapshotError('personeller'));
 
     const unsubYoklamalar = onSnapshot(doc(db, 'yoklamalar', 'global_yoklama_map'), (snap) => {
       if (!snap.exists()) return;
@@ -1579,31 +1614,39 @@ export default function App() {
     if (personeller.length === 0) return;
     if (Object.keys(yoklamalar || {}).length === 0) return;
 
-    const muratNeeds = personeller.some(
-      (p) => p.ad === 'MURAT' && p.soyad === 'ÇÖREKÇİ' && p.iseGirisTarihi === '2026-08-06'
-    );
-    const { changes } = repairCorruptedIseGirisTarihi(personeller, yoklamalar);
-    if (!muratNeeds && changes.length === 0) return;
-
-    setPersonellerWithSync((prev) => {
-      const working = prev.map((p) =>
-        p.ad === 'MURAT' && p.soyad === 'ÇÖREKÇİ' && p.iseGirisTarihi === '2026-08-06'
-          ? { ...p, iseGirisTarihi: '2026-06-08' }
-          : p
+    let cancelled = false;
+    void import('./lib/repairIseGirisTarihi').then(({ repairCorruptedIseGirisTarihi }) => {
+      if (cancelled) return;
+      const muratNeeds = personeller.some(
+        (p) => p.ad === 'MURAT' && p.soyad === 'ÇÖREKÇİ' && p.iseGirisTarihi === '2026-08-06'
       );
-      const repaired = repairCorruptedIseGirisTarihi(working, yoklamalar);
-      if (repaired.changes.length > 0) {
-        console.info(
-          `[iseGiris-onarim] ${repaired.changes.length} personel düzeltildi`,
-          repaired.changes.slice(0, 40)
+      const { changes } = repairCorruptedIseGirisTarihi(personeller, yoklamalar);
+      if (!muratNeeds && changes.length === 0) return;
+
+      setPersonellerWithSync((prev) => {
+        const working = prev.map((p) =>
+          p.ad === 'MURAT' && p.soyad === 'ÇÖREKÇİ' && p.iseGirisTarihi === '2026-08-06'
+            ? { ...p, iseGirisTarihi: '2026-06-08' }
+            : p
         );
+        const repaired = repairCorruptedIseGirisTarihi(working, yoklamalar);
+        if (repaired.changes.length > 0) {
+          console.info(
+            `[iseGiris-onarim] ${repaired.changes.length} personel düzeltildi`,
+            repaired.changes.slice(0, 40)
+          );
+        }
+        return repaired.next;
+      });
+
+      if (changes.length > 0 && !hireRepairNotifiedRef.current) {
+        hireRepairNotifiedRef.current = true;
       }
-      return repaired.next;
     });
 
-    if (changes.length > 0 && !hireRepairNotifiedRef.current) {
-      hireRepairNotifiedRef.current = true;
-    }
+    return () => {
+      cancelled = true;
+    };
   }, [personeller, yoklamalar]);
 
   // Ana firma adı birleştir: "Kibritçi İnşaat" / "KİBRİTÇİ İNŞAAT" → tek kanonik ad
@@ -2853,6 +2896,7 @@ export default function App() {
                   currentUser={currentUser}
                   stokKartlar={stokKartlar}
                   bildirimler={bildirimler}
+                  dataReady={dashboardDataReady}
                 />
               )}
 

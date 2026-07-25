@@ -34,6 +34,7 @@ interface DashboardScreenProps {
   currentUser?: any;
   stokKartlar?: any[];
   bildirimler?: any[];
+  dataReady?: boolean;
 }
 
 export const DashboardScreen: React.FC<DashboardScreenProps> = ({ 
@@ -50,7 +51,8 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
   onNavigate,
   currentUser,
   stokKartlar = [],
-  bildirimler = []
+  bildirimler = [],
+  dataReady = false
 }) => {
   // Sticky notepad local state
   const [stickyNotes, setStickyNotes] = useState<string>(() => {
@@ -159,11 +161,9 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
   );
   const pendingSatinAlmaCount = operasyonOzeti.bekleyenSatinAlma;
   const totalPendingApprovals = operasyonOzeti.bekleyenOnay;
-  const dataStillHydrating =
-    personeller.length > 0 &&
-    satinAlmaTalepleri.length === 0 &&
-    irsaliyeler.length === 0 &&
-    faturalar.length === 0;
+  // Boş koleksiyon geçerli bir sonuçtur. Hazır olmayı dizi uzunluğundan değil,
+  // Firestore'un ilk snapshot'larının tamamlanmasından belirle.
+  const dataStillHydrating = !dataReady;
 
   // Personnel selection state for tracing history
   const [selectedPersonelId, setSelectedPersonelId] = useState<string>('');

@@ -1,6 +1,8 @@
 import { initializeApp } from 'firebase/app';
 import { 
-  getFirestore, 
+  initializeFirestore,
+  persistentLocalCache,
+  persistentMultipleTabManager,
   collection, 
   doc, 
   getDoc,
@@ -23,7 +25,17 @@ const firebaseConfig = resolveFirebaseConfig();
 // Initialize Firebase
 export const app = initializeApp(firebaseConfig);
 const firestoreDbId = getFirestoreDatabaseId(firebaseConfig);
-export const db = firestoreDbId ? getFirestore(app, firestoreDbId) : getFirestore(app);
+// Canlı verileri IndexedDB'de sakla. Sonraki açılışlarda onSnapshot önce yerel
+// önbelleği döndürür; ağdan güncel veri arka planda gelir.
+export const db = initializeFirestore(
+  app,
+  {
+    localCache: persistentLocalCache({
+      tabManager: persistentMultipleTabManager(),
+    }),
+  },
+  firestoreDbId
+);
 export const auth = getAuth(app);
 export const storage = getStorage(app);
 
