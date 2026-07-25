@@ -6,7 +6,9 @@ import { getYoklamaDay, setYoklamaDay } from './yoklamaUtils';
 export const MAX_SAHA_MESAI_SAATI = 24;
 export const MAX_SAHA_FOTO_COUNT = 5;
 
-type FaaliyetFotoKaynak = Partial<SahaFaaliyeti> & {
+type FaaliyetFotoKaynak = {
+  fotoUrl?: string | null;
+  fotoUrls?: string[];
   sahaFotoBase64?: string;
   fotoBase64?: string;
 };

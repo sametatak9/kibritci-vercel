@@ -34,12 +34,25 @@ export function isFaaliyetInPeriod(
   return y === year && m === month;
 }
 
+export function isFaaliyetOnDateKey(f: { tarih?: string }, dateKey: string): boolean {
+  const dk = normalizeDateKey(f.tarih);
+  const target = normalizeDateKey(dateKey);
+  return !!dk && !!target && dk === target;
+}
+
 export function filterFaaliyetlerByPeriod(
   faaliyetler: SahaFaaliyeti[],
   year: number,
   month: number
 ): SahaFaaliyeti[] {
   return (faaliyetler || []).filter((f) => isFaaliyetInPeriod(f, year, month));
+}
+
+export function filterFaaliyetlerByDate<T extends { tarih?: string }>(
+  faaliyetler: readonly T[] | null | undefined,
+  dateKey: string
+): T[] {
+  return (faaliyetler ?? []).filter((f) => isFaaliyetOnDateKey(f, dateKey));
 }
 
 function personScore(p: Personel): number {
@@ -182,9 +195,9 @@ export function formatFaaliyetTarihLabel(tarih?: string): string {
   });
 }
 
-/** Faaliyetteki ekip listesini okunur isimlere çevirir */
+/** Faaliyetteki ekip listesini okunur isimlere çevirir (saha veya kamp) */
 export function resolveFaaliyetEkip(
-  f: SahaFaaliyeti,
+  f: SahaFaaliyeti | KampFaaliyet | FaaliyetPersonelKaynak,
   personeller: Personel[]
 ): Array<{ id?: string; adSoyad: string; mesaiSaati?: number }> {
   const entries = f.aktifPersonelListesi || [];
@@ -214,6 +227,18 @@ export function resolveFaaliyetEkip(
     });
   }
 
+  if (f.personelMesaiSaatleri) {
+    for (const [pid, hrs] of Object.entries(f.personelMesaiSaatleri)) {
+      if (!(Number(hrs) > 0)) continue;
+      const p = personeller.find((x) => x.id === pid);
+      const adSoyad = p ? `${p.ad} ${p.soyad}`.trim() : pid;
+      const key = normalizeTurkishName(adSoyad);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({ id: p?.id, adSoyad, mesaiSaati: Number(hrs) });
+    }
+  }
+
   if (out.length === 0 && f.personelId) {
     const p = personeller.find((x) => x.id === f.personelId);
     if (p) {
@@ -226,6 +251,34 @@ export function resolveFaaliyetEkip(
   }
 
   return out.sort((a, b) => a.adSoyad.localeCompare(b.adSoyad, 'tr'));
+}
+
+export function buildDayFaaliyetOzeti(
+  sahaFaaliyetleri: SahaFaaliyeti[],
+  kampFaaliyetleri: KampFaaliyet[],
+  personeller: Personel[],
+  dateKey: string
+): {
+  sahaSayisi: number;
+  kampSayisi: number;
+  faaliyetSayisi: number;
+  fotoSayisi: number;
+  personelSayisi: number;
+} {
+  const saha = filterFaaliyetlerByDate(sahaFaaliyetleri, dateKey);
+  const kamp = filterFaaliyetlerByDate(kampFaaliyetleri, dateKey);
+  const matched = new Map<string, Personel>();
+  for (const f of saha) absorbFaaliyetPersonel(f, personeller, matched);
+  for (const f of kamp) absorbFaaliyetPersonel(f, personeller, matched);
+  return {
+    sahaSayisi: saha.length,
+    kampSayisi: kamp.length,
+    faaliyetSayisi: saha.length + kamp.length,
+    fotoSayisi:
+      saha.reduce((n, f) => n + getFaaliyetFotolar(f).length, 0) +
+      kamp.reduce((n, f) => n + getFaaliyetFotolar(f).length, 0),
+    personelSayisi: matched.size,
+  };
 }
 
 export function countPersonFaaliyetFotolar(
