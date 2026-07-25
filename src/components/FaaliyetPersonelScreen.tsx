@@ -46,13 +46,19 @@ import { formatDateLabelTr, todayDateKey } from '../lib/dateKeyUtils';
 import { normalizeTurkishName } from '../lib/yoklamaUtils';
 import { db } from '../lib/firebase';
 import { collection, onSnapshot } from 'firebase/firestore';
+import { GunlukFaaliyetProgramScreen } from './GunlukFaaliyetProgramScreen';
 
-type ViewMode = 'personel' | 'gun';
+type ViewMode = 'personel' | 'gun' | 'program';
 
 interface FaaliyetPersonelScreenProps {
   personeller: Personel[];
   yoklamalar: AylikYoklamaMap;
   sahaFaaliyetleri?: SahaFaaliyeti[];
+  setSahaFaaliyetleri: (
+    updater: SahaFaaliyeti[] | ((prev: SahaFaaliyeti[]) => SahaFaaliyeti[])
+  ) => void;
+  currentUser?: { email?: string; uid?: string } | null;
+  canAssignProgram?: boolean;
 }
 
 const DURUM_STYLE: Record<string, string> = {
@@ -88,6 +94,9 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
   personeller,
   yoklamalar,
   sahaFaaliyetleri = [],
+  setSahaFaaliyetleri,
+  currentUser,
+  canAssignProgram = false,
 }) => {
   const [viewMode, setViewMode] = useState<ViewMode>('personel');
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1);
@@ -494,6 +503,20 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
                 <Calendar size={12} />
                 Güne Göre
               </button>
+              {canAssignProgram && (
+                <button
+                  type="button"
+                  onClick={() => setViewMode('program')}
+                  className={`px-3 py-2 rounded-xl text-[10px] font-black uppercase tracking-wide cursor-pointer transition inline-flex items-center gap-1.5 ${
+                    viewMode === 'program'
+                      ? 'bg-amber-400 text-slate-900'
+                      : 'text-white/80 hover:bg-white/10'
+                  }`}
+                >
+                  <HardHat size={12} />
+                  Görev Ata
+                </button>
+              )}
             </div>
             {viewMode === 'personel' ? (
               <div className="flex items-center gap-2 bg-white/10 border border-white/15 rounded-2xl p-2">
@@ -538,7 +561,7 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
                   <ChevronRight size={18} />
                 </button>
               </div>
-            ) : (
+            ) : viewMode === 'gun' ? (
               <div className="flex items-center gap-2 bg-white/10 border border-white/15 rounded-2xl p-2">
                 <button
                   type="button"
@@ -572,10 +595,15 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
                   Bugün
                 </button>
               </div>
+            ) : (
+              <p className="text-[10px] font-bold text-amber-200 text-right px-2">
+                Formen / Yönetici görev programı
+              </p>
             )}
           </div>
         </div>
 
+        {viewMode !== 'program' && (
         <div className="relative mt-5 grid grid-cols-2 sm:grid-cols-5 gap-2">
           {(viewMode === 'personel'
             ? [
@@ -615,9 +643,18 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
             </div>
           ))}
         </div>
+        )}
       </div>
 
-      {viewMode === 'personel' ? (
+      {viewMode === 'program' ? (
+        <GunlukFaaliyetProgramScreen
+          personeller={personeller}
+          yoklamalar={yoklamalar}
+          sahaFaaliyetleri={sahaFaaliyetleri}
+          setSahaFaaliyetleri={setSahaFaaliyetleri}
+          currentUser={currentUser}
+        />
+      ) : viewMode === 'personel' ? (
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 min-h-[60vh]">
         <aside className="lg:col-span-4 xl:col-span-3 bg-white border border-slate-200 rounded-2xl shadow-sm flex flex-col overflow-hidden max-h-[75vh]">
           <div className="p-3 border-b border-slate-100 space-y-2">

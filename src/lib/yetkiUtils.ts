@@ -5,7 +5,6 @@ export const PORTAL_PAGES = [
   { key: "personel_kartlari", label: "Personel Detay Kartları", group: "PERSONEL" },
   { key: "yoklama", label: "Yoklama ve Puantaj", group: "PERSONEL" },
   { key: "faaliyet_personel", label: "Faaliyeti Olan Personeller", group: "PERSONEL" },
-  { key: "gunluk_faaliyet_programi", label: "Günlük Faaliyet Programı", group: "PERSONEL" },
   { key: "maas", label: "Maaş Hesaplama & Ödeme", group: "PERSONEL" },
   { key: "personel_izin", label: "Personel İzin Formu", group: "PERSONEL" },
   { key: "kasa", label: "Haftalık Kasa", group: "FİNANS & ENVANTER" },
@@ -38,7 +37,7 @@ export type PortalPageKey = (typeof PORTAL_PAGES)[number]["key"];
 
 /** Mobil saha rolleri → erişilebilir panel sekmeleri */
 export const MOBILE_ROLE_ALLOWED_TABS: Record<string, PortalPageKey[]> = {
-  FORMEN: ['formen_ekrani', 'rapor_programlama', 'personel'],
+  FORMEN: ['formen_ekrani', 'faaliyet_personel', 'rapor_programlama', 'personel'],
   GÜVENLİK: ['guvenlik_ekrani'],
   KAMPÇI: ['kampci_ekrani'],
   TESİSATÇI: ['tesisatci_ekrani'],
