@@ -31,25 +31,28 @@ export function suggestKalemBaglantilari(
   const usedIrKalem = new Set<string>();
 
   sa?.kalemler.forEach((sk) => {
-    let bestIr: { ir: Irsaliye; kalem: (typeof irsaliyeler)[0]['kalemler'][0] } | null = null;
+    // Aynı SA kalemine bağlı tüm irsaliye satırlarını topla (20 TIR → tonaj toplamı)
+    const matched: Array<{ ir: Irsaliye; kalem: (typeof irsaliyeler)[0]['kalemler'][0] }> = [];
     for (const ir of irsaliyeler) {
       for (const ik of ir.kalemler) {
         const key = `${ir.id}-${ik.id}`;
         if (usedIrKalem.has(key)) continue;
-        if (namesSimilar(sk.urunAdi, ik.urunAdi)) {
-          bestIr = { ir, kalem: ik };
-          break;
+        const byId = ik.saKalemId && ik.saKalemId === sk.id;
+        const byName = namesSimilar(sk.urunAdi, ik.urunAdi);
+        if (byId || byName) {
+          matched.push({ ir, kalem: ik });
+          usedIrKalem.add(key);
         }
       }
-      if (bestIr) break;
     }
+
+    const bestIr = matched[0] || null;
+    const irsaliyeMiktarToplam = matched.reduce((s, m) => s + (Number(m.kalem.miktar) || 0), 0);
 
     let ftKalem = fatura?.kalemler.find((fk) => namesSimilar(fk.urunAdi, sk.urunAdi));
     if (!ftKalem && bestIr) {
       ftKalem = fatura?.kalemler.find((fk) => namesSimilar(fk.urunAdi, bestIr!.kalem.urunAdi));
     }
-
-    if (bestIr) usedIrKalem.add(`${bestIr.ir.id}-${bestIr.kalem.id}`);
 
     links.push({
       id: `kb_${sk.id}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
@@ -59,10 +62,10 @@ export function suggestKalemBaglantilari(
       irsaliyeId: bestIr?.ir.id,
       faturaKalemId: ftKalem?.id,
       saMiktar: sk.miktar,
-      irsaliyeMiktar: bestIr?.kalem.miktar,
+      irsaliyeMiktar: matched.length ? irsaliyeMiktarToplam : undefined,
       faturaMiktar: ftKalem?.miktar,
       birim: sk.birim || bestIr?.kalem.birim || ftKalem?.birim,
-      onaylandi: Boolean(bestIr || ftKalem),
+      onaylandi: Boolean(matched.length || ftKalem),
     });
   });
 

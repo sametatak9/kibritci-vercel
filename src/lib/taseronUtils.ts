@@ -1,10 +1,13 @@
 import { CariKart, KampKaydi, KampOdasi, OperatorFaaliyet, Personel, TaseronEnerjiKaydi, TaseronSayacOlcum, TaseronYemekKaydi } from '../types/erp';
 
 export function getTaseronCariKartlar(cariKartlar: CariKart[]): CariKart[] {
-  return cariKartlar.filter((c) => c.kartTipi === 'TASERON' && c.durum !== 'PASIF');
+  return cariKartlar.filter(
+    (c) =>
+      (c.kartTipi === 'TASERON' || String((c as { tur?: string }).tur || '').toUpperCase() === 'TASERON') &&
+      c.durum !== 'PASIF'
+  );
 }
 
-/** Boşlukları sadeleştir + tr-TR küçük harf (YURT MEKANİK ↔ Yurt Mekanik) */
 export function normFirma(s: string): string {
   return String(s || '')
     .trim()
@@ -12,42 +15,127 @@ export function normFirma(s: string): string {
     .replace(/\s+/g, ' ');
 }
 
-/** Türkçe karakterleri katla — Ltd/Şti farklarını da ayıklar */
-export function foldFirma(s: string): string {
+/** Türkçe karakter + Ltd/Limited/Şirketi varyasyonlarını sadeleştir */
+export function firmaAnahtar(s: string): string {
   return normFirma(s)
     .replace(/ı/g, 'i')
+    .replace(/İ/g, 'i')
+    .replace(/ş/g, 's')
     .replace(/ğ/g, 'g')
     .replace(/ü/g, 'u')
-    .replace(/ş/g, 's')
     .replace(/ö/g, 'o')
     .replace(/ç/g, 'c')
-    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .replace(/\b(limited|ltd\.?|şti\.?|sti\.?|a\.?\s*ş\.?|as\.?|san\.?|tic\.?|ve|insaat|inşaat|sirketi|sirket)\b/gi, ' ')
+    .replace(/[.,/\\\-_'"()]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 }
 
-function stripFirmaSuffix(s: string): string {
-  return foldFirma(s)
-    .replace(
-      /\b(ltd|sti|as|a s|san|tic|insaat|ins|ticaret|limited|sirketi|sirket)\b/g,
-      ' '
-    )
-    .replace(/\s+/g, ' ')
-    .trim();
+/** Alias — mevcut çağrılar (taseronMevcudiyetUtils vb.) */
+export function foldFirma(s: string): string {
+  return firmaAnahtar(s);
 }
 
 export function firmaEslesir(a: string, b: string): boolean {
-  const left = String(a || '').trim();
-  const right = String(b || '').trim();
-  if (!left || !right) return false;
-  if (normFirma(left) === normFirma(right)) return true;
-  if (foldFirma(left) === foldFirma(right)) return true;
-  const sa = stripFirmaSuffix(left);
-  const sb = stripFirmaSuffix(right);
-  if (sa.length < 4 || sb.length < 4) return false;
-  if (sa === sb) return true;
-  // "Demirkaan" ↔ "Demirkaan İnşaat Ltd. Şti." gibi kısmi eşleşme
-  return sa.includes(sb) || sb.includes(sa);
+  if (!a?.trim() || !b?.trim()) return false;
+  if (normFirma(a) === normFirma(b)) return true;
+  const ka = firmaAnahtar(a);
+  const kb = firmaAnahtar(b);
+  if (!ka || !kb) return false;
+  if (ka === kb) return true;
+  // Birinin diğeri içinde geçmesi (Demirkaan / Demirkaan İnşaat)
+  if (ka.length >= 4 && kb.length >= 4 && (ka.includes(kb) || kb.includes(ka))) return true;
+  return false;
+}
+
+export type TaseronFirmaEnvanterSatir = {
+  key: string;
+  unvan: string;
+  cari?: CariKart;
+  personelSayisi: number;
+  kampSakinSayisi: number;
+  durum: 'AKTIF' | 'PASIF' | 'ORPHAN';
+  personeller: Personel[];
+};
+
+/** Cari + personel firmaAdi + kamp calistigiFirma birleşik taşeron envanteri */
+export function buildTaseronFirmaEnvanteri(
+  cariKartlar: CariKart[],
+  personeller: Personel[],
+  kampKayitlari: KampKaydi[] = []
+): TaseronFirmaEnvanterSatir[] {
+  const cariler = getTaseronCariKartlar(cariKartlar);
+  const byKey = new Map<string, TaseronFirmaEnvanterSatir>();
+
+  const ensure = (rawName: string, cari?: CariKart) => {
+    const name = (cari?.unvan || rawName || '').trim();
+    if (!name) return null;
+    const key = firmaAnahtar(name) || normFirma(name);
+    let row = byKey.get(key);
+    if (!row) {
+      row = {
+        key,
+        unvan: name,
+        cari,
+        personelSayisi: 0,
+        kampSakinSayisi: 0,
+        durum: cari ? (cari.durum === 'PASIF' ? 'PASIF' : 'AKTIF') : 'ORPHAN',
+        personeller: [],
+      };
+      byKey.set(key, row);
+    } else if (cari && !row.cari) {
+      row.cari = cari;
+      row.unvan = cari.unvan;
+      row.durum = cari.durum === 'PASIF' ? 'PASIF' : 'AKTIF';
+    }
+    return row;
+  };
+
+  for (const c of cariler) ensure(c.unvan, c);
+
+  for (const p of personeller) {
+    const firma = (p.firmaAdi || '').trim();
+    if (!firma) continue;
+    if (p.firmaTipi === 'ANA_FIRMA') continue;
+    // Taşeron veya firma adı cari taşeronlarla eşleşenler
+    const matchedCari = cariler.find((c) => firmaEslesir(firma, c.unvan));
+    if (p.firmaTipi !== 'TASERON' && !matchedCari) continue;
+    const row = ensure(matchedCari?.unvan || firma, matchedCari);
+    if (!row) continue;
+    if (!row.personeller.some((x) => x.id === p.id)) {
+      row.personeller.push(p);
+      row.personelSayisi = row.personeller.length;
+    }
+  }
+
+  for (const k of kampKayitlari) {
+    if (k.durum !== 'AKTIF') continue;
+    const firma = (k.calistigiFirma || '').trim();
+    if (!firma) continue;
+    const matchedCari = cariler.find((c) => firmaEslesir(firma, c.unvan));
+    if (!matchedCari) {
+      const hasTaseronPersonel = personeller.some(
+        (p) => p.firmaTipi === 'TASERON' && firmaEslesir(p.firmaAdi || '', firma)
+      );
+      if (!hasTaseronPersonel) continue;
+    }
+    const row = ensure(matchedCari?.unvan || firma, matchedCari);
+    if (row) row.kampSakinSayisi += 1;
+  }
+
+  return Array.from(byKey.values()).sort((a, b) =>
+    a.unvan.localeCompare(b.unvan, 'tr', { sensitivity: 'base' })
+  );
+}
+
+export function taseronEnvanterOzet(rows: TaseronFirmaEnvanterSatir[]) {
+  return {
+    toplamFirma: rows.length,
+    cariVar: rows.filter((r) => r.cari).length,
+    carisiz: rows.filter((r) => !r.cari).length,
+    personelsizCari: rows.filter((r) => r.cari && r.personelSayisi === 0).length,
+    toplamPersonel: rows.reduce((s, r) => s + r.personelSayisi, 0),
+  };
 }
 
 export function faaliyetlerForTaseron(

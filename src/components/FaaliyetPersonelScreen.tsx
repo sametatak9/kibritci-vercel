@@ -17,8 +17,9 @@ import {
   UserRound,
   Layers,
   X,
+  Tent,
 } from 'lucide-react';
-import { AylikYoklamaMap, Personel, SahaFaaliyeti } from '../types/erp';
+import { AylikYoklamaMap, KampFaaliyet, Personel, SahaFaaliyeti } from '../types/erp';
 import {
   formatMesaiFaaliyetLabel,
   getFaaliyetFotolar,
@@ -31,9 +32,13 @@ import {
   countPersonFaaliyetFotolar,
   formatFaaliyetTarihLabel,
   getPersonFaaliyetleriInPeriod,
+  isFaaliyetInPeriod,
+  personMatchesFaaliyet,
   resolveFaaliyetEkip,
 } from '../lib/faaliyetPersonelUtils';
 import { normalizeTurkishName } from '../lib/yoklamaUtils';
+import { db } from '../lib/firebase';
+import { collection, onSnapshot } from 'firebase/firestore';
 
 interface FaaliyetPersonelScreenProps {
   personeller: Personel[];
@@ -79,6 +84,16 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedPersonId, setSelectedPersonId] = useState<string | null>(null);
   const [lightbox, setLightbox] = useState<{ urls: string[]; index: number } | null>(null);
+  const [kampFaaliyetleri, setKampFaaliyetleri] = useState<KampFaaliyet[]>([]);
+
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, 'kampGunlukFaaliyetleri'), (snap) => {
+      const list: KampFaaliyet[] = [];
+      snap.forEach((d) => list.push({ id: d.id, ...(d.data() as Omit<KampFaaliyet, 'id'>) }));
+      setKampFaaliyetleri(list);
+    });
+    return () => unsub();
+  }, []);
 
   const periodLabel = useMemo(
     () =>
@@ -89,14 +104,33 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
     [selectedYear, selectedMonth]
   );
 
+  const selectedPeriodKampFaaliyetleri = useMemo(
+    () => kampFaaliyetleri.filter((f) => isFaaliyetInPeriod(f, selectedYear, selectedMonth)),
+    [kampFaaliyetleri, selectedYear, selectedMonth]
+  );
+
   const faaliyetPersoneller = useMemo(
-    () => buildFaaliyetPersoneller(sahaFaaliyetleri, personeller, selectedYear, selectedMonth),
-    [sahaFaaliyetleri, personeller, selectedYear, selectedMonth]
+    () =>
+      buildFaaliyetPersoneller(
+        sahaFaaliyetleri,
+        personeller,
+        selectedYear,
+        selectedMonth,
+        kampFaaliyetleri
+      ),
+    [sahaFaaliyetleri, kampFaaliyetleri, personeller, selectedYear, selectedMonth]
   );
 
   const periodOzet = useMemo(
-    () => buildPeriodFaaliyetOzeti(sahaFaaliyetleri, personeller, selectedYear, selectedMonth),
-    [sahaFaaliyetleri, personeller, selectedYear, selectedMonth]
+    () =>
+      buildPeriodFaaliyetOzeti(
+        sahaFaaliyetleri,
+        personeller,
+        selectedYear,
+        selectedMonth,
+        kampFaaliyetleri
+      ),
+    [sahaFaaliyetleri, kampFaaliyetleri, personeller, selectedYear, selectedMonth]
   );
 
   const filteredList = useMemo(() => {
@@ -150,6 +184,16 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
           )
         : [],
     [selectedPerson, sahaFaaliyetleri, selectedYear, selectedMonth]
+  );
+
+  const personKampFaaliyetleri = useMemo(
+    () =>
+      selectedPerson
+        ? selectedPeriodKampFaaliyetleri
+            .filter((f) => personMatchesFaaliyet(selectedPerson, f))
+            .sort((a, b) => String(b.tarih || '').localeCompare(String(a.tarih || ''), 'tr'))
+        : [],
+    [selectedPerson, selectedPeriodKampFaaliyetleri]
   );
 
   const personFotoSayisi = useMemo(
@@ -285,7 +329,7 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
             { icon: Users, label: 'Personel', value: String(periodOzet.personelSayisi) },
             { icon: Layers, label: 'Faaliyet', value: String(periodOzet.faaliyetSayisi) },
             { icon: Images, label: 'Fotoğraf', value: String(periodOzet.fotoSayisi) },
-            { icon: MapPin, label: 'Parsel', value: String(periodOzet.parselSayisi) },
+            { icon: MapPin, label: 'Saha / Kamp', value: `${periodOzet.sahaFaaliyetSayisi} · ${periodOzet.kampFaaliyetSayisi}` },
           ].map((item) => (
             <div
               key={item.label}
@@ -512,7 +556,7 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
 
                 {personFaaliyetleri.length === 0 ? (
                   <div className="bg-slate-50 border border-slate-200 rounded-2xl p-8 text-center text-slate-400 text-xs">
-                    Bu ay için faaliyet kartı yok.
+                    Bu ay için saha faaliyet kartı yok.
                   </div>
                 ) : (
                   personFaaliyetleri.map((f) => {
@@ -689,6 +733,53 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
                       </article>
                     );
                   })
+                )}
+
+                <div className="flex flex-wrap items-center justify-between gap-2 pt-2">
+                  <h3 className="text-xs font-black uppercase tracking-wider text-slate-700 flex items-center gap-2">
+                    <Tent size={14} className="text-teal-600" />
+                    Kamp faaliyetleri ({personKampFaaliyetleri.length})
+                  </h3>
+                  <span className="text-[9px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">
+                    Kaynak: Kamp
+                  </span>
+                </div>
+                {personKampFaaliyetleri.length === 0 ? (
+                  <div className="bg-slate-50 border border-slate-200 rounded-2xl p-6 text-center text-slate-400 text-xs">
+                    Bu ay için kamp faaliyet kaydı yok.
+                  </div>
+                ) : (
+                  personKampFaaliyetleri.map((f) => (
+                    <article
+                      key={`kamp-${f.id}`}
+                      className="bg-white border border-teal-200 rounded-2xl overflow-hidden shadow-sm"
+                    >
+                      <div className="p-4 sm:p-5 space-y-3">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-[11px] font-bold text-slate-700">
+                            {formatFaaliyetTarihLabel(f.tarih)}
+                          </span>
+                          <span className="text-[9px] font-black uppercase tracking-wide text-teal-800 bg-teal-50 border border-teal-100 px-2 py-0.5 rounded-full">
+                            Kamp
+                          </span>
+                          <span className="text-[9px] font-black uppercase tracking-wide text-slate-600 bg-slate-100 px-2 py-0.5 rounded-full">
+                            {f.faaliyetTipi}
+                            {f.faaliyetGrubu ? ` · ${f.faaliyetGrubu}` : ''}
+                          </span>
+                        </div>
+                        <h4 className="text-base font-black text-slate-900">
+                          {f.yerleskeAdi || 'Kamp yerleşkesi'}
+                        </h4>
+                        {f.aciklama ? (
+                          <p className="text-xs text-slate-700 leading-relaxed whitespace-pre-wrap">
+                            {f.aciklama}
+                          </p>
+                        ) : (
+                          <p className="text-[11px] text-slate-400 italic">Açıklama girilmemiş.</p>
+                        )}
+                      </div>
+                    </article>
+                  ))
                 )}
               </div>
             </>

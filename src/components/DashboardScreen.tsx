@@ -717,8 +717,17 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
             ))}
             {odemeEngelleri.length > 40 && (
               <p className="text-[10px] text-slate-500 text-center pt-1">
-                +{odemeEngelleri.length - 40} kişi daha — Personel ekranından tamamlayın.
+                +{odemeEngelleri.length - 40} kişi daha — Personel ekranında &quot;Ödeme Engeli&quot; filtresini açın.
               </p>
+            )}
+            {odemeEngelleri.length > 0 && onNavigate && (
+              <button
+                type="button"
+                onClick={() => onNavigate('personel')}
+                className="w-full mt-2 text-[10px] font-bold py-2 rounded-xl bg-rose-50 text-rose-800 border border-rose-200 cursor-pointer hover:bg-rose-100"
+              >
+                Tümünü Personel ekranında göster
+              </button>
             )}
           </div>
         )}

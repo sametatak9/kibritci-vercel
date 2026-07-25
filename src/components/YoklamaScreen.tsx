@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { Calendar, Trash2, ShieldAlert, CheckCircle, FileText, ChevronRight, RefreshCw, Database, Undo2, Redo2, Camera } from 'lucide-react';
-import { Personel, AylikYoklamaMap, YoklamaDurum, SahaFaaliyeti } from '../types/erp';
+import { Personel, AylikYoklamaMap, YoklamaDurum, SahaFaaliyeti, KampFaaliyet } from '../types/erp';
 import { normalizeDateKey } from '../lib/dateKeyUtils';
 import { formatMesaiFaaliyetLabel, getFaaliyetFotolar, isMesaiSahaFaaliyet } from '../lib/sahaFaaliyetUtils';
 import {
@@ -19,6 +19,8 @@ import {
   YoklamaArchiveEntry,
 } from '../lib/yoklamaPersistence';
 import type { YoklamaSaveSource } from '../lib/yoklamaPersistence';
+import { db } from '../lib/firebase';
+import { collection, onSnapshot } from 'firebase/firestore';
 
 const maskName = (name?: string): string => {
   return name || '';
@@ -89,6 +91,16 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
   const [bireyselYear, setBireyselYear] = useState(selectedYear);
 
   const [sahaPreviewPerson, setSahaPreviewPerson] = useState<Personel | null>(null);
+  const [kampFaaliyetleri, setKampFaaliyetleri] = useState<KampFaaliyet[]>([]);
+
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, 'kampGunlukFaaliyetleri'), (snap) => {
+      const list: KampFaaliyet[] = [];
+      snap.forEach((d) => list.push({ id: d.id, ...(d.data() as Omit<KampFaaliyet, 'id'>) }));
+      setKampFaaliyetleri(list);
+    });
+    return () => unsub();
+  }, []);
 
   const handlePersonDoubleClick = (p: Personel) => {
     setSahaPreviewPerson(p);
@@ -467,8 +479,15 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
   );
 
   const faaliyetPersonelCount = useMemo(
-    () => buildFaaliyetPersoneller(sahaFaaliyetleri, personeller, selectedYear, selectedMonth).length,
-    [sahaFaaliyetleri, personeller, selectedYear, selectedMonth]
+    () =>
+      buildFaaliyetPersoneller(
+        sahaFaaliyetleri,
+        personeller,
+        selectedYear,
+        selectedMonth,
+        kampFaaliyetleri
+      ).length,
+    [sahaFaaliyetleri, kampFaaliyetleri, personeller, selectedYear, selectedMonth]
   );
 
   const sahaPreviewFaaliyetleri = useMemo(() => {

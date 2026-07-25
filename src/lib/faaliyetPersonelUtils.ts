@@ -1,17 +1,33 @@
-import { AylikYoklamaMap, Personel, SahaFaaliyeti, YoklamaDurum } from '../types/erp';
+import { AylikYoklamaMap, KampFaaliyet, Personel, SahaFaaliyeti, YoklamaDurum } from '../types/erp';
 import { normalizeDateKey } from './dateKeyUtils';
 import { getFaaliyetFotolar } from './sahaFaaliyetUtils';
 import { findPersonelByName, getYoklamaDay, normalizeTurkishName } from './yoklamaUtils';
 
-export function personMatchesFaaliyet(p: Personel, f: SahaFaaliyeti): boolean {
+/** Saha veya kamp faaliyetinde personel eşleştirme için ortak şekil */
+export type FaaliyetPersonelKaynak = {
+  aktifPersonelListesi?: string[];
+  personelId?: string;
+  personelMesaiSaatleri?: Record<string, number>;
+  tarih?: string;
+};
+
+export function personMatchesFaaliyet(
+  p: Personel,
+  f: SahaFaaliyeti | KampFaaliyet | FaaliyetPersonelKaynak
+): boolean {
   const list = f.aktifPersonelListesi || [];
   if (list.some((entry) => String(entry).trim() === p.id)) return true;
   const fullName = normalizeTurkishName(`${p.ad} ${p.soyad}`);
   if (list.some((entry) => normalizeTurkishName(String(entry).trim()) === fullName)) return true;
+  if (f.personelMesaiSaatleri && Number(f.personelMesaiSaatleri[p.id]) > 0) return true;
   return f.personelId === p.id;
 }
 
-export function isFaaliyetInPeriod(f: SahaFaaliyeti, year: number, month: number): boolean {
+export function isFaaliyetInPeriod(
+  f: { tarih?: string },
+  year: number,
+  month: number
+): boolean {
   const dk = normalizeDateKey(f.tarih);
   if (!dk) return false;
   const [y, m] = dk.split('-').map(Number);
@@ -34,32 +50,49 @@ function personScore(p: Personel): number {
   return s;
 }
 
-/** Seçili ayda en az bir saha faaliyetine bağlı personeller (Yoklama ile aynı mantık) */
-export function buildFaaliyetPersoneller(
-  sahaFaaliyetleri: SahaFaaliyeti[],
+function absorbFaaliyetPersonel(
+  f: FaaliyetPersonelKaynak,
   personeller: Personel[],
-  year: number,
-  month: number
-): Personel[] {
-  const period = filterFaaliyetlerByPeriod(sahaFaaliyetleri, year, month);
-  const matched = new Map<string, Personel>();
+  matched: Map<string, Personel>
+) {
   const addPerson = (p: Personel | undefined | null) => {
     if (p?.id) matched.set(p.id, p);
   };
 
-  for (const f of period) {
-    for (const entry of f.aktifPersonelListesi || []) {
-      const raw = String(entry).trim();
-      if (!raw) continue;
-      const byId = personeller.find((p) => p.id === raw);
-      if (byId) {
-        addPerson(byId);
-        continue;
-      }
-      addPerson(findPersonelByName(personeller, raw));
+  for (const entry of f.aktifPersonelListesi || []) {
+    const raw = String(entry).trim();
+    if (!raw) continue;
+    const byId = personeller.find((p) => p.id === raw);
+    if (byId) {
+      addPerson(byId);
+      continue;
     }
-    addPerson(personeller.find((p) => p.id === f.personelId));
+    addPerson(findPersonelByName(personeller, raw));
   }
+  if (f.personelId) addPerson(personeller.find((p) => p.id === f.personelId));
+  if (f.personelMesaiSaatleri) {
+    for (const pid of Object.keys(f.personelMesaiSaatleri)) {
+      if (Number(f.personelMesaiSaatleri[pid]) > 0) {
+        addPerson(personeller.find((p) => p.id === pid));
+      }
+    }
+  }
+}
+
+/** Seçili ayda saha ∪ kamp faaliyetine bağlı personeller */
+export function buildFaaliyetPersoneller(
+  sahaFaaliyetleri: SahaFaaliyeti[],
+  personeller: Personel[],
+  year: number,
+  month: number,
+  kampFaaliyetleri: Array<KampFaaliyet | FaaliyetPersonelKaynak> = []
+): Personel[] {
+  const period = filterFaaliyetlerByPeriod(sahaFaaliyetleri, year, month);
+  const kampPeriod = (kampFaaliyetleri || []).filter((f) => isFaaliyetInPeriod(f, year, month));
+  const matched = new Map<string, Personel>();
+
+  for (const f of period) absorbFaaliyetPersonel(f, personeller, matched);
+  for (const f of kampPeriod) absorbFaaliyetPersonel(f, personeller, matched);
 
   const byName = new Map<string, Personel>();
   for (const p of matched.values()) {
@@ -211,22 +244,33 @@ export function buildPeriodFaaliyetOzeti(
   sahaFaaliyetleri: SahaFaaliyeti[],
   personeller: Personel[],
   year: number,
-  month: number
+  month: number,
+  kampFaaliyetleri: Array<KampFaaliyet | FaaliyetPersonelKaynak> = []
 ): {
   personelSayisi: number;
   faaliyetSayisi: number;
   fotoSayisi: number;
   parselSayisi: number;
   mesaiFaaliyetSayisi: number;
+  sahaFaaliyetSayisi: number;
+  kampFaaliyetSayisi: number;
 } {
   const period = filterFaaliyetlerByPeriod(sahaFaaliyetleri, year, month);
+  const kampPeriod = (kampFaaliyetleri || []).filter((f) => isFaaliyetInPeriod(f, year, month));
   const parseller = new Set(
-    period.map((f) => String(f.parsel || '').trim()).filter(Boolean)
+    period.map((f) => String((f as SahaFaaliyeti).parsel || '').trim()).filter(Boolean)
   );
   return {
-    personelSayisi: buildFaaliyetPersoneller(sahaFaaliyetleri, personeller, year, month)
-      .length,
-    faaliyetSayisi: period.length,
+    personelSayisi: buildFaaliyetPersoneller(
+      sahaFaaliyetleri,
+      personeller,
+      year,
+      month,
+      kampFaaliyetleri
+    ).length,
+    faaliyetSayisi: period.length + kampPeriod.length,
+    sahaFaaliyetSayisi: period.length,
+    kampFaaliyetSayisi: kampPeriod.length,
     fotoSayisi: period.reduce((n, f) => n + getFaaliyetFotolar(f).length, 0),
     parselSayisi: parseller.size,
     mesaiFaaliyetSayisi: period.filter((f) => f.faaliyetTipi === 'MESAI_SAHA').length,

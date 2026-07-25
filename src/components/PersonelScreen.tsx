@@ -20,8 +20,9 @@ import {
   personelNameKey,
   resolveAkvizyonGorev,
 } from '../lib/guvenlikHelpers';
-import { CANONICAL_ANA_FIRMA_ADI } from '../lib/yoklamaUtils';
+import { CANONICAL_ANA_FIRMA_ADI, isTaseronPersonel } from '../lib/yoklamaUtils';
 import { getPersonelMissingDocs } from '../lib/personelMissingDocs';
+import { listOdemeEngelleri, validateIBAN, validateTC } from '../lib/personelOdemeUtils';
 
 const MAX_PERSONEL_INLINE_MEDIA = 120_000;
 
@@ -123,6 +124,7 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
   const [firmaFilters, setFirmaFilters] = useState<string[]>([]);
   const [firmaFilterOpen, setFirmaFilterOpen] = useState(false);
   const firmaFilterRef = useRef<HTMLDivElement | null>(null);
+  const [odemeFilter, setOdemeFilter] = useState<'ALL' | 'TC' | 'IBAN' | 'ENGEL'>('ALL');
   const [selectedPersonel, setSelectedPersonel] = useState<Personel | null>(null);
   const [dismissingPersonel, setDismissingPersonel] = useState<Personel | null>(null);
   const [dismissDateStr, setDismissDateStr] = useState<string>("");
@@ -612,7 +614,7 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
     }
 
     const normalizedTc = String(formData.tcNo || '').trim();
-    if (normalizedTc.length !== 11 || !/^\d+$/.test(normalizedTc)) {
+    if (!validateTC(normalizedTc)) {
       alert("TC Kimlik No tam 11 haneli ve sadece rakamlardan oluşmalıdır!");
       return;
     }
@@ -638,10 +640,22 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
     const firmaFields = resolveFirmaFields();
     if (!firmaFields) return;
 
+    const finalIban = inputIban && inputIban !== 'TR' ? inputIban : prevIban;
+    const isAnaFirmaAktif =
+      firmaFields.firmaTipi === 'ANA_FIRMA' && is_aktif_status(formData.durum);
+    if (isAnaFirmaAktif && !validateIBAN(finalIban)) {
+      alert('Ana firma aktif personeli için geçerli TR IBAN zorunludur (TR + 24 hane, toplam 26 karakter).');
+      return;
+    }
+    if (finalIban && finalIban !== 'TR' && !validateIBAN(finalIban)) {
+      alert('IBAN formatı geçersiz. Örnek: TR860006400000123456789012');
+      return;
+    }
+
     const normalizedPayload = {
       ...formData,
       tcNo: normalizedTc,
-      ibanNo: inputIban && inputIban !== 'TR' ? inputIban : prevIban,
+      ibanNo: finalIban,
       gorev: normalizePersonelGorev(
         resolveAkvizyonGorev(firmaFields.firmaAdi, (formData as any).gorev)
       ),
@@ -751,9 +765,18 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
     return `${firmaFilters.length} firma seçili`;
   }, [firmaFilters, firmaFilterOptions]);
 
+  const odemeEngelIds = useMemo(() => {
+    return new Set(listOdemeEngelleri(personeller).map((e) => e.personel.id));
+  }, [personeller]);
+
   const filteredPersonel = personeller.filter((p) => {
     if (showOnlyActive && !is_aktif_status(p.durum)) return false;
     if (!matchesFirmaFilter(p, firmaFilters)) return false;
+    if (odemeFilter === 'TC' && validateTC(p.tcNo || '')) return false;
+    if (odemeFilter === 'IBAN' && validateIBAN(p.ibanNo || '')) return false;
+    if (odemeFilter === 'ENGEL') {
+      if (isTaseronPersonel(p) || !odemeEngelIds.has(p.id)) return false;
+    }
     const term = searchTerm.toLowerCase();
     const fullName = `${p.ad} ${p.soyad}`.toLowerCase();
     return (
@@ -1599,6 +1622,17 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
                 </div>
               )}
             </div>
+            <select
+              value={odemeFilter}
+              onChange={(e) => setOdemeFilter(e.target.value as 'ALL' | 'TC' | 'IBAN' | 'ENGEL')}
+              className="text-[10px] font-bold px-3 py-2 rounded-xl border border-slate-200 bg-white text-slate-700 cursor-pointer"
+              title="Eksik TC / IBAN / Ödeme engeli"
+            >
+              <option value="ALL">Ödeme: Tümü</option>
+              <option value="TC">Eksik TC</option>
+              <option value="IBAN">Eksik/Geçersiz IBAN</option>
+              <option value="ENGEL">Ödeme Engeli (Ana Firma)</option>
+            </select>
             <button
               type="button"
               onClick={() => setShowOnlyActive((prev) => !prev)}

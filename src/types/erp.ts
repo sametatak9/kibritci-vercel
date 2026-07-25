@@ -402,6 +402,8 @@ export interface KampSarf {
 export interface KampFaaliyet {
   id: string;
   personelId?: string;
+  /** NORMAL/MESAI faaliyetine otomatik veya manuel bağlanan personel id'leri */
+  aktifPersonelListesi?: string[];
   tarih: string;
   faaliyetTipi: 'TEMİZLİK' | 'YEMEK' | 'GÜVENLİK' | 'BAKIM' | 'DİĞER';
   faaliyetGrubu?: 'NORMAL' | 'MESAI';
@@ -410,6 +412,7 @@ export interface KampFaaliyet {
   yerleskeAdi: string;
   fotoUrl?: string | null;
   kaydedenKampci?: string;
+  durum?: string;
 }
 
 export type SahaFaaliyetTipi = 'NORMAL' | 'MESAI_SAHA';

@@ -15,7 +15,7 @@ import { KampGunlukYoklamaTab } from './KampGunlukYoklamaTab';
 import { KampVidanjorTab } from './KampVidanjorTab';
 import { collection, onSnapshot, doc, updateDoc, setDoc, query, orderBy } from 'firebase/firestore';
 import { applySahaMesaiToYoklama, normalizeMesaiHours } from '../lib/sahaFaaliyetUtils';
-import { isTaseronPersonel } from '../lib/yoklamaUtils';
+import { getYoklamaDay, isKampciTesisatciMermerci, isTaseronPersonel } from '../lib/yoklamaUtils';
 import { vibrateVidanjorAlert } from '../lib/vidanjorUtils';
 interface KampciScreenProps {
   kampOdalari: KampOdasi[];
@@ -937,7 +937,50 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
     try {
       const actId = `act_${Date.now()}`;
       const bugunTarih = new Date().toISOString().slice(0, 10);
-      
+      const [yy, mm, dd] = bugunTarih.split('-').map(Number);
+
+      const kampHavuz = personeller.filter(
+        (p) =>
+          isKampciTesisatciMermerci(p.gorev) ||
+          isTaseronPersonel(p) ||
+          kampKayitlari.some((k) => k.personelId === p.id && k.durum === 'AKTIF')
+      );
+
+      let aktifPersonelListesi: string[] = [];
+      if (faaliyetGrubu === 'MESAI') {
+        aktifPersonelListesi = Object.entries(personelMesaiSaatleri)
+          .filter(([, hrs]) => Number(hrs) > 0)
+          .map(([pid]) => pid);
+      } else {
+        // NORMAL: o gün yoklamada Geldi olan kampçı/tesisatçı/mermerci + aktif yerleşim
+        const geldiIds = kampHavuz
+          .filter((p) => {
+            if (
+              !isKampciTesisatciMermerci(p.gorev) &&
+              !kampKayitlari.some((k) => k.personelId === p.id && k.durum === 'AKTIF')
+            ) {
+              return false;
+            }
+            const day = getYoklamaDay(yoklamalar[p.id], yy, mm, dd);
+            const durum = String(day?.durum || '').toLowerCase();
+            // Yoklama yoksa aktif yerleşimli kampçıları yine de bağla
+            if (!day || !day.durum || day.durum === 'Girilmedi') {
+              return (
+                isKampciTesisatciMermerci(p.gorev) ||
+                kampKayitlari.some((k) => k.personelId === p.id && k.durum === 'AKTIF')
+              );
+            }
+            return (
+              durum.includes('geldi') ||
+              durum === 'var' ||
+              durum === 'çalıştı' ||
+              durum === 'calisti'
+            );
+          })
+          .map((p) => p.id);
+        aktifPersonelListesi = geldiIds;
+      }
+
       const actData = {
         id: actId,
         tarih: bugunTarih,
@@ -945,6 +988,8 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
         faaliyetTipi,
         faaliyetGrubu,
         personelMesaiSaatleri: faaliyetGrubu === 'MESAI' ? personelMesaiSaatleri : undefined,
+        aktifPersonelListesi,
+        personelId: aktifPersonelListesi[0],
         yerleskeAdi: faaliyetYerleske,
         aciklama: faaliyetAciklama.trim(),
         fotoUrl: faaliyetFoto || null,
@@ -960,14 +1005,19 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
       }
 
       if (addNotification) {
-        addNotification(`Kamp günlük faaliyet raporu (${faaliyetTipi}) sisteme girildi.`);
+        addNotification(
+          `Kamp günlük faaliyet (${faaliyetTipi}) kaydedildi · ${aktifPersonelListesi.length} personel bağlandı.`
+        );
       }
 
       // Reset
       setFaaliyetAciklama('');
       setFaaliyetFoto(null);
       setPersonelMesaiSaatleri({});
-      showStatus('success', 'Günlük faaliyet başarıyla kaydedildi, Onay Havuzuna iletildi!');
+      showStatus(
+        'success',
+        `Günlük faaliyet kaydedildi (${aktifPersonelListesi.length} personel). Onay havuzuna iletildi.`
+      );
     } catch (err) {
       console.error(err);
       showStatus('error', 'Günlük faaliyet kaydedilirken hata oluştu.');
