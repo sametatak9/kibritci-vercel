@@ -2208,6 +2208,39 @@ export default function App() {
     }
   };
 
+  /** Bildirim metninden ilgili sekmeyi (muhatabı) çıkarır */
+  const resolveNotificationTab = (notif: any): string => {
+    const explicit = notif?.hedefTab || notif?.route;
+    if (explicit && typeof explicit === 'string') return explicit;
+    const text = String(notif?.mesaj || '').toLocaleLowerCase('tr-TR');
+    const has = (...keys: string[]) => keys.some((k) => text.includes(k));
+
+    if (has('onay', 'reddedil', 'onaylandı', 'onaylandi', 'imza', 'kapı', 'kapi', 'gate', 'evrak')) return 'onay_islemleri';
+    if (has('irsaliye', 'fiş', 'fis')) return 'irsaliye_giris';
+    if (has('fatura')) return 'fatura_giris';
+    if (has('satın alma', 'satin alma', 'talep', 'po ')) return 'satin_alma';
+    if (has('yoklama', 'mesai', 'puantaj')) return 'yoklama';
+    if (has('saha', 'faaliyet')) return 'faaliyet_personel';
+    if (has('oda', 'kamp', 'tahliye', 'yerleştir', 'yerlestir', 'sayım', 'sayim')) return 'kamp';
+    if (has('kullanıcı', 'kullanici', 'rol', 'hesap', 'yetki', 'üyelik', 'uyelik', 'kayıttan', 'kayittan')) return 'admin';
+    if (has('taşeron', 'taseron', 'kesinti')) return 'taseron_kesinti';
+    if (has('operatör', 'operator')) return 'operator';
+    if (has('araç', 'arac', 'demirbaş', 'demirbas', 'plaka')) return 'arac';
+    if (has('personel')) return 'personel';
+    if (has('yedek', 'program')) return 'admin';
+    return 'ana_sayfa';
+  };
+
+  const handleNotificationClick = (notif: any) => {
+    if (notif && !notif.okundu) {
+      void saveDocument('bildirimler', { ...notif, okundu: true }).catch((err) =>
+        console.error('Bildirim okundu işaretlenemedi:', err)
+      );
+    }
+    const target = resolveNotificationTab(notif);
+    handleTabNavigation(target);
+  };
+
   const handleTabNavigation = (targetTab: string) => {
     try {
       persistLastTab(targetTab);
@@ -2798,6 +2831,7 @@ export default function App() {
             onToggleSidebar={() => setIsSidebarOpen(prev => !prev)}
             bildirimler={bildirimler}
             onClearNotifications={markAllNotificationsAsRead}
+            onNotificationClick={handleNotificationClick}
             onToggleMobileMode={() => {
               setIsMobileMode(true);
               setIsMobileDirect(false);

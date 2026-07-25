@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Search, Bell, CheckCircle, Clock, Smartphone, User, Shield, Activity, TrendingUp, Inbox } from 'lucide-react';
+import { Search, Bell, CheckCircle, Clock, Smartphone, User, Shield, Activity, TrendingUp, Inbox, ChevronRight } from 'lucide-react';
 import { KibritciLogo } from './KibritciLogo';
 
 interface TopbarProps {
@@ -10,6 +10,7 @@ interface TopbarProps {
   onToggleSidebar?: () => void;
   bildirimler?: any[];
   onClearNotifications?: () => void;
+  onNotificationClick?: (notif: any) => void;
   onToggleMobileMode?: () => void;
   onProfileClick?: () => void;
   pendingOnayCount?: number;
@@ -24,6 +25,7 @@ export const Topbar: React.FC<TopbarProps> = ({
   onToggleSidebar,
   bildirimler = [],
   onClearNotifications,
+  onNotificationClick,
   onToggleMobileMode,
   onProfileClick,
   pendingOnayCount = 0,
@@ -316,9 +318,14 @@ export const Topbar: React.FC<TopbarProps> = ({
                   </div>
                 ) : (
                   bildirimler.map((notif) => (
-                    <div 
+                    <button
                       key={notif.id}
-                      className={`p-2.5 rounded-xl border flex flex-col space-y-0.5 transition duration-150 ${
+                      type="button"
+                      onClick={() => {
+                        onNotificationClick?.(notif);
+                        setShowDropdown(false);
+                      }}
+                      className={`w-full text-left p-2.5 rounded-xl border flex flex-col space-y-0.5 transition duration-150 cursor-pointer hover:border-amber-300 hover:shadow-sm ${
                         notif.okundu 
                           ? 'bg-slate-50 border-slate-200 text-slate-600' 
                           : 'bg-amber-50 border-amber-200 text-slate-800'
@@ -333,7 +340,11 @@ export const Topbar: React.FC<TopbarProps> = ({
                         </span>
                       </div>
                       <p className="text-[11px] font-medium leading-relaxed break-words text-slate-700">{notif.mesaj}</p>
-                    </div>
+                      <span className="text-[9px] font-bold text-amber-600 inline-flex items-center gap-0.5 mt-0.5">
+                        Muhataba git
+                        <ChevronRight size={11} />
+                      </span>
+                    </button>
                   ))
                 )}
               </div>
