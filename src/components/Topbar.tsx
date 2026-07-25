@@ -82,7 +82,7 @@ export const Topbar: React.FC<TopbarProps> = ({
       eposta: "E-Posta Yönetim Merkezi",
       sohbet: "Sohbet & Haberleşme",
       onay_islemleri: "Onay Havuzu & İmzalar",
-      admin: "Üyelik & Admin Paneli",
+      admin: "Üyelik Onay & İmza",
       yetki_verme: "Sayfa Yetkilendirme",
       taseron_kesinti: "Taşeron Yönetimi",
       fatura_giris: "Fatura Girişi",

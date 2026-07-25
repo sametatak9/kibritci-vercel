@@ -29,7 +29,7 @@ export const PORTAL_PAGES = [
   { key: "depocu_ekrani", label: "Depocu Mobil Paneli", group: "İDARİ İŞLER & SAHA" },
   { key: "imalat_terminali", label: "İmalat Terminali", group: "İDARİ İŞLER & SAHA" },
   { key: "onay_islemleri", label: "Onay Havuzu & İmzalar", group: "RAPOR VE İLETİŞİM" },
-  { key: "admin", label: "Üyelik & Admin Paneli", group: "ADMİNİSTRATOR" },
+  { key: "admin", label: "Üyelik Onay & İmza", group: "ADMİNİSTRATOR" },
   { key: "yetki_verme", label: "Sayfa Yetkilendirme", group: "ADMİNİSTRATOR" },
 ] as const;
 
@@ -63,6 +63,10 @@ const YETKI_ALIASES: Record<string, string> = {
   TESISATCI: 'TESİSATÇI',
   TESİSATCI: 'TESİSATÇI',
   MERMERCI: 'MERMERCİ',
+  'İDARİ İŞLER': 'İDARİ_İŞLER',
+  'IDARI ISLER': 'İDARİ_İŞLER',
+  IDARI_ISLER: 'İDARİ_İŞLER',
+  IDARI: 'İDARİ_İŞLER',
 };
 
 export function normalizeYetki(yetki?: string | null): string {
@@ -83,6 +87,20 @@ export function getRoleHomeTab(yetki?: string | null): PortalPageKey | null {
 
 export function isMobileRole(yetki?: string | null): boolean {
   return getRoleAllowedTabs(yetki) !== null;
+}
+
+/** İdari İşler: üyelik onay / imza paneline erişebilir (süper admin araçları hariç) */
+export function isIdariIslerRole(yetki?: string | null): boolean {
+  return normalizeYetki(yetki) === 'İDARİ_İŞLER';
+}
+
+/** Üyelik & Admin paneli — kurucu/müdür veya İdari İşler */
+export function canAccessUyelikAdminPanel(
+  yetki?: string | null,
+  options?: { isPrivilegedAdmin?: boolean }
+): boolean {
+  if (options?.isPrivilegedAdmin) return true;
+  return isIdariIslerRole(yetki);
 }
 
 /** Tek panel — tam ekran mobil (Formen hariç; o personel sekmesine de erişir) */
@@ -115,6 +133,10 @@ export function isTabRestrictedForUser(
   const allowed = getRoleAllowedTabs(yetki);
   if (allowed) {
     return !allowed.includes(tab as PortalPageKey);
+  }
+  // İdari İşler için üyelik onay paneli kısıt listesinden muaf
+  if (tab === 'admin' && isIdariIslerRole(yetki)) {
+    return false;
   }
   if (!kisitliSayfalar?.length) return false;
   return kisitliSayfalar.includes(tab);

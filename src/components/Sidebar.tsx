@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Building2, Users, CalendarCheck2, CreditCard, ShoppingCart, Truck, KeySquare, FileText, Tent, Mail, ChartBar as BarChart3, BookOpen, Contact as Contact2, Package, LogOut, Moon, Sun, Wallet, Hop as Home, ShieldCheck, PenTool, MessageSquare, Smartphone, HardHat, Banknote, Images, Sparkles, Link2, ChevronDown, ChevronRight, Search, Pin, PinOff, Wrench, Gem, Camera } from 'lucide-react';
-import { getRoleAllowedTabs, normalizeYetki } from '../lib/yetkiUtils';
+import { canAccessUyelikAdminPanel, getRoleAllowedTabs, isIdariIslerRole, normalizeYetki } from '../lib/yetkiUtils';
 import { readFavoriteTabs, writeFavoriteTabs } from '../lib/navPreferences';
 
 interface SidebarProps {
@@ -100,7 +100,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     {
       group: "ADMİNİSTRATOR",
       items: [
-        { key: "admin", label: "Üyelik & Admin Paneli", icon: KeySquare },
+        { key: "admin", label: "Üyelik Onay & İmza", icon: KeySquare },
         { key: "yetki_verme", label: "Sayfa Yetkilendirme", icon: ShieldCheck },
       ]
     }
@@ -110,6 +110,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const isFounderAdmin = emailLower === 'sametatak9@gmail.com';
   const isSecondaryAdmin = emailLower === 'mudur@gmail.com';
   const isPrivilegedAdmin = isFounderAdmin || isSecondaryAdmin;
+  const canSeeUyelikAdmin = canAccessUyelikAdminPanel(normalizedYetki, { isPrivilegedAdmin });
+  const isIdariIsler = isIdariIslerRole(normalizedYetki);
 
   const filteredMenuItems = menuItems.map(group => {
     return {
@@ -120,7 +122,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
         }
 
         if (kisitliSayfalar && kisitliSayfalar.includes(item.key)) {
-          return false;
+          // İdari İşler: üyelik onay paneli kısıt listesinde olsa bile görünür
+          if (!(item.key === 'admin' && isIdariIsler)) {
+            return false;
+          }
         }
 
         if (item.key === 'kibar_hakedis') {
@@ -128,7 +133,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
           return emailLower === 'sametatak9@gmail.com' || emailLower === 'santiye@kibritci.com';
         }
 
-        if (item.key === 'admin' || item.key === 'yetki_verme') {
+        if (item.key === 'admin') {
+          return canSeeUyelikAdmin;
+        }
+
+        if (item.key === 'yetki_verme') {
           return isPrivilegedAdmin;
         }
 
@@ -183,7 +192,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       })
     };
   }).filter(group => {
-    if (group.group === "ADMİNİSTRATOR" && !isPrivilegedAdmin) {
+    if (group.group === "ADMİNİSTRATOR" && !canSeeUyelikAdmin && !isPrivilegedAdmin) {
       return false;
     }
     return group.items.length > 0;

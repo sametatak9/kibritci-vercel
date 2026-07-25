@@ -91,6 +91,8 @@ interface AdminPanelScreenProps {
   sahaFaaliyetleri?: SahaFaaliyeti[];
   kampKayitlari?: KampKaydi[];
   faturalar?: Fatura[];
+  /** İdari İşler: yalnızca üyelik onay / imza sekmeleri */
+  uyelikOnly?: boolean;
 }
 
 export const AdminPanelScreen: React.FC<AdminPanelScreenProps> = ({
@@ -103,9 +105,19 @@ export const AdminPanelScreen: React.FC<AdminPanelScreenProps> = ({
   sahaFaaliyetleri = [],
   kampKayitlari = [],
   faturalar = [],
+  uyelikOnly = false,
 }) => {
   const visibleKullanicilar = dedupeKullanicilarByEmail(kullanicilar);
-  const [activeTab, setActiveTab] = useState<'users' | 'permissions' | 'pending' | 'create' | 'errors' | 'backup'>('users');
+  const [activeTab, setActiveTab] = useState<'users' | 'permissions' | 'pending' | 'create' | 'errors' | 'backup'>(
+    'users'
+  );
+
+  useEffect(() => {
+    if (!uyelikOnly) return;
+    if (activeTab !== 'users' && activeTab !== 'pending' && activeTab !== 'create') {
+      setActiveTab('users');
+    }
+  }, [uyelikOnly, activeTab]);
   const [hataRaporlari, setHataRaporlari] = useState<HataRaporu[]>([]);
   const [loadingErrors, setLoadingErrors] = useState(false);
   const [selectedError, setSelectedError] = useState<HataRaporu | null>(null);
@@ -568,12 +580,19 @@ export const AdminPanelScreen: React.FC<AdminPanelScreenProps> = ({
       {/* Title Header Card */}
       <div className="bg-slate-900 text-white p-5 rounded-3xl shrink-0 flex items-center justify-between border border-slate-800 shadow-md">
         <div className="space-y-1">
-          <span className="text-[10px] text-amber-500 font-bold uppercase tracking-widest block">Süper Admin Modülü</span>
+          <span className="text-[10px] text-amber-500 font-bold uppercase tracking-widest block">
+            {uyelikOnly ? 'İdari İşler · Üyelik' : 'Süper Admin Modülü'}
+          </span>
           <h2 className="text-sm font-black tracking-widest font-display flex items-center gap-2">
-            <KeySquare size={16} /> KİBRİTÇİ YÖNETİM VE DENETİM PANELİ
+            <KeySquare size={16} />{' '}
+            {uyelikOnly
+              ? 'ÜYELİK ONAY VE İMZA PANELİ'
+              : 'KİBRİTÇİ YÖNETİM VE DENETİM PANELİ'}
           </h2>
           <p className="text-[10px] text-slate-400">
-            Sisteme yeni kayıt olan personellerin rollerini düzenleyin ve kullanıcıların karşılaştığı sistem hatalarını Türkçe açıklamalarıyla takip edin.
+            {uyelikOnly
+              ? 'Bekleyen üyelikleri onaylayın, roller atayın ve kayıtlı dijital imzaları görün.'
+              : 'Sisteme yeni kayıt olan personellerin rollerini düzenleyin ve kullanıcıların karşılaştığı sistem hatalarını Türkçe açıklamalarıyla takip edin.'}
           </p>
         </div>
         <span className="bg-amber-500/10 border border-amber-500/20 text-amber-500 text-[10px] font-mono font-bold px-3 py-1 rounded-full uppercase">
@@ -597,6 +616,7 @@ export const AdminPanelScreen: React.FC<AdminPanelScreenProps> = ({
               <Users size={14} />
               <span>ÜYE YETKİLENDİRME ({visibleKullanicilar.length})</span>
             </button>
+            {!uyelikOnly && (
             <button
               onClick={() => setActiveTab('permissions')}
               className={`px-4 py-3 text-xs font-extrabold flex items-center gap-2 transition-all outline-none cursor-pointer border-b-2 ${
@@ -608,6 +628,7 @@ export const AdminPanelScreen: React.FC<AdminPanelScreenProps> = ({
               <Key size={14} />
               <span>ROL YETKİ ŞABLONLARI</span>
             </button>
+            )}
             <button
               onClick={() => setActiveTab('pending')}
               className={`px-4 py-3 text-xs font-extrabold flex items-center gap-2 transition-all outline-none cursor-pointer border-b-2 ${
@@ -630,6 +651,8 @@ export const AdminPanelScreen: React.FC<AdminPanelScreenProps> = ({
               <UserPlus size={14} />
               <span>MANUEL KULLANICI OLUŞTUR</span>
             </button>
+            {!uyelikOnly && (
+            <>
             <button
               onClick={() => setActiveTab('errors')}
               className={`px-4 py-3 text-xs font-extrabold flex items-center gap-2 transition-all outline-none cursor-pointer border-b-2 ${
@@ -652,6 +675,8 @@ export const AdminPanelScreen: React.FC<AdminPanelScreenProps> = ({
               <Database size={14} />
               <span>VERİ KORUMA</span>
             </button>
+            </>
+            )}
           </div>
 
           {activeTab === 'pending' && (

@@ -40,7 +40,7 @@ const ROUTES = [
   { key: 'imalat_terminali', label: 'İmalat Terminali', icon: Settings },
   { key: 'sohbet', label: 'Sohbet', icon: MessageSquare },
   { key: 'eposta', label: 'E-Posta', icon: MessageSquare },
-  { key: 'admin', label: 'Admin Paneli', icon: Settings },
+  { key: 'admin', label: 'Üyelik Onay & İmza', icon: Settings },
   { key: 'yetki_verme', label: 'Yetki Verme', icon: Settings },
 ];
 

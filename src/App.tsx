@@ -104,6 +104,8 @@ import {
   isTabRestrictedForUser,
   sanitizeKisitliSayfalar,
   guessRoleFromEmail,
+  canAccessUyelikAdminPanel,
+  isIdariIslerRole,
 } from './lib/yetkiUtils';
 import {
   dedupeKullanicilarByEmail,
@@ -2382,6 +2384,8 @@ export default function App() {
   const isFounderAccount = emailLower === 'sametatak9@gmail.com';
   const isSecondaryAdmin = emailLower === SECONDARY_ADMIN_EMAIL;
   const isPrivilegedAdmin = isFounderAccount || isSecondaryAdmin;
+  const canSeeUyelikAdmin = canAccessUyelikAdminPanel(userYetki, { isPrivilegedAdmin });
+  const isIdariIsler = isIdariIslerRole(userYetki);
   const isYonetici = userYetki === 'YÖNETİCİ' || 
                      userYetki === 'KURUCU' ||
                      userYetki === 'PROJE_MÜDÜRÜ' ||
@@ -2901,7 +2905,7 @@ export default function App() {
               )}
 
               {activeTab === "admin" && (
-                isPrivilegedAdmin ? (
+                canSeeUyelikAdmin ? (
                   <AdminPanelScreen 
                     kullanicilar={kullanicilar}
                     setKullanicilar={setKullanicilarWithSync}
@@ -2912,6 +2916,7 @@ export default function App() {
                     sahaFaaliyetleri={sahaFaaliyetleri}
                     kampKayitlari={kampKayitlari}
                     faturalar={faturalar}
+                    uyelikOnly={isIdariIsler && !isPrivilegedAdmin}
                   />
                 ) : renderAccessDenied()
               )}
