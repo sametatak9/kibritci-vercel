@@ -3,32 +3,56 @@ import {
   ShoppingCart, Plus, Trash2, Edit3, Eye, Upload, 
   Send, ShieldCheck, Search, Sparkles, CheckCircle2, AlertCircle 
 } from 'lucide-react';
-import { SatinAlmaTalebi, SatinAlmaItem, CariKart, StokKart, StokKartIslem, Irsaliye } from '../types/erp';
+import { SatinAlmaTalebi, SatinAlmaItem, CariKart, StokKart, StokKartIslem, CariKartIslem, Irsaliye, Fatura } from '../types/erp';
 import { compressImage } from '../lib/imageCompress';
 import { confirmSignedUploadWithMismatchCheck } from '../lib/evrakOnayUtils';
 import { findNearDuplicateStokName, normalizeCardName } from '../lib/duplicateNameUtils';
 import { fetchApiJson } from '../lib/apiClient';
 import { normalizeDateKey } from '../lib/dateKeyUtils';
-import { wrapCorporateReportHtml } from '../lib/corporateReportHtml';
+import { openHtmlReportWindow, openReportEmailComposer } from '../lib/reportEmail';
+import { buildSatinAlmaReportHtml } from '../lib/satinAlmaReportHtml';
+import { createSatinAlmaPublicShare } from '../lib/satinAlmaPublicShare';
+import {
+  applyStokGirisFromKalemler,
+  appendCariIslemOnce,
+  buildCariEvrakHistory,
+  countLinkedStok,
+  linkSatinAlmaKalemler,
+  resolveCariKartId,
+} from '../lib/evrakCariStokSync';
+import {
+  buildIrsaliyeFromSatinAlma,
+  describeEvrakZinciri,
+  findIrsaliyelerForSa,
+} from '../lib/evrakDonusum';
 import {
   buildNDeliveryTemplates,
   createIrsaliyelerFromSatinAlma,
-  deliveredMiktarForSaKalem,
   kalanMiktarForSaKalem,
 } from '../lib/satinAlmaIrsaliyeUtils';
+import { EvrakZincirBanner } from './EvrakZincirBanner';
+import {
+  EvrakArchivePanel,
+  EvrakArchiveSearch,
+  EvrakFormCard,
+  EvrakPageShell,
+  EvrakPrimaryButton,
+  EvrakSectionHeader,
+} from './evrakUi/EvrakScreenChrome';
 
 interface SatinAlmaScreenProps {
   satinAlmaTalepleri: SatinAlmaTalebi[];
   setSatinAlmaTalepleri: React.Dispatch<React.SetStateAction<SatinAlmaTalebi[]>>;
   irsaliyeler?: Irsaliye[];
   setIrsaliyeler?: React.Dispatch<React.SetStateAction<Irsaliye[]>>;
-  faturalar?: any;
-  setFaturalar?: any;
+  faturalar?: Fatura[];
+  setFaturalar?: React.Dispatch<React.SetStateAction<Fatura[]>>;
   cariKartlar: CariKart[];
   setCariKartlar?: React.Dispatch<React.SetStateAction<CariKart[]>>;
   stokKartlar: StokKart[];
   setStokKartlar?: React.Dispatch<React.SetStateAction<StokKart[]>>;
   setStokIslemGecmisi?: React.Dispatch<React.SetStateAction<StokKartIslem[]>>;
+  setCariIslemGecmisi?: React.Dispatch<React.SetStateAction<CariKartIslem[]>>;
   kullanicilar?: any[];
   currentUser?: any;
   addNotification?: (mesaj: string) => void;
@@ -39,11 +63,13 @@ export const SatinAlmaScreen: React.FC<SatinAlmaScreenProps> = ({
   setSatinAlmaTalepleri,
   irsaliyeler = [],
   setIrsaliyeler,
+  faturalar = [],
   cariKartlar,
   setCariKartlar,
   stokKartlar,
   setStokKartlar,
   setStokIslemGecmisi,
+  setCariIslemGecmisi,
   currentUser,
   addNotification
 }) => {
@@ -54,7 +80,8 @@ export const SatinAlmaScreen: React.FC<SatinAlmaScreenProps> = ({
   const [editingSaId, setEditingSaId] = useState<string | null>(null);
   const [saAttachmentUrl, setSaAttachmentUrl] = useState<string | null>(null);
   const [saSearchKeyword, setSaSearchKeyword] = useState("");
-  const [talepTab, setTalepTab] = useState<'MEVCUT' | 'ARSIV'>('MEVCUT');
+  const [talepTab, setTalepTab] = useState<'MEVCUT' | 'DONUSTURULDU' | 'ARSIV'>('MEVCUT');
+  const [emailSendingId, setEmailSendingId] = useState<string | null>(null);
   const [talepTarihFiltre, setTalepTarihFiltre] = useState('');
   const legacyDocInputRef = useRef<HTMLInputElement | null>(null);
   const [legacyImportLoading, setLegacyImportLoading] = useState(false);
@@ -203,75 +230,19 @@ export const SatinAlmaScreen: React.FC<SatinAlmaScreenProps> = ({
     });
 
   const syncPurchaseToStokCards = (items: SatinAlmaItem[], saId: string, tarih: string, supplier: string) => {
-    if (!setStokKartlar) return;
-    const islemSatirlari: StokKartIslem[] = [];
-
-    setStokKartlar((prev) => {
-      let next = [...prev];
-      for (const kalem of items) {
-        const rawName = String(kalem.urunAdi || '').trim();
-        if (!rawName) continue;
-
-        let stok = findExistingStok(rawName, next);
-        if (!stok) {
-          stok = {
-            id: `sk_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
-            stokKodu: `STK-${Math.floor(1000 + Math.random() * 9000)}`,
-            stokAdi: rawName,
-            kategori: suggestedStokCat || 'Kaba İnşaat İmalatı',
-            birim: kalem.birim || suggestedStokUnit || 'ADET',
-            kritikSeviye: 5,
-            durum: 'AKTIF',
-            aciklama: 'Satın alma entegrasyonuyla otomatik oluşturuldu.',
-          };
-          next = [stok, ...next];
-        }
-
-        const historyLine = `${tarih} ${saId} · ${supplier} · ${kalem.miktar} ${kalem.birim || stok.birim}`;
-        next = next.map((s) => {
-          if (s.id !== stok!.id) return s;
-          const oldDesc = String(s.aciklama || '');
-          const alreadyLogged = oldDesc.includes(saId);
-          const mergedDesc = alreadyLogged
-            ? oldDesc
-            : `${oldDesc}\n[Satın Alma] ${historyLine}`.trim();
-          return {
-            ...s,
-            stokAdi: stok!.stokAdi,
-            birim: s.birim || kalem.birim || 'ADET',
-            aciklama: mergedDesc,
-          };
-        });
-
-        islemSatirlari.push({
-          id: `stk_islem_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
-          stokKartId: stok.id,
-          islemTipi: 'GIRIS',
-          islemId: saId,
-          islemBaslik: 'Satın Alma Talebi',
-          islemDetay: `${supplier} firmasından satın alma kaydı işlendi.`,
-          miktarDegisimi: Number(kalem.miktar || 0),
-          tarih,
-          belgeNo: saId,
-        });
-      }
-      return next;
+    applyStokGirisFromKalemler({
+      kalemler: items,
+      belgeNo: saId,
+      tarih,
+      supplier,
+      islemBaslik: 'Satın Alma Talebi',
+      islemDetayPrefix: 'Satın alma kaydı ·',
+      bumpMiktar: true,
+      stokKartlar,
+      setStokKartlar,
+      setStokIslemGecmisi,
+      aciklamaTag: 'Satın Alma',
     });
-
-    if (setStokIslemGecmisi && islemSatirlari.length > 0) {
-      setStokIslemGecmisi((prev) => {
-        const existingKeys = new Set(
-          prev.map((row) => `${row.stokKartId}|${row.belgeNo}|${row.islemTipi}`)
-        );
-        const uniqueIncoming = islemSatirlari.filter((row) => {
-          const key = `${row.stokKartId}|${row.belgeNo}|${row.islemTipi}`;
-          if (existingKeys.has(key)) return false;
-          existingKeys.add(key);
-          return true;
-        });
-        return [...uniqueIncoming, ...prev];
-      });
-    }
   };
 
   const handleAddToCart = () => {
@@ -284,6 +255,7 @@ export const SatinAlmaScreen: React.FC<SatinAlmaScreenProps> = ({
       ...tempItem,
       urunAdi: existingStok?.stokAdi || tempItem.urunAdi.trim(),
       birim: tempItem.birim || existingStok?.birim || 'ADET',
+      stokKartId: existingStok?.id,
       id: `sai_${Date.now()}`
     };
     setCartItems(prev => [...prev, newItem]);
@@ -305,10 +277,15 @@ export const SatinAlmaScreen: React.FC<SatinAlmaScreenProps> = ({
     }
 
     const cleanDate = saDate || new Date().toISOString().split('T')[0];
-    const normalizedCartItems = normalizeCartItemsByKnownStok(cartItems);
+    const cariResolved = resolveCariKartId(saSupplier, cariKartlar);
+    const normalizedCartItems = linkSatinAlmaKalemler(
+      normalizeCartItemsByKnownStok(cartItems),
+      stokKartlar
+    );
     const purchaseSaId = editingSaId
       ? satinAlmaTalepleri.find((s) => s.id === editingSaId)?.saId || buildSaId(cleanDate)
       : buildSaId(cleanDate);
+    const recordId = editingSaId || `sa_${Date.now()}`;
 
     if (editingSaId) {
       setSatinAlmaTalepleri(prev => prev.map(sa => {
@@ -318,6 +295,7 @@ export const SatinAlmaScreen: React.FC<SatinAlmaScreenProps> = ({
             tarih: cleanDate,
             saId: purchaseSaId,
             cariFirma: saSupplier,
+            cariKartId: cariResolved.cariKartId || sa.cariKartId,
             aciklama: saNotes,
             kalemler: normalizedCartItems,
             imzaliEvrakUrl: saAttachmentUrl || sa.imzaliEvrakUrl
@@ -328,11 +306,12 @@ export const SatinAlmaScreen: React.FC<SatinAlmaScreenProps> = ({
       setEditingSaId(null);
     } else {
       const newSa: SatinAlmaTalebi = {
-        id: `sa_${Date.now()}`,
+        id: recordId,
         saId: purchaseSaId,
         tarih: cleanDate,
         talepEden: '',
         cariFirma: saSupplier,
+        cariKartId: cariResolved.cariKartId || undefined,
         onayDurumu: 'ONAY BEKLİYOR',
         aciklama: saNotes,
         kalemler: normalizedCartItems,
@@ -344,8 +323,27 @@ export const SatinAlmaScreen: React.FC<SatinAlmaScreenProps> = ({
 
     checkAndSuggestCari(saSupplier);
     syncPurchaseToStokCards(normalizedCartItems, purchaseSaId, cleanDate, saSupplier);
+
+    if (cariResolved.cariKartId) {
+      appendCariIslemOnce(
+        setCariIslemGecmisi,
+        buildCariEvrakHistory({
+          cariKartId: cariResolved.cariKartId,
+          islemTipi: 'SATIN_ALMA',
+          islemId: recordId,
+          islemBaslik: 'Satın Alma Talebi',
+          islemDetay: `${purchaseSaId} · ${saSupplier} · ${normalizedCartItems.length} kalem`,
+          tarih: cleanDate,
+          belgeNo: purchaseSaId,
+        })
+      );
+    }
+
+    const stokLink = countLinkedStok(normalizedCartItems);
     if (addNotification) {
-      addNotification(`${purchaseSaId} satın alma kaydı işlendi. ${normalizedCartItems.length} kalem stok kart geçmişine eklendi.`);
+      addNotification(
+        `${purchaseSaId} kaydedildi. Cari: ${cariResolved.matched ? 'bağlı' : 'önerildi'} · Stok: ${stokLink.linked}/${stokLink.total}`
+      );
     }
 
     // reset
@@ -354,7 +352,142 @@ export const SatinAlmaScreen: React.FC<SatinAlmaScreenProps> = ({
     setSaNotes("");
     setCartItems([]);
     setSaAttachmentUrl(null);
-    alert("Satın alma talebi kaydedildi.");
+    alert(
+      cariResolved.matched
+        ? `Satın alma kaydedildi.\nCari kart bağlı · Stok eşleşmesi ${stokLink.linked}/${stokLink.total}`
+        : `Satın alma kaydedildi.\nCari kart bulunamadı — öneri penceresini kontrol edin.\nStok eşleşmesi ${stokLink.linked}/${stokLink.total}`
+    );
+  };
+
+  const handleConvertSaToIrsaliye = (sa: SatinAlmaTalebi) => {
+    if (!setIrsaliyeler) {
+      alert('İrsaliye kaydı için sistem bağlantısı yok. Sayfayı yenileyip tekrar deneyin.');
+      return;
+    }
+    if (!sa.kalemler?.length) {
+      alert('Bu siparişte kalem yok; irsaliyeye dönüştürülemez.');
+      return;
+    }
+
+    const { irsaliye, alreadyExists, warning } = buildIrsaliyeFromSatinAlma(sa, {
+      irsaliyeler,
+      cariKartlar,
+      stokKartlar,
+    });
+
+    if (alreadyExists.length > 0) {
+      const ok = window.confirm(
+        `${warning || 'Bu sipariş için irsaliye zaten var.'}\n\nMevcut: ${alreadyExists
+          .map((x) => x.irsaliyeNo)
+          .join(', ')}\n\nYine de yeni sevk irsaliyesi oluşturulsun mu?`
+      );
+      if (!ok) return;
+    } else if (
+      !window.confirm(
+        `"${sa.saId}" siparişi sevk irsaliyesine dönüştürülsün mü?\n\nFirma: ${sa.cariFirma}\nKalem: ${sa.kalemler.length}`
+      )
+    ) {
+      return;
+    }
+
+    setIrsaliyeler((prev) => [irsaliye, ...prev]);
+
+    if (irsaliye.cariKartId) {
+      appendCariIslemOnce(
+        setCariIslemGecmisi,
+        buildCariEvrakHistory({
+          cariKartId: irsaliye.cariKartId,
+          islemTipi: 'IRSALIYE',
+          islemId: irsaliye.id,
+          islemBaslik: 'Siparişten İrsaliye',
+          islemDetay: `${sa.saId} → ${irsaliye.irsaliyeNo} · ${sa.cariFirma}`,
+          tarih: irsaliye.tarih,
+          belgeNo: irsaliye.irsaliyeNo,
+        })
+      );
+    }
+
+    if (addNotification) {
+      addNotification(`${sa.saId} → irsaliye ${irsaliye.irsaliyeNo} oluşturuldu (sevk hazırlık).`);
+    }
+    setTalepTab('DONUSTURULDU');
+    alert(
+      `İrsaliye oluşturuldu.\nNo: ${irsaliye.irsaliyeNo}\nSipariş bağı: ${sa.saId}\n\nSipariş «Dönüştürüldü» listesine alındı. İrsaliye sekmesinden kontrol edebilirsiniz.`
+    );
+  };
+
+  const openMultiIrsaliyeModal = (sa: SatinAlmaTalebi) => {
+    if (!setIrsaliyeler) {
+      alert('İrsaliye kaydı için sistem bağlantısı yok. Sayfayı yenileyip tekrar deneyin.');
+      return;
+    }
+    if (!sa.kalemler?.length) {
+      alert('Bu siparişte kalem yok.');
+      return;
+    }
+    const firstKalem = sa.kalemler[0];
+    const kalan = firstKalem ? kalanMiktarForSaKalem(sa, firstKalem, irsaliyeler) : 1;
+    setIrsaliyeModalSa(sa);
+    setIrsaliyeKalemId(firstKalem.id);
+    setIrsaliyeMiktarEach(1);
+    setIrsaliyeAdet(Math.max(1, Math.min(Math.ceil(kalan) || 1, 50)));
+  };
+
+  const handleCreateMultiIrsaliye = () => {
+    if (!irsaliyeModalSa || !setIrsaliyeler) return;
+    const kalem = irsaliyeModalSa.kalemler.find((k) => k.id === irsaliyeKalemId);
+    if (!kalem) {
+      alert('Kalem seçin.');
+      return;
+    }
+    const kalan = kalanMiktarForSaKalem(irsaliyeModalSa, kalem, irsaliyeler);
+    const totalQty = irsaliyeAdet * irsaliyeMiktarEach;
+    if (totalQty <= 0) {
+      alert('Adet ve miktar 0’dan büyük olmalı.');
+      return;
+    }
+    if (totalQty > kalan + 1e-9) {
+      const ok = window.confirm(
+        `Toplam teslim (${totalQty}) kalan miktardan (${kalan}) fazla.\nYine de oluşturulsun mu?`
+      );
+      if (!ok) return;
+    }
+    const deliveries = buildNDeliveryTemplates(
+      irsaliyeModalSa,
+      irsaliyeKalemId,
+      irsaliyeAdet,
+      irsaliyeMiktarEach
+    );
+    const created = createIrsaliyelerFromSatinAlma(irsaliyeModalSa, deliveries, {
+      tarih: new Date().toISOString().split('T')[0],
+      firma: irsaliyeModalSa.cariFirma,
+    });
+    setIrsaliyeler((prev) => [...created, ...prev]);
+    for (const ir of created) {
+      const cariResolved = resolveCariKartId(irsaliyeModalSa.cariFirma || '', cariKartlar);
+      if (cariResolved.matched && cariResolved.cariKartId) {
+        appendCariIslemOnce(
+          setCariIslemGecmisi,
+          buildCariEvrakHistory({
+            cariKartId: cariResolved.cariKartId,
+            islemTipi: 'IRSALIYE',
+            islemId: ir.id,
+            islemBaslik: 'SA çoklu irsaliye',
+            islemDetay: `${irsaliyeModalSa.saId} → ${ir.irsaliyeNo} · ${kalem.urunAdi}`,
+            tarih: ir.tarih,
+            belgeNo: ir.irsaliyeNo,
+          })
+        );
+      }
+    }
+    if (addNotification) {
+      addNotification(
+        `${irsaliyeModalSa.saId}: ${created.length} irsaliye üretildi (${kalem.urunAdi}). Fatura bağlama ile devam edebilirsiniz.`
+      );
+    }
+    setIrsaliyeModalSa(null);
+    setTalepTab('DONUSTURULDU');
+    alert(`${created.length} irsaliye oluşturuldu.\nİlk no: ${created[0]?.irsaliyeNo || '—'}`);
   };
 
   const handleSimulateESignature = (sa: SatinAlmaTalebi) => {
@@ -446,156 +579,13 @@ export const SatinAlmaScreen: React.FC<SatinAlmaScreenProps> = ({
   };
 
   const handleExportSatinAlmaExcel = async () => {
-    const { Workbook } = await import('exceljs');
-    const wb = new Workbook();
-
-    const current = satinAlmaTalepleri.filter((t) => !t.arsivde);
-    const archive = satinAlmaTalepleri.filter((t) => t.arsivde);
-
-    const buildSheet = (name: string, data: SatinAlmaTalebi[]) => {
-      const ws = wb.addWorksheet(name);
-      ws.addRow([
-        'SA ID',
-        'Tarih',
-        'Cari Firma',
-        'Talep Eden',
-        'Durum',
-        'Arşiv',
-        'Kalem Sayısı',
-        'Açıklama',
-        'İmzalı Evrak',
-      ]);
-      ws.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
-      ws.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E3A8A' } };
-      data.forEach((sa) => {
-        ws.addRow([
-          sa.saId,
-          sa.tarih,
-          sa.cariFirma,
-          sa.talepEden,
-          sa.onayDurumu,
-          sa.arsivde ? 'EVET' : 'HAYIR',
-          sa.kalemler.length,
-          sa.aciklama || '',
-          sa.imzaliEvrakUrl ? 'VAR' : 'YOK',
-        ]);
-      });
-      ws.columns = [
-        { width: 22 },
-        { width: 14 },
-        { width: 24 },
-        { width: 20 },
-        { width: 20 },
-        { width: 10 },
-        { width: 12 },
-        { width: 38 },
-        { width: 12 },
-      ];
-    };
-
-    buildSheet('Mevcut Talepler', current);
-    buildSheet('Arşiv Talepler', archive);
-
-    const lines = wb.addWorksheet('Kalem Dökümü');
-    lines.addRow([
-      'SA ID',
-      'Tarih',
-      'Cari',
-      'Ürün',
-      'Miktar',
-      'Birim',
-      'Marka',
-      'Kullanım Yeri',
-      'Kalem Notu',
-      'Durum',
-      'Arşiv',
-    ]);
-    lines.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
-    lines.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0F172A' } };
-
-    satinAlmaTalepleri.forEach((sa) => {
-      sa.kalemler.forEach((k) => {
-        lines.addRow([
-          sa.saId,
-          sa.tarih,
-          sa.cariFirma,
-          k.urunAdi,
-          k.miktar,
-          k.birim,
-          k.marka || '',
-          k.kullanilacakYer || '',
-          k.aciklama || '',
-          sa.onayDurumu,
-          sa.arsivde ? 'EVET' : 'HAYIR',
-        ]);
-      });
-    });
-    lines.columns = [
-      { width: 22 },
-      { width: 14 },
-      { width: 20 },
-      { width: 32 },
-      { width: 12 },
-      { width: 10 },
-      { width: 18 },
-      { width: 18 },
-      { width: 30 },
-      { width: 18 },
-      { width: 10 },
-    ];
-
-    const buffer = await wb.xlsx.writeBuffer();
-    const blob = new Blob([buffer], {
-      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `SatinAlma_Rapor_${new Date().toISOString().slice(0, 10)}.xlsx`;
-    a.click();
-    URL.revokeObjectURL(url);
+    const { exportSatinAlmaListeExcel } = await import('../lib/satinAlmaExcelExport');
+    await exportSatinAlmaListeExcel(satinAlmaTalepleri);
   };
 
   const exportSpecificTaleplerToExcel = async (rows: SatinAlmaTalebi[], fileName: string) => {
-    const { Workbook } = await import('exceljs');
-    const wb = new Workbook();
-    const ws = wb.addWorksheet('Satın Alma Raporu');
-    ws.addRow(['SA ID', 'Tarih', 'Cari Firma', 'Talep Eden', 'Durum', 'Arşiv', 'Açıklama']);
-    ws.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
-    ws.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E3A8A' } };
-    rows.forEach((r) => {
-      ws.addRow([
-        r.saId,
-        r.tarih,
-        r.cariFirma,
-        r.talepEden,
-        r.onayDurumu,
-        r.arsivde ? 'EVET' : 'HAYIR',
-        r.aciklama || '',
-      ]);
-      r.kalemler.forEach((k) => {
-        ws.addRow(['', '', '↳ Kalem', k.urunAdi, `${k.miktar} ${k.birim}`, k.marka || '', k.kullanilacakYer || '']);
-      });
-    });
-    ws.columns = [
-      { width: 22 },
-      { width: 14 },
-      { width: 24 },
-      { width: 20 },
-      { width: 20 },
-      { width: 10 },
-      { width: 34 },
-    ];
-    const buffer = await wb.xlsx.writeBuffer();
-    const blob = new Blob([buffer], {
-      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = fileName;
-    a.click();
-    URL.revokeObjectURL(url);
+    const { exportSatinAlmaTaleplerExcel } = await import('../lib/satinAlmaExcelExport');
+    await exportSatinAlmaTaleplerExcel(rows, fileName);
   };
 
   const handleExportSelectedExcel = async () => {
@@ -760,109 +750,82 @@ export const SatinAlmaScreen: React.FC<SatinAlmaScreenProps> = ({
     }
   };
 
-  const openIrsaliyeModal = (sa: SatinAlmaTalebi) => {
-    const firstKalem = sa.kalemler[0];
-    setIrsaliyeModalSa(sa);
-    setIrsaliyeKalemId(firstKalem?.id || '');
-    const kalan = firstKalem ? kalanMiktarForSaKalem(sa, firstKalem, irsaliyeler) : 1;
-    setIrsaliyeAdet(Math.max(1, Math.min(50, Math.ceil(kalan) || 1)));
-    setIrsaliyeMiktarEach(1);
-  };
-
-  const handleCreateIrsaliyelerFromSa = () => {
-    if (!irsaliyeModalSa || !setIrsaliyeler) {
-      alert('İrsaliye yazma bağlantısı yok. Sayfayı yenileyip tekrar deneyin.');
-      return;
-    }
-    const kalem = irsaliyeModalSa.kalemler.find((k) => k.id === irsaliyeKalemId);
-    if (!kalem) {
-      alert('Kalem seçin.');
-      return;
-    }
-    const kalan = kalanMiktarForSaKalem(irsaliyeModalSa, kalem, irsaliyeler);
-    const totalWanted = irsaliyeAdet * irsaliyeMiktarEach;
-    if (totalWanted <= 0) {
-      alert('Adet ve miktar 0 olamaz.');
-      return;
-    }
-    if (totalWanted > kalan + 0.0001) {
-      if (
-        !confirm(
-          `Sipariş kalanı ${kalan} ${kalem.birim}, üreteceğiniz toplam ${totalWanted} ${kalem.birim}. Yine de devam edilsin mi?`
-        )
-      ) {
-        return;
-      }
-    }
-    const deliveries = buildNDeliveryTemplates(
-      irsaliyeModalSa,
-      kalem.id,
-      irsaliyeAdet,
-      irsaliyeMiktarEach
-    );
-    const created = createIrsaliyelerFromSatinAlma(irsaliyeModalSa, deliveries, {
-      tarih: new Date().toISOString().split('T')[0],
-      firma: irsaliyeModalSa.cariFirma,
-    });
-    setIrsaliyeler((prev) => [...created, ...prev]);
-    addNotification?.(
-      `${irsaliyeModalSa.saId}: ${created.length} irsaliye üretildi (${kalem.urunAdi}). Evrak Bağlama / Fatura ile ödeme adımına geçebilirsiniz.`
-    );
-    alert(`${created.length} irsaliye belgesi oluşturuldu.\nİlk no: ${created[0]?.irsaliyeNo || '—'}`);
-    setIrsaliyeModalSa(null);
-  };
-
   const handlePreviewPdf = (sa: SatinAlmaTalebi) => {
-    const poExtraCss = `
-      .info-grid{display:grid;grid-template-columns:1fr 1fr;gap:15px;margin-bottom:25px}
-      .info-card{background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:12px;font-size:11px}
-      .info-card h4{margin:0 0 8px;color:#1e3a8a;border-bottom:1px solid #cbd5e1;padding-bottom:4px;font-size:12px}
-      .items-table{width:100%;border-collapse:collapse;margin-top:10px}
-      .items-table th{background-color:#1e3a8a;color:#fff;padding:10px;text-align:left;font-size:11px}
-      .items-table td{border-bottom:1px solid #e2e8f0;padding:10px;font-size:11px}
-      .signatures-title{margin-top:30px;font-size:11px;font-weight:bold;color:#1e3a8a;border-bottom:2px dashed #cbd5e1;padding-bottom:5px}
-      .signatures-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-top:15px}
-      .sig-col{border:1px solid #e2e8f0;border-radius:8px;padding:10px;text-align:center;font-size:10px;min-height:90px}
-      .sig-title{font-weight:bold;color:#475569;display:block;margin-bottom:8px}
-      .sig-status{font-weight:800;color:#10b981;font-size:8px}
-      .e-imza-bar{margin-top:20px;font-size:9px;color:#059669;font-weight:bold;background:#ecfdf5;border:1px solid #a7f3d0;padding:8px;border-radius:8px}
-    `;
-    const innerBody = `
-          <h2 style="margin:0 0 4px;font-size:18px;color:#0f172a">SATIN ALMA SİPARİŞİ / PO FORMU</h2>
-          <div class="info-grid">
-            <div class="info-card"><h4>📋 SİPARİŞ BİLGİLERİ</h4><p><strong>Belge Tarihi:</strong> ${sa.tarih}</p><p><strong>Onay Durumu:</strong> ${sa.onayDurumu}</p></div>
-            <div class="info-card"><h4>🏗️ SİPARİŞ EDEN ŞANTİYE</h4><p><strong>Şantiye Ünvanı:</strong> ${sa.cariFirma}</p><p><strong>Açıklama/Not:</strong> ${sa.aciklama || 'Belirtilmemiş'}</p></div>
-          </div>
-          <table class="items-table"><thead><tr><th>Malzeme / Ürün Adı</th><th>Sipariş Miktarı</th><th>Marka / Üretici</th><th>Kullanılacak Yer</th></tr></thead><tbody>
-              ${sa.kalemler.map(x => `<tr><td>${x.urunAdi}</td><td>${x.miktar} ${x.birim}</td><td>${x.marka || 'Belirtilmemiş'}</td><td>${x.kullanilacakYer || 'Genel Şantiye'}</td></tr>`).join('')}
-          </tbody></table>
-          <div class="signatures-title">🖋️ ONAY VE İMZA KANALLARI</div>
-          <div class="signatures-grid">
-            <div class="sig-col"><span class="sig-title">Talep Eden</span><span style="color:#94a3b8;font-style:italic;">İmza Bekleniyor</span></div>
-            <div class="sig-col"><span class="sig-title">Muhasebe</span><span style="color:#94a3b8;font-style:italic;">İmza Yetkisi</span></div>
-            <div class="sig-col"><span class="sig-title">Satın Alma Md.</span><span style="color:#94a3b8;font-style:italic;">İmza Yetkisi</span></div>
-            <div class="sig-col"><span class="sig-title">Şantiye Şefi</span><span class="${sa.onayDurumu === 'ONAYLANDI' ? 'sig-status' : ''}" style="${sa.onayDurumu !== 'ONAYLANDI' ? 'color:#94a3b8' : ''}">${sa.onayDurumu === 'ONAYLANDI' ? '✓ ONAYLANDI' : 'İmza Bekleniyor'}</span></div>
-            <div class="sig-col"><span class="sig-title">Proje Müdürü</span><span class="${sa.onayDurumu === 'ONAYLANDI' ? 'sig-status' : ''}" style="${sa.onayDurumu !== 'ONAYLANDI' ? 'color:#94a3b8' : ''}">${sa.onayDurumu === 'ONAYLANDI' ? '✓ ONAYLANDI' : 'İmza Bekleniyor'}</span></div>
-          </div>
-          ${sa.eImzalar && sa.eImzalar.length > 0 ? `<div class="e-imza-bar">🛡️ DİJİTAL E-İMZA KANIT ZİNCİRİ:<br/>${sa.eImzalar.map(im => `• ${im}`).join('<br/>')}</div>` : ''}
-    `;
-    const htmlContent = wrapCorporateReportHtml(innerBody, {
-      docCode: `BELGE NO: ${sa.saId}`,
-      orientation: 'portrait',
-      title: `Kibritçi İnşaat - PO: ${sa.saId}`,
-      extraCss: poExtraCss,
-    });
-    const blob = new Blob([htmlContent], { type: 'text/html' });
-    const url = URL.createObjectURL(blob);
-    const win = window.open(url, '_blank');
-    if (win) win.print();
+    const htmlContent = buildSatinAlmaReportHtml(sa);
+    openHtmlReportWindow(htmlContent, `Satın Alma ${sa.saId}`);
   };
+
+  const handleEmailTalep = async (sa: SatinAlmaTalebi) => {
+    if (emailSendingId) return;
+    setEmailSendingId(sa.id);
+    const html = buildSatinAlmaReportHtml(sa);
+    const kalemOzet = (sa.kalemler || [])
+      .slice(0, 8)
+      .map((k) => `• ${k.urunAdi}: ${k.miktar} ${k.birim}`)
+      .join('\n');
+    const more =
+      (sa.kalemler || []).length > 8 ? `\n… +${sa.kalemler.length - 8} kalem daha` : '';
+
+    let downloadUrl = '';
+    try {
+      const share = await createSatinAlmaPublicShare({
+        sa,
+        createdBy: currentUser?.email || currentUser?.eposta || '',
+      });
+      downloadUrl = share.url;
+    } catch (err) {
+      console.error(err);
+      alert(
+        'Evrak indirme bağlantısı oluşturulamadı. Yine de e-posta açılacak; HTML dosyasını elle ekleyebilirsiniz.'
+      );
+    } finally {
+      setEmailSendingId(null);
+    }
+
+    openReportEmailComposer({
+      subject: `Satın Alma Talebi ${sa.saId} — ${sa.cariFirma || 'Kibritçi'}`,
+      body: `Satın alma sipariş talebi bilginize sunulmuştur.
+
+Belge No: ${sa.saId}
+Tarih: ${sa.tarih}
+Firma: ${sa.cariFirma}
+Talep Eden: ${sa.talepEden || '-'}
+Durum: ${sa.onayDurumu}
+Açıklama: ${sa.aciklama || '-'}
+
+Kalemler:
+${kalemOzet || '—'}${more}`,
+      html,
+      fileName: `SatinAlma_${String(sa.saId).replace(/[^\w.\-]+/g, '_')}.html`,
+      defaultTo: '',
+      downloadUrl: downloadUrl || undefined,
+    });
+  };
+
+  const tabCounts = useMemo(() => {
+    let mevcut = 0;
+    let donusturuldu = 0;
+    let arsiv = 0;
+    for (const sa of satinAlmaTalepleri) {
+      if (sa.arsivde) {
+        arsiv += 1;
+        continue;
+      }
+      if (findIrsaliyelerForSa(sa, irsaliyeler).length > 0) donusturuldu += 1;
+      else mevcut += 1;
+    }
+    return { mevcut, donusturuldu, arsiv };
+  }, [satinAlmaTalepleri, irsaliyeler]);
 
   const filteredTalepler = useMemo(() => {
     const kw = saSearchKeyword.toLowerCase();
     return satinAlmaTalepleri
       .filter((sa) => {
-        const inTab = talepTab === 'MEVCUT' ? !sa.arsivde : Boolean(sa.arsivde);
+        const donusturuldu = findIrsaliyelerForSa(sa, irsaliyeler).length > 0;
+        let inTab = false;
+        if (talepTab === 'MEVCUT') inTab = !sa.arsivde && !donusturuldu;
+        else if (talepTab === 'DONUSTURULDU') inTab = !sa.arsivde && donusturuldu;
+        else inTab = Boolean(sa.arsivde);
         if (!inTab) return false;
         if (talepTarihFiltre && normalizeDateKey(sa.tarih) !== talepTarihFiltre) return false;
         if (!kw) return true;
@@ -873,22 +836,54 @@ export const SatinAlmaScreen: React.FC<SatinAlmaScreenProps> = ({
         );
       })
       .sort((a, b) => String(b.tarih || '').localeCompare(String(a.tarih || ''), 'tr'));
-  }, [satinAlmaTalepleri, talepTab, talepTarihFiltre, saSearchKeyword]);
+  }, [satinAlmaTalepleri, talepTab, talepTarihFiltre, saSearchKeyword, irsaliyeler]);
+
+  const liveCari = resolveCariKartId(saSupplier, cariKartlar);
+  const liveStok = countLinkedStok(cartItems);
+  const cariBagliCount = satinAlmaTalepleri.filter((t) => Boolean(t.cariKartId)).length;
 
   return (
-    <div className="flex-grow p-6 min-h-[calc(100vh-52px)] overflow-y-auto flex flex-col lg:flex-row font-sans gap-6 select-none bg-slate-50/50">
-      
-      {/* LEFT FORM PANEL */}
-      <div className="w-full lg:w-[420px] lg:h-[680px] shrink-0 bg-white border border-[#e2e8f0] rounded-2xl flex flex-col overflow-hidden shadow-sm">
-        <div className="bg-slate-900 text-white p-4 shrink-0 flex items-center gap-2">
-          <ShoppingCart size={18} className="text-amber-500" />
-          <div>
-            <h3 className="font-display font-semibold text-sm">🛒 Satın Alma Sipariş Talebi</h3>
-            <p className="text-[10px] text-slate-400">Yeni bir malzeme tedarik sipariş talebi oluşturun.</p>
-          </div>
-        </div>
+    <EvrakPageShell>
+      <EvrakSectionHeader
+        accent="sa"
+        eyebrow="Sipariş evrağı"
+        title="Satın Alma"
+        subtitle="Sipariş oluştur · sevk irsaliyesine dönüştür · cari/stok bağla"
+      />
+      <EvrakZincirBanner
+        aktif="satin_alma"
+        cariBagli={liveCari.matched}
+        cariAdi={saSupplier || undefined}
+        stokLinked={liveStok.linked}
+        stokTotal={liveStok.total}
+        metrics={[
+          { label: 'Bekleyen (sevk yok)', value: tabCounts.mevcut, tone: 'neutral' },
+          {
+            label: 'Dönüştürüldü',
+            value: tabCounts.donusturuldu,
+            tone: tabCounts.donusturuldu > 0 ? 'ok' : 'neutral',
+          },
+          {
+            label: 'Cari bağlı kayıt',
+            value: `${cariBagliCount}/${satinAlmaTalepleri.length || 0}`,
+            tone: cariBagliCount > 0 ? 'ok' : 'warn',
+          },
+        ]}
+      />
 
-        <div className="flex-grow p-5 space-y-4 overflow-y-auto text-xs text-slate-700">
+      <div className="flex flex-col lg:flex-row gap-5 flex-1 min-h-0">
+      <EvrakFormCard
+        accent="sa"
+        icon={<ShoppingCart size={18} className="text-amber-300" />}
+        title="Yeni sipariş girişi"
+        subtitle="Tedarikçi, tarih ve malzeme kalemlerini girin"
+        badge={editingSaId ? 'Düzenleme' : 'Yeni'}
+        footer={
+          <EvrakPrimaryButton accent="sa" onClick={handleSavePurchaseOrder}>
+            {editingSaId ? 'Siparişi Güncelle' : 'Siparişi Kaydet'}
+          </EvrakPrimaryButton>
+        }
+      >
           <div>
             <label className="text-[10px] font-bold text-slate-500 uppercase">Belge Tarihi *</label>
             <input
@@ -1004,92 +999,86 @@ export const SatinAlmaScreen: React.FC<SatinAlmaScreenProps> = ({
               className="w-full text-xs mt-1 p-2 bg-slate-50 border border-[#e2e8f0] rounded-lg resize-none"
             />
           </div>
-        </div>
+      </EvrakFormCard>
 
-        <div className="p-4 border-t bg-slate-50 shrink-0">
-          <button
-            onClick={handleSavePurchaseOrder}
-            className="w-full bg-slate-900 hover:bg-slate-900 text-white font-bold text-xs py-2.5 rounded-xl shadow transition cursor-pointer"
-          >
-            Satın Alma Talebini Kaydet
-          </button>
-        </div>
-      </div>
-
-      {/* RIGHT LIST PANEL */}
-      <div className="flex-1 bg-white border border-[#e2e8f0] rounded-2xl flex flex-col overflow-hidden shadow-sm min-h-[450px]">
-        <div className="p-4 border-b border-[#e2e8f0] bg-slate-50/50 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 shrink-0">
-          <div className="flex items-center gap-2">
-            <h4 className="font-display font-bold text-xs text-slate-800 uppercase tracking-widest">
-              📋 Satın Alma Talepleri
-            </h4>
+      <EvrakArchivePanel
+        accent="sa"
+        title="Sipariş listesi"
+        toolbar={
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <button type="button" onClick={handleExportSatinAlmaExcel} className="text-[10px] font-bold px-2.5 py-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700">Excel</button>
+            <button type="button" onClick={handleExportSelectedExcel} className="text-[10px] font-bold px-2.5 py-1.5 rounded-lg bg-slate-800 text-white hover:bg-slate-900">Seçili Excel</button>
+          </div>
+        }
+      >
+        <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
               onClick={() => setTalepTab('MEVCUT')}
-              className={`text-[10px] px-2.5 py-1 rounded-lg border font-bold ${talepTab === 'MEVCUT' ? 'bg-slate-900 text-white border-slate-800' : 'bg-white text-slate-700 border-slate-250'}`}
+              className={`text-[10px] px-2.5 py-1.5 rounded-xl border font-bold transition cursor-pointer ${talepTab === 'MEVCUT' ? 'bg-slate-900 text-white border-slate-800' : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'}`}
             >
-              Mevcut Talepler
+              Mevcut ({tabCounts.mevcut})
+            </button>
+            <button
+              type="button"
+              onClick={() => setTalepTab('DONUSTURULDU')}
+              className={`text-[10px] px-2.5 py-1.5 rounded-xl border font-bold transition cursor-pointer ${talepTab === 'DONUSTURULDU' ? 'bg-violet-700 text-white border-violet-800' : 'bg-white text-violet-800 border-violet-200 hover:bg-violet-50'}`}
+            >
+              Dönüştürüldü ({tabCounts.donusturuldu})
             </button>
             <button
               type="button"
               onClick={() => setTalepTab('ARSIV')}
-              className={`text-[10px] px-2.5 py-1 rounded-lg border font-bold ${talepTab === 'ARSIV' ? 'bg-amber-600 text-white border-amber-700' : 'bg-white text-slate-700 border-slate-250'}`}
+              className={`text-[10px] px-2.5 py-1.5 rounded-xl border font-bold transition cursor-pointer ${talepTab === 'ARSIV' ? 'bg-amber-600 text-white border-amber-700' : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'}`}
             >
-              Eski Talepler (Arşiv)
+              Arşiv ({tabCounts.arsiv})
             </button>
             <input
               type="date"
               value={talepTarihFiltre}
               onChange={(e) => setTalepTarihFiltre(e.target.value)}
-              className="text-xs border border-slate-250 rounded-lg px-2 py-1"
+              className="text-xs border border-slate-200 rounded-xl px-2.5 py-1.5 bg-slate-50"
               title="Tarihe göre filtrele"
             />
             {talepTarihFiltre && (
               <button
                 type="button"
                 onClick={() => setTalepTarihFiltre('')}
-                className="text-[10px] border border-slate-300 bg-white hover:bg-slate-100 px-2 py-1 rounded-lg font-semibold"
+                className="text-[10px] border border-slate-200 bg-white hover:bg-slate-100 px-2.5 py-1.5 rounded-xl font-semibold"
               >
-                Tüm Tarihler
+                Tüm tarihler
               </button>
             )}
-          </div>
-          <div className="flex items-center gap-2 flex-wrap">
-            <button
-              type="button"
-              onClick={handleExportSatinAlmaExcel}
-              className="text-[10px] font-bold px-2.5 py-2 rounded-lg border bg-emerald-600 text-white border-emerald-700 hover:bg-emerald-700"
-            >
-              Tümünü Excel Raporla
-            </button>
-            <button
-              type="button"
-              onClick={handleExportSelectedExcel}
-              className="text-[10px] font-bold px-2.5 py-2 rounded-lg border bg-slate-900 text-white border-slate-800 hover:bg-slate-900"
-            >
-              Seçili Satın Almaları Excel Raporla
-            </button>
-            <input
-              type="text"
-              placeholder="Kod veya firma ara..."
-              value={saSearchKeyword}
-              onChange={(e) => setSaSearchKeyword(e.target.value)}
-              className="text-xs border p-2 rounded-xl bg-white w-48 sm:w-64"
-            />
-          </div>
+            <div className="flex-1 min-w-[160px]">
+              <EvrakArchiveSearch
+                value={saSearchKeyword}
+                onChange={setSaSearchKeyword}
+                placeholder="Kod veya firma ara…"
+              />
+            </div>
         </div>
 
-        <div className="flex-grow overflow-y-auto p-4 space-y-4">
+        <div className="flex-1 overflow-y-auto space-y-3 max-h-[min(58vh,560px)] pr-0.5">
           {filteredTalepler.length === 0 ? (
-            <p className="text-xs text-slate-400 italic text-center py-6">Kayıtlı talep bulunmuyor.</p>
+            <p className="text-xs text-slate-400 italic text-center py-6">
+              {talepTab === 'DONUSTURULDU'
+                ? 'İrsaliyeye dönüştürülmüş sipariş yok.'
+                : talepTab === 'ARSIV'
+                  ? 'Arşivde kayıt yok.'
+                  : 'Dönüştürülmeyi bekleyen sipariş yok.'}
+            </p>
           ) : (
             filteredTalepler.map(sa => {
               const isLocked = sa.onayDurumu === 'ONAYLANDI';
+              const linkedIrs = findIrsaliyelerForSa(sa, irsaliyeler);
+              const donusturuldu = linkedIrs.length > 0;
               return (
-                <div key={sa.id} className="border border-slate-100 rounded-2xl p-4 bg-white hover:shadow transition flex flex-col space-y-3.5 text-xs text-slate-700">
+                <div key={sa.id} className={`border rounded-2xl p-4 bg-white hover:shadow-md transition-all duration-200 flex flex-col space-y-3.5 text-xs text-slate-700 ${
+                  donusturuldu ? 'border-violet-200 hover:border-violet-300' : 'border-slate-150 hover:border-slate-200'
+                }`}>
                   <div className="flex justify-between items-start border-b pb-2">
                     <div className="space-y-1">
-                      <div className="flex items-center space-x-2">
+                      <div className="flex items-center space-x-2 flex-wrap gap-y-1">
                         <span className="font-mono bg-slate-900 text-amber-500 rounded px-2.5 py-0.5 text-[9px] font-bold uppercase tracking-wider">
                           {sa.saId}
                         </span>
@@ -1102,8 +1091,43 @@ export const SatinAlmaScreen: React.FC<SatinAlmaScreenProps> = ({
                         }`}>
                           {sa.onayDurumu === 'ONAYLANDI' ? '✓ ONAYLANDI (KİLİTLİ)' : sa.onayDurumu}
                         </span>
+                        {donusturuldu && (
+                          <span className="text-[9px] font-black px-2 py-0.5 rounded-full uppercase border bg-violet-100 text-violet-800 border-violet-200">
+                            Dönüştürüldü · {linkedIrs.length} irsaliye
+                          </span>
+                        )}
                       </div>
-                      <h5 className="font-bold text-slate-950 mt-1">Şantiye: {sa.cariFirma} · Tarih: {sa.tarih}</h5>
+                      <h5 className="font-bold text-slate-950 mt-1">
+                        {sa.cariFirma} · {sa.tarih}
+                        {sa.cariKartId ? (
+                          <span className="ml-2 text-[8px] font-black uppercase bg-emerald-50 text-emerald-700 border border-emerald-100 px-1.5 py-0.5 rounded">
+                            Cari bağlı
+                          </span>
+                        ) : (
+                          <span className="ml-2 text-[8px] font-black uppercase bg-amber-50 text-amber-700 border border-amber-100 px-1.5 py-0.5 rounded">
+                            Cari yok
+                          </span>
+                        )}
+                        {countLinkedStok(sa.kalemler).linked > 0 && (
+                          <span className="ml-1 text-[8px] font-black uppercase bg-sky-50 text-sky-700 border border-sky-100 px-1.5 py-0.5 rounded">
+                            Stok {countLinkedStok(sa.kalemler).linked}/{sa.kalemler.length}
+                          </span>
+                        )}
+                        {(() => {
+                          const z = describeEvrakZinciri(sa, irsaliyeler, faturalar);
+                          if (!z.sevk && !z.fatura) return null;
+                          return (
+                            <span className="ml-1 text-[8px] font-black uppercase bg-violet-50 text-violet-700 border border-violet-100 px-1.5 py-0.5 rounded">
+                              Sevk {z.sevk} · Fatura {z.fatura}
+                            </span>
+                          );
+                        })()}
+                      </h5>
+                      {donusturuldu && (
+                        <p className="text-[10px] text-violet-700 font-semibold">
+                          İrsaliye: {linkedIrs.map((ir) => ir.irsaliyeNo).join(', ')}
+                        </p>
+                      )}
                     </div>
 
                     {isLocked && (
@@ -1135,15 +1159,14 @@ export const SatinAlmaScreen: React.FC<SatinAlmaScreenProps> = ({
                   
                   <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-150/50 space-y-1 text-[10px] font-semibold text-slate-650">
                     {sa.kalemler.map((item, idx) => {
-                      const teslim = deliveredMiktarForSaKalem(sa, item, irsaliyeler);
-                      const kalan = Math.max(0, (Number(item.miktar) || 0) - teslim);
+                      const kalan = kalanMiktarForSaKalem(sa, item, irsaliyeler);
+                      const siparis = Number(item.miktar) || 0;
                       return (
                         <p key={idx}>
-                          • {item.urunAdi}: {item.miktar} {item.birim}
-                          {item.marka ? ` (${item.marka})` : ''}
-                          <span className="text-slate-400 font-normal">
-                            {' '}
-                            · teslim {teslim} · kalan {kalan}
+                          • {item.urunAdi}: {item.miktar} {item.birim}{' '}
+                          {item.marka ? `(${item.marka})` : ''}
+                          <span className="ml-1 text-violet-700 font-bold">
+                            · kalan {kalan}/{siparis}
                           </span>
                         </p>
                       );
@@ -1154,11 +1177,28 @@ export const SatinAlmaScreen: React.FC<SatinAlmaScreenProps> = ({
                   <div className="flex flex-wrap gap-2 pt-1.5 text-[10px]">
                     <button
                       type="button"
-                      onClick={() => openIrsaliyeModal(sa)}
-                      className="bg-sky-50 hover:bg-sky-100 text-sky-800 border border-sky-200 px-3 py-1.5 rounded-xl font-bold transition flex items-center gap-1 cursor-pointer"
-                      title="Örn: 20 araba mıcır → 20 irsaliye"
+                      onClick={() => handleConvertSaToIrsaliye(sa)}
+                      className={`px-3 py-1.5 rounded-xl font-bold transition flex items-center gap-1 cursor-pointer border ${
+                        donusturuldu
+                          ? 'bg-violet-100 hover:bg-violet-200 text-violet-900 border-violet-300'
+                          : 'bg-violet-50 hover:bg-violet-100 text-violet-800 border-violet-200'
+                      }`}
+                      title={
+                        donusturuldu
+                          ? 'Bu sipariş zaten irsaliyeye dönüştürüldü; gerekirse yeni sevk oluşturabilirsiniz'
+                          : 'Siparişi sevk irsaliyesine dönüştür (kalemler + firma + SA bağı)'
+                      }
                     >
-                      <Plus size={13} />
+                      {donusturuldu
+                        ? `✓ Dönüştürüldü · Tekrar (${linkedIrs.length})`
+                        : '→ İrsaliyeye Dönüştür'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => openMultiIrsaliyeModal(sa)}
+                      className="bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200 px-3 py-1.5 rounded-xl font-bold transition flex items-center gap-1 cursor-pointer"
+                      title="Her TIR/sevk için ayrı irsaliye üret (çoklu)"
+                    >
                       İrsaliye(ler) Oluştur
                     </button>
                     <button
@@ -1173,11 +1213,22 @@ export const SatinAlmaScreen: React.FC<SatinAlmaScreenProps> = ({
                       Excel İndir
                     </button>
                     <button
+                      type="button"
                       onClick={() => handlePreviewPdf(sa)}
                       className="bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 px-3 py-1.5 rounded-xl font-bold transition flex items-center gap-1 cursor-pointer"
                     >
                       <Eye size={13} />
                       PDF Raporu Önizle
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void handleEmailTalep(sa)}
+                      disabled={emailSendingId === sa.id}
+                      className="bg-sky-50 hover:bg-sky-100 text-sky-800 border border-sky-200 px-3 py-1.5 rounded-xl font-bold transition flex items-center gap-1 cursor-pointer disabled:opacity-60"
+                      title="Bir veya birden fazla kişiye e-posta ile gönder (indirme linki dahil)"
+                    >
+                      <Send size={13} />
+                      {emailSendingId === sa.id ? 'Link hazırlanıyor…' : 'E-posta ile Gönder'}
                     </button>
 
                     {!isLocked ? (
@@ -1286,96 +1337,14 @@ export const SatinAlmaScreen: React.FC<SatinAlmaScreenProps> = ({
             })
           )}
         </div>
+      </EvrakArchivePanel>
       </div>
-
-      {/* N irsaliye üretim modalı */}
-      {irsaliyeModalSa && (
-        <div className="fixed inset-0 bg-slate-950/70 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl w-full max-w-md p-5 space-y-4">
-            <h3 className="font-display font-bold text-xs text-slate-900 uppercase">
-              İrsaliye(ler) Oluştur — {irsaliyeModalSa.saId}
-            </h3>
-            <p className="text-[11px] text-slate-500 leading-relaxed">
-              Örnek: 20 araba mıcır siparişi → her sevk için ayrı irsaliye (tonajlı). Sonra bir veya birden fazla fatura ile
-              ödeme bağlanır. Mevcut bağlı irsaliyeler silinmez.
-            </p>
-            <div className="space-y-1">
-              <label className="text-[9px] font-bold text-slate-400 uppercase">SA Kalemi</label>
-              <select
-                value={irsaliyeKalemId}
-                onChange={(e) => {
-                  setIrsaliyeKalemId(e.target.value);
-                  const k = irsaliyeModalSa.kalemler.find((x) => x.id === e.target.value);
-                  if (k) {
-                    const kalan = kalanMiktarForSaKalem(irsaliyeModalSa, k, irsaliyeler);
-                    setIrsaliyeAdet(Math.max(1, Math.min(50, Math.ceil(kalan) || 1)));
-                  }
-                }}
-                className="w-full text-xs p-2.5 bg-slate-50 border rounded-xl font-bold"
-              >
-                {irsaliyeModalSa.kalemler.map((k) => {
-                  const kalan = kalanMiktarForSaKalem(irsaliyeModalSa, k, irsaliyeler);
-                  return (
-                    <option key={k.id} value={k.id}>
-                      {k.urunAdi} — sipariş {k.miktar} {k.birim} · kalan {kalan}
-                    </option>
-                  );
-                })}
-              </select>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1">
-                <label className="text-[9px] font-bold text-slate-400 uppercase">İrsaliye adedi (N)</label>
-                <input
-                  type="number"
-                  min={1}
-                  max={200}
-                  value={irsaliyeAdet}
-                  onChange={(e) => setIrsaliyeAdet(Math.max(1, Number(e.target.value) || 1))}
-                  className="w-full text-xs p-2.5 bg-slate-50 border rounded-xl font-mono font-bold"
-                />
-              </div>
-              <div className="space-y-1">
-                <label className="text-[9px] font-bold text-slate-400 uppercase">Her irsaliyede miktar</label>
-                <input
-                  type="number"
-                  min={0.01}
-                  step={0.01}
-                  value={irsaliyeMiktarEach}
-                  onChange={(e) => setIrsaliyeMiktarEach(Math.max(0.01, Number(e.target.value) || 1))}
-                  className="w-full text-xs p-2.5 bg-slate-50 border rounded-xl font-mono font-bold"
-                />
-              </div>
-            </div>
-            <p className="text-[10px] text-slate-500">
-              Toplam teslim: <strong>{(irsaliyeAdet * irsaliyeMiktarEach).toLocaleString('tr-TR')}</strong> · {irsaliyeAdet}{' '}
-              ayrı irsaliye belgesi üretilecek.
-            </p>
-            <div className="flex gap-2 pt-1">
-              <button
-                type="button"
-                onClick={() => setIrsaliyeModalSa(null)}
-                className="flex-1 py-2.5 rounded-xl border text-xs font-bold text-slate-600 cursor-pointer"
-              >
-                Vazgeç
-              </button>
-              <button
-                type="button"
-                onClick={handleCreateIrsaliyelerFromSa}
-                className="flex-1 py-2.5 rounded-xl bg-sky-600 text-white text-xs font-bold cursor-pointer"
-              >
-                {irsaliyeAdet} İrsaliye Üret
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* ➕ CARİ SUGGEST MODAL */}
       {showCariSuggest && (
         <div className="fixed inset-0 bg-slate-950/70 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl w-full max-w-sm p-5 space-y-4">
-            <h3 className="font-display font-bold text-xs text-slate-900 uppercase">🏢 Cari Firma Önerisi</h3>
+            <h3 className="font-display font-bold text-xs text-slate-900 uppercase">Cari Firma Önerisi</h3>
             <p className="text-xs text-slate-500 leading-normal">
               Girdiğiniz <strong>"{suggestedCariName}"</strong> firması veritabanında bulunamadı. Bu firmayı yeni bir Cari Kart olarak eklemek ister misiniz?
             </p>
@@ -1404,7 +1373,7 @@ export const SatinAlmaScreen: React.FC<SatinAlmaScreenProps> = ({
               </button>
               <button 
                 onClick={handleCreateCari} 
-                className="flex-1 bg-slate-900 hover:bg-slate-900 text-white font-bold py-2 rounded-xl text-center text-xs"
+                className="flex-1 bg-slate-900 hover:bg-slate-800 text-white font-bold py-2 rounded-xl text-center text-xs"
               >
                 Evet, Kart Aç
               </button>
@@ -1413,11 +1382,10 @@ export const SatinAlmaScreen: React.FC<SatinAlmaScreenProps> = ({
         </div>
       )}
 
-      {/* ➕ STOK SUGGEST MODAL */}
       {showStokSuggest && (
         <div className="fixed inset-0 bg-slate-950/70 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl w-full max-w-sm p-5 space-y-4">
-            <h3 className="font-display font-bold text-xs text-slate-900 uppercase">📦 Stok Malzeme Önerisi</h3>
+            <h3 className="font-display font-bold text-xs text-slate-900 uppercase">Stok Malzeme Önerisi</h3>
             <p className="text-xs text-slate-500 leading-normal">
               Girdiğiniz <strong>"{suggestedStokName}"</strong> malzemesi veritabanında bulunamadı. Bu malzemeyi yeni bir Stok Kartı olarak envantere eklemek ister misiniz?
             </p>
@@ -1455,7 +1423,7 @@ export const SatinAlmaScreen: React.FC<SatinAlmaScreenProps> = ({
               </button>
               <button 
                 onClick={handleCreateStok} 
-                className="flex-1 bg-slate-900 hover:bg-slate-900 text-white font-bold py-2 rounded-xl text-center text-xs"
+                className="flex-1 bg-slate-900 hover:bg-slate-800 text-white font-bold py-2 rounded-xl text-center text-xs"
               >
                 Evet, Kart Aç
               </button>
@@ -1464,7 +1432,93 @@ export const SatinAlmaScreen: React.FC<SatinAlmaScreenProps> = ({
         </div>
       )}
 
-    </div>
+      {irsaliyeModalSa && (
+        <div className="fixed inset-0 z-50 bg-slate-900/50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-5 space-y-4 border border-slate-200">
+            <h3 className="text-sm font-black text-slate-900 uppercase tracking-wide">
+              İrsaliye(ler) Oluştur — {irsaliyeModalSa.saId}
+            </h3>
+            <p className="text-[11px] text-slate-500">
+              Her sevk (TIR/araba) için ayrı irsaliye üretilir. Kalan miktar sipariş − önceki
+              teslimatlardır.
+            </p>
+            <div className="space-y-2">
+              <label className="text-[10px] font-bold text-slate-500 uppercase">Kalem</label>
+              <select
+                value={irsaliyeKalemId}
+                onChange={(e) => {
+                  setIrsaliyeKalemId(e.target.value);
+                  const k = irsaliyeModalSa.kalemler.find((x) => x.id === e.target.value);
+                  if (k) {
+                    const kalan = kalanMiktarForSaKalem(irsaliyeModalSa, k, irsaliyeler);
+                    setIrsaliyeAdet(Math.max(1, Math.min(Math.ceil(kalan) || 1, 50)));
+                  }
+                }}
+                className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold"
+              >
+                {irsaliyeModalSa.kalemler.map((k) => {
+                  const kalan = kalanMiktarForSaKalem(irsaliyeModalSa, k, irsaliyeler);
+                  return (
+                    <option key={k.id} value={k.id}>
+                      {k.urunAdi} · kalan {kalan} {k.birim}
+                    </option>
+                  );
+                })}
+              </select>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-slate-500 uppercase">
+                  İrsaliye adedi (N)
+                </label>
+                <input
+                  type="number"
+                  min={1}
+                  max={200}
+                  value={irsaliyeAdet}
+                  onChange={(e) => setIrsaliyeAdet(Math.max(1, Number(e.target.value) || 1))}
+                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-slate-500 uppercase">
+                  Miktar / irsaliye
+                </label>
+                <input
+                  type="number"
+                  min={0.01}
+                  step="any"
+                  value={irsaliyeMiktarEach}
+                  onChange={(e) =>
+                    setIrsaliyeMiktarEach(Math.max(0.01, Number(e.target.value) || 1))
+                  }
+                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold"
+                />
+              </div>
+            </div>
+            <p className="text-[10px] text-violet-800 bg-violet-50 border border-violet-100 rounded-xl px-3 py-2 font-semibold">
+              Toplam teslim: {irsaliyeAdet * irsaliyeMiktarEach} · {irsaliyeAdet} ayrı irsaliye
+            </p>
+            <div className="flex gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => setIrsaliyeModalSa(null)}
+                className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-2.5 rounded-xl text-xs cursor-pointer"
+              >
+                İptal
+              </button>
+              <button
+                type="button"
+                onClick={handleCreateMultiIrsaliye}
+                className="flex-1 bg-slate-900 hover:bg-black text-white font-bold py-2.5 rounded-xl text-xs cursor-pointer"
+              >
+                {irsaliyeAdet} İrsaliye Oluştur
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </EvrakPageShell>
   );
 };
 
