@@ -1005,15 +1005,15 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
                 <div className="flex flex-wrap items-center justify-between gap-2 pt-2">
                   <h3 className="text-xs font-black uppercase tracking-wider text-slate-700 flex items-center gap-2">
                     <Tent size={14} className="text-teal-600" />
-                    Kamp faaliyetleri ({personKampFaaliyetleri.length})
+                    Kampçı faaliyetleri ({personKampFaaliyetleri.length})
                   </h3>
-                  <span className="text-[9px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">
-                    Kaynak: Kamp
+                  <span className="text-[9px] font-bold text-teal-800 bg-teal-50 border border-teal-100 px-2 py-0.5 rounded-full">
+                    Kaynak: Kampçı
                   </span>
                 </div>
                 {personKampFaaliyetleri.length === 0 ? (
                   <div className="bg-slate-50 border border-slate-200 rounded-2xl p-6 text-center text-slate-400 text-xs">
-                    Bu ay için kamp faaliyet kaydı yok.
+                    Bu ay için kampçı faaliyet kaydı yok.
                   </div>
                 ) : (
                   personKampFaaliyetleri.map((f) => {
@@ -1322,7 +1322,7 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
                 <div className="space-y-3">
                   <h3 className="text-xs font-black uppercase tracking-wider text-slate-700 flex items-center gap-2">
                     <Tent size={14} className="text-teal-600" />
-                    Kamp faaliyetleri ({dayKampFaaliyetleri.length})
+                    Kampçı faaliyetleri ({dayKampFaaliyetleri.length})
                   </h3>
                   {dayKampFaaliyetleri.map((f) => {
                     const fotolar = getFaaliyetFotolar(f);

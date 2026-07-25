@@ -43,6 +43,10 @@ export function kampFaaliyetCalisanSayisi(
   return f.personelId ? 1 : 0;
 }
 
+function isAktifPersonel(p: Personel): boolean {
+  return p.durum === true || String(p.durum).toLowerCase() === 'true';
+}
+
 export function personMatchesFaaliyet(
   p: Personel,
   f: SahaFaaliyeti | KampFaaliyet | FaaliyetPersonelKaynak
@@ -64,6 +68,30 @@ export function personMatchesFaaliyet(
     return true;
   }
   return false;
+}
+
+/**
+ * Kamp faaliyet eşlemesi: listedeki / kaydeden eşleşmesi +
+ * görevi KAMPÇI olan personeller dönemdeki tüm kamp faaliyetlerini görür.
+ */
+export function personMatchesKampFaaliyet(
+  p: Personel,
+  f: KampFaaliyet | FaaliyetPersonelKaynak
+): boolean {
+  if (personMatchesFaaliyet(p, f)) return true;
+  return isKampciGorev(p.gorev);
+}
+
+/** Dönemde kamp faaliyeti varsa aktif KAMPÇI görevli personelleri listeye ekle */
+function absorbAktifKampciPersoneller(
+  personeller: Personel[],
+  matched: Map<string, Personel>
+) {
+  for (const p of personeller) {
+    if (!isAktifPersonel(p)) continue;
+    if (!isKampciGorev(p.gorev)) continue;
+    matched.set(p.id, p);
+  }
 }
 
 export function isFaaliyetInPeriod(
@@ -152,6 +180,10 @@ export function buildFaaliyetPersoneller(
 
   for (const f of period) absorbFaaliyetPersonel(f, personeller, matched);
   for (const f of kampPeriod) absorbFaaliyetPersonel(f, personeller, matched);
+  // KAMPÇI görevli personeller → kampçı faaliyetleri olarak sekmede görünsün
+  if (kampPeriod.length > 0) {
+    absorbAktifKampciPersoneller(personeller, matched);
+  }
 
   const byName = new Map<string, Personel>();
   for (const p of matched.values()) {
@@ -182,7 +214,7 @@ export function getPersonKampFaaliyetleriInPeriod(
   month: number
 ): KampFaaliyet[] {
   return (kampFaaliyetleri || [])
-    .filter((f) => isFaaliyetInPeriod(f, year, month) && personMatchesFaaliyet(person, f))
+    .filter((f) => isFaaliyetInPeriod(f, year, month) && personMatchesKampFaaliyet(person, f))
     .sort((a, b) => String(b.tarih || '').localeCompare(String(a.tarih || ''), 'tr'));
 }
 
@@ -349,6 +381,9 @@ export function buildDayPersonelRaporu(
   const matched = new Map<string, Personel>();
   for (const f of saha) absorbFaaliyetPersonel(f, personeller, matched);
   for (const f of kamp) absorbFaaliyetPersonel(f, personeller, matched);
+  if (kamp.length > 0) {
+    absorbAktifKampciPersoneller(personeller, matched);
+  }
 
   const dk = normalizeDateKey(dateKey);
   const [y, m, d] = dk ? dk.split('-').map(Number) : [0, 0, 0];
@@ -356,7 +391,7 @@ export function buildDayPersonelRaporu(
   const faaliyetliPersoneller: DayFaaliyetPersonelSatir[] = Array.from(matched.values())
     .map((p) => {
       const pSaha = saha.filter((f) => personMatchesFaaliyet(p, f));
-      const pKamp = kamp.filter((f) => personMatchesFaaliyet(p, f));
+      const pKamp = kamp.filter((f) => personMatchesKampFaaliyet(p, f));
       const cell = y && m && d ? getYoklamaDay(yoklamalar[p.id], y, m, d) : undefined;
       return {
         id: p.id,
