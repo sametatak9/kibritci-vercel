@@ -373,8 +373,14 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
               <img
                 src={url}
                 alt={`Saha fotoğrafı ${idx + 1}`}
+                referrerPolicy="no-referrer"
                 className="w-full h-full object-cover transition duration-300 group-hover:scale-[1.03]"
                 loading="lazy"
+                onError={(e) => {
+                  const el = e.currentTarget;
+                  el.style.opacity = '0.35';
+                  el.alt = 'Fotoğraf yüklenemedi';
+                }}
               />
               <span className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent px-2.5 py-2 text-[10px] font-bold text-white opacity-0 group-hover:opacity-100 transition">
                 {idx + 1} / {fotolar.length} · büyüt
@@ -1377,6 +1383,7 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
               <img
                 src={lightbox.urls[lightbox.index]}
                 alt={`Saha fotoğrafı ${lightbox.index + 1}`}
+                referrerPolicy="no-referrer"
                 className="max-h-[78vh] max-w-full rounded-xl object-contain shadow-2xl"
               />
               {lightbox.urls.length > 1 && (

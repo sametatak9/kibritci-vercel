@@ -888,6 +888,7 @@ export const GunlukFaaliyetProgramScreen: React.FC<GunlukFaaliyetProgramScreenPr
                                 <img
                                   src={url}
                                   alt=""
+                                  referrerPolicy="no-referrer"
                                   className="w-full h-full object-cover group-hover:scale-105 transition"
                                 />
                               </button>
@@ -957,6 +958,7 @@ export const GunlukFaaliyetProgramScreen: React.FC<GunlukFaaliyetProgramScreenPr
           <img
             src={lightbox.urls[lightbox.index]}
             alt=""
+            referrerPolicy="no-referrer"
             className="max-w-full max-h-[85vh] object-contain rounded-lg shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           />

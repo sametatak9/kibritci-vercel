@@ -2160,15 +2160,25 @@ export default function App() {
     record: SahaFaaliyetiType,
     kaynak: import('./lib/sahaFaaliyetPersistence').SahaFaaliyetSaveSource = 'formen_mobil'
   ) => {
-    const { enqueueSahaFaaliyetSave } = await import('./lib/sahaFaaliyetPersistence');
+    const { enqueueSahaFaaliyetSave, fetchSahaFaaliyetById } = await import(
+      './lib/sahaFaaliyetPersistence'
+    );
     const result = await enqueueSahaFaaliyetSave(record, kaynak);
     if (!result.ok) {
       notifySahaFaaliyetFailure(result.error || 'Bilinmeyen hata');
       throw new Error(result.error || 'Saha faaliyeti kaydedilemedi');
     }
+    // Storage'a taşınmış foto URL'lerini state'e al
+    let saved: SahaFaaliyetiType = record;
+    try {
+      const remote = await fetchSahaFaaliyetById(record.id);
+      if (remote) saved = remote;
+    } catch {
+      /* local kaydı kullan */
+    }
     setSahaFaaliyetleri((prev) => {
-      const exists = prev.some((f) => f.id === record.id);
-      return exists ? prev.map((f) => (f.id === record.id ? record : f)) : [record, ...prev];
+      const exists = prev.some((f) => f.id === saved.id);
+      return exists ? prev.map((f) => (f.id === saved.id ? { ...f, ...saved } : f)) : [saved, ...prev];
     });
     return result;
   };

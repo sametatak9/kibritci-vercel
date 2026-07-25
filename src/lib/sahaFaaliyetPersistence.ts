@@ -12,6 +12,7 @@ import {
 import { SahaFaaliyeti } from '../types/erp';
 import { db, cleanUndefined, withTimeout } from './firebase';
 import { getFaaliyetFotolar } from './sahaFaaliyetUtils';
+import { ensureSahaFaaliyetFotolarPersisted } from './sahaFaaliyetFotoStorage';
 import { isProductionLive, shouldBlockMassDelete } from './productionDataGuard';
 
 export const SAHA_FAALIYET_COLLECTION = 'sahaFaaliyetleri';
@@ -156,15 +157,31 @@ export async function persistSahaFaaliyet(
     }
   }
 
-  const payload = remote ? mergeSahaFaaliyetRecords(remote, record) : record;
+  // data: URL → Storage (Firestore 1MB); mevcut http URL'ler korunur
+  let prepared = record;
+  try {
+    prepared = await ensureSahaFaaliyetFotolarPersisted(record);
+  } catch (err) {
+    console.warn('Saha foto Storage hazırlığı atlandı:', err);
+  }
+
+  const payload = remote ? mergeSahaFaaliyetRecords(remote, prepared) : prepared;
 
   if (remote) {
     await archiveSahaFaaliyet(remote, kaynak, 'Güncelleme öncesi otomatik yedek');
   }
 
   try {
+    const cleaned = cleanUndefined(payload) as Record<string, unknown>;
+    // Boş foto alanlarını null yazma — merge:true ile mevcut fotoğrafları silmesin
+    if (getFaaliyetFotolar(payload).length === 0) {
+      delete cleaned.fotoUrls;
+      delete cleaned.fotoUrl;
+      delete cleaned.sahaFotoBase64;
+      delete cleaned.fotoBase64;
+    }
     await withTimeout(
-      setDoc(doc(db, SAHA_FAALIYET_COLLECTION, payload.id), cleanUndefined(payload), {
+      setDoc(doc(db, SAHA_FAALIYET_COLLECTION, payload.id), cleaned, {
         merge: true,
       }),
       45000

@@ -8,19 +8,56 @@ export const MAX_SAHA_FOTO_COUNT = 5;
 
 type FaaliyetFotoKaynak = {
   fotoUrl?: string | null;
-  fotoUrls?: string[];
+  fotoUrls?: string[] | Record<string, string> | null;
   sahaFotoBase64?: string;
   fotoBase64?: string;
+  fotograflar?: Array<string | { fotoUrl?: string; url?: string; dataUrl?: string }>;
+  fotoAdedi?: number;
 };
 
-/** Kayıttaki tüm saha fotoğrafları (geriye uyumlu: tek fotoUrl dahil) */
+function coerceFotoUrl(raw: unknown): string {
+  if (raw == null) return '';
+  if (typeof raw === 'string') {
+    const u = raw.trim();
+    if (!u || u === 'null' || u === 'undefined') return '';
+    if (u.startsWith('data:') || /^https?:\/\//i.test(u) || u.startsWith('blob:')) return u;
+    // Ham base64 (prefix yok)
+    if (u.length > 64 && /^[A-Za-z0-9+/=\s]+$/.test(u.slice(0, 120))) {
+      return `data:image/jpeg;base64,${u.replace(/\s+/g, '')}`;
+    }
+    return u;
+  }
+  if (typeof raw === 'object') {
+    const o = raw as Record<string, unknown>;
+    return coerceFotoUrl(o.fotoUrl || o.url || o.dataUrl || o.src || '');
+  }
+  return '';
+}
+
+function collectFotoList(raw: unknown): string[] {
+  if (!raw) return [];
+  if (Array.isArray(raw)) {
+    return raw.map(coerceFotoUrl).filter(Boolean);
+  }
+  if (typeof raw === 'object') {
+    return Object.values(raw as Record<string, unknown>)
+      .map(coerceFotoUrl)
+      .filter(Boolean);
+  }
+  const single = coerceFotoUrl(raw);
+  return single ? [single] : [];
+}
+
+/** Kayıttaki tüm saha fotoğrafları (geriye uyumlu: tek fotoUrl, object map, ham base64) */
 export function getFaaliyetFotolar(sf: FaaliyetFotoKaynak | null | undefined): string[] {
   if (!sf) return [];
-  const fromArray = Array.isArray(sf.fotoUrls)
-    ? sf.fotoUrls.map((u) => String(u || '').trim()).filter(Boolean)
-    : [];
+  const fromArray = collectFotoList(sf.fotoUrls);
   if (fromArray.length > 0) return fromArray.slice(0, MAX_SAHA_FOTO_COUNT);
-  const single = String(sf.fotoUrl || sf.sahaFotoBase64 || sf.fotoBase64 || '').trim();
+
+  const fromFotograflar = collectFotoList(sf.fotograflar);
+  if (fromFotograflar.length > 0) return fromFotograflar.slice(0, MAX_SAHA_FOTO_COUNT);
+
+  const single = coerceFotoUrl(sf.fotoUrl || sf.sahaFotoBase64 || sf.fotoBase64 || '');
   return single ? [single] : [];
 }
 
