@@ -1,7 +1,12 @@
 import { AylikYoklamaMap, KampFaaliyet, Personel, SahaFaaliyeti, YoklamaDurum } from '../types/erp';
 import { normalizeDateKey } from './dateKeyUtils';
 import { getFaaliyetFotolar } from './sahaFaaliyetUtils';
-import { findPersonelByName, getYoklamaDay, normalizeTurkishName } from './yoklamaUtils';
+import {
+  findPersonelByName,
+  getYoklamaDay,
+  isKampciGorev,
+  normalizeTurkishName,
+} from './yoklamaUtils';
 
 /** Saha veya kamp faaliyetinde personel eşleştirme için ortak şekil */
 export type FaaliyetPersonelKaynak = {
@@ -9,7 +14,34 @@ export type FaaliyetPersonelKaynak = {
   personelId?: string;
   personelMesaiSaatleri?: Record<string, number>;
   tarih?: string;
+  kaydedenKampci?: string;
+  kaydeden?: string;
 };
+
+function findPersonelByEmail(
+  personeller: Personel[],
+  email?: string | null
+): Personel | undefined {
+  const e = String(email || '').trim().toLowerCase();
+  if (!e) return undefined;
+  return personeller.find((p) => String(p.eposta || '').trim().toLowerCase() === e);
+}
+
+/** Kamp faaliyetindeki çalışan (bağlı personel) sayısı */
+export function kampFaaliyetCalisanSayisi(
+  f: KampFaaliyet | FaaliyetPersonelKaynak | null | undefined
+): number {
+  if (!f) return 0;
+  const fromList = (f.aktifPersonelListesi || [])
+    .map((x) => String(x || '').trim())
+    .filter(Boolean);
+  if (fromList.length > 0) return new Set(fromList).size;
+  if (f.personelMesaiSaatleri) {
+    const n = Object.values(f.personelMesaiSaatleri).filter((h) => Number(h) > 0).length;
+    if (n > 0) return n;
+  }
+  return f.personelId ? 1 : 0;
+}
 
 export function personMatchesFaaliyet(
   p: Personel,
@@ -20,7 +52,18 @@ export function personMatchesFaaliyet(
   const fullName = normalizeTurkishName(`${p.ad} ${p.soyad}`);
   if (list.some((entry) => normalizeTurkishName(String(entry).trim()) === fullName)) return true;
   if (f.personelMesaiSaatleri && Number(f.personelMesaiSaatleri[p.id]) > 0) return true;
-  return f.personelId === p.id;
+  if (f.personelId === p.id) return true;
+
+  // Kampçı kaydeden (e-posta) — kampçı personelin kendi kayıtları listede görünsün
+  const kaydedenEmail = String(
+    (f as FaaliyetPersonelKaynak).kaydedenKampci || (f as FaaliyetPersonelKaynak).kaydeden || ''
+  )
+    .trim()
+    .toLowerCase();
+  if (kaydedenEmail && String(p.eposta || '').trim().toLowerCase() === kaydedenEmail) {
+    return true;
+  }
+  return false;
 }
 
 export function isFaaliyetInPeriod(
@@ -73,7 +116,7 @@ function absorbFaaliyetPersonel(
   };
 
   for (const entry of f.aktifPersonelListesi || []) {
-    const raw = String(entry).trim();
+    const raw = String(entry || '').trim();
     if (!raw) continue;
     const byId = personeller.find((p) => p.id === raw);
     if (byId) {
@@ -90,6 +133,9 @@ function absorbFaaliyetPersonel(
       }
     }
   }
+  // Kampçı kaydeden — e-posta ile personel kartına bağla
+  const kaydeden = findPersonelByEmail(personeller, f.kaydedenKampci || f.kaydeden);
+  if (kaydeden) addPerson(kaydeden);
 }
 
 /** Seçili ayda saha ∪ kamp faaliyetine bağlı personeller */
@@ -126,6 +172,17 @@ export function getPersonFaaliyetleriInPeriod(
 ): SahaFaaliyeti[] {
   return filterFaaliyetlerByPeriod(sahaFaaliyetleri, year, month)
     .filter((f) => personMatchesFaaliyet(person, f))
+    .sort((a, b) => String(b.tarih || '').localeCompare(String(a.tarih || ''), 'tr'));
+}
+
+export function getPersonKampFaaliyetleriInPeriod(
+  person: Personel,
+  kampFaaliyetleri: KampFaaliyet[],
+  year: number,
+  month: number
+): KampFaaliyet[] {
+  return (kampFaaliyetleri || [])
+    .filter((f) => isFaaliyetInPeriod(f, year, month) && personMatchesFaaliyet(person, f))
     .sort((a, b) => String(b.tarih || '').localeCompare(String(a.tarih || ''), 'tr'));
 }
 
@@ -381,12 +438,18 @@ export function countPersonFaaliyetFotolar(
   person: Personel,
   sahaFaaliyetleri: SahaFaaliyeti[],
   year: number,
-  month: number
+  month: number,
+  kampFaaliyetleri: KampFaaliyet[] = []
 ): number {
-  return getPersonFaaliyetleriInPeriod(person, sahaFaaliyetleri, year, month).reduce(
+  const saha = getPersonFaaliyetleriInPeriod(person, sahaFaaliyetleri, year, month).reduce(
     (sum, f) => sum + getFaaliyetFotolar(f).length,
     0
   );
+  const kamp = getPersonKampFaaliyetleriInPeriod(person, kampFaaliyetleri, year, month).reduce(
+    (sum, f) => sum + getFaaliyetFotolar(f).length,
+    0
+  );
+  return saha + kamp;
 }
 
 export function buildPeriodFaaliyetOzeti(
@@ -394,7 +457,7 @@ export function buildPeriodFaaliyetOzeti(
   personeller: Personel[],
   year: number,
   month: number,
-  kampFaaliyetleri: Array<KampFaaliyet | FaaliyetPersonelKaynak> = []
+  kampFaaliyetleri: KampFaaliyet[] = []
 ): {
   personelSayisi: number;
   faaliyetSayisi: number;
@@ -403,25 +466,36 @@ export function buildPeriodFaaliyetOzeti(
   mesaiFaaliyetSayisi: number;
   sahaFaaliyetSayisi: number;
   kampFaaliyetSayisi: number;
+  kampCalisanSayisi: number;
+  kampciPersonelSayisi: number;
 } {
   const period = filterFaaliyetlerByPeriod(sahaFaaliyetleri, year, month);
   const kampPeriod = (kampFaaliyetleri || []).filter((f) => isFaaliyetInPeriod(f, year, month));
   const parseller = new Set(
     period.map((f) => String((f as SahaFaaliyeti).parsel || '').trim()).filter(Boolean)
   );
+  const faaliyetPersoneller = buildFaaliyetPersoneller(
+    sahaFaaliyetleri,
+    personeller,
+    year,
+    month,
+    kampFaaliyetleri
+  );
+  const kampCalisanSayisi = kampPeriod.reduce(
+    (n, f) => n + kampFaaliyetCalisanSayisi(f),
+    0
+  );
   return {
-    personelSayisi: buildFaaliyetPersoneller(
-      sahaFaaliyetleri,
-      personeller,
-      year,
-      month,
-      kampFaaliyetleri
-    ).length,
+    personelSayisi: faaliyetPersoneller.length,
     faaliyetSayisi: period.length + kampPeriod.length,
     sahaFaaliyetSayisi: period.length,
     kampFaaliyetSayisi: kampPeriod.length,
-    fotoSayisi: period.reduce((n, f) => n + getFaaliyetFotolar(f).length, 0),
+    fotoSayisi:
+      period.reduce((n, f) => n + getFaaliyetFotolar(f).length, 0) +
+      kampPeriod.reduce((n, f) => n + getFaaliyetFotolar(f).length, 0),
     parselSayisi: parseller.size,
     mesaiFaaliyetSayisi: period.filter((f) => f.faaliyetTipi === 'MESAI_SAHA').length,
+    kampCalisanSayisi,
+    kampciPersonelSayisi: faaliyetPersoneller.filter((p) => isKampciGorev(p.gorev)).length,
   };
 }

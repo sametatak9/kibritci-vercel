@@ -38,12 +38,12 @@ import {
   filterFaaliyetlerByDate,
   formatFaaliyetTarihLabel,
   getPersonFaaliyetleriInPeriod,
-  isFaaliyetInPeriod,
-  personMatchesFaaliyet,
+  getPersonKampFaaliyetleriInPeriod,
+  kampFaaliyetCalisanSayisi,
   resolveFaaliyetEkip,
 } from '../lib/faaliyetPersonelUtils';
 import { formatDateLabelTr, todayDateKey } from '../lib/dateKeyUtils';
-import { normalizeTurkishName } from '../lib/yoklamaUtils';
+import { isKampciGorev, normalizeTurkishName } from '../lib/yoklamaUtils';
 import { db } from '../lib/firebase';
 import { collection, onSnapshot } from 'firebase/firestore';
 import { GunlukFaaliyetProgramScreen } from './GunlukFaaliyetProgramScreen';
@@ -126,11 +126,6 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
     [selectedYear, selectedMonth]
   );
 
-  const selectedPeriodKampFaaliyetleri = useMemo(
-    () => kampFaaliyetleri.filter((f) => isFaaliyetInPeriod(f, selectedYear, selectedMonth)),
-    [kampFaaliyetleri, selectedYear, selectedMonth]
-  );
-
   const faaliyetPersoneller = useMemo(
     () =>
       buildFaaliyetPersoneller(
@@ -211,16 +206,21 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
   const personKampFaaliyetleri = useMemo(
     () =>
       selectedPerson
-        ? selectedPeriodKampFaaliyetleri
-            .filter((f) => personMatchesFaaliyet(selectedPerson, f))
-            .sort((a, b) => String(b.tarih || '').localeCompare(String(a.tarih || ''), 'tr'))
+        ? getPersonKampFaaliyetleriInPeriod(
+            selectedPerson,
+            kampFaaliyetleri,
+            selectedYear,
+            selectedMonth
+          )
         : [],
-    [selectedPerson, selectedPeriodKampFaaliyetleri]
+    [selectedPerson, kampFaaliyetleri, selectedYear, selectedMonth]
   );
 
   const personFotoSayisi = useMemo(
-    () => personFaaliyetleri.reduce((n, f) => n + getFaaliyetFotolar(f).length, 0),
-    [personFaaliyetleri]
+    () =>
+      personFaaliyetleri.reduce((n, f) => n + getFaaliyetFotolar(f).length, 0) +
+      personKampFaaliyetleri.reduce((n, f) => n + getFaaliyetFotolar(f).length, 0),
+    [personFaaliyetleri, personKampFaaliyetleri]
   );
 
   const ayOzeti = useMemo(
@@ -480,8 +480,8 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
               Faaliyeti Olan Personeller
             </h1>
             <p className="text-xs text-slate-300 mt-2 max-w-xl leading-relaxed">
-              Salt okunur çalışma günlüğü: personel bazında dönem özeti veya güne göre tüm saha/kamp
-              faaliyetleri — ekip ve fotoğraflarla birlikte.
+              Salt okunur çalışma günlüğü: saha ve kampçı faaliyetleri — personel, ekip, çalışan
+              sayısı ve fotoğraflarla birlikte.
             </p>
           </div>
           <div className="flex flex-col items-stretch sm:items-end gap-2">
@@ -610,13 +610,20 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
         </div>
 
         {viewMode !== 'program' && (
-        <div className="relative mt-5 grid grid-cols-2 sm:grid-cols-5 gap-2">
+        <div className={`relative mt-5 grid grid-cols-2 gap-2 ${
+          viewMode === 'personel' ? 'sm:grid-cols-3 lg:grid-cols-6' : 'sm:grid-cols-5'
+        }`}>
           {(viewMode === 'personel'
             ? [
                 { icon: Calendar, label: 'Dönem', value: periodLabel, mono: false },
                 { icon: Users, label: 'Personel', value: String(periodOzet.personelSayisi) },
                 { icon: Layers, label: 'Faaliyet', value: String(periodOzet.faaliyetSayisi) },
                 { icon: Images, label: 'Fotoğraf', value: String(periodOzet.fotoSayisi) },
+                {
+                  icon: Tent,
+                  label: 'Kamp çalışan',
+                  value: String(periodOzet.kampCalisanSayisi),
+                },
                 {
                   icon: MapPin,
                   label: 'Saha / Kamp',
@@ -682,7 +689,7 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
               <div className="p-8 text-center text-slate-400 text-xs space-y-2">
                 <Camera className="mx-auto opacity-30" size={28} />
                 <p className="font-bold text-slate-500">Bu dönemde faaliyetli personel yok</p>
-                <p>Formen / idari saha faaliyetleri girdikçe burada listelenir.</p>
+                <p>Formen / idari saha veya kampçı faaliyetleri girdikçe burada listelenir.</p>
               </div>
             ) : (
               filteredList.map((p) => {
@@ -692,13 +699,21 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
                   selectedYear,
                   selectedMonth
                 ).length;
+                const kampCount = getPersonKampFaaliyetleriInPeriod(
+                  p,
+                  kampFaaliyetleri,
+                  selectedYear,
+                  selectedMonth
+                ).length;
                 const fotoCount = countPersonFaaliyetFotolar(
                   p,
                   sahaFaaliyetleri,
                   selectedYear,
-                  selectedMonth
+                  selectedMonth,
+                  kampFaaliyetleri
                 );
                 const active = p.id === selectedPersonId;
+                const isKampci = isKampciGorev(p.gorev);
                 return (
                   <button
                     key={p.id}
@@ -732,16 +747,37 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
                             {p.gorev || 'Görev yok'}
                             {p.tcNo ? ` · ${p.tcNo}` : ''}
                           </p>
-                          {fotoCount > 0 && (
-                            <p className="text-[9px] text-amber-700 font-bold mt-1 flex items-center gap-1">
-                              <Images size={10} /> {fotoCount} foto
-                            </p>
-                          )}
+                          <div className="flex flex-wrap gap-1 mt-1">
+                            {isKampci && (
+                              <span className="text-[8px] font-black uppercase bg-teal-50 text-teal-800 border border-teal-100 px-1.5 py-0.5 rounded-full">
+                                Kampçı
+                              </span>
+                            )}
+                            {fotoCount > 0 && (
+                              <span className="text-[9px] text-amber-700 font-bold inline-flex items-center gap-1">
+                                <Images size={10} /> {fotoCount} foto
+                              </span>
+                            )}
+                          </div>
                         </div>
                       </div>
-                      <span className="shrink-0 text-[9px] font-black bg-slate-900 text-white rounded-full px-2 py-0.5">
-                        {count} iş
-                      </span>
+                      <div className="text-right shrink-0 space-y-0.5">
+                        {count > 0 && (
+                          <p className="text-[9px] font-black bg-slate-900 text-white rounded-full px-2 py-0.5">
+                            {count} saha
+                          </p>
+                        )}
+                        {kampCount > 0 && (
+                          <p className="text-[9px] font-black bg-teal-700 text-white rounded-full px-2 py-0.5">
+                            {kampCount} kamp
+                          </p>
+                        )}
+                        {count === 0 && kampCount === 0 && (
+                          <p className="text-[9px] font-black bg-slate-200 text-slate-600 rounded-full px-2 py-0.5">
+                            0
+                          </p>
+                        )}
+                      </div>
                     </div>
                   </button>
                 );
@@ -983,6 +1019,7 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
                   personKampFaaliyetleri.map((f) => {
                     const fotolar = getFaaliyetFotolar(f);
                     const ekip = resolveFaaliyetEkip(f, personeller);
+                    const calisan = kampFaaliyetCalisanSayisi(f);
                     return (
                       <article
                         key={`kamp-${f.id}`}
@@ -999,6 +1036,10 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
                             <span className="text-[9px] font-black uppercase tracking-wide text-slate-600 bg-slate-100 px-2 py-0.5 rounded-full">
                               {f.faaliyetTipi}
                               {f.faaliyetGrubu ? ` · ${f.faaliyetGrubu}` : ''}
+                            </span>
+                            <span className="text-[9px] font-black uppercase bg-teal-700 text-white px-2 py-0.5 rounded-full inline-flex items-center gap-1">
+                              <Users size={10} />
+                              {calisan} çalışan
                             </span>
                             {fotolar.length > 0 && (
                               <span className="text-[9px] font-black uppercase bg-indigo-50 text-indigo-700 border border-indigo-100 px-2 py-0.5 rounded-full inline-flex items-center gap-1">
@@ -1069,6 +1110,10 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
               </span>
               <span className="bg-teal-50 text-teal-900 border border-teal-200 rounded-full px-2.5 py-1">
                 {dayOzet.kampSayisi} kamp
+              </span>
+              <span className="bg-teal-700 text-white rounded-full px-2.5 py-1 inline-flex items-center gap-1">
+                <Users size={11} />
+                {dayKampFaaliyetleri.reduce((n, f) => n + kampFaaliyetCalisanSayisi(f), 0)} kamp çalışan
               </span>
               <span className="bg-indigo-50 text-indigo-800 border border-indigo-100 rounded-full px-2.5 py-1 inline-flex items-center gap-1">
                 <Images size={11} />
@@ -1282,6 +1327,7 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
                   {dayKampFaaliyetleri.map((f) => {
                     const fotolar = getFaaliyetFotolar(f);
                     const ekip = resolveFaaliyetEkip(f, personeller);
+                    const calisan = kampFaaliyetCalisanSayisi(f);
                     return (
                       <article
                         key={`day-kamp-${f.id}`}
@@ -1295,6 +1341,10 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
                             <span className="text-[9px] font-black uppercase tracking-wide text-slate-600 bg-slate-100 px-2 py-0.5 rounded-full">
                               {f.faaliyetTipi}
                               {f.faaliyetGrubu ? ` · ${f.faaliyetGrubu}` : ''}
+                            </span>
+                            <span className="text-[9px] font-black uppercase bg-teal-700 text-white px-2 py-0.5 rounded-full inline-flex items-center gap-1">
+                              <Users size={10} />
+                              {calisan} çalışan
                             </span>
                             {fotolar.length > 0 && (
                               <span className="text-[9px] font-black uppercase bg-indigo-50 text-indigo-700 border border-indigo-100 px-2 py-0.5 rounded-full inline-flex items-center gap-1">
