@@ -6,6 +6,20 @@ import {
 import { Personel, AylikYoklamaMap, AracBakim, KampKaydi, KampOdasi, HazirTutanak, KasaHareketi, SahaFaaliyeti } from '../types/erp';
 import { getYoklamaDay, iterateMonthYoklama, isDayActiveForPersonel, asYoklamaGunMap, parseYoklamaDateKey } from '../lib/yoklamaUtils';
 import { PersonelIdCard } from './PersonelIdCard';
+import { db } from '../lib/firebase';
+import { collection, getDocs } from 'firebase/firestore';
+
+interface PersonelIzinBelgesi {
+  id: string;
+  personelId: string;
+  personelIsim?: string;
+  izinTipi?: string;
+  baslangicTarihi?: string;
+  bitisTarihi?: string;
+  toplamGun?: number;
+  aciklama?: string;
+  onayDurumu?: string;
+}
 
 interface PersonelKartlariScreenProps {
   personeller: Personel[];
@@ -120,6 +134,36 @@ export const PersonelKartlariScreen: React.FC<PersonelKartlariScreenProps> = ({
         t => t.personelId === selectedPersonnel.id && t.tutanakTipi === 'TESLİM'
       )
     : [];
+
+  // Personel izin formları (personelIzinFormlari koleksiyonundan — izin arşivi personel kartında görünür)
+  const [izinBelgeleri, setIzinBelgeleri] = useState<PersonelIzinBelgesi[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const snap = await getDocs(collection(db, 'personelIzinFormlari'));
+        if (cancelled) return;
+        const list: PersonelIzinBelgesi[] = [];
+        snap.forEach((d) => list.push({ id: d.id, ...(d.data() as Omit<PersonelIzinBelgesi, 'id'>) }));
+        setIzinBelgeleri(list);
+      } catch (err) {
+        console.warn('İzin belgeleri yüklenemedi:', err);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const personelIzinBelgeleri = useMemo(() => {
+    if (!selectedPersonnel) return [] as PersonelIzinBelgesi[];
+    const fullName = `${selectedPersonnel.ad} ${selectedPersonnel.soyad}`.trim().toLocaleLowerCase('tr-TR');
+    return izinBelgeleri
+      .filter(
+        (b) =>
+          b.personelId === selectedPersonnel.id ||
+          (b.personelIsim || '').trim().toLocaleLowerCase('tr-TR') === fullName
+      )
+      .sort((a, b) => String(b.baslangicTarihi || '').localeCompare(String(a.baslangicTarihi || '')));
+  }, [izinBelgeleri, selectedPersonnel]);
 
   const sahaGorevKayitlari = useMemo(() => {
     if (!selectedPersonnel) return [] as Array<{ id: string; tarih?: string; islem?: string; detay?: string }>;
@@ -532,20 +576,40 @@ export const PersonelKartlariScreen: React.FC<PersonelKartlariScreenProps> = ({
               </h4>
 
               <div className="space-y-3">
-                {leaveTutanaklar.length === 0 ? (
+                {personelIzinBelgeleri.length === 0 && leaveTutanaklar.length === 0 ? (
                   <div className="h-20 border border-dashed border-slate-100 rounded-xl flex items-center justify-center text-[10px] text-slate-400 font-medium italic">
                     Arşivlenmiş izin veya teslim tutanağı bulunmuyor.
                   </div>
                 ) : (
-                  leaveTutanaklar.map(t => (
-                    <div key={t.id} className="border border-slate-100 rounded-xl p-3 flex items-center justify-between bg-slate-50/50 hover:bg-slate-50 transition text-xs font-semibold text-slate-700">
-                      <div className="space-y-1">
-                        <p className="text-slate-900">{t.konu}</p>
-                        <p className="text-[9px] text-slate-450 font-mono">Kod: {t.belgeNo} · Tarih: {t.tarih}</p>
+                  <>
+                    {personelIzinBelgeleri.map((b) => (
+                      <div key={b.id} className="border border-emerald-100 rounded-xl p-3 flex items-center justify-between bg-emerald-50/40 hover:bg-emerald-50 transition text-xs font-semibold text-slate-700">
+                        <div className="space-y-1">
+                          <p className="text-slate-900">
+                            İzin Belgesi · {(b.izinTipi || 'İZİN').replace(/_/g, ' ')}
+                          </p>
+                          <p className="text-[9px] text-slate-450 font-mono">
+                            {b.baslangicTarihi} → {b.bitisTarihi} · {b.toplamGun || 1} gün
+                          </p>
+                        </div>
+                        <span className={`text-[8px] font-black px-2 py-0.5 rounded-full uppercase whitespace-nowrap ${
+                          b.onayDurumu === 'ONAYLANDI' ? 'bg-emerald-100 text-emerald-800' :
+                          b.onayDurumu === 'REDDEDİLDİ' ? 'bg-red-100 text-red-800' : 'bg-amber-100 text-amber-800'
+                        }`}>
+                          {b.onayDurumu === 'ONAYLANDI' ? '✓ Onaylı' : b.onayDurumu === 'REDDEDİLDİ' ? '✖ Red' : '⌛ Bekliyor'}
+                        </span>
                       </div>
-                      <ChevronRight size={15} className="text-slate-400" />
-                    </div>
-                  ))
+                    ))}
+                    {leaveTutanaklar.map(t => (
+                      <div key={t.id} className="border border-slate-100 rounded-xl p-3 flex items-center justify-between bg-slate-50/50 hover:bg-slate-50 transition text-xs font-semibold text-slate-700">
+                        <div className="space-y-1">
+                          <p className="text-slate-900">{t.konu}</p>
+                          <p className="text-[9px] text-slate-450 font-mono">Kod: {t.belgeNo} · Tarih: {t.tarih}</p>
+                        </div>
+                        <ChevronRight size={15} className="text-slate-400" />
+                      </div>
+                    ))}
+                  </>
                 )}
               </div>
             </div>

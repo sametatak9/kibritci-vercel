@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Building2, Users, CalendarCheck2, CreditCard, ShoppingCart, Truck, KeySquare, FileText, Tent, Mail, ChartBar as BarChart3, BookOpen, Contact as Contact2, Package, LogOut, Moon, Sun, Wallet, Hop as Home, ShieldCheck, PenTool, MessageSquare, Smartphone, HardHat, Banknote, Images, Sparkles, Link2, ChevronDown, ChevronRight, Search, Pin, PinOff, Wrench, Gem, Camera } from 'lucide-react';
+import { Building2, Users, CalendarCheck2, CreditCard, ShoppingCart, Truck, KeySquare, FileText, Tent, Mail, ChartBar as BarChart3, BookOpen, Contact as Contact2, Package, LogOut, Moon, Sun, Wallet, Hop as Home, ShieldCheck, PenTool, MessageSquare, Smartphone, HardHat, Banknote, Images, Sparkles, Link2, ChevronDown, ChevronRight, Search, Pin, PinOff, Wrench, Gem, Camera, ClipboardList } from 'lucide-react';
 import {
   canAccessOnayHavuzu,
   canAccessUyelikAdminPanel,
@@ -64,6 +64,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         { key: "personel_kartlari", label: "Personel Detay Kartları", icon: Users },
         { key: "yoklama", label: "Yoklama ve Puantaj", icon: CalendarCheck2 },
         { key: "faaliyet_personel", label: "Faaliyeti Olan Personeller", icon: Camera },
+        { key: "gunluk_faaliyet_programi", label: "Günlük Faaliyet Programı", icon: ClipboardList },
         { key: "maas", label: "Maaş Hesaplama & Ödeme", icon: CreditCard },
         { key: "personel_izin", label: "Personel İzin Formu", icon: FileText },
       ]

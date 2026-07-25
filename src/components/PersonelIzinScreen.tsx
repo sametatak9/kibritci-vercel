@@ -7,8 +7,6 @@ import { CorporateReportLayout } from './CorporateReportLayout';
 import { collection, query, getDocs, doc, setDoc, deleteDoc, updateDoc } from 'firebase/firestore';
 import { HazirTutanakTab } from './HazirTutanakTab';
 import { ReportEmailButton } from './ReportEmailButton';
-import type { AylikYoklamaMap } from '../types/erp';
-import { applyOnayliIzinToYoklama } from '../lib/operasyonUyarilari';
 
 interface IzinFormu {
   id: string;
@@ -42,8 +40,6 @@ interface PersonelIzinScreenProps {
   cariKartlar?: any[];
   stokKartlar?: any[];
   setCariIslemGecmisi?: any;
-  yoklamalar?: AylikYoklamaMap;
-  setYoklamalar?: React.Dispatch<React.SetStateAction<AylikYoklamaMap>>;
 }
 
 export const PersonelIzinScreen: React.FC<PersonelIzinScreenProps> = ({ 
@@ -54,8 +50,6 @@ export const PersonelIzinScreen: React.FC<PersonelIzinScreenProps> = ({
   cariKartlar = [],
   stokKartlar = [],
   setCariIslemGecmisi,
-  yoklamalar = {},
-  setYoklamalar,
 }) => {
   const [activeTab, setActiveTab] = useState<'izin' | 'tutanak'>('izin');
   
@@ -298,7 +292,7 @@ export const PersonelIzinScreen: React.FC<PersonelIzinScreenProps> = ({
 
   const handleApproveIzin = async (item: IzinFormu) => {
     if (item.onayDurumu === 'ONAYLANDI') return;
-    if (!window.confirm(`${item.personelIsim} için izni onaylayıp (mümkünse) yoklamaya İzinli yazayım mı?`)) return;
+    if (!window.confirm(`${item.personelIsim} için izin belgesini onaylamak istiyor musunuz?`)) return;
     try {
       const patch = {
         onayDurumu: 'ONAYLANDI' as const,
@@ -307,23 +301,8 @@ export const PersonelIzinScreen: React.FC<PersonelIzinScreenProps> = ({
       };
       await updateDoc(doc(db, 'personelIzinFormlari', item.id), patch);
       setIzinFormlari((prev) => prev.map((x) => (x.id === item.id ? { ...x, ...patch } : x)));
-
-      if (setYoklamalar && item.personelId && !String(item.personelId).startsWith('manual_')) {
-        const result = applyOnayliIzinToYoklama(yoklamalar, {
-          personelId: item.personelId,
-          baslangicTarihi: item.baslangicTarihi,
-          bitisTarihi: item.bitisTarihi,
-        });
-        if (result.yazilanGun > 0) {
-          setYoklamalar(result.next);
-        }
-        alert(
-          `İzin onaylandı.\nYoklamaya yazılan gün: ${result.yazilanGun}` +
-            (result.atlananGun ? `\nAtlanan (zaten dolu) gün: ${result.atlananGun}` : '')
-        );
-      } else {
-        alert('İzin onaylandı. (Manuel personelde yoklama yazılmadı.)');
-      }
+      // İzinli personeller yoklama/puantaja girmez; belge yalnızca personel kartı arşivinde saklanır.
+      alert('İzin belgesi onaylandı ve personel arşivine kaydedildi.');
     } catch (err) {
       console.error(err);
       alert('Onay işlemi başarısız.');
@@ -639,7 +618,7 @@ export const PersonelIzinScreen: React.FC<PersonelIzinScreenProps> = ({
                           className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-1.5 px-3 rounded-lg flex items-center space-x-1 cursor-pointer"
                         >
                           <Check size={12} />
-                          <span>Onayla + Yoklamaya Yaz</span>
+                          <span>Onayla</span>
                         </button>
                         <button
                           type="button"

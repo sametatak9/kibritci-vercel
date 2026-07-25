@@ -23,6 +23,7 @@ const DashboardScreen = lazy(() => import('./components/DashboardScreen').then(m
 const PersonelScreen = lazy(() => import('./components/PersonelScreen').then(m => ({ default: m.PersonelScreen })));
 const YoklamaScreen = lazy(() => import('./components/YoklamaScreen').then(m => ({ default: m.YoklamaScreen })));
 const FaaliyetPersonelScreen = lazy(() => import('./components/FaaliyetPersonelScreen').then(m => ({ default: m.FaaliyetPersonelScreen })));
+const GunlukFaaliyetProgramScreen = lazy(() => import('./components/GunlukFaaliyetProgramScreen').then(m => ({ default: m.GunlukFaaliyetProgramScreen })));
 const MaasMerkeziScreen = lazy(() => import('./components/MaasMerkeziScreen').then(m => ({ default: m.MaasMerkeziScreen })));
 const PersonelIzinScreen = lazy(() => import('./components/PersonelIzinScreen').then(m => ({ default: m.PersonelIzinScreen })));
 const SatinAlmaScreen = lazy(() => import('./components/SatinAlmaScreen').then(m => ({ default: m.SatinAlmaScreen })));
@@ -2953,6 +2954,16 @@ export default function App() {
                 />
               )}
 
+              {activeTab === "gunluk_faaliyet_programi" && (
+                <GunlukFaaliyetProgramScreen
+                  personeller={personeller}
+                  yoklamalar={yoklamalar}
+                  sahaFaaliyetleri={sahaFaaliyetleri}
+                  setSahaFaaliyetleri={setSahaFaaliyetleriWithSync}
+                  currentUser={currentUser}
+                />
+              )}
+
               {activeTab === "maas" && (
                 <MaasMerkeziScreen
                   subTab={maasSubTab}
@@ -2971,16 +2982,14 @@ export default function App() {
               )}
 
               {activeTab === "personel_izin" && (
-                <PersonelIzinScreen 
-                  personeller={personeller} 
+                <PersonelIzinScreen
+                  personeller={personeller}
                   currentUser={currentUser}
                   hazirTutanaklar={hazirTutanaklar}
                   setHazirTutanaklar={setHazirTutanaklarWithSync}
                   cariKartlar={cariKartlar}
                   stokKartlar={stokKartlar}
                   setCariIslemGecmisi={setCariIslemGecmisiWithSync}
-                  yoklamalar={yoklamalar}
-                  setYoklamalar={setYoklamalarWithSync}
                 />
               )}
 

@@ -253,23 +253,85 @@ export function resolveFaaliyetEkip(
   return out.sort((a, b) => a.adSoyad.localeCompare(b.adSoyad, 'tr'));
 }
 
-export function buildDayFaaliyetOzeti(
-  sahaFaaliyetleri: SahaFaaliyeti[],
-  kampFaaliyetleri: KampFaaliyet[],
-  personeller: Personel[],
-  dateKey: string
-): {
+export interface DayFaaliyetPersonelSatir {
+  id: string;
+  adSoyad: string;
+  gorev: string;
+  sahaSayisi: number;
+  kampSayisi: number;
+  faaliyetSayisi: number;
+  fotoSayisi: number;
+  yoklamaDurum: YoklamaDurum | 'Girilmedi';
+}
+
+export interface DayPersonelRaporu {
   sahaSayisi: number;
   kampSayisi: number;
   faaliyetSayisi: number;
   fotoSayisi: number;
   personelSayisi: number;
-} {
+  yokSayisi: number;
+  faaliyetliPersoneller: DayFaaliyetPersonelSatir[];
+  yokPersoneller: Array<{
+    id: string;
+    adSoyad: string;
+    gorev: string;
+  }>;
+}
+
+/** Seçili günde faaliyetli personeller + yoklama "Yok" sayısı */
+export function buildDayPersonelRaporu(
+  sahaFaaliyetleri: SahaFaaliyeti[],
+  kampFaaliyetleri: KampFaaliyet[],
+  personeller: Personel[],
+  dateKey: string,
+  yoklamalar: AylikYoklamaMap = {}
+): DayPersonelRaporu {
   const saha = filterFaaliyetlerByDate(sahaFaaliyetleri, dateKey);
   const kamp = filterFaaliyetlerByDate(kampFaaliyetleri, dateKey);
   const matched = new Map<string, Personel>();
   for (const f of saha) absorbFaaliyetPersonel(f, personeller, matched);
   for (const f of kamp) absorbFaaliyetPersonel(f, personeller, matched);
+
+  const dk = normalizeDateKey(dateKey);
+  const [y, m, d] = dk ? dk.split('-').map(Number) : [0, 0, 0];
+
+  const faaliyetliPersoneller: DayFaaliyetPersonelSatir[] = Array.from(matched.values())
+    .map((p) => {
+      const pSaha = saha.filter((f) => personMatchesFaaliyet(p, f));
+      const pKamp = kamp.filter((f) => personMatchesFaaliyet(p, f));
+      const cell = y && m && d ? getYoklamaDay(yoklamalar[p.id], y, m, d) : undefined;
+      return {
+        id: p.id,
+        adSoyad: `${p.ad} ${p.soyad}`.trim(),
+        gorev: p.gorev || '—',
+        sahaSayisi: pSaha.length,
+        kampSayisi: pKamp.length,
+        faaliyetSayisi: pSaha.length + pKamp.length,
+        fotoSayisi:
+          pSaha.reduce((n, f) => n + getFaaliyetFotolar(f).length, 0) +
+          pKamp.reduce((n, f) => n + getFaaliyetFotolar(f).length, 0),
+        yoklamaDurum: (cell?.durum || 'Girilmedi') as YoklamaDurum | 'Girilmedi',
+      };
+    })
+    .sort((a, b) => a.adSoyad.localeCompare(b.adSoyad, 'tr'));
+
+  const yokPersoneller: DayPersonelRaporu['yokPersoneller'] = [];
+  if (y && m && d) {
+    for (const p of personeller) {
+      const isAktif = p.durum === true || String(p.durum).toLowerCase() === 'true';
+      if (!isAktif) continue;
+      const cell = getYoklamaDay(yoklamalar[p.id], y, m, d);
+      if (cell?.durum !== 'Yok') continue;
+      yokPersoneller.push({
+        id: p.id,
+        adSoyad: `${p.ad} ${p.soyad}`.trim(),
+        gorev: p.gorev || '—',
+      });
+    }
+    yokPersoneller.sort((a, b) => a.adSoyad.localeCompare(b.adSoyad, 'tr'));
+  }
+
   return {
     sahaSayisi: saha.length,
     kampSayisi: kamp.length,
@@ -277,7 +339,41 @@ export function buildDayFaaliyetOzeti(
     fotoSayisi:
       saha.reduce((n, f) => n + getFaaliyetFotolar(f).length, 0) +
       kamp.reduce((n, f) => n + getFaaliyetFotolar(f).length, 0),
-    personelSayisi: matched.size,
+    personelSayisi: faaliyetliPersoneller.length,
+    yokSayisi: yokPersoneller.length,
+    faaliyetliPersoneller,
+    yokPersoneller,
+  };
+}
+
+export function buildDayFaaliyetOzeti(
+  sahaFaaliyetleri: SahaFaaliyeti[],
+  kampFaaliyetleri: KampFaaliyet[],
+  personeller: Personel[],
+  dateKey: string,
+  yoklamalar: AylikYoklamaMap = {}
+): {
+  sahaSayisi: number;
+  kampSayisi: number;
+  faaliyetSayisi: number;
+  fotoSayisi: number;
+  personelSayisi: number;
+  yokSayisi: number;
+} {
+  const r = buildDayPersonelRaporu(
+    sahaFaaliyetleri,
+    kampFaaliyetleri,
+    personeller,
+    dateKey,
+    yoklamalar
+  );
+  return {
+    sahaSayisi: r.sahaSayisi,
+    kampSayisi: r.kampSayisi,
+    faaliyetSayisi: r.faaliyetSayisi,
+    fotoSayisi: r.fotoSayisi,
+    personelSayisi: r.personelSayisi,
+    yokSayisi: r.yokSayisi,
   };
 }
 

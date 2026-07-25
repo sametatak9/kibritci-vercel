@@ -24,6 +24,7 @@ const ROUTES = [
   { key: 'personel_kartlari', label: 'Personel Detay Kartları', icon: Users },
   { key: 'yoklama', label: 'Yoklama & Puantaj', icon: ClipboardList },
   { key: 'faaliyet_personel', label: 'Faaliyeti Olan Personeller', icon: Camera },
+  { key: 'gunluk_faaliyet_programi', label: 'Günlük Faaliyet Programı', icon: ClipboardList },
   { key: 'maas', label: 'Maaş Hesaplama', icon: CreditCard },
   { key: 'personel_izin', label: 'Personel İzin Formu', icon: FileText },
   { key: 'satin_alma', label: 'Satın Alma', icon: Package },

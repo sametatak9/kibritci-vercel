@@ -30,6 +30,7 @@ import {
 } from '../lib/sahaFaaliyetUtils';
 import {
   buildDayFaaliyetOzeti,
+  buildDayPersonelRaporu,
   buildFaaliyetPersoneller,
   buildPeriodFaaliyetOzeti,
   buildPersonelAyOzeti,
@@ -76,6 +77,7 @@ function kaynakEtiket(kaynak?: string): string {
   const k = String(kaynak || '').toUpperCase();
   if (k === 'FORMEN_MOBIL') return 'Formen Mobil';
   if (k === 'IDARI_SAHA') return 'İdari Saha';
+  if (k === 'GUNLUK_PROGRAM') return 'Günlük Program';
   if (k === 'TESISATCI_MOBIL') return 'Tesisatçı';
   if (k === 'MERMERCI_MOBIL') return 'Mermerci';
   if (k === 'KAMPCI') return 'Kampçı';
@@ -233,8 +235,27 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
   }, [kampFaaliyetleri, selectedDate]);
 
   const dayOzet = useMemo(
-    () => buildDayFaaliyetOzeti(sahaFaaliyetleri, kampFaaliyetleri, personeller, selectedDate),
-    [sahaFaaliyetleri, kampFaaliyetleri, personeller, selectedDate]
+    () =>
+      buildDayFaaliyetOzeti(
+        sahaFaaliyetleri,
+        kampFaaliyetleri,
+        personeller,
+        selectedDate,
+        yoklamalar
+      ),
+    [sahaFaaliyetleri, kampFaaliyetleri, personeller, selectedDate, yoklamalar]
+  );
+
+  const dayPersonelRaporu = useMemo(
+    () =>
+      buildDayPersonelRaporu(
+        daySahaFaaliyetleri,
+        dayKampFaaliyetleri,
+        personeller,
+        selectedDate,
+        yoklamalar
+      ),
+    [daySahaFaaliyetleri, dayKampFaaliyetleri, personeller, selectedDate, yoklamalar]
   );
 
   const dayLabel = useMemo(() => formatDateLabelTr(selectedDate), [selectedDate]);
@@ -285,6 +306,7 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
           sahaFaaliyetleri: daySahaFaaliyetleri,
           kampFaaliyetleri: dayKampFaaliyetleri,
           personeller,
+          yoklamalar,
         });
         openFaaliyetGunlukReportPdf(html, `Günlük Faaliyet — ${dayLabel}`);
       }
@@ -304,6 +326,7 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
         sahaFaaliyetleri: daySahaFaaliyetleri,
         kampFaaliyetleri: dayKampFaaliyetleri,
         personeller,
+        yoklamalar,
       });
     } catch (err) {
       console.error(err);
@@ -568,14 +591,10 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
               ]
             : [
                 { icon: Calendar, label: 'Gün', value: dayLabel, mono: false },
-                { icon: Users, label: 'Personel', value: String(dayOzet.personelSayisi) },
+                { icon: Users, label: 'Faaliyetli', value: String(dayOzet.personelSayisi) },
+                { icon: XCircle, label: 'Yok', value: String(dayOzet.yokSayisi) },
                 { icon: Layers, label: 'Faaliyet', value: String(dayOzet.faaliyetSayisi) },
                 { icon: Images, label: 'Fotoğraf', value: String(dayOzet.fotoSayisi) },
-                {
-                  icon: MapPin,
-                  label: 'Saha / Kamp',
-                  value: `${dayOzet.sahaSayisi} · ${dayOzet.kampSayisi}`,
-                },
               ]
           ).map((item) => (
             <div
@@ -1014,13 +1033,90 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
               </span>
               <span className="bg-slate-100 text-slate-700 border border-slate-200 rounded-full px-2.5 py-1 inline-flex items-center gap-1">
                 <Users size={11} />
-                {dayOzet.personelSayisi} kişi
+                {dayOzet.personelSayisi} faaliyetli
+              </span>
+              <span className="bg-rose-50 text-rose-800 border border-rose-200 rounded-full px-2.5 py-1 inline-flex items-center gap-1">
+                <XCircle size={11} />
+                {dayOzet.yokSayisi} yok
               </span>
             </div>
           </div>
         </div>
 
         <div className="p-4 sm:p-5 space-y-4">
+          {/* Faaliyeti olan personeller özeti */}
+          <div className="rounded-2xl border border-slate-200 bg-slate-50/60 overflow-hidden">
+            <div className="px-4 py-3 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2">
+              <h3 className="text-xs font-black uppercase tracking-wider text-slate-800 flex items-center gap-2">
+                <Users size={14} className="text-amber-600" />
+                Faaliyeti Olan Personeller ({dayPersonelRaporu.personelSayisi})
+              </h3>
+              <span className="text-[10px] font-bold text-rose-700 bg-rose-50 border border-rose-200 rounded-full px-2.5 py-1">
+                Yok: {dayPersonelRaporu.yokSayisi}
+              </span>
+            </div>
+            {dayPersonelRaporu.faaliyetliPersoneller.length === 0 ? (
+              <p className="px-4 py-6 text-center text-[11px] text-slate-400 italic">
+                Bu gün faaliyetli personel yok
+              </p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-[11px]">
+                  <thead>
+                    <tr className="bg-slate-900 text-white">
+                      <th className="px-3 py-2 font-black w-8">#</th>
+                      <th className="px-3 py-2 font-black">Ad Soyad</th>
+                      <th className="px-3 py-2 font-black">Görev</th>
+                      <th className="px-3 py-2 font-black text-center">Saha</th>
+                      <th className="px-3 py-2 font-black text-center">Kamp</th>
+                      <th className="px-3 py-2 font-black text-center">Foto</th>
+                      <th className="px-3 py-2 font-black text-center">Yoklama</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {dayPersonelRaporu.faaliyetliPersoneller.map((p, i) => (
+                      <tr key={p.id} className="border-b border-slate-100 bg-white hover:bg-amber-50/40">
+                        <td className="px-3 py-2 text-slate-400">{i + 1}</td>
+                        <td className="px-3 py-2 font-bold text-slate-900">{p.adSoyad}</td>
+                        <td className="px-3 py-2 text-slate-600">{p.gorev}</td>
+                        <td className="px-3 py-2 text-center font-bold">{p.sahaSayisi}</td>
+                        <td className="px-3 py-2 text-center font-bold">{p.kampSayisi}</td>
+                        <td className="px-3 py-2 text-center">{p.fotoSayisi}</td>
+                        <td className="px-3 py-2 text-center">
+                          <span
+                            className={`text-[9px] font-black px-2 py-0.5 rounded-full border ${
+                              DURUM_STYLE[p.yoklamaDurum] || DURUM_STYLE.Girilmedi
+                            }`}
+                          >
+                            {p.yoklamaDurum}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            {dayPersonelRaporu.yokPersoneller.length > 0 && (
+              <div className="border-t border-rose-100 bg-rose-50/40 px-4 py-3">
+                <p className="text-[10px] font-black uppercase tracking-wider text-rose-800 mb-2">
+                  Yok Olan Personeller ({dayPersonelRaporu.yokSayisi})
+                </p>
+                <div className="flex flex-wrap gap-1.5">
+                  {dayPersonelRaporu.yokPersoneller.map((p) => (
+                    <span
+                      key={p.id}
+                      className="text-[10px] font-bold bg-white border border-rose-200 text-rose-900 rounded-lg px-2 py-1"
+                    >
+                      {p.adSoyad}
+                      <span className="text-rose-400 font-semibold"> · {p.gorev}</span>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
           {daySahaFaaliyetleri.length === 0 && dayKampFaaliyetleri.length === 0 ? (
             <div className="py-16 text-center text-slate-400 space-y-2">
               <Camera className="mx-auto opacity-30" size={32} />

@@ -69,6 +69,7 @@ export const Topbar: React.FC<TopbarProps> = ({
       personel: "Personel Yönetimi",
       yoklama: "Yoklama ve Puantaj",
       faaliyet_personel: "Faaliyeti Olan Personeller",
+      gunluk_faaliyet_programi: "Günlük Faaliyet Programı",
       maas: "Maaş Hesaplama",
       personel_izin: "Personel İzin Formu",
       satin_alma: "Satın Alma Talep",

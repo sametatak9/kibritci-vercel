@@ -5,6 +5,7 @@ export const PORTAL_PAGES = [
   { key: "personel_kartlari", label: "Personel Detay Kartları", group: "PERSONEL" },
   { key: "yoklama", label: "Yoklama ve Puantaj", group: "PERSONEL" },
   { key: "faaliyet_personel", label: "Faaliyeti Olan Personeller", group: "PERSONEL" },
+  { key: "gunluk_faaliyet_programi", label: "Günlük Faaliyet Programı", group: "PERSONEL" },
   { key: "maas", label: "Maaş Hesaplama & Ödeme", group: "PERSONEL" },
   { key: "personel_izin", label: "Personel İzin Formu", group: "PERSONEL" },
   { key: "kasa", label: "Haftalık Kasa", group: "FİNANS & ENVANTER" },
