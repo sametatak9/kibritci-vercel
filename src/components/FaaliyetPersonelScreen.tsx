@@ -18,6 +18,9 @@ import {
   Layers,
   X,
   Tent,
+  FileSpreadsheet,
+  Printer,
+  Loader2,
 } from 'lucide-react';
 import { AylikYoklamaMap, KampFaaliyet, Personel, SahaFaaliyeti } from '../types/erp';
 import {
@@ -92,6 +95,7 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
   const [selectedPersonId, setSelectedPersonId] = useState<string | null>(null);
   const [lightbox, setLightbox] = useState<{ urls: string[]; index: number } | null>(null);
   const [kampFaaliyetleri, setKampFaaliyetleri] = useState<KampFaaliyet[]>([]);
+  const [exportingExcel, setExportingExcel] = useState(false);
 
   useEffect(() => {
     const unsub = onSnapshot(collection(db, 'kampGunlukFaaliyetleri'), (snap) => {
@@ -264,6 +268,49 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
   const openLightbox = (urls: string[], index: number) => {
     if (!urls.length) return;
     setLightbox({ urls, index: Math.max(0, Math.min(index, urls.length - 1)) });
+  };
+
+  const dayHasRecords =
+    daySahaFaaliyetleri.length > 0 || dayKampFaaliyetleri.length > 0;
+
+  const handleDayPdfReport = () => {
+    if (!dayHasRecords) {
+      alert('Bu gün için raporlanacak faaliyet kaydı yok.');
+      return;
+    }
+    void import('../lib/faaliyetGunlukReport').then(
+      ({ buildFaaliyetGunlukReportHtml, openFaaliyetGunlukReportPdf }) => {
+        const html = buildFaaliyetGunlukReportHtml({
+          dateKey: selectedDate,
+          sahaFaaliyetleri: daySahaFaaliyetleri,
+          kampFaaliyetleri: dayKampFaaliyetleri,
+          personeller,
+        });
+        openFaaliyetGunlukReportPdf(html, `Günlük Faaliyet — ${dayLabel}`);
+      }
+    );
+  };
+
+  const handleDayExcelReport = async () => {
+    if (!dayHasRecords) {
+      alert('Bu gün için raporlanacak faaliyet kaydı yok.');
+      return;
+    }
+    setExportingExcel(true);
+    try {
+      const { exportFaaliyetGunlukExcel } = await import('../lib/faaliyetGunlukReport');
+      await exportFaaliyetGunlukExcel({
+        dateKey: selectedDate,
+        sahaFaaliyetleri: daySahaFaaliyetleri,
+        kampFaaliyetleri: dayKampFaaliyetleri,
+        personeller,
+      });
+    } catch (err) {
+      console.error(err);
+      alert('Excel raporu oluşturulamadı. Tekrar deneyin.');
+    } finally {
+      setExportingExcel(false);
+    }
   };
 
   const renderFotoGrid = (id: string, fotolar: string[], emptyHint = 'Bu kayıtta saha fotoğrafı yok') =>
@@ -932,21 +979,44 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
               Seçili günün saha ve kamp kayıtları · personel ve fotoğraflarla
             </p>
           </div>
-          <div className="flex flex-wrap gap-2 text-[10px] font-bold">
-            <span className="bg-amber-50 text-amber-900 border border-amber-200 rounded-full px-2.5 py-1">
-              {dayOzet.sahaSayisi} saha
-            </span>
-            <span className="bg-teal-50 text-teal-900 border border-teal-200 rounded-full px-2.5 py-1">
-              {dayOzet.kampSayisi} kamp
-            </span>
-            <span className="bg-indigo-50 text-indigo-800 border border-indigo-100 rounded-full px-2.5 py-1 inline-flex items-center gap-1">
-              <Images size={11} />
-              {dayOzet.fotoSayisi} foto
-            </span>
-            <span className="bg-slate-100 text-slate-700 border border-slate-200 rounded-full px-2.5 py-1 inline-flex items-center gap-1">
-              <Users size={11} />
-              {dayOzet.personelSayisi} kişi
-            </span>
+          <div className="flex flex-col items-end gap-2">
+            <div className="flex flex-wrap gap-2 justify-end">
+              <button
+                type="button"
+                onClick={handleDayPdfReport}
+                disabled={!dayHasRecords}
+                className="inline-flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 text-white text-[10px] font-black px-3 py-2 rounded-xl disabled:opacity-40 cursor-pointer"
+                title="Yazdır / PDF olarak kaydet"
+              >
+                <Printer size={13} />
+                PDF / Yazdır ({dayOzet.faaliyetSayisi})
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleDayExcelReport()}
+                disabled={!dayHasRecords || exportingExcel}
+                className="inline-flex items-center gap-1.5 bg-emerald-700 hover:bg-emerald-800 text-white text-[10px] font-black px-3 py-2 rounded-xl disabled:opacity-40 cursor-pointer"
+              >
+                {exportingExcel ? <Loader2 size={13} className="animate-spin" /> : <FileSpreadsheet size={13} />}
+                {exportingExcel ? 'Excel…' : `Excel (${dayOzet.faaliyetSayisi})`}
+              </button>
+            </div>
+            <div className="flex flex-wrap gap-2 text-[10px] font-bold justify-end">
+              <span className="bg-amber-50 text-amber-900 border border-amber-200 rounded-full px-2.5 py-1">
+                {dayOzet.sahaSayisi} saha
+              </span>
+              <span className="bg-teal-50 text-teal-900 border border-teal-200 rounded-full px-2.5 py-1">
+                {dayOzet.kampSayisi} kamp
+              </span>
+              <span className="bg-indigo-50 text-indigo-800 border border-indigo-100 rounded-full px-2.5 py-1 inline-flex items-center gap-1">
+                <Images size={11} />
+                {dayOzet.fotoSayisi} foto
+              </span>
+              <span className="bg-slate-100 text-slate-700 border border-slate-200 rounded-full px-2.5 py-1 inline-flex items-center gap-1">
+                <Users size={11} />
+                {dayOzet.personelSayisi} kişi
+              </span>
+            </div>
           </div>
         </div>
 
