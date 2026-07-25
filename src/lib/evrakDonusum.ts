@@ -51,6 +51,61 @@ export type SaToIrsaliyeResult = {
   warning?: string;
 };
 
+/** Satın Alma → İrsaliye Giriş formu ön doldurma (kullanıcı kaydı onaylar) */
+export type SaIrsaliyeFormPrefill = {
+  saId: string;
+  saDocId: string;
+  firma: string;
+  tarih: string;
+  suggestedIrNo: string;
+  kalemler: IrsaliyeItem[];
+};
+
+/**
+ * SA sipariş kalemlerini irsaliye formuna taşır.
+ * Daha önce teslim edilen miktar varsa kalan miktarı yazar.
+ */
+export function buildSaIrsaliyeFormPrefill(
+  sa: SatinAlmaTalebi,
+  irsaliyeler: Irsaliye[] = []
+): SaIrsaliyeFormPrefill {
+  const tarih = todayIso();
+  const linked = findIrsaliyelerForSa(sa, irsaliyeler);
+  const deliveredByKalem = new Map<string, number>();
+  for (const ir of linked) {
+    for (const ik of ir.kalemler || []) {
+      const key = ik.saKalemId || String(ik.urunAdi || '').trim().toLocaleLowerCase('tr-TR');
+      if (!key) continue;
+      deliveredByKalem.set(key, (deliveredByKalem.get(key) || 0) + (Number(ik.miktar) || 0));
+    }
+  }
+
+  const kalemler: IrsaliyeItem[] = (sa.kalemler || []).map((k, idx) => {
+    const byId = deliveredByKalem.get(k.id) || 0;
+    const byName =
+      deliveredByKalem.get(String(k.urunAdi || '').trim().toLocaleLowerCase('tr-TR')) || 0;
+    const delivered = k.id ? byId : byName;
+    const kalan = Math.max(0, (Number(k.miktar) || 0) - delivered);
+    return {
+      id: `iri_prefill_${sa.id}_${idx}_${shortToken()}`,
+      saKalemId: k.id,
+      stokKartId: k.stokKartId,
+      urunAdi: k.urunAdi,
+      miktar: kalan > 0 ? kalan : Number(k.miktar) || 0,
+      birim: k.birim || 'ADET',
+    };
+  });
+
+  return {
+    saId: sa.saId,
+    saDocId: sa.id,
+    firma: sa.cariFirma || '',
+    tarih,
+    suggestedIrNo: `IRS-${dateKey(tarih)}-${shortToken()}`,
+    kalemler,
+  };
+}
+
 /** Satın alma (sipariş) → irsaliye (sevk hazırlık) taslağı */
 export function buildIrsaliyeFromSatinAlma(
   sa: SatinAlmaTalebi,

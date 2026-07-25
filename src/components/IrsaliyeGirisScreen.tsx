@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { 
   Truck, ClipboardList, Plus, Trash2, Edit3, ArrowRight, 
   Upload, Printer, Download, Sparkles, FileText, CheckCircle2, Search 
@@ -25,6 +25,7 @@ import {
   buildFaturaFromIrsaliyeler,
   findFaturalarForIrsaliye,
   linkIrsaliyelerToFatura,
+  type SaIrsaliyeFormPrefill,
 } from '../lib/evrakDonusum';
 import { findStokMatch } from '../lib/evrakBatchImportUtils';
 import { listFaturasizIrsaliyeler } from '../lib/operasyonUyarilari';
@@ -51,6 +52,9 @@ interface IrsaliyeGirisScreenProps {
   setCariIslemGecmisi?: React.Dispatch<React.SetStateAction<CariKartIslem[]>>;
   currentUser?: any;
   addNotification?: (mesaj: string) => void;
+  /** Satın Alma «İrsaliyeye Dönüştür» ile gelen ön doldurma */
+  prefillFromSa?: SaIrsaliyeFormPrefill | null;
+  onPrefillConsumed?: () => void;
 }
 
 export const IrsaliyeGirisScreen: React.FC<IrsaliyeGirisScreenProps> = ({
@@ -69,6 +73,8 @@ export const IrsaliyeGirisScreen: React.FC<IrsaliyeGirisScreenProps> = ({
   setCariIslemGecmisi,
   currentUser,
   addNotification,
+  prefillFromSa = null,
+  onPrefillConsumed,
 }) => {
 
   // Form states
@@ -80,6 +86,21 @@ export const IrsaliyeGirisScreen: React.FC<IrsaliyeGirisScreenProps> = ({
   const [irAttachmentUrl, setIrAttachmentUrl] = useState<string | null>(null);
   const [irSignedAttachmentUrl, setIrSignedAttachmentUrl] = useState<string | null>(null);
   const [editingIrId, setEditingIrId] = useState<string | null>(null);
+  const [linkedSaId, setLinkedSaId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!prefillFromSa) return;
+    setEditingIrId(null);
+    setIrNo(prefillFromSa.suggestedIrNo);
+    setIrDate(prefillFromSa.tarih || new Date().toISOString().split('T')[0]);
+    setIrSupplier(prefillFromSa.firma || '');
+    setIrProducts(prefillFromSa.kalemler || []);
+    setLinkedSaId(prefillFromSa.saId);
+    setIrAttachmentUrl(null);
+    setIrSignedAttachmentUrl(null);
+    onPrefillConsumed?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- yalnızca yeni prefill geldiğinde uygula
+  }, [prefillFromSa]);
 
   // AI Parser states
   const [isIrParsing, setIsIrParsing] = useState(false);
@@ -299,7 +320,7 @@ export const IrsaliyeGirisScreen: React.FC<IrsaliyeGirisScreenProps> = ({
             tarih: irDate,
             firma: irSupplier,
             cariKartId: cariResolved.cariKartId || ir.cariKartId,
-            saId: existing?.saId,
+            saId: existing?.saId || linkedSaId || undefined,
             onayDurumu: calculatedStatus,
             kalemler: linkedProducts,
             fisEvrakUrl: irAttachmentUrl || undefined,
@@ -317,6 +338,7 @@ export const IrsaliyeGirisScreen: React.FC<IrsaliyeGirisScreenProps> = ({
         tarih: irDate,
         firma: irSupplier,
         cariKartId: cariResolved.cariKartId || undefined,
+        saId: linkedSaId || undefined,
         onayDurumu: calculatedStatus,
         kalemler: linkedProducts,
         fisEvrakUrl: irAttachmentUrl || undefined,
@@ -368,6 +390,7 @@ export const IrsaliyeGirisScreen: React.FC<IrsaliyeGirisScreenProps> = ({
     setIrProducts([]);
     setIrAttachmentUrl(null);
     setIrSignedAttachmentUrl(null);
+    setLinkedSaId(null);
     alert(
       `İrsaliye kaydedildi.\nCari: ${cariResolved.matched ? 'bağlı' : 'kart önerildi'}\nStok eşleşmesi: ${stokLink.linked}/${stokLink.total}`
     );
@@ -659,6 +682,18 @@ export const IrsaliyeGirisScreen: React.FC<IrsaliyeGirisScreenProps> = ({
           {/* Creator Drawer Form */}
           <div className="w-full lg:w-[440px] bg-white border border-slate-200/90 rounded-2xl p-5 shadow-sm space-y-4 ring-1 ring-black/5">
             
+            {linkedSaId && (
+              <div className="rounded-xl border border-violet-200 bg-violet-50 px-3 py-2.5 text-[11px] text-violet-900 space-y-0.5">
+                <p className="font-black uppercase tracking-wide text-[10px]">Satın alma siparişinden</p>
+                <p className="font-bold">
+                  PO: <span className="font-mono">{linkedSaId}</span>
+                </p>
+                <p className="text-violet-700">
+                  Ürünler sipariş formundan dolduruldu. Kaydedince fiili irsaliye evrakı oluşur ve siparişe bağlanır.
+                </p>
+              </div>
+            )}
+
             <EvrakAiDropzone
               accent="ir"
               title="Yapay zeka irsaliye okuyucu"

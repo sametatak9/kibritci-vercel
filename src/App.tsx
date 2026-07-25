@@ -124,6 +124,10 @@ import { PublicSatinAlmaShareScreen } from './components/PublicSatinAlmaShareScr
 import { fetchSatinAlmaPublicShare } from './lib/satinAlmaPublicShare';
 import { installReportEmailGlobalBridge } from './lib/reportEmail';
 import { CANONICAL_ANA_FIRMA_ADI, isKibritciCompany } from './lib/yoklamaUtils';
+import {
+  buildSaIrsaliyeFormPrefill,
+  type SaIrsaliyeFormPrefill,
+} from './lib/evrakDonusum';
 
 installReportEmailGlobalBridge();
 
@@ -246,6 +250,7 @@ export default function App() {
   });
   const [satinAlmaTalepleri, setSatinAlmaTalepleri] = useState<SatinAlmaTalebi[]>([]);
   const [irsaliyeler, setIrsaliyeler] = useState<Irsaliye[]>([]);
+  const [irsaliyeSaPrefill, setIrsaliyeSaPrefill] = useState<SaIrsaliyeFormPrefill | null>(null);
   const [faturalar, setFaturalar] = useState<Fatura[]>([]);
   const [evrakBaglantiGruplari, setEvrakBaglantiGruplari] = useState<EvrakBaglantiGrubu[]>([]);
   const [onayliAnalizRaporlari, setOnayliAnalizRaporlari] = useState<OnayliAnalizRaporu[]>([]);
@@ -2140,6 +2145,11 @@ export default function App() {
     setActiveTab(targetTab);
   };
 
+  const openIrsaliyeFromSatinAlma = (sa: SatinAlmaTalebi) => {
+    setIrsaliyeSaPrefill(buildSaIrsaliyeFormPrefill(sa, irsaliyeler));
+    handleTabNavigation('irsaliye_giris');
+  };
+
   const closePublicGiris = () => {
     const url = new URL(window.location.href);
     url.searchParams.delete('view_giris');
@@ -2906,6 +2916,7 @@ export default function App() {
                   kullanicilar={kullanicilar}
                   currentUser={currentUser}
                   addNotification={addNotification}
+                  onOpenIrsaliyeFromSa={openIrsaliyeFromSatinAlma}
                 />
               )}
 
@@ -2926,6 +2937,8 @@ export default function App() {
                   setCariIslemGecmisi={setCariIslemGecmisiWithSync}
                   currentUser={currentUser}
                   addNotification={addNotification}
+                  prefillFromSa={irsaliyeSaPrefill}
+                  onPrefillConsumed={() => setIrsaliyeSaPrefill(null)}
                 />
               )}
 

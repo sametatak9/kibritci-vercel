@@ -1,6 +1,12 @@
 import { SatinAlmaTalebi } from '../types/erp';
 import { wrapCorporateReportHtml } from './corporateReportHtml';
 
+export type SatinAlmaReportLinkedIrsaliye = {
+  irsaliyeNo: string;
+  tarih?: string;
+  kalemOzet?: string;
+};
+
 /** Satın alma PO HTML raporu (önizleme, e-posta, public paylaşım). */
 export function buildSatinAlmaReportHtml(
   sa: Pick<
@@ -13,9 +19,14 @@ export function buildSatinAlmaReportHtml(
     | 'onayDurumu'
     | 'kalemler'
     | 'eImzalar'
-  >
+  >,
+  opts?: {
+    linkedIrsaliyeler?: SatinAlmaReportLinkedIrsaliye[];
+  }
 ): string {
   const kalemler = sa.kalemler || [];
+  const linked = opts?.linkedIrsaliyeler || [];
+  const donusturuldu = linked.length > 0;
   const poExtraCss = `
       .info-grid{display:grid;grid-template-columns:1fr 1fr;gap:15px;margin-bottom:25px}
       .info-card{background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:12px;font-size:11px}
@@ -28,9 +39,22 @@ export function buildSatinAlmaReportHtml(
       .sig-col{border:1px solid #e2e8f0;border-radius:8px;padding:10px;text-align:center;font-size:10px;min-height:90px}
       .sig-title{font-weight:bold;color:#475569;display:block;margin-bottom:8px}
       .e-imza-bar{margin-top:20px;font-size:9px;color:#059669;font-weight:bold;background:#ecfdf5;border:1px solid #a7f3d0;padding:8px;border-radius:8px}
+      .donusum-bar{margin:0 0 18px;padding:10px 12px;border-radius:10px;border:1px solid #c4b5fd;background:#f5f3ff;font-size:11px;color:#5b21b6}
+      .donusum-bar strong{display:block;margin-bottom:4px;font-size:12px}
     `;
+  const donusumHtml = donusturuldu
+    ? `<div class="donusum-bar"><strong>İRSALİYEYE DÖNÜŞTÜRÜLDÜ</strong>Bu siparişten üretilen sevk irsaliyesi: ${linked
+        .map(
+          (ir) =>
+            `${ir.irsaliyeNo}${ir.tarih ? ` (${ir.tarih})` : ''}${
+              ir.kalemOzet ? ` — ${ir.kalemOzet}` : ''
+            }`
+        )
+        .join('; ')}</div>`
+    : `<div class="donusum-bar" style="border-color:#fcd34d;background:#fffbeb;color:#92400e"><strong>İRSALİYE BEKLİYOR</strong>Bu sipariş henüz irsaliyeye dönüştürülmedi.</div>`;
   const innerBody = `
           <h2 style="margin:0 0 4px;font-size:18px;color:#0f172a">SATIN ALMA SİPARİŞİ / PO FORMU</h2>
+          ${donusumHtml}
           <div class="info-grid">
             <div class="info-card"><h4>📋 SİPARİŞ BİLGİLERİ</h4><p><strong>Belge Tarihi:</strong> ${sa.tarih}</p><p><strong>Onay Durumu:</strong> ${sa.onayDurumu}</p><p><strong>Talep Eden:</strong> ${sa.talepEden || '-'}</p></div>
             <div class="info-card"><h4>🏗️ TEDARİKÇİ / ŞANTİYE</h4><p><strong>Firma:</strong> ${sa.cariFirma}</p><p><strong>Açıklama/Not:</strong> ${sa.aciklama || 'Belirtilmemiş'}</p></div>

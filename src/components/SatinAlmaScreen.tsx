@@ -56,6 +56,8 @@ interface SatinAlmaScreenProps {
   kullanicilar?: any[];
   currentUser?: any;
   addNotification?: (mesaj: string) => void;
+  /** İrsaliye Giriş ekranına SA ön doldurma ile geçiş */
+  onOpenIrsaliyeFromSa?: (sa: SatinAlmaTalebi) => void;
 }
 
 export const SatinAlmaScreen: React.FC<SatinAlmaScreenProps> = ({
@@ -71,7 +73,8 @@ export const SatinAlmaScreen: React.FC<SatinAlmaScreenProps> = ({
   setStokIslemGecmisi,
   setCariIslemGecmisi,
   currentUser,
-  addNotification
+  addNotification,
+  onOpenIrsaliyeFromSa,
 }) => {
   const [saSupplier, setSaSupplier] = useState("");
   const [saDate, setSaDate] = useState(new Date().toISOString().split('T')[0]);
@@ -360,60 +363,44 @@ export const SatinAlmaScreen: React.FC<SatinAlmaScreenProps> = ({
   };
 
   const handleConvertSaToIrsaliye = (sa: SatinAlmaTalebi) => {
-    if (!setIrsaliyeler) {
-      alert('İrsaliye kaydı için sistem bağlantısı yok. Sayfayı yenileyip tekrar deneyin.');
-      return;
-    }
     if (!sa.kalemler?.length) {
       alert('Bu siparişte kalem yok; irsaliyeye dönüştürülemez.');
       return;
     }
 
-    const { irsaliye, alreadyExists, warning } = buildIrsaliyeFromSatinAlma(sa, {
+    const existing = findIrsaliyelerForSa(sa, irsaliyeler);
+    if (existing.length > 0) {
+      const ok = window.confirm(
+        `Bu sipariş için zaten ${existing.length} irsaliye var:\n${existing
+          .map((x) => x.irsaliyeNo)
+          .join(', ')}\n\nİrsaliye giriş formuna kalan kalemlerle geçilsin mi?`
+      );
+      if (!ok) return;
+    }
+
+    if (onOpenIrsaliyeFromSa) {
+      onOpenIrsaliyeFromSa(sa);
+      if (addNotification) {
+        addNotification(
+          `${sa.saId} → İrsaliye Giriş formu açıldı. Ürünler siparişten dolduruldu; kaydedince evrak oluşur.`
+        );
+      }
+      return;
+    }
+
+    // Fallback: App bağlantısı yoksa eski anlık üretim
+    if (!setIrsaliyeler) {
+      alert('İrsaliye kaydı için sistem bağlantısı yok. Sayfayı yenileyip tekrar deneyin.');
+      return;
+    }
+    const { irsaliye } = buildIrsaliyeFromSatinAlma(sa, {
       irsaliyeler,
       cariKartlar,
       stokKartlar,
     });
-
-    if (alreadyExists.length > 0) {
-      const ok = window.confirm(
-        `${warning || 'Bu sipariş için irsaliye zaten var.'}\n\nMevcut: ${alreadyExists
-          .map((x) => x.irsaliyeNo)
-          .join(', ')}\n\nYine de yeni sevk irsaliyesi oluşturulsun mu?`
-      );
-      if (!ok) return;
-    } else if (
-      !window.confirm(
-        `"${sa.saId}" siparişi sevk irsaliyesine dönüştürülsün mü?\n\nFirma: ${sa.cariFirma}\nKalem: ${sa.kalemler.length}`
-      )
-    ) {
-      return;
-    }
-
     setIrsaliyeler((prev) => [irsaliye, ...prev]);
-
-    if (irsaliye.cariKartId) {
-      appendCariIslemOnce(
-        setCariIslemGecmisi,
-        buildCariEvrakHistory({
-          cariKartId: irsaliye.cariKartId,
-          islemTipi: 'IRSALIYE',
-          islemId: irsaliye.id,
-          islemBaslik: 'Siparişten İrsaliye',
-          islemDetay: `${sa.saId} → ${irsaliye.irsaliyeNo} · ${sa.cariFirma}`,
-          tarih: irsaliye.tarih,
-          belgeNo: irsaliye.irsaliyeNo,
-        })
-      );
-    }
-
-    if (addNotification) {
-      addNotification(`${sa.saId} → irsaliye ${irsaliye.irsaliyeNo} oluşturuldu (sevk hazırlık).`);
-    }
     setTalepTab('DONUSTURULDU');
-    alert(
-      `İrsaliye oluşturuldu.\nNo: ${irsaliye.irsaliyeNo}\nSipariş bağı: ${sa.saId}\n\nSipariş «Dönüştürüldü» listesine alındı. İrsaliye sekmesinden kontrol edebilirsiniz.`
-    );
+    alert(`İrsaliye oluşturuldu: ${irsaliye.irsaliyeNo}`);
   };
 
   const openMultiIrsaliyeModal = (sa: SatinAlmaTalebi) => {
@@ -750,15 +737,28 @@ export const SatinAlmaScreen: React.FC<SatinAlmaScreenProps> = ({
     }
   };
 
+  const buildSaReportHtml = (sa: SatinAlmaTalebi) => {
+    const linked = findIrsaliyelerForSa(sa, irsaliyeler);
+    return buildSatinAlmaReportHtml(sa, {
+      linkedIrsaliyeler: linked.map((ir) => ({
+        irsaliyeNo: ir.irsaliyeNo,
+        tarih: ir.tarih,
+        kalemOzet: (ir.kalemler || [])
+          .map((k) => `${k.urunAdi} ${k.miktar} ${k.birim}`)
+          .join(', '),
+      })),
+    });
+  };
+
   const handlePreviewPdf = (sa: SatinAlmaTalebi) => {
-    const htmlContent = buildSatinAlmaReportHtml(sa);
+    const htmlContent = buildSaReportHtml(sa);
     openHtmlReportWindow(htmlContent, `Satın Alma ${sa.saId}`);
   };
 
   const handleEmailTalep = async (sa: SatinAlmaTalebi) => {
     if (emailSendingId) return;
     setEmailSendingId(sa.id);
-    const html = buildSatinAlmaReportHtml(sa);
+    const html = buildSaReportHtml(sa);
     const kalemOzet = (sa.kalemler || [])
       .slice(0, 8)
       .map((k) => `• ${k.urunAdi}: ${k.miktar} ${k.birim}`)
@@ -1185,12 +1185,12 @@ ${kalemOzet || '—'}${more}`,
                       }`}
                       title={
                         donusturuldu
-                          ? 'Bu sipariş zaten irsaliyeye dönüştürüldü; gerekirse yeni sevk oluşturabilirsiniz'
-                          : 'Siparişi sevk irsaliyesine dönüştür (kalemler + firma + SA bağı)'
+                          ? 'İrsaliye Giriş formuna geç — sipariş ürünleri doldurulur (ek sevk)'
+                          : 'İrsaliye Giriş formuna geç — sipariş ürünleri otomatik gelir'
                       }
                     >
                       {donusturuldu
-                        ? `✓ Dönüştürüldü · Tekrar (${linkedIrs.length})`
+                        ? `✓ Dönüştürüldü · Form Aç (${linkedIrs.length})`
                         : '→ İrsaliyeye Dönüştür'}
                     </button>
                     <button
