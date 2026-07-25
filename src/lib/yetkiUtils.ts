@@ -103,6 +103,15 @@ export function canAccessUyelikAdminPanel(
   return isIdariIslerRole(yetki);
 }
 
+/** Onay Havuzu & İmzalar — yönetici rolleri + İdari İşler */
+export function canAccessOnayHavuzu(
+  yetki?: string | null,
+  options?: { isYonetici?: boolean; isPrivilegedAdmin?: boolean }
+): boolean {
+  if (options?.isPrivilegedAdmin || options?.isYonetici) return true;
+  return isIdariIslerRole(yetki);
+}
+
 /** Tek panel — tam ekran mobil (Formen hariç; o personel sekmesine de erişir) */
 export function isStandaloneMobileRole(yetki?: string | null): boolean {
   const allowed = getRoleAllowedTabs(yetki);
@@ -134,8 +143,8 @@ export function isTabRestrictedForUser(
   if (allowed) {
     return !allowed.includes(tab as PortalPageKey);
   }
-  // İdari İşler için üyelik onay paneli kısıt listesinden muaf
-  if (tab === 'admin' && isIdariIslerRole(yetki)) {
+  // İdari İşler: üyelik paneli + onay havuzu kısıt listesinden muaf
+  if (isIdariIslerRole(yetki) && (tab === 'admin' || tab === 'onay_islemleri')) {
     return false;
   }
   if (!kisitliSayfalar?.length) return false;

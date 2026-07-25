@@ -179,6 +179,7 @@ export const FormenScreen: React.FC<FormenScreenProps> = ({
   const [havaDurumu, setHavaDurumu] = useState('Güneşli');
   const [genelNotlar, setGenelNotlar] = useState('');
   const [showPdfPreview, setShowPdfPreview] = useState(false);
+  const [sendingPdfRapor, setSendingPdfRapor] = useState(false);
 
   // Status message
   const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
@@ -1014,53 +1015,220 @@ ${satirlar
   };
 
   const handleSaveGunlukRapor = async () => {
+    if (sendingPdfRapor) return;
+    setSendingPdfRapor(true);
+
     const reportId = `report_${selectedDate}`;
     const dayActivities = selectedDateFaaliyetleri;
     const presentStaffNames = activeStaff
-      .filter(p => selectedDateAttendance.gelenIds.includes(p.id))
-      .map(p => `${p.ad} ${p.soyad} (${p.gorev})`);
+      .filter((p) => selectedDateAttendance.gelenIds.includes(p.id))
+      .map((p) => `${p.ad} ${p.soyad} (${p.gorev})`);
+    const gonderen =
+      currentUser?.displayName ||
+      (currentUser?.ad ? `${currentUser.ad} ${currentUser.soyad || ''}` : '') ||
+      formenEmail ||
+      'FORMEN';
+
+    // Firestore 1MB sınırı: base64 fotoğrafları kayda yazma (PDF önizlemede bellekte kalır)
+    const leanFaaliyetler = dayActivities.map((sf) => ({
+      id: sf.id,
+      tarih: sf.tarih,
+      isNiteligi: sf.isNiteligi,
+      parsel: sf.parsel,
+      blok: sf.blok,
+      aciklama: sf.aciklama || '',
+      faaliyetTipi: sf.faaliyetTipi,
+      aktifPersonelListesi: sf.aktifPersonelListesi || [],
+      ustaSayisi: sf.ustaSayisi,
+      isciSayisi: sf.isciSayisi,
+      kaynakEkran: sf.kaynakEkran || 'FORMEN_MOBIL',
+      fotoAdedi: getFaaliyetFotolar(sf).length,
+    }));
 
     const reportData = {
       id: reportId,
       tarih: selectedDate,
       havaDurumu,
       genelNotlar,
-      gonderen: currentUser?.displayName || (currentUser?.ad ? `${currentUser.ad} ${currentUser.soyad || ''}` : '') || 'FORMEN',
+      gonderen,
+      gonderenFormen: formenEmail,
       toplamEkip: selectedDateAttendance.gelenCount,
-      faaliyetler: dayActivities,
+      faaliyetler: leanFaaliyetler,
+      faaliyetAdet: leanFaaliyetler.length,
       yoklama: presentStaffNames,
       onayDurumu: 'BEKLİYOR',
-      guncellenmeTarihi: new Date().toISOString()
+      durum: 'ONAY BEKLİYOR',
+      guncellenmeTarihi: new Date().toISOString(),
+      olusturulma: new Date().toISOString(),
+      kaynak: 'FORMEN_MOBIL',
+    };
+
+    const arsivId = `saha_gun_rapor_${selectedDate}_formen`;
+    const arsivData = {
+      id: arsivId,
+      tarih: selectedDate,
+      olusturmaTarihi: new Date().toISOString(),
+      olusturan: gonderen,
+      gonderenFormen: formenEmail,
+      faaliyetIds: dayActivities.map((f) => f.id),
+      faaliyetAdet: dayActivities.length,
+      formenFaaliyetAdet: dayActivities.length,
+      yoklamaOzet: {
+        gelen: selectedDateAttendance.gelenCount,
+        yok: Math.max(0, activeStaff.length - selectedDateAttendance.gelenCount),
+        izinli: 0,
+        raporlu: 0,
+      },
+      aciklama: genelNotlar || '',
+      havaDurumu,
+      kaynak: 'FORMEN_MOBIL',
     };
 
     try {
-      await setDoc(doc(db, 'gunlukSahaRaporlari', reportId), reportData);
-      const rows = dayActivities
-        .map(
-          (sf, idx) =>
-            `<tr><td>${idx + 1}</td><td>${escapeHtml(sf.tarih)}</td><td>${escapeHtml(sf.isNiteligi)}</td><td>${escapeHtml(sf.parsel)} / ${escapeHtml(sf.blok)}</td><td>${escapeHtml(sf.aciklama || '-')}</td></tr>`
+      await Promise.all([
+        setDoc(doc(db, 'gunlukSahaRaporlari', reportId), reportData, { merge: true }),
+        setDoc(doc(db, 'sahaGunRaporArsiv', arsivId), arsivData, { merge: true }),
+      ]);
+
+      // Gün faaliyetlerini arşivlendi olarak işaretle
+      const stamp = new Date().toISOString();
+      await Promise.all(
+        dayActivities.map((sf) =>
+          updateDoc(doc(db, 'sahaFaaliyetleri', sf.id), {
+            programaGonderildi: true,
+            programaGonderimTarihi: stamp,
+            iceriAktarimDurumu: 'AKTARILDI',
+          }).catch(() => undefined)
         )
+      );
+      setSahaFaaliyetleri((prev) =>
+        prev.map((sf) =>
+          dayActivities.some((d) => d.id === sf.id)
+            ? {
+                ...sf,
+                programaGonderildi: true,
+                programaGonderimTarihi: stamp,
+                iceriAktarimDurumu: 'AKTARILDI',
+              }
+            : sf
+        )
+      );
+
+      const faaliyetHtml = dayActivities
+        .map((sf, idx) => {
+          const fotolar = getFaaliyetFotolar(sf);
+          const ekip = (sf.aktifPersonelListesi || [])
+            .map((pid) => {
+              const p = personeller.find((x) => x.id === pid);
+              return p ? `${p.ad} ${p.soyad}` : pid;
+            })
+            .filter(Boolean);
+          const fotoBlock =
+            fotolar.length > 0
+              ? `<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:4px;margin-top:6px;">${fotolar
+                  .slice(0, 4)
+                  .map(
+                    (url) =>
+                      `<img src="${escapeHtml(url)}" alt="foto" style="width:100%;height:72px;object-fit:cover;border-radius:6px;border:1px solid #e2e8f0;" />`
+                  )
+                  .join('')}</div>${
+                  fotolar.length > 1
+                    ? `<div style="font-size:9px;color:#64748b;margin-top:2px;">${fotolar.length} fotoğraf</div>`
+                    : ''
+                }`
+              : `<div style="font-size:10px;color:#94a3b8;font-style:italic;margin-top:6px;">📷 Görsel eklenmedi</div>`;
+
+          return `<article style="border:1px solid #e2e8f0;border-radius:10px;padding:12px;margin-bottom:12px;page-break-inside:avoid;background:#f8fafc;">
+            <div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start;border-bottom:1px solid #e2e8f0;padding-bottom:6px;margin-bottom:8px;">
+              <strong style="font-size:12px;">${idx + 1}. ${escapeHtml(sf.isNiteligi || 'Faaliyet')}</strong>
+              <span style="font-size:10px;background:#fef3c7;color:#92400e;padding:2px 8px;border-radius:999px;white-space:nowrap;">📍 ${escapeHtml(sf.parsel || '-')} / ${escapeHtml(sf.blok || '-')}</span>
+            </div>
+            <div style="display:grid;grid-template-columns:2fr 1fr;gap:10px;">
+              <div>
+                <div style="font-size:9px;color:#94a3b8;text-transform:uppercase;font-weight:700;">Açıklama</div>
+                <p style="font-size:11px;margin:4px 0 8px;white-space:pre-wrap;">${escapeHtml(sf.aciklama || 'Detay açıklaması girilmemiştir.')}</p>
+                <div style="font-size:9px;color:#94a3b8;text-transform:uppercase;font-weight:700;">Ekip</div>
+                <p style="font-size:10px;margin:4px 0 0;">${escapeHtml(ekip.join(', ') || 'Ekip seçilmedi.')}</p>
+              </div>
+              <div>${fotoBlock}</div>
+            </div>
+          </article>`;
+        })
         .join('');
+
       const innerBody = `
-      <h1 style="font-size:14px;margin:0 0 10px;">FORMEN GÜNLÜK SAHA RAPORU</h1>
-      <div style="font-size:12px;color:#475569;margin-bottom:12px">Tarih: ${escapeHtml(selectedDate)} | Gelen personel: ${selectedDateAttendance.gelenCount}</div>
-      <table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr><th style="border:1px solid #cbd5e1;padding:6px;background:#f1f5f9">#</th><th style="border:1px solid #cbd5e1;padding:6px;background:#f1f5f9">Tarih</th><th style="border:1px solid #cbd5e1;padding:6px;background:#f1f5f9">İş Niteliği</th><th style="border:1px solid #cbd5e1;padding:6px;background:#f1f5f9">Lokasyon</th><th style="border:1px solid #cbd5e1;padding:6px;background:#f1f5f9">Açıklama</th></tr></thead><tbody>${rows || '<tr><td colspan="5">Kayıt yok</td></tr>'}</tbody></table>`;
+        <h1 style="font-size:15px;margin:0 0 6px;">ŞANTİYE GÜNLÜK FİİLİ RAPORU</h1>
+        <div style="font-size:11px;color:#475569;margin-bottom:14px;">
+          Tarih: ${escapeHtml(formatDateLabelTr(selectedDate))} · Gelen personel: ${selectedDateAttendance.gelenCount} ·
+          Formen: ${escapeHtml(gonderen)} · Hava: ${escapeHtml(havaDurumu)}
+        </div>
+        <h2 style="font-size:12px;margin:16px 0 8px;border-bottom:2px solid #334155;padding-bottom:4px;">1. YOKLAMA ÖZETİ</h2>
+        <p style="font-size:11px;">Gelen: <strong>${selectedDateAttendance.gelenCount}</strong> kişi
+          ${presentStaffNames.length ? ` — ${escapeHtml(presentStaffNames.slice(0, 20).join(', '))}${presentStaffNames.length > 20 ? '…' : ''}` : ''}
+        </p>
+        <h2 style="font-size:12px;margin:16px 0 8px;border-bottom:2px solid #334155;padding-bottom:4px;">2. FİİLİ SAHA İMALATLARI (${dayActivities.length})</h2>
+        ${faaliyetHtml || '<p style="color:#94a3b8;font-style:italic;">Bugün için faaliyet kaydı yok.</p>'}
+        <h2 style="font-size:12px;margin:16px 0 8px;border-bottom:2px solid #334155;padding-bottom:4px;">3. EK ŞANTİYE NOTLARI</h2>
+        <p style="font-size:11px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px;">
+          ${escapeHtml(genelNotlar || 'Bugün şantiyede herhangi bir aksaklık, malzeme teslimatı veya ek genel durum bildirilmemiştir.')}
+        </p>
+        <div style="margin-top:18px;padding-top:10px;border-top:2px solid #0f172a;display:flex;justify-content:space-between;gap:12px;align-items:flex-start;">
+          <div style="font-size:10px;color:#64748b;max-width:60%;">
+            <strong style="color:#0f172a;">BELGE GÜVENLİĞİ:</strong>
+            Bu rapor Formen mobil panelinden dijital olarak onaylanıp arşive kaydedilmiştir.
+          </div>
+          <div style="border:2px dashed #059669;color:#047857;padding:8px 10px;border-radius:10px;text-align:center;font-size:9px;font-weight:800;">
+            KİBRİTÇİ İNŞAAT<br/>E-İMZA ONAYLANDI<br/><span style="font-weight:600;color:#64748b;">FORMEN MOBİL ONAY</span>
+          </div>
+        </div>`;
+
       const html = wrapCorporateReportHtml(innerBody, {
         docCode: `FORMEN-${selectedDate}`,
         orientation: 'portrait',
-        title: `Formen Raporu ${selectedDate}`,
-        extraCss: 'table th,table td{border:1px solid #cbd5e1;padding:6px;text-align:left;vertical-align:top}',
+        title: `Şantiye Günlük Fiili Raporu ${selectedDate}`,
+        extraCss: 'article{break-inside:avoid}',
       });
+
       const popup = window.open('', '_blank', 'width=1000,height=700');
       if (popup) {
         popup.document.open();
         popup.document.write(html);
         popup.document.close();
+        setTimeout(() => {
+          try {
+            popup.focus();
+            popup.print();
+          } catch {
+            /* ignore */
+          }
+        }, 600);
+        showStatus(
+          'success',
+          '📄 Rapor arşive kaydedildi. PDF penceresi açıldı — Yazdır / PDF olarak kaydedin.'
+        );
+      } else {
+        // Popup engellendiyse HTML indir
+        const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `Santiye_Gunluk_Rapor_${selectedDate}.html`;
+        a.click();
+        URL.revokeObjectURL(url);
+        showStatus(
+          'success',
+          '📄 Rapor arşive kaydedildi. Pop-up engelli olduğu için HTML dosyası indirildi (açıp yazdırabilirsiniz).'
+        );
       }
-      showStatus('success', '📄 Günlük rapor kaydedildi. PDF penceresi açıldı.');
       setShowPdfPreview(false);
     } catch (err: any) {
-      showStatus('error', 'Rapor kaydedilirken hata oluştu: ' + err.message);
+      console.error(err);
+      showStatus(
+        'error',
+        `Rapor gönderilemedi: ${err?.message || 'Bağlantı veya yetki hatası'}`
+      );
+    } finally {
+      setSendingPdfRapor(false);
     }
   };
 
@@ -3173,11 +3341,12 @@ _Lütfen bu personelin sigorta giriş işlemlerini başlatınız._`}
               </button>
 
               <button
-                onClick={handleSaveGunlukRapor}
-                className="bg-amber-500 hover:bg-amber-600 active:scale-95 text-slate-950 font-black text-[10px] py-2.5 px-6 rounded-xl transition cursor-pointer flex items-center space-x-1 border-b-4 border-amber-700"
+                onClick={() => void handleSaveGunlukRapor()}
+                disabled={sendingPdfRapor}
+                className="bg-amber-500 hover:bg-amber-600 active:scale-95 text-slate-950 font-black text-[10px] py-2.5 px-6 rounded-xl transition cursor-pointer flex items-center space-x-1 border-b-4 border-amber-700 disabled:opacity-50 disabled:cursor-wait"
               >
-                <Check size={12} />
-                <span>PDF OLARAK GÖNDER</span>
+                {sendingPdfRapor ? <RefreshCw size={12} className="animate-spin" /> : <Check size={12} />}
+                <span>{sendingPdfRapor ? 'GÖNDERİLİYOR…' : 'PDF OLARAK GÖNDER'}</span>
               </button>
             </div>
 

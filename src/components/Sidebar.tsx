@@ -1,6 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import { Building2, Users, CalendarCheck2, CreditCard, ShoppingCart, Truck, KeySquare, FileText, Tent, Mail, ChartBar as BarChart3, BookOpen, Contact as Contact2, Package, LogOut, Moon, Sun, Wallet, Hop as Home, ShieldCheck, PenTool, MessageSquare, Smartphone, HardHat, Banknote, Images, Sparkles, Link2, ChevronDown, ChevronRight, Search, Pin, PinOff, Wrench, Gem, Camera } from 'lucide-react';
-import { canAccessUyelikAdminPanel, getRoleAllowedTabs, isIdariIslerRole, normalizeYetki } from '../lib/yetkiUtils';
+import {
+  canAccessOnayHavuzu,
+  canAccessUyelikAdminPanel,
+  getRoleAllowedTabs,
+  isIdariIslerRole,
+  normalizeYetki,
+} from '../lib/yetkiUtils';
 import { readFavoriteTabs, writeFavoriteTabs } from '../lib/navPreferences';
 
 interface SidebarProps {
@@ -111,6 +117,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const isSecondaryAdmin = emailLower === 'mudur@gmail.com';
   const isPrivilegedAdmin = isFounderAdmin || isSecondaryAdmin;
   const canSeeUyelikAdmin = canAccessUyelikAdminPanel(normalizedYetki, { isPrivilegedAdmin });
+  const canSeeOnayHavuzu = canAccessOnayHavuzu(normalizedYetki, {
+    isYonetici,
+    isPrivilegedAdmin,
+  });
   const isIdariIsler = isIdariIslerRole(normalizedYetki);
 
   const filteredMenuItems = menuItems.map(group => {
@@ -122,8 +132,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
         }
 
         if (kisitliSayfalar && kisitliSayfalar.includes(item.key)) {
-          // İdari İşler: üyelik onay paneli kısıt listesinde olsa bile görünür
-          if (!(item.key === 'admin' && isIdariIsler)) {
+          // İdari İşler: üyelik onay + onay havuzu kısıt listesinde olsa bile görünür
+          if (!(isIdariIsler && (item.key === 'admin' || item.key === 'onay_islemleri'))) {
             return false;
           }
         }
@@ -178,7 +188,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         }
 
         if (item.key === 'onay_islemleri') {
-          return isYonetici;
+          return canSeeOnayHavuzu;
         }
 
         if (item.key === 'operator') {

@@ -1385,24 +1385,70 @@ export const IdariScreen: React.FC<IdariScreenProps> = ({
     [formenGunlukRaporlari, formenTarihFiltre]
   );
   const displayGunRaporArsivi = useMemo(() => {
-    if (sahaGunRaporArsivleri.length > 0) return sahaGunRaporArsivleri;
-    return filteredFormenGunlukRaporlari.map((r) => ({
-      id: `formen_${r.id}`,
-      tarih: normalizeDateKey(r.tarih),
-      olusturmaTarihi: r.guncellenmeTarihi || r.olusturulma || '',
-      olusturan: r.gonderen || r.gonderenFormen || 'FORMEN',
-      faaliyetIds: Array.isArray(r.faaliyetler) ? r.faaliyetler.map((f: any) => String(f?.id || '')) : [],
-      faaliyetAdet: Array.isArray(r.faaliyetler) ? r.faaliyetler.length : 0,
-      formenFaaliyetAdet: Array.isArray(r.faaliyetler) ? r.faaliyetler.length : 0,
-      yoklamaOzet: {
-        gelen: Number(r.toplamEkip || 0),
-        yok: 0,
-        izinli: 0,
-        raporlu: 0,
-      },
-      aciklama: r.genelNotlar || r.ozetMetin || '',
-    })) as SahaGunRaporArsiv[];
-  }, [sahaGunRaporArsivleri, filteredFormenGunlukRaporlari]);
+    const byDate = new Map<string, SahaGunRaporArsiv>();
+
+    // Formen saha faaliyetlerinden gün özetleri (PDF gönderilmemiş eski kayıtlar dahil)
+    const faaliyetByDate = new Map<string, SahaFaaliyeti[]>();
+    for (const sf of filteredFormenFaaliyetleri) {
+      const tarih = normalizeDateKey(sf.tarih);
+      if (!tarih) continue;
+      const list = faaliyetByDate.get(tarih) || [];
+      list.push(sf);
+      faaliyetByDate.set(tarih, list);
+    }
+    for (const [tarih, list] of faaliyetByDate.entries()) {
+      byDate.set(tarih, {
+        id: `formen_faaliyet_gun_${tarih}`,
+        tarih,
+        olusturmaTarihi: '',
+        olusturan: 'FORMEN_MOBIL',
+        faaliyetIds: list.map((f) => f.id),
+        faaliyetAdet: list.length,
+        formenFaaliyetAdet: list.length,
+        yoklamaOzet: { gelen: 0, yok: 0, izinli: 0, raporlu: 0 },
+        aciklama: `${list.length} Formen saha faaliyeti`,
+      } as SahaGunRaporArsiv);
+    }
+
+    // Eski Formen PDF gönderimleri (gunlukSahaRaporlari)
+    for (const r of filteredFormenGunlukRaporlari) {
+      const tarih = normalizeDateKey(r.tarih);
+      if (!tarih) continue;
+      byDate.set(tarih, {
+        id: `formen_${r.id}`,
+        tarih,
+        olusturmaTarihi: r.guncellenmeTarihi || r.olusturulma || '',
+        olusturan: r.gonderen || r.gonderenFormen || 'FORMEN',
+        faaliyetIds: Array.isArray(r.faaliyetler)
+          ? r.faaliyetler.map((f: any) => String(f?.id || '')).filter(Boolean)
+          : [],
+        faaliyetAdet: Array.isArray(r.faaliyetler)
+          ? r.faaliyetler.length
+          : Number(r.faaliyetAdet || 0),
+        formenFaaliyetAdet: Array.isArray(r.faaliyetler)
+          ? r.faaliyetler.length
+          : Number(r.faaliyetAdet || 0),
+        yoklamaOzet: {
+          gelen: Number(r.toplamEkip || 0),
+          yok: 0,
+          izinli: 0,
+          raporlu: 0,
+        },
+        aciklama: r.genelNotlar || r.ozetMetin || '',
+      } as SahaGunRaporArsiv);
+    }
+
+    // İdari / Formen sahaGunRaporArsiv kayıtları (aynı günde öncelikli)
+    for (const r of sahaGunRaporArsivleri) {
+      const tarih = normalizeDateKey(r.tarih);
+      if (!tarih) continue;
+      byDate.set(tarih, r);
+    }
+
+    return Array.from(byDate.values()).sort((a, b) =>
+      String(b.tarih).localeCompare(String(a.tarih), 'tr')
+    );
+  }, [sahaGunRaporArsivleri, filteredFormenGunlukRaporlari, filteredFormenFaaliyetleri]);
   const filteredDisplayGunRaporArsivi = useMemo(
     () =>
       displayGunRaporArsivi.filter((r) =>
