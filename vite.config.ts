@@ -18,6 +18,18 @@ export default defineConfig(() => {
       commonjsOptions: {
         include: [/node_modules/],
       },
+      rollupOptions: {
+        output: {
+          // Büyük vendor kütüphanelerini ayrı paketlere böl: tarayıcı bunları önbelleğe alır,
+          // uygulama kodu güncellense bile tekrar indirilmez.
+          manualChunks(id: string) {
+            if (!id.includes('node_modules')) return undefined;
+            if (id.includes('firebase')) return 'vendor-firebase';
+            if (id.includes('react-dom') || id.includes('/react/') || id.includes('scheduler')) return 'vendor-react';
+            return undefined;
+          },
+        },
+      },
     },
     server: {
       // HMR is disabled in AI Studio via DISABLE_HMR env var.

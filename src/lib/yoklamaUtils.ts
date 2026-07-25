@@ -189,18 +189,16 @@ export function getBoundaryDayInMonth(
   return null;
 }
 
-/** Yoklama kaydı varsa işe giriş/çıkış filtresini uygulama */
+/** Personel bu ayın yoklama listesinde görünmeli mi?
+ *  İşe giriş/çıkış aralığı bu ayı hiç kapsamıyorsa — o ayda kayıtlı yoklama verisi olsa bile —
+ *  satır listeye alınmaz (alakasız personel görünmesin). */
 export function isPersonelVisibleInMonth(
   p: Personel,
   year: number,
   month: number,
   personMap?: PersonelYoklamaMap
 ): boolean {
-  // 1. O ayda herhangi bir kayıtlı yoklama verisi varsa HER ZAMAN göster!
-  if (personMap && personHasYoklamaInMonth(personMap, year, month)) return true;
-
-  const durumNorm = normalizeTurkishName(String(p.durum || ''));
-  const isAktif = p.durum === true || durumNorm === 'TRUE' || durumNorm === 'AKTIF';
+  // 1. İşe giriş ayı bu aydan SONRA ise gizle (henüz işe girmemiş).
   const hireTarih = p.iseGirisTarihi || (p as any).girisTarihi || (p as any).kayitTarihi;
   const hire = parseFlexibleDateParts(hireTarih);
   if (hire) {
@@ -208,15 +206,24 @@ export function isPersonelVisibleInMonth(
     const hireM = hire.month;
     if (hireY > year || (hireY === year && hireM > month)) return false;
   }
+
+  // 2. İşten çıkış ayı bu aydan ÖNCE ise gizle (çoktan ayrılmış).
   const exitTarih = p.istenCikisTarihi || (p as any).cikisTarihi;
   const exit = parseFlexibleDateParts(exitTarih);
   if (exit) {
     const exitY = exit.year;
     const exitM = exit.month;
     if (exitY < year || (exitY === year && exitM < month)) return false;
-  } else if (!isAktif && !exitTarih) {
-    return false;
   }
+
+  // 3. İstihdam aralığı bu ayı kapsıyor; ayda kayıtlı yoklama verisi varsa her durumda göster.
+  if (personMap && personHasYoklamaInMonth(personMap, year, month)) return true;
+
+  // 4. Pasif ve çıkış tarihi de yoksa (eksik kayıt) gizle.
+  const durumNorm = normalizeTurkishName(String(p.durum || ''));
+  const isAktif = p.durum === true || durumNorm === 'TRUE' || durumNorm === 'AKTIF';
+  if (!exit && !exitTarih && !isAktif) return false;
+
   return true;
 }
 

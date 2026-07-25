@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, lazy, Suspense } from 'react';
 import { ToastProvider } from './components/ToastProvider';
 import { SoundProvider } from './components/SoundProvider';
 import { ContextMenuProvider } from './components/ContextMenuProvider';
@@ -13,38 +13,38 @@ import { CircleAlert as AlertCircle, RefreshCw } from 'lucide-react';
 import { pushRecentTab } from './lib/navPreferences';
 import { countChromePendingOnay } from './lib/onayInboxUtils';
 
-// Core Screens
-import { AdminPanelScreen, Kullanici } from './components/AdminPanelScreen';
-import { DashboardScreen } from './components/DashboardScreen';
-import { PersonelScreen } from './components/PersonelScreen';
-import { YoklamaScreen } from './components/YoklamaScreen';
-import { FaaliyetPersonelScreen } from './components/FaaliyetPersonelScreen';
-import { MaasMerkeziScreen } from './components/MaasMerkeziScreen';
-import { PersonelIzinScreen } from './components/PersonelIzinScreen';
-import { SatinAlmaScreen } from './components/SatinAlmaScreen';
-import { IrsaliyeGirisScreen } from './components/IrsaliyeGirisScreen';
-import { FaturaGirisScreen } from './components/FaturaGirisScreen';
-import { TaseronKesintiScreen } from './components/TaseronKesintiScreen';
-import { PlanliOrganizasyonScreen } from './components/PlanliOrganizasyonScreen';
-import { PersonelKartlariScreen } from './components/PersonelKartlariScreen';
-import { KasaScreen } from './components/KasaScreen';
-import { IdariScreen } from './components/IdariScreen';
-import { CariStokScreen } from './components/CariStokScreen';
-import { OnayIslemleriScreen } from './components/OnayIslemleriScreen';
-import { FormenScreen } from './components/FormenScreen';
 import { queueArrayStateSync } from './lib/collectionSyncQueue';
-import { GuvenlikScreen } from './components/GuvenlikScreen';
-import { KampciScreen } from './components/KampciScreen';
-import { TesisatciMobilScreen } from './components/TesisatciMobilScreen';
-import { MermerciMobilScreen } from './components/MermerciMobilScreen';
-import { LojistikScreen } from './components/LojistikScreen';
-import { ProfilScreen } from './components/ProfilScreen';
-import { DepocuScreen } from './components/DepocuScreen';
-import { ImalatTerminaliScreen } from './components/ImalatTerminaliScreen';
-import { MobileManagerScreen } from './components/MobileManagerScreen';
-import { KibarHakedisScreen } from './components/KibarHakedisScreen';
-import { SahaKolajScreen } from './components/SahaKolajScreen';
-import { ProgramliFaaliyetScreen } from './components/ProgramliFaaliyetScreen';
+
+// Core Screens — kod bölme (code splitting): her ekran ilk açıldığında ayrı paket olarak yüklenir,
+// böylece ana paket küçülür ve uygulama ilk açılışta çok daha hızlı gelir.
+import type { Kullanici } from './components/AdminPanelScreen';
+const AdminPanelScreen = lazy(() => import('./components/AdminPanelScreen').then(m => ({ default: m.AdminPanelScreen })));
+const DashboardScreen = lazy(() => import('./components/DashboardScreen').then(m => ({ default: m.DashboardScreen })));
+const PersonelScreen = lazy(() => import('./components/PersonelScreen').then(m => ({ default: m.PersonelScreen })));
+const YoklamaScreen = lazy(() => import('./components/YoklamaScreen').then(m => ({ default: m.YoklamaScreen })));
+const FaaliyetPersonelScreen = lazy(() => import('./components/FaaliyetPersonelScreen').then(m => ({ default: m.FaaliyetPersonelScreen })));
+const MaasMerkeziScreen = lazy(() => import('./components/MaasMerkeziScreen').then(m => ({ default: m.MaasMerkeziScreen })));
+const PersonelIzinScreen = lazy(() => import('./components/PersonelIzinScreen').then(m => ({ default: m.PersonelIzinScreen })));
+const SatinAlmaScreen = lazy(() => import('./components/SatinAlmaScreen').then(m => ({ default: m.SatinAlmaScreen })));
+const IrsaliyeGirisScreen = lazy(() => import('./components/IrsaliyeGirisScreen').then(m => ({ default: m.IrsaliyeGirisScreen })));
+const FaturaGirisScreen = lazy(() => import('./components/FaturaGirisScreen').then(m => ({ default: m.FaturaGirisScreen })));
+const TaseronKesintiScreen = lazy(() => import('./components/TaseronKesintiScreen').then(m => ({ default: m.TaseronKesintiScreen })));
+const PersonelKartlariScreen = lazy(() => import('./components/PersonelKartlariScreen').then(m => ({ default: m.PersonelKartlariScreen })));
+const KasaScreen = lazy(() => import('./components/KasaScreen').then(m => ({ default: m.KasaScreen })));
+const IdariScreen = lazy(() => import('./components/IdariScreen').then(m => ({ default: m.IdariScreen })));
+const CariStokScreen = lazy(() => import('./components/CariStokScreen').then(m => ({ default: m.CariStokScreen })));
+const OnayIslemleriScreen = lazy(() => import('./components/OnayIslemleriScreen').then(m => ({ default: m.OnayIslemleriScreen })));
+const FormenScreen = lazy(() => import('./components/FormenScreen').then(m => ({ default: m.FormenScreen })));
+const GuvenlikScreen = lazy(() => import('./components/GuvenlikScreen').then(m => ({ default: m.GuvenlikScreen })));
+const KampciScreen = lazy(() => import('./components/KampciScreen').then(m => ({ default: m.KampciScreen })));
+const TesisatciMobilScreen = lazy(() => import('./components/TesisatciMobilScreen').then(m => ({ default: m.TesisatciMobilScreen })));
+const MermerciMobilScreen = lazy(() => import('./components/MermerciMobilScreen').then(m => ({ default: m.MermerciMobilScreen })));
+const LojistikScreen = lazy(() => import('./components/LojistikScreen').then(m => ({ default: m.LojistikScreen })));
+const ProfilScreen = lazy(() => import('./components/ProfilScreen').then(m => ({ default: m.ProfilScreen })));
+const DepocuScreen = lazy(() => import('./components/DepocuScreen').then(m => ({ default: m.DepocuScreen })));
+const ImalatTerminaliScreen = lazy(() => import('./components/ImalatTerminaliScreen').then(m => ({ default: m.ImalatTerminaliScreen })));
+const MobileManagerScreen = lazy(() => import('./components/MobileManagerScreen').then(m => ({ default: m.MobileManagerScreen })));
+const KibarHakedisScreen = lazy(() => import('./components/KibarHakedisScreen').then(m => ({ default: m.KibarHakedisScreen })));
 
 import { KibritciLogo } from './components/KibritciLogo';
 
@@ -117,10 +117,10 @@ import { collection, onSnapshot, doc, getDoc, query, orderBy, limit } from 'fire
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { syncAuthClaimsFromServer } from './lib/authClaimsClient';
 import { LoginScreen } from './components/LoginScreen';
-import { YetkiVermeScreen } from './components/YetkiVermeScreen';
-import { OperatorScreen } from './components/OperatorScreen';
-import { PublicGirisKayitScreen } from './components/PublicGirisKayitScreen';
-import { PublicSatinAlmaShareScreen } from './components/PublicSatinAlmaShareScreen';
+const YetkiVermeScreen = lazy(() => import('./components/YetkiVermeScreen').then(m => ({ default: m.YetkiVermeScreen })));
+const OperatorScreen = lazy(() => import('./components/OperatorScreen').then(m => ({ default: m.OperatorScreen })));
+const PublicGirisKayitScreen = lazy(() => import('./components/PublicGirisKayitScreen').then(m => ({ default: m.PublicGirisKayitScreen })));
+const PublicSatinAlmaShareScreen = lazy(() => import('./components/PublicSatinAlmaShareScreen').then(m => ({ default: m.PublicSatinAlmaShareScreen })));
 import { fetchSatinAlmaPublicShare } from './lib/satinAlmaPublicShare';
 import { installReportEmailGlobalBridge } from './lib/reportEmail';
 import { CANONICAL_ANA_FIRMA_ADI, isKibritciCompany } from './lib/yoklamaUtils';
@@ -128,6 +128,15 @@ import {
   buildSaIrsaliyeFormPrefill,
   type SaIrsaliyeFormPrefill,
 } from './lib/evrakDonusum';
+import { repairCorruptedIseGirisTarihi } from './lib/repairIseGirisTarihi';
+
+/** Lazy ekran paketi indirilirken içerik alanında gösterilen kısa yükleme animasyonu */
+const ScreenLoader: React.FC = () => (
+  <div className="flex flex-col items-center justify-center h-full min-h-[280px] text-slate-500 select-none">
+    <div className="w-10 h-10 border-4 border-amber-500 border-t-transparent rounded-full animate-spin mb-3"></div>
+    <p className="text-[10px] font-bold tracking-widest uppercase">Ekran yükleniyor...</p>
+  </div>
+);
 
 installReportEmailGlobalBridge();
 
@@ -1564,15 +1573,38 @@ export default function App() {
     });
   };
 
-  // One-time patch for Murat Çörekçi's date bug
+  // Self-healing: Murat Çörekçi + toplu işe giriş bozulması (2024/2026-07-14 vb.)
+  const hireRepairNotifiedRef = useRef(false);
   useEffect(() => {
-    if (personeller.length > 0) {
-      const wrongMurat = personeller.find(p => p.ad === 'MURAT' && p.soyad === 'ÇÖREKÇİ' && p.iseGirisTarihi === '2026-08-06');
-      if (wrongMurat) {
-        setPersonellerWithSync(prev => prev.map(p => p.id === wrongMurat.id ? { ...p, iseGirisTarihi: '2026-06-08' } : p));
+    if (personeller.length === 0) return;
+    if (Object.keys(yoklamalar || {}).length === 0) return;
+
+    const muratNeeds = personeller.some(
+      (p) => p.ad === 'MURAT' && p.soyad === 'ÇÖREKÇİ' && p.iseGirisTarihi === '2026-08-06'
+    );
+    const { changes } = repairCorruptedIseGirisTarihi(personeller, yoklamalar);
+    if (!muratNeeds && changes.length === 0) return;
+
+    setPersonellerWithSync((prev) => {
+      const working = prev.map((p) =>
+        p.ad === 'MURAT' && p.soyad === 'ÇÖREKÇİ' && p.iseGirisTarihi === '2026-08-06'
+          ? { ...p, iseGirisTarihi: '2026-06-08' }
+          : p
+      );
+      const repaired = repairCorruptedIseGirisTarihi(working, yoklamalar);
+      if (repaired.changes.length > 0) {
+        console.info(
+          `[iseGiris-onarim] ${repaired.changes.length} personel düzeltildi`,
+          repaired.changes.slice(0, 40)
+        );
       }
+      return repaired.next;
+    });
+
+    if (changes.length > 0 && !hireRepairNotifiedRef.current) {
+      hireRepairNotifiedRef.current = true;
     }
-  }, [personeller]);
+  }, [personeller, yoklamalar]);
 
   // Ana firma adı birleştir: "Kibritçi İnşaat" / "KİBRİTÇİ İNŞAAT" → tek kanonik ad
   useEffect(() => {
@@ -2696,13 +2728,15 @@ export default function App() {
             >
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
             </button>
-            <ProfilScreen 
-              currentUser={currentUser}
-              kullanicilar={kullanicilar}
-              setKullanicilar={setKullanicilarWithSync}
-              onSignOut={handleSignOut}
-              isStandalone={false}
-            />
+            <Suspense fallback={<ScreenLoader />}>
+              <ProfilScreen 
+                currentUser={currentUser}
+                kullanicilar={kullanicilar}
+                setKullanicilar={setKullanicilarWithSync}
+                onSignOut={handleSignOut}
+                isStandalone={false}
+              />
+            </Suspense>
           </div>
         </div>
       )}
@@ -2801,6 +2835,7 @@ export default function App() {
           })()}
 
           {isTabRestricted ? renderAccessDenied() : (
+            <Suspense fallback={<ScreenLoader />}>
             <>
               {activeTab === "ana_sayfa" && (
                 <DashboardScreen 
@@ -3251,6 +3286,7 @@ export default function App() {
               )}
 
             </>
+            </Suspense>
           )}
 
         </main>

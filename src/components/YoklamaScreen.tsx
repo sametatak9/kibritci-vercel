@@ -1729,6 +1729,10 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
 
                       const hireBound = getBoundaryDayInMonth(p.iseGirisTarihi, selectedYear, selectedMonth);
                       const exitBound = getBoundaryDayInMonth(p.istenCikisTarihi, selectedYear, selectedMonth);
+                      const hasRecorded =
+                        !!dayData.durum && dayData.durum !== 'Girilmedi';
+                      // Kayıtlı yoklama silinmedi — tarih aralığı dışı olsa bile mevcut kaydı göster
+                      const showAsRecorded = isActiveDay || hasRecorded;
                       const closedTitle = !isActiveDay
                         ? exitBound != null && day > exitBound
                           ? `İşten çıkış sonrası — yoklamaya kapalı (${p.istenCikisTarihi})`
@@ -1758,10 +1762,12 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
                             className={`w-7 h-7 rounded-md border font-bold text-[9px] flex items-center justify-center transition shadow-sm ${
                               isActiveDay
                                 ? `${isEditMode ? 'hover:scale-105 active:scale-95 cursor-pointer' : 'cursor-default opacity-90 hover:opacity-100'} ${getStatusColor(dayData.durum)} ${boundaryRing}`
-                                : 'bg-violet-100 border-violet-300 text-violet-700 opacity-95 cursor-not-allowed'
+                                : hasRecorded
+                                  ? `${getStatusColor(dayData.durum)} opacity-70 cursor-not-allowed ring-1 ring-violet-300`
+                                  : 'bg-violet-100 border-violet-300 text-violet-700 opacity-95 cursor-not-allowed'
                             }`}
                           >
-                            {isActiveDay ? getStatusAbbreviation(dayData.durum) : '■'}
+                            {showAsRecorded ? getStatusAbbreviation(dayData.durum) : '■'}
                           </button>
                           
                           {isActiveDay && dayData.gonderen && (
@@ -1782,7 +1788,7 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
                               pattern="^\\d+([.,]\\d{0,2})?$"
                               title={`0 ile ${MAX_MESAI_SAATI} saat arası girin (0.5 adım).`}
                               maxLength={5}
-                              value={isActiveDay ? (dayData.mesaiSaati || "") : ""}
+                              value={showAsRecorded ? (dayData.mesaiSaati || "") : ""}
                               placeholder="-"
                               onChange={(e) => isActiveDay && isEditMode && handleMesaiChange(p.id, day, parseMesaiInput(e.target.value))}
                               className={`w-7 text-[8px] font-bold font-mono text-center rounded border py-0.5 focus:outline-none ${
@@ -1792,7 +1798,9 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
                                     ? 'bg-emerald-50 border-emerald-300 text-emerald-800'
                                     : isActiveDay
                                       ? `${isHoliday ? (isOfficial ? 'bg-purple-50 border-purple-200 text-purple-700' : 'bg-orange-50 border-orange-200 text-orange-700') : 'bg-slate-50 hover:bg-slate-100 border-slate-200 text-slate-600'} `
-                                      : 'bg-slate-900 border-slate-800 text-slate-500'
+                                      : hasRecorded
+                                        ? 'bg-violet-50 border-violet-200 text-violet-700'
+                                        : 'bg-slate-900 border-slate-800 text-slate-500'
                               }`}
                             />
                           </div>

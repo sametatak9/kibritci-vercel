@@ -1,4 +1,4 @@
-import { Component, StrictMode, type ReactNode } from 'react';
+import { Component, StrictMode, Suspense, type ReactNode } from 'react';
 import {createRoot} from 'react-dom/client';
 import App from './App.tsx';
 import './index.css';
@@ -103,6 +103,14 @@ class RootErrorBoundary extends Component<{ children: ReactNode }, RootErrorBoun
   }
 }
 
+/** Tam ekran lazy paket yükleme göstergesi (tekil mobil ekranlar / public paylaşım görünümleri için) */
+const FullScreenLoader = () => (
+  <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center text-slate-100 p-6 select-none">
+    <div className="w-12 h-12 border-4 border-amber-500 border-t-transparent rounded-full animate-spin"></div>
+    <p className="mt-4 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Ekran yükleniyor...</p>
+  </div>
+);
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <RootErrorBoundary>
@@ -113,7 +121,9 @@ createRoot(document.getElementById('root')!).render(
       <EasterEggProvider />
       <ToastProvider />
       <NetworkProvider />
-      <App />
+      <Suspense fallback={<FullScreenLoader />}>
+        <App />
+      </Suspense>
     </RootErrorBoundary>
   </StrictMode>,
 );
