@@ -220,46 +220,41 @@ export function isPersonelVisibleInMonth(
   return true;
 }
 
-/** Kayıtlı yoklama varsa veya ay içinde aktifse hücreyi aktif kıl */
+/** İşe giriş–çıkış aralığında mı? (sınır günleri dahil — o günlerde yoklama alınabilir) */
+export function isDateInEmploymentRange(
+  p: Personel,
+  year: number,
+  month: number,
+  day: number
+): boolean {
+  const currentDateVal = year * 10000 + month * 100 + day;
+
+  const hireTarih = p.iseGirisTarihi || (p as any).girisTarihi || (p as any).kayitTarihi;
+  const hire = parseFlexibleDateParts(hireTarih);
+  if (hire) {
+    const hireDateVal = hire.year * 10000 + hire.month * 100 + hire.day;
+    if (currentDateVal < hireDateVal) return false;
+  }
+
+  const exitTarih = p.istenCikisTarihi || (p as any).cikisTarihi;
+  const exit = parseFlexibleDateParts(exitTarih);
+  if (exit) {
+    const exitDateVal = exit.year * 10000 + exit.month * 100 + exit.day;
+    if (currentDateVal > exitDateVal) return false;
+  }
+
+  return true;
+}
+
+/** Kayıtlı yoklama, işe giriş/çıkış aralığı dışını açmaz — aralık dışı her zaman kapalı */
 export function isDayActiveForPersonel(
   p: Personel,
   year: number,
   month: number,
   day: number,
-  personMap?: PersonelYoklamaMap
+  _personMap?: PersonelYoklamaMap
 ): boolean {
-  // 1. Kayıtlı yoklama verisi varsa (Geldi, Yok, İzinli, Raporlu, Pazar, Tatil),
-  // işe giriş/çıkış tarihinden bağımsız olarak HER ZAMAN göster ve aktif kıl!
-  const dayData = personMap ? getYoklamaDay(personMap, year, month, day) : undefined;
-  if (dayData?.durum && dayData.durum !== 'Girilmedi') return true;
-
-  // 2. İşe giriş tarihi kontrolü:
-  // Eğer işe giriş tarihi bulunulan aydan SONRAKİ bir aydaysa (ör. Gelecek ay işe girecekse) kapat.
-  // Ancak bulunulan ay veya önceki aylarda işe girmişse ayın TÜM günleri (1-31) açık ve girilebilir olmalıdır.
-  const hireTarih = p.iseGirisTarihi || (p as any).girisTarihi;
-  const hire = parseFlexibleDateParts(hireTarih);
-  if (hire) {
-    const hireY = hire.year;
-    const hireM = hire.month;
-    if (hireY > year || (hireY === year && hireM > month)) {
-      return false;
-    }
-  }
-
-  // 3. İşten çıkış tarihi kontrolü:
-  // Eğer işten çıkış verilmişse ve bulunulan gün çıkış tarihinden SONRAKİ bir günse kapat.
-  const exitTarih = p.istenCikisTarihi || (p as any).cikisTarihi;
-  const exit = parseFlexibleDateParts(exitTarih);
-  if (exit) {
-    const exitY = exit.year;
-    const exitM = exit.month;
-    const exitD = exit.day;
-    const currentDateVal = year * 10000 + month * 100 + day;
-    const exitDateVal = exitY * 10000 + exitM * 100 + exitD;
-    if (currentDateVal > exitDateVal) return false;
-  }
-
-  return true;
+  return isDateInEmploymentRange(p, year, month, day);
 }
 
 export function iterateMonthYoklama(

@@ -1619,8 +1619,12 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
               <span className="text-emerald-800 font-semibold">İşe giriş günü</span>
             </span>
             <span className="flex items-center space-x-1">
-              <span className="w-4 h-4 bg-rose-50 text-rose-800 rounded font-bold text-center inline-block ring-2 ring-rose-500">Ç</span>
+              <span className="w-4 h-4 bg-rose-50 text-rose-800 rounded font-bold text-center inline-block ring-2 ring-rose-500">G</span>
               <span className="text-rose-800 font-semibold">İşten çıkış günü</span>
+            </span>
+            <span className="flex items-center space-x-1">
+              <span className="w-4 h-4 bg-violet-100 border border-violet-300 text-violet-700 rounded font-bold text-center inline-block text-[8px]">■</span>
+              <span className="text-violet-800 font-semibold">Yoklamaya kapalı (giriş öncesi / çıkış sonrası)</span>
             </span>
           </div>
 
@@ -1711,8 +1715,9 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
                           tdClass += " bg-orange-100/60 border-x border-orange-200";
                         }
                       }
-                      if (isHireDay) tdClass += " bg-emerald-50/80";
-                      if (isExitDay) tdClass += " bg-rose-50/80";
+                      if (isHireDay) tdClass += " bg-emerald-100/90";
+                      if (isExitDay) tdClass += " bg-rose-100/90";
+                      if (!isActiveDay) tdClass += " bg-violet-50/40";
 
                       const boundaryRing = isExitDay
                         ? 'ring-2 ring-rose-500 ring-offset-1'
@@ -1722,6 +1727,20 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
                             ? (isOfficial ? 'ring-1 ring-purple-300' : 'ring-1 ring-orange-300')
                             : '';
 
+                      const hireBound = getBoundaryDayInMonth(p.iseGirisTarihi, selectedYear, selectedMonth);
+                      const exitBound = getBoundaryDayInMonth(p.istenCikisTarihi, selectedYear, selectedMonth);
+                      const closedTitle = !isActiveDay
+                        ? exitBound != null && day > exitBound
+                          ? `İşten çıkış sonrası — yoklamaya kapalı (${p.istenCikisTarihi})`
+                          : hireBound != null && day < hireBound
+                            ? `İşe giriş öncesi — yoklamaya kapalı (${p.iseGirisTarihi})`
+                            : p.istenCikisTarihi
+                              ? `İşten çıkış sonrası — yoklamaya kapalı (${p.istenCikisTarihi})`
+                              : p.iseGirisTarihi
+                                ? `İşe giriş öncesi — yoklamaya kapalı (${p.iseGirisTarihi})`
+                                : 'Yoklamaya kapalı'
+                        : undefined;
+
                       return (
                         <td key={day} className={`${tdClass} relative`}>
                           <button
@@ -1729,16 +1748,17 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
                             disabled={!isActiveDay || !isEditMode}
                             onClick={() => isActiveDay && isEditMode && handleCellClick(p.id, day)}
                             title={
-                              isExitDay
+                              closedTitle ||
+                              (isExitDay
                                 ? `İşten çıkış: ${p.istenCikisTarihi}`
                                 : isHireDay
                                   ? `İşe giriş: ${p.iseGirisTarihi}`
-                                  : undefined
+                                  : undefined)
                             }
                             className={`w-7 h-7 rounded-md border font-bold text-[9px] flex items-center justify-center transition shadow-sm ${
                               isActiveDay
                                 ? `${isEditMode ? 'hover:scale-105 active:scale-95 cursor-pointer' : 'cursor-default opacity-90 hover:opacity-100'} ${getStatusColor(dayData.durum)} ${boundaryRing}`
-                                : `bg-violet-100 border-violet-300 text-violet-700 opacity-95 cursor-not-allowed ${boundaryRing}`
+                                : 'bg-violet-100 border-violet-300 text-violet-700 opacity-95 cursor-not-allowed'
                             }`}
                           >
                             {isActiveDay ? getStatusAbbreviation(dayData.durum) : '■'}
