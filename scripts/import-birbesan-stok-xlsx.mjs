@@ -198,6 +198,11 @@ const mergeLinesByStokName = (lines) => {
   return [...bucket.values()];
 };
 
+const findExistingStok = (urunAdi, stoklar) => {
+  const norm = canonicalStokKey(urunAdi);
+  return stoklar.find((s) => canonicalStokKey(s.stokAdi) === norm) || null;
+};
+
 const findExistingTedarikciStok = (urunAdi, stoklar, cariId) => {
   const pool = stoklar.filter(
     (s) =>
