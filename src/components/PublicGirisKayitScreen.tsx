@@ -19,6 +19,10 @@ export interface PersonelGirisTalebi {
   ad?: string;
   soyad?: string;
   gorev?: string;
+  tcNo?: string;
+  telefonNo?: string;
+  firmaTipi?: 'ANA_FIRMA' | 'TASERON';
+  firmaAdi?: string;
   kimlikFotoUrl?: string;
   kimlikArkaFotoUrl?: string;
   durum?: string;
@@ -96,6 +100,10 @@ const PublicGirisKayitForm: React.FC<PublicGirisKayitScreenProps> = ({
     ad: talep.ad || '',
     soyad: talep.soyad || '',
     gorev: talep.gorev || '',
+    tcNo: talep.tcNo || '',
+    telefonNo: talep.telefonNo || '',
+    firmaTipi: talep.firmaTipi || 'ANA_FIRMA',
+    firmaAdi: talep.firmaAdi || EMPTY_FORM.firmaAdi,
     fotografUrl: talep.kimlikFotoUrl || '',
   });
   const [gorevListesi, setGorevListesi] = useState<string[]>([]);

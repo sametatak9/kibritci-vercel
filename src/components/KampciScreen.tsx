@@ -15,7 +15,15 @@ import { KampGunlukYoklamaTab } from './KampGunlukYoklamaTab';
 import { KampVidanjorTab } from './KampVidanjorTab';
 import { collection, onSnapshot, doc, updateDoc, setDoc, query, orderBy } from 'firebase/firestore';
 import { applySahaMesaiToYoklama, normalizeMesaiHours } from '../lib/sahaFaaliyetUtils';
-import { getYoklamaDay, isKampciTesisatciMermerci, isTaseronPersonel } from '../lib/yoklamaUtils';
+import {
+  CANONICAL_ANA_FIRMA_ADI,
+  canonicalizeAnaFirmaAdi,
+  getYoklamaDay,
+  isKampciTesisatciMermerci,
+  isTaseronPersonel,
+} from '../lib/yoklamaUtils';
+import { firmaEslesir } from '../lib/taseronUtils';
+import { validateTC } from '../lib/personelOdemeUtils';
 import { vibrateVidanjorAlert } from '../lib/vidanjorUtils';
 interface KampciScreenProps {
   kampOdalari: KampOdasi[];
@@ -223,11 +231,20 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
   const [selectedPersonelId, setSelectedPersonelId] = useState('');
   const [manualPersonelIsim, setManualPersonelIsim] = useState('');
   const [searchPersonelQuery, setSearchPersonelQuery] = useState('');
+  const [placementTcNo, setPlacementTcNo] = useState('');
+  const [placementTelefonNo, setPlacementTelefonNo] = useState('');
   const [firmaType, setFirmaType] = useState<'DB' | 'MANUAL'>('DB');
   const [selectedFirma, setSelectedFirma] = useState('');
   const [manualFirma, setManualFirma] = useState('');
   const [loadingPlacement, setLoadingPlacement] = useState(false);
   const [placementModalRoom, setPlacementModalRoom] = useState<KampOdasi | null>(null);
+
+  const digitsOnly = (raw: string) => String(raw || '').replace(/\D/g, '');
+  const phoneMatchKey = (raw: string) => {
+    const d = digitsOnly(raw);
+    if (d.length >= 10) return d.slice(-10);
+    return d;
+  };
 
   const normalizeNameKey = (raw: string) =>
     String(raw || '')
@@ -283,39 +300,84 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
     );
   };
 
-  const createTaseronPersonel = async (rawName: string, firmaAdi: string) => {
-    const existing = findExistingTaseronPersonel(rawName, firmaAdi);
-    if (existing) return existing;
+  const findPersonelByTc = (tcRaw: string) => {
+    const tc = digitsOnly(tcRaw);
+    if (!validateTC(tc)) return undefined;
+    return personeller.find((p) => digitsOnly(p.tcNo || '') === tc);
+  };
+
+  const findPersonelByTel = (telRaw: string) => {
+    const key = phoneMatchKey(telRaw);
+    if (key.length < 10) return undefined;
+    return personeller.find((p) => phoneMatchKey(p.telefonNo || '') === key);
+  };
+
+  const createKampPersonel = async (
+    rawName: string,
+    firmaAdi: string,
+    firmaTipi: 'ANA_FIRMA' | 'TASERON',
+    tcNo: string,
+    telefonNo: string
+  ) => {
+    const tc = digitsOnly(tcNo);
+    const byTc = findPersonelByTc(tc);
+    if (byTc) return byTc;
+    const byTel = findPersonelByTel(telefonNo);
+    if (byTel) return byTel;
+
+    if (firmaTipi === 'TASERON') {
+      const existing = findExistingTaseronPersonel(rawName, firmaAdi);
+      if (existing) {
+        const needsPatch =
+          (tc && digitsOnly(existing.tcNo || '') !== tc) ||
+          (telefonNo && phoneMatchKey(existing.telefonNo || '') !== phoneMatchKey(telefonNo));
+        if (needsPatch) {
+          const patched: Personel = {
+            ...existing,
+            tcNo: tc || existing.tcNo,
+            telefonNo: telefonNo.trim() || existing.telefonNo,
+            firmaTipi: 'TASERON',
+            firmaAdi: String(firmaAdi || existing.firmaAdi || '').trim() || existing.firmaAdi,
+          };
+          await saveDocument('personeller', patched);
+          return patched;
+        }
+        return existing;
+      }
+    }
 
     const cleaned = sanitizeManualName(rawName);
     const parts = cleaned.split(' ').filter(Boolean);
     const ad = (parts[0] || 'ADI').toLocaleUpperCase('tr-TR');
     const soyad = (parts.slice(1).join(' ') || 'BİLİNMİYOR').toLocaleUpperCase('tr-TR');
-    const normalizedFirma = String(firmaAdi || '').trim() || 'Taşeron';
+    const normalizedFirma =
+      firmaTipi === 'ANA_FIRMA'
+        ? CANONICAL_ANA_FIRMA_ADI
+        : String(firmaAdi || '').trim() || 'Taşeron';
     const personel: Personel = {
-      id: `prs_taseron_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
-      tcNo: '',
+      id: `prs_kamp_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      tcNo: tc,
       ad,
       soyad,
       babaAdi: '',
       dogumTarihi: '1990-01-01',
-      telefonNo: '',
+      telefonNo: telefonNo.trim() || '',
       eposta: '',
       adres: 'Kamp Yerleşimi',
       il: '',
       ilce: '',
-      departman: 'TAŞERON',
-      gorev: 'TAŞERON PERSONEL',
+      departman: firmaTipi === 'TASERON' ? 'TAŞERON' : 'SAHA',
+      gorev: firmaTipi === 'TASERON' ? 'TAŞERON PERSONEL' : 'KAMP PERSONEL',
       iseGirisTarihi: new Date().toISOString().slice(0, 10),
       cinsiyet: 'Belirtilmedi',
       maas: 0,
       ucretTipi: 'Günlük',
-      sgkDurumu: 'Sigortasız',
+      sgkDurumu: firmaTipi === 'TASERON' ? 'Sigortasız' : "SGK'lı",
       bankaAdi: '',
       subeAdi: '',
       ibanNo: '',
       durum: true,
-      firmaTipi: 'TASERON',
+      firmaTipi,
       firmaAdi: normalizedFirma,
     };
     await saveDocument('personeller', personel);
@@ -400,6 +462,12 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
   const [yeniAd, setYeniAd] = useState('');
   const [yeniSoyad, setYeniSoyad] = useState('');
   const [yeniGorev, setYeniGorev] = useState('');
+  const [yeniTcNo, setYeniTcNo] = useState('');
+  const [yeniTelefonNo, setYeniTelefonNo] = useState('');
+  const [girisFirmaTipi, setGirisFirmaTipi] = useState<'ANA_FIRMA' | 'TASERON'>('ANA_FIRMA');
+  const [girisFirmaType, setGirisFirmaType] = useState<'DB' | 'MANUAL'>('DB');
+  const [girisSelectedFirma, setGirisSelectedFirma] = useState('');
+  const [girisManualFirma, setGirisManualFirma] = useState('');
   const [yeniKimlikFoto, setYeniKimlikFoto] = useState<string | null>(null);
   const [sonGirisTalebi, setSonGirisTalebi] = useState<{ id: string; ad: string; soyad: string; gorev: string } | null>(null);
   const [girisTalepleriList, setGirisTalepleriList] = useState<any[]>([]);
@@ -600,6 +668,8 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
     setSelectedPersonelId('');
     setManualPersonelIsim('');
     setSearchPersonelQuery('');
+    setPlacementTcNo('');
+    setPlacementTelefonNo('');
     setSelectedFirma('');
     setManualFirma('');
     setPlacementType('DB');
@@ -617,7 +687,7 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
   };
 
   const applyPersonelFirmaMatch = (person: Personel) => {
-    if (person.firmaTipi === 'TASERON') {
+    if (person.firmaTipi === 'TASERON' || isTaseronPersonel(person)) {
       setPlacementFirmaTipi('TASERON');
       const firmaAdi = String(person.firmaAdi || '').trim();
       if (!firmaAdi) return;
@@ -639,6 +709,45 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
     setFirmaType('DB');
     setSelectedFirma('');
     setManualFirma('');
+  };
+
+  const applyPersonelFromLookup = (person: Personel) => {
+    setPlacementType('DB');
+    setSelectedPersonelId(person.id);
+    setManualPersonelIsim(`${person.ad} ${person.soyad}`);
+    setPlacementTcNo(digitsOnly(person.tcNo || ''));
+    setPlacementTelefonNo(String(person.telefonNo || '').trim());
+    applyPersonelFirmaMatch(person);
+  };
+
+  const runPlacementTcSorgu = () => {
+    const tc = digitsOnly(placementTcNo);
+    if (!validateTC(tc)) {
+      showStatus('error', 'TC SORGU için 11 haneli geçerli TC girin.');
+      return;
+    }
+    const found = findPersonelByTc(tc);
+    if (!found) {
+      showStatus('info', 'Bu TC ile kayıtlı personel bulunamadı — yeni kayıt için ad/soyad ve firmayı girin.');
+      return;
+    }
+    applyPersonelFromLookup(found);
+    showStatus('success', `${found.ad} ${found.soyad} bulundu (${found.firmaAdi || CANONICAL_ANA_FIRMA_ADI}).`);
+  };
+
+  const runPlacementTelSorgu = () => {
+    const key = phoneMatchKey(placementTelefonNo);
+    if (key.length < 10) {
+      showStatus('error', 'TEL NO SORGU için en az 10 haneli telefon girin.');
+      return;
+    }
+    const found = findPersonelByTel(placementTelefonNo);
+    if (!found) {
+      showStatus('info', 'Bu telefon ile kayıtlı personel bulunamadı — yeni kayıt için ad/soyad ve firmayı girin.');
+      return;
+    }
+    applyPersonelFromLookup(found);
+    showStatus('success', `${found.ad} ${found.soyad} bulundu (${found.firmaAdi || CANONICAL_ANA_FIRMA_ADI}).`);
   };
 
   const openPlacementModalForRoom = (room: KampOdasi) => {
@@ -700,10 +809,10 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
     }
 
     let resolvedFirma = '';
-    if (matchedPersonel && placementFirmaTipi === 'ANA_FIRMA') {
-      resolvedFirma = matchedPersonel.firmaAdi || 'Kibritçi İnşaat';
-    } else if (placementFirmaTipi === 'ANA_FIRMA') {
-      resolvedFirma = 'Ana Firma';
+    if (placementFirmaTipi === 'ANA_FIRMA') {
+      resolvedFirma = matchedPersonel
+        ? canonicalizeAnaFirmaAdi(matchedPersonel.firmaAdi)
+        : CANONICAL_ANA_FIRMA_ADI;
     } else if (firmaType === 'DB') {
       resolvedFirma = selectedFirma || '';
     } else {
@@ -716,9 +825,20 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
       return;
     }
 
-    if (!matchedPersonel && placementFirmaTipi === 'TASERON' && !resolvedFirma) {
+    if (placementFirmaTipi === 'TASERON' && !resolvedFirma) {
       showStatus('error', 'Taşeron personel için firma bilgisi zorunludur.');
       return;
+    }
+
+    if (placementType === 'MANUAL' && !matchedPersonel) {
+      if (!validateTC(placementTcNo)) {
+        showStatus('error', 'Yeni personel kaydı için geçerli 11 haneli TC zorunludur. Önce TC SORGU deneyin.');
+        return;
+      }
+      if (phoneMatchKey(placementTelefonNo).length < 10) {
+        showStatus('error', 'Yeni personel kaydı için geçerli telefon numarası zorunludur. Önce TEL NO SORGU deneyin.');
+        return;
+      }
     }
 
     setLoadingPlacement(true);
@@ -734,14 +854,50 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
         }
       }
 
-      if (!matchedPersonel && placementType === 'MANUAL' && placementFirmaTipi === 'TASERON') {
-        const beforeId = findExistingTaseronPersonel(personelIsim, resolvedFirma || 'Taşeron')?.id;
-        const created = await createTaseronPersonel(personelIsim, resolvedFirma || 'Taşeron');
+      if (!matchedPersonel && placementType === 'MANUAL') {
+        const alreadyInList = (id: string) => personeller.some((p) => p.id === id);
+        const created = await createKampPersonel(
+          personelIsim,
+          resolvedFirma || (placementFirmaTipi === 'ANA_FIRMA' ? CANONICAL_ANA_FIRMA_ADI : 'Taşeron'),
+          placementFirmaTipi,
+          placementTcNo,
+          placementTelefonNo
+        );
         personelId = created.id;
         personelIsim = `${created.ad} ${created.soyad}`;
-        createdPersonel = !beforeId;
-        setPersoneller?.((prev) => (prev.some((p) => p.id === created.id) ? prev : [...prev, created]));
+        createdPersonel = !alreadyInList(created.id);
+        setPersoneller?.((prev) =>
+          prev.some((p) => p.id === created.id)
+            ? prev.map((p) => (p.id === created.id ? created : p))
+            : [...prev, created]
+        );
         matchedPersonel = created;
+      } else if (matchedPersonel) {
+        // Seçili personelin TC/tel boşsa kampçı girdikleriyle güncelle; firma seçimini yaz
+        const nextTc = digitsOnly(placementTcNo) || digitsOnly(matchedPersonel.tcNo || '');
+        const nextTel = placementTelefonNo.trim() || matchedPersonel.telefonNo || '';
+        const nextFirmaTipi = placementFirmaTipi;
+        const nextFirmaAdi =
+          nextFirmaTipi === 'ANA_FIRMA'
+            ? CANONICAL_ANA_FIRMA_ADI
+            : resolvedFirma || matchedPersonel.firmaAdi || '';
+        const needsUpdate =
+          (nextTc && digitsOnly(matchedPersonel.tcNo || '') !== nextTc) ||
+          (nextTel && phoneMatchKey(matchedPersonel.telefonNo || '') !== phoneMatchKey(nextTel)) ||
+          matchedPersonel.firmaTipi !== nextFirmaTipi ||
+          !firmaEslesir(matchedPersonel.firmaAdi || '', nextFirmaAdi);
+        if (needsUpdate && nextFirmaAdi) {
+          const patched: Personel = {
+            ...matchedPersonel,
+            tcNo: nextTc || matchedPersonel.tcNo,
+            telefonNo: nextTel || matchedPersonel.telefonNo,
+            firmaTipi: nextFirmaTipi,
+            firmaAdi: nextFirmaAdi,
+          };
+          await saveDocument('personeller', patched);
+          setPersoneller?.((prev) => prev.map((p) => (p.id === patched.id ? patched : p)));
+          matchedPersonel = patched;
+        }
       }
 
       const finalFirmaTipi: 'ANA_FIRMA' | 'TASERON' = placementFirmaTipi;
@@ -762,6 +918,8 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
 
       setSelectedPersonelId('');
       setManualPersonelIsim('');
+      setPlacementTcNo('');
+      setPlacementTelefonNo('');
       setSelectedFirma('');
       setManualFirma('');
       setPlacementModalRoom(null);
@@ -1031,17 +1189,79 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
       showStatus('error', 'Ad, soyad ve görev alanlarını doldurunuz.');
       return;
     }
+    if (!validateTC(yeniTcNo)) {
+      showStatus('error', 'Geçerli 11 haneli TC zorunludur. Önce TC SORGU deneyin.');
+      return;
+    }
+    if (phoneMatchKey(yeniTelefonNo).length < 10) {
+      showStatus('error', 'Geçerli telefon numarası zorunludur. Önce TEL NO SORGU deneyin.');
+      return;
+    }
     if (!yeniKimlikFoto) {
       showStatus('error', 'Kimlik fotoğrafı zorunludur.');
+      return;
+    }
+    const firmaTipi = girisFirmaTipi;
+    const firmaAdi =
+      firmaTipi === 'ANA_FIRMA'
+        ? CANONICAL_ANA_FIRMA_ADI
+        : (girisFirmaType === 'DB' ? girisSelectedFirma : girisManualFirma).trim();
+    if (firmaTipi === 'TASERON' && !firmaAdi) {
+      showStatus('error', 'Taşeron personel için firma seçin veya yazın.');
       return;
     }
     try {
       const requestID = `GIRIS-KAMP-${Date.now()}`;
       const email = currentUser?.email || 'kampci';
+      let createdPersonelNote = '';
+
+      // Aynı TC yoksa ilgili firmaya personel kaydı oluştur
+      let existing = findPersonelByTc(yeniTcNo);
+      if (!existing) {
+        if (firmaTipi === 'TASERON' && firmaAdi) {
+          await ensureTaseronCari(firmaAdi);
+        }
+        const created = await createKampPersonel(
+          `${yeniAd.trim()} ${yeniSoyad.trim()}`,
+          firmaAdi,
+          firmaTipi,
+          yeniTcNo,
+          yeniTelefonNo
+        );
+        // görev güncelle
+        if (created.gorev !== yeniGorev.trim()) {
+          const patched = { ...created, gorev: yeniGorev.trim(), ad: yeniAd.trim().toLocaleUpperCase('tr-TR'), soyad: yeniSoyad.trim().toLocaleUpperCase('tr-TR') };
+          await saveDocument('personeller', patched);
+          setPersoneller?.((prev) =>
+            prev.some((p) => p.id === patched.id)
+              ? prev.map((p) => (p.id === patched.id ? patched : p))
+              : [...prev, patched]
+          );
+        } else {
+          setPersoneller?.((prev) => (prev.some((p) => p.id === created.id) ? prev : [...prev, created]));
+        }
+        createdPersonelNote = ' · personel kaydı oluşturuldu';
+      } else {
+        const patched: Personel = {
+          ...existing,
+          telefonNo: yeniTelefonNo.trim() || existing.telefonNo,
+          firmaTipi,
+          firmaAdi,
+          gorev: yeniGorev.trim() || existing.gorev,
+        };
+        await saveDocument('personeller', patched);
+        setPersoneller?.((prev) => prev.map((p) => (p.id === patched.id ? patched : p)));
+        createdPersonelNote = ' · mevcut personel güncellendi';
+      }
+
       await setDoc(doc(db, 'personelGirisTalepleri', requestID), {
         ad: yeniAd.trim(),
         soyad: yeniSoyad.trim(),
         gorev: yeniGorev.trim(),
+        tcNo: digitsOnly(yeniTcNo),
+        telefonNo: yeniTelefonNo.trim(),
+        firmaTipi,
+        firmaAdi,
         kimlikFotoUrl: yeniKimlikFoto,
         durum: 'BEKLEMEDE',
         tarih: new Date().toISOString(),
@@ -1053,8 +1273,13 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
       setYeniAd('');
       setYeniSoyad('');
       setYeniGorev('');
+      setYeniTcNo('');
+      setYeniTelefonNo('');
+      setGirisSelectedFirma('');
+      setGirisManualFirma('');
+      setGirisFirmaTipi('ANA_FIRMA');
       setYeniKimlikFoto(null);
-      showStatus('success', 'Giriş talebi oluşturuldu — yönetim onay havuzuna iletildi.');
+      showStatus('success', `Giriş talebi oluşturuldu${createdPersonelNote} — yönetim onay havuzuna iletildi.`);
     } catch (err) {
       console.error(err);
       showStatus('error', 'Giriş talebi kaydedilemedi.');
@@ -1096,17 +1321,34 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
     }
   };
 
-  // Filtered personnel list for DB selection
+  // Filtered personnel list for DB selection — seçili firmaya göre
+  const resolvedPlacementFirmaAdi = useMemo(() => {
+    if (placementFirmaTipi === 'ANA_FIRMA') return CANONICAL_ANA_FIRMA_ADI;
+    return (firmaType === 'DB' ? selectedFirma : manualFirma).trim();
+  }, [placementFirmaTipi, firmaType, selectedFirma, manualFirma]);
+
   const filteredPersonel = personeller.filter(p => {
     const statusLower = String(p.durum || '').toLowerCase();
     const isPasif = statusLower === 'pasif' || p.durum === false || statusLower === 'false';
     if (isPasif) return false;
+
+    if (placementFirmaTipi === 'ANA_FIRMA') {
+      if (isTaseronPersonel(p)) return false;
+    } else {
+      if (!isTaseronPersonel(p) && p.firmaTipi !== 'TASERON') return false;
+      if (resolvedPlacementFirmaAdi && !firmaEslesir(p.firmaAdi || '', resolvedPlacementFirmaAdi)) {
+        return false;
+      }
+    }
+
     const nameStr = `${p.ad || ''} ${p.soyad || ''}`.toLowerCase();
     const queryStr = searchPersonelQuery.toLowerCase();
+    if (!queryStr) return true;
     return (
       nameStr.includes(queryStr) ||
       (p.gorev || '').toLowerCase().includes(queryStr) ||
       (p.tcNo || '').toLowerCase().includes(queryStr) ||
+      digitsOnly(p.telefonNo || '').includes(digitsOnly(queryStr)) ||
       (p.firmaAdi || '').toLowerCase().includes(queryStr)
     );
   });
@@ -1169,91 +1411,44 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
               placementType === 'MANUAL' ? 'bg-slate-800 text-white' : 'text-slate-500 hover:text-slate-800'
             }`}
           >
-            Elle Giriş (Misafir/Taşeron)
+            Yeni Personel Kaydı
           </button>
         </div>
       </div>
 
       <div className="border-t border-slate-850 pt-3 space-y-3">
-        <span className="text-[10px] font-black text-slate-600 uppercase tracking-widest block">ADIM 1: Personel Bilgisi</span>
-
-        {placementType === 'DB' ? (
-          <div className="space-y-3 animate-in fade-in duration-100">
-            <div className="space-y-1.5">
-                  <label className="text-[9px] font-extrabold text-slate-500 uppercase tracking-wider block">Personel Filtrele / Ara</label>
-              <div className="relative">
-                <Search size={14} className="absolute left-3 top-3 text-slate-500" />
-                <input
-                  type="text"
-                  placeholder="Ad, TC, görev veya firma ara..."
-                  value={searchPersonelQuery}
-                  onChange={(e) => setSearchPersonelQuery(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 text-xs text-slate-800 pl-9 pr-3 py-2.5 rounded-xl outline-none"
-                />
-              </div>
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-[9px] font-extrabold text-slate-500 uppercase tracking-wider block">Kayıtlı Personel Listesinden Seçin *</label>
-              <select
-                required={placementType === 'DB'}
-                value={selectedPersonelId}
-                onChange={(e) => {
-                  const pid = e.target.value;
-                  setSelectedPersonelId(pid);
-                  const matched = personeller.find((p) => p.id === pid);
-                  if (matched) applyPersonelFirmaMatch(matched);
-                }}
-                className="w-full bg-slate-50 border border-slate-200 text-xs font-bold text-slate-800 rounded-xl p-3 outline-none"
-              >
-                <option value="">-- Personel Seçin --</option>
-                {filteredPersonel.slice(0, 30).map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.ad} {p.soyad} ({p.gorev}){p.firmaTipi === 'TASERON' && p.firmaAdi ? ` · ${p.firmaAdi}` : ''}
-                  </option>
-                ))}
-              </select>
-              {filteredPersonel.length > 30 && (
-                <span className="text-[9px] text-slate-500 italic block mt-1">+ {filteredPersonel.length - 30} personel daha filtrelendi. Kelime arayarak daraltın.</span>
-              )}
-            </div>
-          </div>
-        ) : (
-          <div className="space-y-1.5 animate-in fade-in duration-100">
-            <label className="text-[9px] font-extrabold text-slate-500 uppercase tracking-wider block">Personel Adı Soyadı *</label>
-            <input
-              type="text"
-              required={placementType === 'MANUAL'}
-              placeholder="Örn: Ahmet Yılmaz"
-              value={manualPersonelIsim}
-              onChange={(e) => setManualPersonelIsim(e.target.value)}
-              className="w-full bg-slate-50 border border-slate-200 text-xs text-slate-800 p-3 rounded-xl outline-none"
-            />
-          </div>
-        )}
-      </div>
-
-      <div className="border-t border-slate-850 pt-3 space-y-3">
-        <span className="text-[10px] font-black text-slate-600 uppercase tracking-widest block">ADIM 2: Firma Bilgisi</span>
+        <span className="text-[10px] font-black text-slate-600 uppercase tracking-widest block">ADIM 1: Firma Bilgisi</span>
 
         <div className="grid grid-cols-2 gap-2">
           <button
             type="button"
-            onClick={() => setPlacementFirmaTipi('ANA_FIRMA')}
+            onClick={() => {
+              setPlacementFirmaTipi('ANA_FIRMA');
+              setSelectedPersonelId('');
+              setSelectedFirma('');
+              setManualFirma('');
+            }}
             className={`py-1.5 rounded-lg text-[10px] font-bold ${placementFirmaTipi === 'ANA_FIRMA' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600'}`}
           >
             Ana Firma
           </button>
           <button
             type="button"
-            onClick={() => setPlacementFirmaTipi('TASERON')}
+            onClick={() => {
+              setPlacementFirmaTipi('TASERON');
+              setSelectedPersonelId('');
+            }}
             className={`py-1.5 rounded-lg text-[10px] font-bold ${placementFirmaTipi === 'TASERON' ? 'bg-amber-600 text-white' : 'bg-slate-100 text-slate-600'}`}
           >
             Taşeron
           </button>
         </div>
 
-        {placementFirmaTipi === 'TASERON' && (
+        {placementFirmaTipi === 'ANA_FIRMA' ? (
+          <div className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-[11px] font-bold text-slate-700">
+            {CANONICAL_ANA_FIRMA_ADI}
+          </div>
+        ) : (
           <>
             <div className="grid grid-cols-2 gap-2 bg-slate-50 p-1 rounded-lg border border-slate-200/60">
               <button
@@ -1282,7 +1477,10 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
                 <select
                   required={firmaType === 'DB'}
                   value={selectedFirma}
-                  onChange={(e) => setSelectedFirma(e.target.value)}
+                  onChange={(e) => {
+                    setSelectedFirma(e.target.value);
+                    setSelectedPersonelId('');
+                  }}
                   className="w-full bg-slate-50 border border-slate-200 text-xs font-bold text-slate-800 rounded-xl p-3 outline-none"
                 >
                   <option value="">-- Taşeron / Firma Seçin --</option>
@@ -1302,12 +1500,135 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
                   required={firmaType === 'MANUAL'}
                   placeholder="Örn: Özdemir Hafriyat Ltd. Şti."
                   value={manualFirma}
-                  onChange={(e) => setManualFirma(e.target.value)}
+                  onChange={(e) => {
+                    setManualFirma(e.target.value);
+                    setSelectedPersonelId('');
+                  }}
                   className="w-full bg-slate-50 border border-slate-200 text-xs text-slate-800 p-3 rounded-xl outline-none"
                 />
               </div>
             )}
           </>
+        )}
+      </div>
+
+      <div className="border-t border-slate-850 pt-3 space-y-3">
+        <span className="text-[10px] font-black text-slate-600 uppercase tracking-widest block">ADIM 2: TC / Tel Sorgu</span>
+        <div className="space-y-2">
+          <div className="flex gap-2">
+            <input
+              type="text"
+              inputMode="numeric"
+              maxLength={11}
+              placeholder="TC Kimlik No"
+              value={placementTcNo}
+              onChange={(e) => setPlacementTcNo(e.target.value.replace(/\D/g, '').slice(0, 11))}
+              className="flex-1 bg-slate-50 border border-slate-200 text-xs text-slate-800 p-2.5 rounded-xl outline-none"
+            />
+            <button
+              type="button"
+              onClick={runPlacementTcSorgu}
+              className="shrink-0 px-3 py-2.5 rounded-xl bg-sky-700 hover:bg-sky-800 text-white text-[10px] font-black tracking-wide"
+            >
+              TC SORGU
+            </button>
+          </div>
+          <div className="flex gap-2">
+            <input
+              type="tel"
+              placeholder="Telefon No"
+              value={placementTelefonNo}
+              onChange={(e) => setPlacementTelefonNo(e.target.value)}
+              className="flex-1 bg-slate-50 border border-slate-200 text-xs text-slate-800 p-2.5 rounded-xl outline-none"
+            />
+            <button
+              type="button"
+              onClick={runPlacementTelSorgu}
+              className="shrink-0 px-3 py-2.5 rounded-xl bg-teal-700 hover:bg-teal-800 text-white text-[10px] font-black tracking-wide"
+            >
+              TEL NO SORGU
+            </button>
+          </div>
+          <p className="text-[9px] text-slate-500 leading-relaxed">
+            Kayıtlı personel varsa sorgu ile bulunur ve firması otomatik seçilir. Yoksa yeni kayıt için ad soyad + TC + telefon girin; personel seçili firmaya kaydedilir.
+          </p>
+        </div>
+      </div>
+
+      <div className="border-t border-slate-850 pt-3 space-y-3">
+        <span className="text-[10px] font-black text-slate-600 uppercase tracking-widest block">ADIM 3: Personel Bilgisi</span>
+
+        {placementType === 'DB' ? (
+          <div className="space-y-3 animate-in fade-in duration-100">
+            <div className="space-y-1.5">
+              <label className="text-[9px] font-extrabold text-slate-500 uppercase tracking-wider block">
+                {placementFirmaTipi === 'ANA_FIRMA'
+                  ? `${CANONICAL_ANA_FIRMA_ADI} Personelleri`
+                  : resolvedPlacementFirmaAdi
+                    ? `${resolvedPlacementFirmaAdi} Personelleri`
+                    : 'Önce taşeron firma seçin'}
+              </label>
+              <div className="relative">
+                <Search size={14} className="absolute left-3 top-3 text-slate-500" />
+                <input
+                  type="text"
+                  placeholder="Ad, TC, telefon veya görev ara..."
+                  value={searchPersonelQuery}
+                  onChange={(e) => setSearchPersonelQuery(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 text-xs text-slate-800 pl-9 pr-3 py-2.5 rounded-xl outline-none"
+                />
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-[9px] font-extrabold text-slate-500 uppercase tracking-wider block">
+                Firmaya Ait Personel Listesi ({filteredPersonel.length}) *
+              </label>
+              <select
+                required={placementType === 'DB'}
+                value={selectedPersonelId}
+                onChange={(e) => {
+                  const pid = e.target.value;
+                  setSelectedPersonelId(pid);
+                  const matched = personeller.find((p) => p.id === pid);
+                  if (matched) {
+                    setPlacementTcNo(digitsOnly(matched.tcNo || ''));
+                    setPlacementTelefonNo(String(matched.telefonNo || '').trim());
+                    applyPersonelFirmaMatch(matched);
+                  }
+                }}
+                className="w-full bg-slate-50 border border-slate-200 text-xs font-bold text-slate-800 rounded-xl p-3 outline-none"
+              >
+                <option value="">-- Personel Seçin --</option>
+                {filteredPersonel.slice(0, 50).map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.ad} {p.soyad} ({p.gorev || '-'}){p.firmaAdi ? ` · ${p.firmaAdi}` : ''}
+                  </option>
+                ))}
+              </select>
+              {filteredPersonel.length > 50 && (
+                <span className="text-[9px] text-slate-500 italic block mt-1">+ {filteredPersonel.length - 50} personel daha — arama ile daraltın.</span>
+              )}
+              {placementFirmaTipi === 'TASERON' && !resolvedPlacementFirmaAdi && (
+                <span className="text-[9px] text-amber-600 font-bold block mt-1">Firma seçilmeden tüm taşeron personeller listelenir.</span>
+              )}
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-1.5 animate-in fade-in duration-100">
+            <label className="text-[9px] font-extrabold text-slate-500 uppercase tracking-wider block">Personel Adı Soyadı *</label>
+            <input
+              type="text"
+              required={placementType === 'MANUAL'}
+              placeholder="Örn: Ahmet Yılmaz"
+              value={manualPersonelIsim}
+              onChange={(e) => setManualPersonelIsim(e.target.value)}
+              className="w-full bg-slate-50 border border-slate-200 text-xs text-slate-800 p-3 rounded-xl outline-none"
+            />
+            <p className="text-[9px] text-slate-500">
+              Bu kişi seçili firmaya ({resolvedPlacementFirmaAdi || '—'}) personel olarak kaydedilir.
+            </p>
+          </div>
         )}
       </div>
 
@@ -2333,9 +2654,129 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
               <h3 className="font-bold text-sm text-slate-800 mt-0.5">🚪 Girişe Yolla</h3>
             </div>
             <p className="text-xs text-slate-500 leading-relaxed">
-              Kamp alanına veya lojmana gelen yeni personelin kimlik fotoğrafını çekip bilgilerini girin.
-              Talep <strong>Onay Havuzu → Formen Belgeleri</strong> üzerinden yönetici onayına gider.
+              Kamp alanına gelen personelin TC / telefon sorgu yapın, firmasını seçin ve kimlik fotoğrafıyla kaydedin.
+              Kayıt ilgili firmaya personel olarak işlenir; talep ayrıca onay havuzuna gider.
             </p>
+
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setGirisFirmaTipi('ANA_FIRMA')}
+                className={`py-1.5 rounded-lg text-[10px] font-bold ${girisFirmaTipi === 'ANA_FIRMA' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600'}`}
+              >
+                Ana Firma
+              </button>
+              <button
+                type="button"
+                onClick={() => setGirisFirmaTipi('TASERON')}
+                className={`py-1.5 rounded-lg text-[10px] font-bold ${girisFirmaTipi === 'TASERON' ? 'bg-amber-600 text-white' : 'bg-slate-100 text-slate-600'}`}
+              >
+                Taşeron
+              </button>
+            </div>
+            {girisFirmaTipi === 'ANA_FIRMA' ? (
+              <div className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-[11px] font-bold text-slate-700">
+                {CANONICAL_ANA_FIRMA_ADI}
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <div className="grid grid-cols-2 gap-2">
+                  <button type="button" onClick={() => setGirisFirmaType('DB')} className={`py-1 rounded-md text-[9px] font-bold ${girisFirmaType === 'DB' ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-600'}`}>Kayıtlı Firma</button>
+                  <button type="button" onClick={() => setGirisFirmaType('MANUAL')} className={`py-1 rounded-md text-[9px] font-bold ${girisFirmaType === 'MANUAL' ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-600'}`}>Yeni Firma</button>
+                </div>
+                {girisFirmaType === 'DB' ? (
+                  <select value={girisSelectedFirma} onChange={(e) => setGirisSelectedFirma(e.target.value)} className="w-full bg-slate-50 border border-slate-200 text-xs font-bold text-slate-800 rounded-xl p-3 outline-none">
+                    <option value="">-- Taşeron Seçin --</option>
+                    {taseronCariler.map((c) => (
+                      <option key={c.id} value={c.unvan}>{c.unvan}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <input value={girisManualFirma} onChange={(e) => setGirisManualFirma(e.target.value)} placeholder="Firma adı" className="w-full bg-slate-50 border border-slate-200 text-xs text-slate-800 p-3 rounded-xl outline-none" />
+                )}
+              </div>
+            )}
+
+            <div className="space-y-2">
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  maxLength={11}
+                  placeholder="TC Kimlik No"
+                  value={yeniTcNo}
+                  onChange={(e) => setYeniTcNo(e.target.value.replace(/\D/g, '').slice(0, 11))}
+                  className="flex-1 bg-slate-50 border border-slate-200 text-xs text-slate-800 p-2.5 rounded-xl outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    const found = findPersonelByTc(yeniTcNo);
+                    if (!validateTC(yeniTcNo)) {
+                      showStatus('error', 'TC SORGU için 11 haneli TC girin.');
+                      return;
+                    }
+                    if (!found) {
+                      showStatus('info', 'Bu TC ile kayıt bulunamadı — yeni personel olarak kaydedilecek.');
+                      return;
+                    }
+                    setYeniAd(found.ad || '');
+                    setYeniSoyad(found.soyad || '');
+                    setYeniGorev(found.gorev || '');
+                    setYeniTelefonNo(found.telefonNo || '');
+                    if (isTaseronPersonel(found)) {
+                      setGirisFirmaTipi('TASERON');
+                      setGirisSelectedFirma(found.firmaAdi || '');
+                      setGirisFirmaType('DB');
+                    } else {
+                      setGirisFirmaTipi('ANA_FIRMA');
+                    }
+                    showStatus('success', `${found.ad} ${found.soyad} bulundu.`);
+                  }}
+                  className="shrink-0 px-3 py-2.5 rounded-xl bg-sky-700 text-white text-[10px] font-black"
+                >
+                  TC SORGU
+                </button>
+              </div>
+              <div className="flex gap-2">
+                <input
+                  type="tel"
+                  placeholder="Telefon No"
+                  value={yeniTelefonNo}
+                  onChange={(e) => setYeniTelefonNo(e.target.value)}
+                  className="flex-1 bg-slate-50 border border-slate-200 text-xs text-slate-800 p-2.5 rounded-xl outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (phoneMatchKey(yeniTelefonNo).length < 10) {
+                      showStatus('error', 'TEL NO SORGU için en az 10 hane girin.');
+                      return;
+                    }
+                    const found = findPersonelByTel(yeniTelefonNo);
+                    if (!found) {
+                      showStatus('info', 'Bu telefon ile kayıt bulunamadı — yeni personel olarak kaydedilecek.');
+                      return;
+                    }
+                    setYeniAd(found.ad || '');
+                    setYeniSoyad(found.soyad || '');
+                    setYeniGorev(found.gorev || '');
+                    setYeniTcNo(digitsOnly(found.tcNo || ''));
+                    if (isTaseronPersonel(found)) {
+                      setGirisFirmaTipi('TASERON');
+                      setGirisSelectedFirma(found.firmaAdi || '');
+                      setGirisFirmaType('DB');
+                    } else {
+                      setGirisFirmaTipi('ANA_FIRMA');
+                    }
+                    showStatus('success', `${found.ad} ${found.soyad} bulundu.`);
+                  }}
+                  className="shrink-0 px-3 py-2.5 rounded-xl bg-teal-700 text-white text-[10px] font-black"
+                >
+                  TEL NO SORGU
+                </button>
+              </div>
+            </div>
 
             <div className="grid grid-cols-2 gap-3">
               <div>
