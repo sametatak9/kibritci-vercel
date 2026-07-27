@@ -268,6 +268,26 @@ export const findExistingStok = (urunAdi: string, stoklar: StokKart[]): StokKart
   return bestDist <= 2 ? best : null;
 };
 
+/** Tedarikçi arşiv stoklarında eşleştir — aktif şantiye stoklarıyla karışmasın */
+export const findExistingTedarikciStok = (
+  urunAdi: string,
+  stoklar: StokKart[],
+  cariId: string
+): StokKart | null => {
+  const pool = stoklar.filter(
+    (s) =>
+      s.tedarikciCariId === cariId ||
+      s.arsivde ||
+      normalizeImportText(s.tedarikciUnvan || '').includes('birbesan')
+  );
+  return findExistingStok(urunAdi, pool);
+};
+
+export const isBirbesanStokArsiv = (stok: StokKart): boolean =>
+  Boolean(stok.arsivde) &&
+  (stok.stokKaynak === 'BIRBESAN_EXCEL' ||
+    normalizeImportText(stok.tedarikciUnvan || '').includes('birbesan'));
+
 export const findCariByUnvan = (unvan: string, cariler: CariKart[]): CariKart | null => {
   const norm = normalizeImportText(unvan);
   return (
@@ -294,9 +314,14 @@ export const applyCariStokExcelImport = async (options: {
   stokKartlar: StokKart[];
   setStokKartlar: (updater: StokKart[] | ((prev: StokKart[]) => StokKart[])) => void;
   importTag?: string;
+  /** Tedarikçi Excel arşivi — stok kartları Stok sekmesinde Arşiv'de listelenir */
+  archiveAsTedarikci?: boolean;
+  stokKaynak?: StokKart['stokKaynak'];
 }): Promise<CariStokImportSummary> => {
   const { lines, cari, stokKartlar, setStokKartlar } = options;
   const importTag = options.importTag || `[ExcelImport:${cari.unvan}]`;
+  const archiveAsTedarikci = Boolean(options.archiveAsTedarikci);
+  const stokKaynak = options.stokKaynak || (archiveAsTedarikci ? 'BIRBESAN_EXCEL' : undefined);
   const mutableStoklar = [...stokKartlar];
   const summary: CariStokImportSummary = {
     createdStok: 0,
@@ -322,13 +347,15 @@ export const applyCariStokExcelImport = async (options: {
 
   for (const [norm, meta] of latestByStok.entries()) {
     const sampleName = lines.find((l) => normalizeImportText(l.urunAdi) === norm)?.urunAdi || norm;
-    let stok = findExistingStok(sampleName, mutableStoklar);
+    let stok = archiveAsTedarikci
+      ? findExistingTedarikciStok(sampleName, mutableStoklar, cari.id)
+      : findExistingStok(sampleName, mutableStoklar);
     if (!stok) {
       stok = {
         id: `sk_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
         stokKodu: `STK-${Math.floor(1000 + Math.random() * 9000)}`,
         stokAdi: sampleName,
-        kategori: 'Kaba İnşaat İmalatı',
+        kategori: archiveAsTedarikci ? 'BİRBESAN Arşiv' : 'Kaba İnşaat İmalatı',
         birim: meta.birim || 'ADET',
         kritikSeviye: 0,
         durum: 'AKTIF',
@@ -337,6 +364,8 @@ export const applyCariStokExcelImport = async (options: {
         sonFiyatTarihi: meta.tarih,
         tedarikciCariId: cari.id,
         tedarikciUnvan: cari.unvan,
+        arsivde: archiveAsTedarikci || undefined,
+        stokKaynak,
       };
       mutableStoklar.unshift(stok);
       await saveDocument('stokKartlar', stok);
@@ -349,6 +378,9 @@ export const applyCariStokExcelImport = async (options: {
         sonFiyatTarihi: meta.tarih,
         tedarikciCariId: cari.id,
         tedarikciUnvan: cari.unvan,
+        arsivde: archiveAsTedarikci ? true : stok.arsivde,
+        stokKaynak: stokKaynak || stok.stokKaynak,
+        kategori: archiveAsTedarikci ? 'BİRBESAN Arşiv' : stok.kategori,
         aciklama: String(stok.aciklama || '').includes(importTag)
           ? stok.aciklama
           : `${String(stok.aciklama || '').trim()}\n${importTag}`.trim(),

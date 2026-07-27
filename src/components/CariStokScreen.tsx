@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Building2, Package, Plus, Search, Trash2, Pencil, Download,
-  ClipboardList, X, RefreshCw, FileText, Truck, Receipt, Home, User, Users, Eye, UserX, Upload
+  ClipboardList, X, RefreshCw, FileText, Truck, Receipt, Home, User, Users, Eye, UserX, Upload, Archive
 } from 'lucide-react';
 import { collection, doc, getDoc, getDocs } from 'firebase/firestore';
 import { CariKart, Fatura, Irsaliye, Personel, SatinAlmaTalebi, StokKart } from '../types/erp';
@@ -17,6 +17,7 @@ import { CariTimeline } from './CariTimeline';
 import {
   applyCariStokExcelImport,
   ensureBirbesanCari,
+  isBirbesanStokArsiv,
   normalizeImportText,
   parseCariStokExcelFiles,
 } from '../lib/cariStokExcelImport';
@@ -114,6 +115,8 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
   const [detailLoadingId, setDetailLoadingId] = useState<string | null>(null);
   const [excelImporting, setExcelImporting] = useState(false);
   const excelInputRef = useRef<HTMLInputElement>(null);
+  const birbesanExcelInputRef = useRef<HTMLInputElement>(null);
+  const [stokListeTab, setStokListeTab] = useState<'AKTIF' | 'ARSIV'>('AKTIF');
 
   const filteredCariKartlar = useMemo(() => {
     const q = cariSearchQuery.trim().toLocaleLowerCase('tr-TR');
@@ -127,17 +130,33 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
     );
   }, [cariKartlar, cariSearchQuery]);
 
+  const stokTabCounts = useMemo(
+    () => ({
+      aktif: stokKartlar.filter((s) => !s.arsivde).length,
+      arsiv: stokKartlar.filter((s) => s.arsivde).length,
+      birbesan: stokKartlar.filter((s) => isBirbesanStokArsiv(s)).length,
+    }),
+    [stokKartlar]
+  );
+
+  const stokPoolForTab = useMemo(() => {
+    if (stokListeTab === 'ARSIV') return stokKartlar.filter((s) => s.arsivde);
+    return stokKartlar.filter((s) => !s.arsivde);
+  }, [stokKartlar, stokListeTab]);
+
   const filteredStokKartlar = useMemo(() => {
     const q = stokSearchQuery.trim().toLowerCase();
-    if (!q) return stokKartlar;
-    return stokKartlar.filter(
+    const pool = stokPoolForTab;
+    if (!q) return pool;
+    return pool.filter(
       (st) =>
         String(st.stokAdi || '').toLowerCase().includes(q) ||
         String(st.stokKodu || '').toLowerCase().includes(q) ||
         String(st.kategori || '').toLowerCase().includes(q) ||
-        String(st.birim || '').toLowerCase().includes(q)
+        String(st.birim || '').toLowerCase().includes(q) ||
+        String(st.tedarikciUnvan || '').toLowerCase().includes(q)
     );
-  }, [stokKartlar, stokSearchQuery]);
+  }, [stokPoolForTab, stokSearchQuery]);
 
   const selectedCari = useMemo(
     () => cariKartlar.find((c) => c.id === selectedCariId) || null,
@@ -163,10 +182,13 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
     if (csTab === 'cari' && !selectedCariId && filteredCariKartlar[0]) {
       setSelectedCariId(filteredCariKartlar[0].id);
     }
-    if (csTab === 'stok' && !selectedStokId && filteredStokKartlar[0]) {
-      setSelectedStokId(filteredStokKartlar[0].id);
+    if (csTab === 'stok') {
+      const visible = filteredStokKartlar;
+      if (!visible.some((s) => s.id === selectedStokId)) {
+        setSelectedStokId(visible[0]?.id || null);
+      }
     }
-  }, [csTab, filteredCariKartlar, filteredStokKartlar, selectedCariId, selectedStokId]);
+  }, [csTab, filteredCariKartlar, filteredStokKartlar, selectedCariId, selectedStokId, stokListeTab]);
 
   const loadHistoryData = async (type: 'cari' | 'stok', id: string, name: string, code: string) => {
     setHistoryLoading(true);
@@ -779,6 +801,8 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
         cari,
         stokKartlar,
         setStokKartlar,
+        archiveAsTedarikci: normalizeImportText(cari.unvan).includes('birbesan'),
+        stokKaynak: normalizeImportText(cari.unvan).includes('birbesan') ? 'BIRBESAN_EXCEL' : undefined,
       });
 
       alert(
@@ -786,8 +810,16 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
           `Yeni stok kartı: ${summary.createdStok}\n` +
           `Güncellenen stok: ${summary.updatedStok}\n` +
           `Arşiv fatura: ${summary.createdFatura}\n` +
-          `Stok hareketi: ${summary.createdStokIslem}`
+          `Stok hareketi: ${summary.createdStokIslem}` +
+          (normalizeImportText(cari.unvan).includes('birbesan')
+            ? '\n\nBİRBESAN stokları Stok sekmesi → Arşiv listesinde.'
+            : '')
       );
+
+      if (normalizeImportText(cari.unvan).includes('birbesan')) {
+        setCsTab('stok');
+        setStokListeTab('ARSIV');
+      }
 
       if (cari.id !== selectedCariId) setSelectedCariId(cari.id);
       void loadHistoryData('cari', cari.id, cari.unvan, cari.kod);
@@ -796,6 +828,50 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
     } finally {
       setExcelImporting(false);
       if (excelInputRef.current) excelInputRef.current.value = '';
+    }
+  };
+
+  const handleBirbesanExcelImport = async (fileList: FileList | null) => {
+    if (!fileList?.length) return;
+    const files = Array.from(fileList);
+    setExcelImporting(true);
+    try {
+      const { lines, warnings } = await parseCariStokExcelFiles(files);
+      if (!lines.length) {
+        alert(`Excel okunamadı.\n${warnings.join('\n') || 'Veri satırı bulunamadı.'}`);
+        return;
+      }
+      const uniqueCount = new Set(lines.map((l) => normalizeImportText(l.urunAdi))).size;
+      const ok = window.confirm(
+        `${files.length} Excel dosyasından ${lines.length} kalem bulundu.\n` +
+          `${uniqueCount} BİRBESAN stok kartı arşive eklenecek veya güncellenecek.\n\nDevam edilsin mi?`
+      );
+      if (!ok) return;
+
+      const cari = ensureBirbesanCari(cariKartlar, setCariKartlar);
+      const summary = await applyCariStokExcelImport({
+        lines,
+        cari,
+        stokKartlar,
+        setStokKartlar,
+        archiveAsTedarikci: true,
+        stokKaynak: 'BIRBESAN_EXCEL',
+      });
+
+      setCsTab('stok');
+      setStokListeTab('ARSIV');
+
+      alert(
+        `BİRBESAN arşiv aktarımı tamamlandı.\n` +
+          `Yeni stok kartı: ${summary.createdStok}\n` +
+          `Güncellenen stok: ${summary.updatedStok}\n` +
+          `Arşiv fatura: ${summary.createdFatura}`
+      );
+    } catch (err) {
+      alert(`Excel aktarım hatası: ${String((err as Error)?.message || err)}`);
+    } finally {
+      setExcelImporting(false);
+      if (birbesanExcelInputRef.current) birbesanExcelInputRef.current.value = '';
     }
   };
 
@@ -848,7 +924,13 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
             type="button"
             onClick={() => {
               if (csTab === 'cari') resetCariForm();
-              else resetStokForm();
+              else {
+                if (stokListeTab === 'ARSIV') {
+                  alert('Arşiv stokları Excel ile aktarılır. BİRBESAN Excel Aktar butonunu kullanın.');
+                  return;
+                }
+                resetStokForm();
+              }
               setShowForm(true);
             }}
             className="inline-flex items-center gap-2 bg-white text-slate-900 font-black text-xs px-4 py-2.5 rounded-xl cursor-pointer hover:bg-amber-50"
@@ -872,7 +954,10 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
           </button>
           <button
             type="button"
-            onClick={() => setCsTab('stok')}
+            onClick={() => {
+              setCsTab('stok');
+              setStokListeTab('AKTIF');
+            }}
             className={`px-4 py-2 rounded-xl text-xs font-black border cursor-pointer ${
               csTab === 'stok'
                 ? 'bg-teal-300 text-slate-900 border-teal-200'
@@ -880,7 +965,7 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
             }`}
           >
             <Package size={13} className="inline mr-1.5" />
-            Stok ({stokKartlar.length})
+            Stok ({stokTabCounts.aktif})
           </button>
         </div>
       </div>
@@ -888,6 +973,60 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 min-h-[62vh]">
         {/* Liste */}
         <aside className="lg:col-span-4 xl:col-span-3 bg-white border border-slate-200 rounded-2xl shadow-sm flex flex-col overflow-hidden max-h-[78vh]">
+          {csTab === 'stok' && (
+            <div className="p-2 border-b border-slate-100 space-y-2">
+              <div className="flex gap-1">
+                <button
+                  type="button"
+                  onClick={() => setStokListeTab('AKTIF')}
+                  className={`flex-1 px-2 py-1.5 rounded-lg text-[10px] font-black border cursor-pointer ${
+                    stokListeTab === 'AKTIF'
+                      ? 'bg-teal-100 text-teal-900 border-teal-200'
+                      : 'bg-slate-50 text-slate-600 border-slate-200'
+                  }`}
+                >
+                  Aktif ({stokTabCounts.aktif})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setStokListeTab('ARSIV')}
+                  className={`flex-1 px-2 py-1.5 rounded-lg text-[10px] font-black border cursor-pointer flex items-center justify-center gap-1 ${
+                    stokListeTab === 'ARSIV'
+                      ? 'bg-amber-100 text-amber-900 border-amber-200'
+                      : 'bg-slate-50 text-slate-600 border-slate-200'
+                  }`}
+                >
+                  <Archive size={11} />
+                  Arşiv ({stokTabCounts.arsiv})
+                </button>
+              </div>
+              {stokListeTab === 'ARSIV' && (
+                <div className="rounded-xl bg-amber-50 border border-amber-100 p-2 space-y-2">
+                  <p className="text-[10px] text-amber-900 leading-snug">
+                    BİRBESAN firmasına ait tedarikçi stok kartları ve birim fiyatları (Excel arşivi).
+                    {stokTabCounts.birbesan > 0 ? ` ${stokTabCounts.birbesan} BİRBESAN kaydı.` : ''}
+                  </p>
+                  <input
+                    ref={birbesanExcelInputRef}
+                    type="file"
+                    accept=".xlsx,.xls"
+                    multiple
+                    className="hidden"
+                    onChange={(e) => void handleBirbesanExcelImport(e.target.files)}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => birbesanExcelInputRef.current?.click()}
+                    disabled={excelImporting}
+                    className="w-full inline-flex items-center justify-center gap-1.5 px-2 py-2 rounded-lg text-[10px] font-black bg-sky-600 text-white cursor-pointer disabled:opacity-50"
+                  >
+                    <Upload size={12} />
+                    {excelImporting ? 'Aktarılıyor…' : 'BİRBESAN Excel Aktar'}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
           <div className="p-3 border-b border-slate-100">
             <label className="relative block">
               <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
@@ -960,6 +1099,9 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
                               ? ` · ₺${st.sonBirimFiyat.toLocaleString('tr-TR')}`
                               : ''}
                           </p>
+                          {isBirbesanStokArsiv(st) && (
+                            <p className="text-[9px] font-black text-amber-700 mt-0.5">BİRBESAN ARŞİV</p>
+                          )}
                         </div>
                         <span className="shrink-0 text-[9px] font-black px-2 py-0.5 rounded-full h-fit bg-emerald-100 text-emerald-800">
                           {st.durum}
@@ -969,7 +1111,11 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
                   );
                 })}
             {(csTab === 'cari' ? filteredCariKartlar : filteredStokKartlar).length === 0 && (
-              <p className="p-8 text-center text-xs text-slate-400">Kayıt bulunamadı.</p>
+              <p className="p-8 text-center text-xs text-slate-400">
+                {csTab === 'stok' && stokListeTab === 'ARSIV'
+                  ? 'Arşivde stok yok. BİRBESAN Excel dosyalarını yükleyin.'
+                  : 'Kayıt bulunamadı.'}
+              </p>
             )}
           </div>
         </aside>
@@ -1186,6 +1332,11 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
                 <div>
                   <p className="text-[10px] font-mono font-bold text-slate-500">{selectedStok.stokKodu}</p>
                   <h2 className="text-lg font-black text-slate-900 mt-0.5">{selectedStok.stokAdi}</h2>
+                  {isBirbesanStokArsiv(selectedStok) && (
+                    <span className="inline-flex mt-1 text-[10px] font-black uppercase tracking-wide bg-amber-100 text-amber-900 border border-amber-200 rounded-lg px-2 py-0.5">
+                      BİRBESAN Arşiv Stok
+                    </span>
+                  )}
                   <p className="text-xs text-slate-500 mt-1">
                     {selectedStok.kategori} · Birim: {selectedStok.birim}
                     {selectedStok.sonBirimFiyat != null && selectedStok.sonBirimFiyat > 0 && (

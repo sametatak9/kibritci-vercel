@@ -568,6 +568,9 @@ export interface StokKart {
   sonFiyatTarihi?: string;
   tedarikciCariId?: string;
   tedarikciUnvan?: string;
+  /** Tedarikçi Excel arşivi — aktif şantiye stok listesinde gösterilmez */
+  arsivde?: boolean;
+  stokKaynak?: 'BIRBESAN_EXCEL' | string;
 }
 
 export interface EpostaGonderim {

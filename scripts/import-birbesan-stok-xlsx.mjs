@@ -178,6 +178,16 @@ const findExistingStok = (urunAdi, stoklar) => {
   return stoklar.find((s) => normalizeText(s.stokAdi) === norm) || null;
 };
 
+const findExistingTedarikciStok = (urunAdi, stoklar, cariId) => {
+  const pool = stoklar.filter(
+    (s) =>
+      s.tedarikciCariId === cariId ||
+      s.arsivde ||
+      normalizeText(s.tedarikciUnvan || '').includes('birbesan')
+  );
+  return findExistingStok(urunAdi, pool);
+};
+
 const findCari = (unvan, cariler) => {
   const norm = normalizeText(unvan);
   return (
@@ -281,13 +291,13 @@ const stokIdByNorm = new Map();
 const mutableStoklar = [...stoklar];
 
 for (const [norm, line] of latestByStok.entries()) {
-  let stok = findExistingStok(line.urunAdi, mutableStoklar);
+  let stok = findExistingTedarikciStok(line.urunAdi, mutableStoklar, cari.id);
   if (!stok) {
     stok = {
       id: `sk_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
       stokKodu: `STK-${Math.floor(1000 + Math.random() * 9000)}`,
       stokAdi: line.urunAdi,
-      kategori: 'Kaba İnşaat İmalatı',
+      kategori: 'BİRBESAN Arşiv',
       birim: line.birim,
       kritikSeviye: 0,
       durum: 'AKTIF',
@@ -296,6 +306,8 @@ for (const [norm, line] of latestByStok.entries()) {
       sonFiyatTarihi: line.tarih,
       tedarikciCariId: cari.id,
       tedarikciUnvan: cari.unvan,
+      arsivde: true,
+      stokKaynak: 'BIRBESAN_EXCEL',
     };
     mutableStoklar.push(stok);
     await setDoc(doc(db, 'stokKartlar', stok.id), stok);
@@ -308,6 +320,9 @@ for (const [norm, line] of latestByStok.entries()) {
       sonFiyatTarihi: line.tarih,
       tedarikciCariId: cari.id,
       tedarikciUnvan: cari.unvan,
+      arsivde: true,
+      stokKaynak: 'BIRBESAN_EXCEL',
+      kategori: 'BİRBESAN Arşiv',
     };
     await setDoc(doc(db, 'stokKartlar', stok.id), next);
     updatedStok += 1;
