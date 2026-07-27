@@ -264,7 +264,9 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
               title: `İrsaliye: ${data.irsaliyeNo || 'İRS-KOD'}`,
               desc: `Durum: ${data.onayDurumu}${data.kaynak ? ` · Kaynak: ${data.kaynak}` : ''}${
                 data.plaka ? ` · ${data.plaka}` : ''
-              }${data.cekimAdedi != null ? ` · ${data.cekimAdedi} çekim` : ''}`,
+              }${data.cekimAdedi != null ? ` · ${data.cekimAdedi} çekim` : ''}${
+                Array.isArray(data.kalemler) && data.kalemler.length ? ` · ${data.kalemler.length} kalem` : ''
+              }${data.toplamTutar ? ` · ₺${Number(data.toplamTutar).toLocaleString('tr-TR')}` : ''}`,
               date: data.tarih || '',
               badgeColor: 'bg-amber-100 text-amber-800',
               collection: 'irsaliyeler',
@@ -371,6 +373,17 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
           });
         });
       } else {
+        // Bu stok kartına ait kalemin miktar × birim fiyat bilgisini üretir
+        const kalemFiyatStr = (kalemler: any): string => {
+          if (!Array.isArray(kalemler)) return '';
+          const k = kalemler.find(
+            (x: any) => x.stokKartId === id || String(x.urunAdi || '').toLowerCase() === name.toLowerCase()
+          );
+          if (!k) return '';
+          const bf = Number(k.birimFiyat || 0);
+          const base = `${k.miktar ?? ''} ${k.birim || ''}`.trim();
+          return base + (bf ? ` × ₺${bf.toLocaleString('tr-TR')}` : '');
+        };
         const purchasesSnap = await getDocs(collection(db, 'satinAlmaTalepleri'));
         purchasesSnap.forEach((docSnap) => {
           const data = docSnap.data();
@@ -378,11 +391,12 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
             (k: any) => k.urunAdi?.toLowerCase() === name.toLowerCase() || k.stokKartId === id
           );
           if (hasItem) {
+            const kf = kalemFiyatStr(data.kalemler);
             logs.push({
               id: docSnap.id,
               type: 'SATIN ALMA',
               title: `Satın Alma: ${data.saId || 'SA-KOD'}`,
-              desc: `Firma: ${data.cariFirma}`,
+              desc: `Firma: ${data.cariFirma}${kf ? ` · ${kf}` : ''}`,
               date: data.tarih || '',
               badgeColor: 'bg-slate-100 text-slate-800',
               collection: 'satinAlmaTalepleri',
@@ -401,7 +415,7 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
               id: docSnap.id,
               type: 'İRSALİYE GİRİŞİ',
               title: `Depo girişi: ${data.irsaliyeNo || 'İRS-KOD'}`,
-              desc: `Firma: ${data.firma}`,
+              desc: `Firma: ${data.firma}${kalemFiyatStr(data.kalemler) ? ` · ${kalemFiyatStr(data.kalemler)}` : ''}`,
               date: data.tarih || '',
               badgeColor: 'bg-amber-100 text-amber-800',
               collection: 'irsaliyeler',
@@ -420,7 +434,7 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
               id: docSnap.id,
               type: 'FATURA',
               title: `Fatura: ${data.faturaNo || 'FAT-KOD'}`,
-              desc: `Firma: ${data.cariUnvan || '-'} · ₺${Number(data.genelToplam || 0).toLocaleString('tr-TR')}`,
+              desc: `Firma: ${data.cariUnvan || '-'}${kalemFiyatStr(data.kalemler) ? ` · ${kalemFiyatStr(data.kalemler)}` : ''} · ₺${Number(data.genelToplam || 0).toLocaleString('tr-TR')}`,
               date: data.tarih || '',
               badgeColor: 'bg-stone-200 text-stone-800',
               collection: 'faturalar',
