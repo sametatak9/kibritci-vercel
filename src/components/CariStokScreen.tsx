@@ -1,10 +1,10 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Building2, Package, Plus, Search, Trash2, Pencil, Download,
-  ClipboardList, X, RefreshCw, FileText, Truck, Receipt, Home, User, Users, Eye, UserX, Upload, Archive
+  ClipboardList, X, RefreshCw, FileText, Truck, Receipt, Home, User, Users, Eye, UserX, Upload, Archive, Printer
 } from 'lucide-react';
 import { collection, doc, getDoc, getDocs } from 'firebase/firestore';
-import { CariKart, Fatura, Irsaliye, Personel, SatinAlmaTalebi, StokKart } from '../types/erp';
+import { CariKart, Fatura, Irsaliye, Personel, SatinAlmaTalebi, StokKart, StokKartIslem } from '../types/erp';
 import { db, removeDocument } from '../lib/firebase';
 import { warnIfDuplicateCari, warnIfDuplicateStok } from '../lib/duplicateNameUtils';
 import { exportHistoryReport } from '../lib/reportExport';
@@ -22,12 +22,18 @@ import {
   normalizeImportText,
   parseCariStokExcelFiles,
 } from '../lib/cariStokExcelImport';
+import {
+  printCariStokTopluYazdir,
+  stokIslemleriForCariStoklar,
+  stoklarForCariKart,
+} from '../lib/cariStokTopluYazdir';
 
 interface CariStokScreenProps {
   cariKartlar: CariKart[];
   setCariKartlar: React.Dispatch<React.SetStateAction<CariKart[]>>;
   stokKartlar: StokKart[];
   setStokKartlar: React.Dispatch<React.SetStateAction<StokKart[]>>;
+  stokIslemGecmisi?: StokKartIslem[];
   personeller?: Personel[];
   setPersoneller?: React.Dispatch<React.SetStateAction<Personel[]>>;
 }
@@ -76,6 +82,7 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
   setCariKartlar,
   stokKartlar,
   setStokKartlar,
+  stokIslemGecmisi = [],
   personeller = [],
   setPersoneller,
 }) => {
@@ -172,6 +179,16 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
     if (!selectedCari) return [];
     return personelForCariKart(personeller, selectedCari);
   }, [personeller, selectedCari]);
+
+  const cariBagliStoklar = useMemo(() => {
+    if (!selectedCari) return [];
+    return stoklarForCariKart(selectedCari, stokKartlar);
+  }, [selectedCari, stokKartlar]);
+
+  const cariBagliStokIslemleri = useMemo(
+    () => stokIslemleriForCariStoklar(cariBagliStoklar, stokIslemGecmisi),
+    [cariBagliStoklar, stokIslemGecmisi]
+  );
 
   const bugun = todayDateKey();
   const bagliPersonelAktifSayisi = useMemo(
@@ -1302,6 +1319,113 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
                   </div>
                 )}
               </div>
+
+              {/* Tedarikçi stok kartları — BİRBESAN arşiv dahil */}
+              {(selectedCari.kartTipi === 'TEDARIKCI' || cariBagliStoklar.length > 0) && (
+                <div className="border border-amber-100 rounded-2xl overflow-hidden bg-amber-50/40">
+                  <div className="px-4 py-3 border-b border-amber-100 flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <h3 className="text-[11px] font-black uppercase tracking-wider text-amber-950 flex items-center gap-1.5">
+                        <Package size={13} /> Bu cariye bağlı stok kartları
+                      </h3>
+                      <p className="text-[10px] text-amber-900/70 mt-0.5">
+                        {normalizeImportText(selectedCari.unvan).includes('birbesan')
+                          ? 'BİRBESAN Excel arşiv stokları bu cari kart altında listelenir.'
+                          : 'Tedarikçiye bağlı stok kartları ve birim fiyatları.'}
+                        {cariBagliStokIslemleri.length > 0
+                          ? ` ${cariBagliStokIslemleri.length} giriş/çıkış hareketi.`
+                          : ''}
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-[10px] font-black bg-white text-amber-900 border border-amber-200 px-2.5 py-1 rounded-full">
+                        {cariBagliStoklar.length} stok
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          printCariStokTopluYazdir(
+                            selectedCari,
+                            cariBagliStoklar,
+                            cariBagliStokIslemleri
+                          )
+                        }
+                        disabled={cariBagliStoklar.length === 0}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[10px] font-bold bg-slate-900 text-white border border-slate-900 cursor-pointer disabled:opacity-40"
+                        title="Tüm stok kartlarını ve giriş/çıkış hareketlerini yazdır"
+                      >
+                        <Printer size={12} />
+                        Toplu Yazdır
+                      </button>
+                    </div>
+                  </div>
+                  {cariBagliStoklar.length === 0 ? (
+                    <div className="px-4 py-8 text-center text-[11px] text-slate-500 space-y-1">
+                      <p>Bu cariye bağlı stok kartı bulunamadı.</p>
+                      <p className="text-[10px] text-slate-400">
+                        {normalizeImportText(selectedCari.unvan).includes('birbesan')
+                          ? 'BİRBESAN Excel Aktar ile stokları bu karta aktarabilirsiniz.'
+                          : 'Excel Stok Aktar veya stok kartında tedarikçi alanını doldurun.'}
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="overflow-x-auto max-h-[320px]">
+                      <table className="w-full text-left text-[11px]">
+                        <thead className="bg-white/80 text-slate-500 uppercase text-[9px] font-bold sticky top-0">
+                          <tr>
+                            <th className="px-3 py-2">Stok Adı</th>
+                            <th className="px-3 py-2">Kod</th>
+                            <th className="px-3 py-2">Birim</th>
+                            <th className="px-3 py-2 text-right">Miktar</th>
+                            <th className="px-3 py-2 text-right">Son Fiyat</th>
+                            <th className="px-3 py-2 text-right">İşlem</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {cariBagliStoklar.map((st) => (
+                            <tr
+                              key={st.id}
+                              className="border-t border-amber-100/80 bg-white/70 hover:bg-amber-50/60"
+                            >
+                              <td className="px-3 py-2 font-bold text-slate-900">
+                                {st.stokAdi}
+                                {isBirbesanStokArsiv(st) && (
+                                  <span className="ml-1.5 text-[8px] font-black uppercase bg-amber-100 text-amber-900 border border-amber-200 rounded px-1 py-0.5">
+                                    Arşiv
+                                  </span>
+                                )}
+                              </td>
+                              <td className="px-3 py-2 font-mono text-slate-600">{st.stokKodu}</td>
+                              <td className="px-3 py-2 text-slate-700">{st.birim}</td>
+                              <td className="px-3 py-2 text-right font-bold text-slate-900">
+                                {Number(st.miktar ?? 0).toLocaleString('tr-TR')}
+                              </td>
+                              <td className="px-3 py-2 text-right text-emerald-800 font-semibold">
+                                {st.sonBirimFiyat != null && st.sonBirimFiyat > 0
+                                  ? `₺${st.sonBirimFiyat.toLocaleString('tr-TR')}`
+                                  : '—'}
+                              </td>
+                              <td className="px-3 py-2 text-right">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setCsTab('stok');
+                                    setStokListeTab(st.arsivde ? 'ARSIV' : 'AKTIF');
+                                    setSelectedStokId(st.id);
+                                  }}
+                                  className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold bg-white text-amber-900 border border-amber-200 hover:bg-amber-100 cursor-pointer"
+                                >
+                                  <Eye size={11} /> Aç
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              )}
 
               <CariTimeline
                 cariUnvan={selectedCari.unvan}

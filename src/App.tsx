@@ -3270,6 +3270,7 @@ export default function App() {
                   setCariKartlar={setCariKartlarWithSync}
                   stokKartlar={stokKartlar}
                   setStokKartlar={setStokKartlarWithSync}
+                  stokIslemGecmisi={stokIslemGecmisi}
                   personeller={personeller}
                   setPersoneller={setPersonellerWithSync}
                 />
