@@ -100,6 +100,7 @@ function createTaseronCariKart(unvan: string): CariKart {
 type PendingPersonelSave = {
   normalizedPayload: Omit<Personel, 'id'> | Personel;
   isEdit: boolean;
+  editingId?: string;
 };
 
 type TaseronResolveModalState =
@@ -363,12 +364,14 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
   };
 
   const handleSelectPersonel = (p: Personel) => {
-    const corrected = {
+    const corrected: Personel = {
       ...p,
+      id: p.id, // Firestore doc id korunur
       gorev: resolveAkvizyonGorev(p.firmaAdi, p.gorev),
     };
     setSelectedPersonel(corrected);
     setFormData(corrected);
+    setRegMethod('manual');
     if (p.firmaTipi === 'TASERON') {
       const match = taseronCariList.find(
         (c) =>
@@ -470,7 +473,8 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
     normalizedPayload: Omit<Personel, 'id'> | Personel,
     isEdit: boolean,
     taseronCariId?: string,
-    historyNote?: string
+    historyNote?: string,
+    editingId?: string
   ) => {
     const withRules = {
       ...normalizedPayload,
@@ -481,19 +485,27 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
         ? ('TASERON' as const)
         : normalizedPayload.firmaTipi,
     };
+
+    const resolvedEditId =
+      (editingId && String(editingId).trim()) ||
+      (isEdit && 'id' in withRules && withRules.id ? String(withRules.id).trim() : '') ||
+      (selectedPersonel?.id ? String(selectedPersonel.id).trim() : '');
+
     let savedPersonel: Personel;
-    if (isEdit && 'id' in withRules) {
-      savedPersonel = withRules as Personel;
+    if (resolvedEditId) {
+      // Güncelleme: asla yeni id üretme
+      savedPersonel = { ...(withRules as Omit<Personel, 'id'>), id: resolvedEditId };
     } else {
       savedPersonel = {
         ...(withRules as Omit<Personel, 'id'>),
         id: `p_${Date.now()}`,
       };
     }
+    const savingAsEdit = Boolean(resolvedEditId);
 
     try {
       // Doğrudan Firestore’a yaz — büyük görselleri tekrar gönderme (timeout/rollback engeli)
-      const prev = isEdit ? personeller.find((p) => p.id === savedPersonel.id) : undefined;
+      const prev = savingAsEdit ? personeller.find((p) => p.id === savedPersonel.id) : undefined;
       const lean = leanPersonelForFirestore(savedPersonel, prev);
       await saveDocument('personeller', lean as Personel);
     } catch (err: any) {
@@ -508,15 +520,27 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
     }
 
     setPersoneller((prev) => {
-      if (isEdit) {
-        return prev.map((p) => (p.id === savedPersonel.id ? savedPersonel : p));
+      if (savingAsEdit) {
+        const exists = prev.some((p) => p.id === savedPersonel.id);
+        if (exists) {
+          return prev.map((p) =>
+            p.id === savedPersonel.id ? { ...p, ...savedPersonel, id: savedPersonel.id } : p
+          );
+        }
+        // Seçili kaydın id'si listedekiyle farklıysa (eski bozuk id alanı) seçiliyi güncelle
+        if (selectedPersonel?.id) {
+          return prev.map((p) =>
+            p.id === selectedPersonel.id ? { ...savedPersonel, id: selectedPersonel.id } : p
+          );
+        }
+        return prev;
       }
       return [savedPersonel, ...prev];
     });
-    alert(isEdit ? 'Personel bilgileri başarıyla güncellendi.' : 'Yeni personel başarıyla kaydedildi.');
+    alert(savingAsEdit ? 'Personel bilgileri başarıyla güncellendi.' : 'Yeni personel başarıyla kaydedildi.');
 
     if (savedPersonel.firmaTipi === 'TASERON' && taseronCariId) {
-      appendTaseronCariHistory(taseronCariId, savedPersonel, isEdit ? 'edit' : 'create', historyNote);
+      appendTaseronCariHistory(taseronCariId, savedPersonel, savingAsEdit ? 'edit' : 'create', historyNote);
     }
 
     setTaseronResolveModal(null);
@@ -532,7 +556,9 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
       await finalizePersonelSave(
         { ...pending.normalizedPayload, firmaAdi: selected?.unvan || firmaAdi },
         pending.isEdit,
-        taseronKaynak
+        taseronKaynak,
+        undefined,
+        pending.editingId
       );
       return true;
     }
@@ -544,7 +570,9 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
       await finalizePersonelSave(
         { ...pending.normalizedPayload, firmaAdi: exact.unvan },
         pending.isEdit,
-        exact.id
+        exact.id,
+        undefined,
+        pending.editingId
       );
       return true;
     }
@@ -575,7 +603,8 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
       { ...pending.normalizedPayload, firmaAdi: selectedCari.unvan },
       pending.isEdit,
       selectedCari.id,
-      `Manuel "${manualName}" → "${selectedCari.unvan}" ile birleştirildi`
+      `Manuel "${manualName}" → "${selectedCari.unvan}" ile birleştirildi`,
+      pending.editingId
     );
     setTaseronKaynak(selectedCari.id);
     setManuelTaseronAdi('');
@@ -586,7 +615,13 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
     const { pending, manualName } = taseronResolveModal;
     if (!setCariKartlar) {
       alert('Cari kart oluşturulamıyor. Personel yalnızca elle yazılan firma adıyla kaydedilecek.');
-      void finalizePersonelSave({ ...pending.normalizedPayload, firmaAdi: manualName }, pending.isEdit);
+      void finalizePersonelSave(
+        { ...pending.normalizedPayload, firmaAdi: manualName },
+        pending.isEdit,
+        undefined,
+        undefined,
+        pending.editingId
+      );
       return;
     }
     const newCari = createTaseronCariKart(manualName);
@@ -595,7 +630,8 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
       { ...pending.normalizedPayload, firmaAdi: newCari.unvan },
       pending.isEdit,
       newCari.id,
-      'Yeni taşeron cari kartı açıldı'
+      'Yeni taşeron cari kartı açıldı',
+      pending.editingId
     );
     setTaseronKaynak(newCari.id);
     setManuelTaseronAdi('');
@@ -604,7 +640,13 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
   const handleSkipTaseronCariCreate = () => {
     if (!taseronResolveModal) return;
     const { pending, manualName } = taseronResolveModal;
-    void finalizePersonelSave({ ...pending.normalizedPayload, firmaAdi: manualName }, pending.isEdit);
+    void finalizePersonelSave(
+      { ...pending.normalizedPayload, firmaAdi: manualName },
+      pending.isEdit,
+      undefined,
+      undefined,
+      pending.editingId
+    );
   };
 
   const handleSave = async (e: React.FormEvent) => {
@@ -620,9 +662,14 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
       return;
     }
 
+    const editingId =
+      (selectedPersonel?.id && String(selectedPersonel.id).trim()) ||
+      ('id' in formData && formData.id ? String(formData.id).trim() : '');
+    const isEdit = Boolean(editingId);
+
     const duplicateTc = personeller.find((p) => {
       const existingTc = String(p.tcNo || '').trim();
-      if ('id' in formData && p.id === formData.id) return false;
+      if (isEdit && p.id === editingId) return false;
       return existingTc.length > 0 && existingTc === normalizedTc;
     });
     if (duplicateTc) {
@@ -635,7 +682,7 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
       return;
     }
 
-    const existingPersonel = 'id' in formData ? personeller.find((p) => p.id === formData.id) : undefined;
+    const existingPersonel = isEdit ? personeller.find((p) => p.id === editingId) : undefined;
     const inputIban = normalizeIban((formData as any).ibanNo || (formData as any).iban || '');
     const prevIban = normalizeIban(existingPersonel?.ibanNo || (existingPersonel as any)?.iban || '');
     const firmaFields = resolveFirmaFields();
@@ -653,19 +700,30 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
       return;
     }
 
-    const normalizedPayload = {
-      ...formData,
-      tcNo: normalizedTc,
-      ibanNo: finalIban,
-      gorev: normalizePersonelGorev(
-        resolveAkvizyonGorev(firmaFields.firmaAdi, (formData as any).gorev)
-      ),
-      firmaTipi: firmaFields.firmaTipi,
-      firmaAdi: firmaFields.firmaAdi,
-    };
+    const normalizedPayload: Omit<Personel, 'id'> | Personel = isEdit
+      ? {
+          ...formData,
+          id: editingId,
+          tcNo: normalizedTc,
+          ibanNo: finalIban,
+          gorev: normalizePersonelGorev(
+            resolveAkvizyonGorev(firmaFields.firmaAdi, (formData as any).gorev)
+          ),
+          firmaTipi: firmaFields.firmaTipi,
+          firmaAdi: firmaFields.firmaAdi,
+        }
+      : {
+          ...formData,
+          tcNo: normalizedTc,
+          ibanNo: finalIban,
+          gorev: normalizePersonelGorev(
+            resolveAkvizyonGorev(firmaFields.firmaAdi, (formData as any).gorev)
+          ),
+          firmaTipi: firmaFields.firmaTipi,
+          firmaAdi: firmaFields.firmaAdi,
+        };
 
-    const isEdit = 'id' in formData;
-    const pending: PendingPersonelSave = { normalizedPayload, isEdit };
+    const pending: PendingPersonelSave = { normalizedPayload, isEdit, editingId: editingId || undefined };
 
     if (firmaFields.firmaTipi === 'TASERON') {
       const proceeded = await resolveTaseronCariOnSave(firmaFields.firmaAdi, pending);
@@ -673,7 +731,7 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
       return;
     }
 
-    await finalizePersonelSave(normalizedPayload, isEdit);
+    await finalizePersonelSave(normalizedPayload, isEdit, undefined, undefined, editingId || undefined);
   };
 
   const handleDelete = (id: string) => {
@@ -1027,6 +1085,8 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
     URL.revokeObjectURL(url);
   };
 
+  const isEditMode = Boolean(selectedPersonel?.id) || ('id' in formData && Boolean((formData as Personel).id));
+
   return (
     <div className="flex-grow p-6 min-h-[calc(100vh-52px)] overflow-y-auto flex flex-col lg:flex-row font-sans gap-6 select-none bg-slate-50/50">
 
@@ -1040,16 +1100,16 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
               Personel Kayıt & Düzenleme
             </span>
             <h3 className="font-display font-black text-slate-800 text-sm">
-              { 'id' in formData ? "👤 Personel Bilgilerini Güncelle" : "👤 Yeni Personel Girişi" }
+              { isEditMode ? "👤 Personel Bilgilerini Güncelle" : "👤 Yeni Personel Girişi" }
             </h3>
           </div>
           <span className="text-[10px] bg-slate-100 text-slate-600 border border-slate-200 px-2 py-0.5 rounded-full font-mono font-bold shadow-sm">
-            { 'id' in formData ? "Düzeltme Modu" : "Yeni Kayıt" }
+            { isEditMode ? "Düzeltme Modu" : "Yeni Kayıt" }
           </span>
         </div>
 
         {/* Tab switcher for registration method - only shown in Create Mode */}
-        { !('id' in formData) && (
+        { !isEditMode && (
           <div className="flex border-b border-slate-100 bg-white p-3 gap-2 shrink-0">
             <button
               type="button"
@@ -1084,7 +1144,7 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
           </div>
         )}
 
-        {regMethod === 'sgk_pdf' && !('id' in formData) ? (
+        {regMethod === 'sgk_pdf' && !isEditMode ? (
           <div className="p-5 space-y-3 overflow-y-auto min-h-0">
             <div className="bg-slate-50 border border-slate-100 rounded-xl p-3 space-y-1 text-slate-700">
               <h5 className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
@@ -1624,13 +1684,14 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
       )}
 
         {/* Action button bar — panel altında sabit */}
-        {(regMethod === 'manual' || ('id' in formData)) && (
+        {(regMethod === 'manual' || isEditMode) && (
           <div className="shrink-0 p-4 border-t border-slate-100 flex gap-2 bg-white shadow-[0_-4px_12px_rgba(0,0,0,0.06)] z-10">
             <button
+              type="button"
               onClick={handleSave}
               className="flex-1 bg-slate-900 hover:bg-slate-800 active:scale-[0.98] transition cursor-pointer text-white font-bold text-xs py-2.5 rounded-xl shadow-md"
             >
-              { 'id' in formData ? "Verileri Güncelle" : "Kaydı Tamamla" }
+              { isEditMode ? "Verileri Güncelle" : "Kaydı Tamamla" }
             </button>
             <button
               type="button"

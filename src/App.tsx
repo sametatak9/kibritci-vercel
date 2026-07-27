@@ -1016,8 +1016,10 @@ export default function App() {
 
     const unsubPersonel = onSnapshot(collection(db, 'personeller'), (snapshot) => {
       const list: Personel[] = [];
-      snapshot.forEach((doc) => {
-        list.push({ id: doc.id, ...doc.data() } as any);
+      snapshot.forEach((docSnap) => {
+        const data = docSnap.data() as Record<string, unknown>;
+        // doc.id her zaman kazanır — data içindeki bozuk/eksik id alanı mükerrer kayıt üretmesin
+        list.push({ ...data, id: docSnap.id } as Personel);
       });
       setPersoneller(list);
       markDashboardSnapshot('personeller');
