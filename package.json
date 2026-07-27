@@ -28,7 +28,10 @@
     "backup:audit": "node scripts/migrate-firestore.mjs --audit-only",
     "restore:yoklama:dry-run": "node scripts/firestore-restore-selective.mjs --dry-run",
     "restore:yoklama": "node scripts/firestore-restore-selective.mjs --execute",
-    "auth:sync-claims": "node scripts/sync-auth-claims.mjs"
+    "auth:sync-claims": "node scripts/sync-auth-claims.mjs",
+    "birbesan:inspect": "node scripts/import-birbesan-stok-xlsx.mjs --dir data/birbesan --inspect",
+    "birbesan:import:dry-run": "node scripts/import-birbesan-stok-xlsx.mjs --dir data/birbesan --dry-run",
+    "birbesan:import": "node scripts/import-birbesan-stok-xlsx.mjs --dir data/birbesan --execute"
   },
   "dependencies": {
     "@google/genai": "^2.10.0",

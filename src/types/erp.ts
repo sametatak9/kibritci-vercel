@@ -563,6 +563,11 @@ export interface StokKart {
   aciklama: string;
   miktar?: number;
   tarih?: string;
+  /** Excel / tedarikçi fiyat listesinden son bilinen birim fiyat */
+  sonBirimFiyat?: number;
+  sonFiyatTarihi?: string;
+  tedarikciCariId?: string;
+  tedarikciUnvan?: string;
 }
 
 export interface EpostaGonderim {

@@ -12,3 +12,5 @@ api/[...path].js.map
 data/pending-signups.json
 firebase-target.config.json
 backups/
+data/birbesan/*.xlsx
+data/birbesan/*.xls

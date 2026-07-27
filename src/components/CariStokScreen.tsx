@@ -1,7 +1,7 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Building2, Package, Plus, Search, Trash2, Pencil, Download,
-  ClipboardList, X, RefreshCw, FileText, Truck, Receipt, Home, User, Users, Eye, UserX
+  ClipboardList, X, RefreshCw, FileText, Truck, Receipt, Home, User, Users, Eye, UserX, Upload
 } from 'lucide-react';
 import { collection, doc, getDoc, getDocs } from 'firebase/firestore';
 import { CariKart, Fatura, Irsaliye, Personel, SatinAlmaTalebi, StokKart } from '../types/erp';
@@ -14,6 +14,12 @@ import { todayDateKey } from '../lib/dateKeyUtils';
 import { EvrakDetayModal, EvrakDetayPayload } from './EvrakDetayModal';
 import { openBase64InNewTab } from '../lib/fileViewerUtils';
 import { CariTimeline } from './CariTimeline';
+import {
+  applyCariStokExcelImport,
+  ensureBirbesanCari,
+  normalizeImportText,
+  parseCariStokExcelFiles,
+} from '../lib/cariStokExcelImport';
 
 interface CariStokScreenProps {
   cariKartlar: CariKart[];
@@ -106,6 +112,8 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
   const [detayPayload, setDetayPayload] = useState<EvrakDetayPayload | null>(null);
   const [genericDetail, setGenericDetail] = useState<GenericDetail | null>(null);
   const [detailLoadingId, setDetailLoadingId] = useState<string | null>(null);
+  const [excelImporting, setExcelImporting] = useState(false);
+  const excelInputRef = useRef<HTMLInputElement>(null);
 
   const filteredCariKartlar = useMemo(() => {
     const q = cariSearchQuery.trim().toLocaleLowerCase('tr-TR');
@@ -743,6 +751,54 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
     setShowForm(true);
   };
 
+  const handleExcelImport = async (fileList: FileList | null) => {
+    if (!selectedCari || !fileList?.length) return;
+    const files = Array.from(fileList);
+    setExcelImporting(true);
+    try {
+      const { lines, warnings } = await parseCariStokExcelFiles(files);
+      if (!lines.length) {
+        alert(`Excel okunamadı.\n${warnings.join('\n') || 'Veri satırı bulunamadı.'}`);
+        return;
+      }
+      const uniqueCount = new Set(lines.map((l) => normalizeImportText(l.urunAdi))).size;
+      const ok = window.confirm(
+        `${files.length} dosyadan ${lines.length} kalem bulundu.\n` +
+          `${uniqueCount} benzersiz stok kartı oluşturulacak veya güncellenecek.\n` +
+          `Hedef cari: ${selectedCari.unvan}\n\nDevam edilsin mi?`
+      );
+      if (!ok) return;
+
+      const cari =
+        normalizeImportText(selectedCari.unvan).includes('birbesan')
+          ? ensureBirbesanCari(cariKartlar, setCariKartlar)
+          : selectedCari;
+
+      const summary = await applyCariStokExcelImport({
+        lines,
+        cari,
+        stokKartlar,
+        setStokKartlar,
+      });
+
+      alert(
+        `Excel aktarımı tamamlandı.\n` +
+          `Yeni stok kartı: ${summary.createdStok}\n` +
+          `Güncellenen stok: ${summary.updatedStok}\n` +
+          `Arşiv fatura: ${summary.createdFatura}\n` +
+          `Stok hareketi: ${summary.createdStokIslem}`
+      );
+
+      if (cari.id !== selectedCariId) setSelectedCariId(cari.id);
+      void loadHistoryData('cari', cari.id, cari.unvan, cari.kod);
+    } catch (err) {
+      alert(`Excel aktarım hatası: ${String((err as Error)?.message || err)}`);
+    } finally {
+      setExcelImporting(false);
+      if (excelInputRef.current) excelInputRef.current.value = '';
+    }
+  };
+
   const exportLogs = (format: 'csv' | 'html') => {
     const card = csTab === 'cari' ? selectedCari : selectedStok;
     if (!card) return;
@@ -900,6 +956,9 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
                           <p className="text-xs font-black text-slate-900 truncate mt-0.5">{st.stokAdi}</p>
                           <p className="text-[10px] text-teal-800 font-bold mt-0.5">
                             {st.birim} · {st.kategori}
+                            {st.sonBirimFiyat != null && st.sonBirimFiyat > 0
+                              ? ` · ₺${st.sonBirimFiyat.toLocaleString('tr-TR')}`
+                              : ''}
                           </p>
                         </div>
                         <span className="shrink-0 text-[9px] font-black px-2 py-0.5 rounded-full h-fit bg-emerald-100 text-emerald-800">
@@ -941,6 +1000,28 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
                   </p>
                 </div>
                 <div className="flex flex-wrap gap-2">
+                  {selectedCari.kartTipi === 'TEDARIKCI' && (
+                    <>
+                      <input
+                        ref={excelInputRef}
+                        type="file"
+                        accept=".xlsx,.xls"
+                        multiple
+                        className="hidden"
+                        onChange={(e) => void handleExcelImport(e.target.files)}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => excelInputRef.current?.click()}
+                        disabled={excelImporting}
+                        className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-[11px] font-bold bg-sky-50 text-sky-900 border border-sky-200 cursor-pointer disabled:opacity-50"
+                        title="Excel cari hesap / fatura listesinden stok kartı ve fiyat aktar"
+                      >
+                        <Upload size={12} />
+                        {excelImporting ? 'Aktarılıyor…' : 'Excel Stok Aktar'}
+                      </button>
+                    </>
+                  )}
                   <button
                     type="button"
                     onClick={() => openEditCari(selectedCari)}
@@ -1107,6 +1188,15 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
                   <h2 className="text-lg font-black text-slate-900 mt-0.5">{selectedStok.stokAdi}</h2>
                   <p className="text-xs text-slate-500 mt-1">
                     {selectedStok.kategori} · Birim: {selectedStok.birim}
+                    {selectedStok.sonBirimFiyat != null && selectedStok.sonBirimFiyat > 0 && (
+                      <span className="ml-2 font-bold text-emerald-700">
+                        Son fiyat: ₺{selectedStok.sonBirimFiyat.toLocaleString('tr-TR')}
+                        {selectedStok.sonFiyatTarihi ? ` (${selectedStok.sonFiyatTarihi})` : ''}
+                      </span>
+                    )}
+                    {selectedStok.tedarikciUnvan && (
+                      <span className="ml-2 text-amber-800">Tedarikçi: {selectedStok.tedarikciUnvan}</span>
+                    )}
                     <span className="ml-2 inline-flex items-center font-bold text-slate-800 bg-slate-100 border border-slate-200 rounded-lg px-2 py-0.5">
                       Stok: {Number(selectedStok.miktar ?? 0).toLocaleString('tr-TR')} {selectedStok.birim}
                     </span>
