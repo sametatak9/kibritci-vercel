@@ -30,12 +30,38 @@ function findPersonelByEmail(
 
 /** Kamp faaliyetindeki çalışan (bağlı personel) sayısı */
 export function kampFaaliyetCalisanSayisi(
-  f: KampFaaliyet | FaaliyetPersonelKaynak | null | undefined
+  f: KampFaaliyet | FaaliyetPersonelKaynak | null | undefined,
+  personeller?: Personel[]
 ): number {
   if (!f) return 0;
-  const fromList = (f.aktifPersonelListesi || [])
-    .map((x) => String(x || '').trim())
-    .filter(Boolean);
+
+  // Personel listesi gelirse: sadece ana firma saha işçisi kapsamına girenleri say.
+  if (personeller) {
+    const ids = new Set<string>();
+    const addIfScoped = (pid: string) => {
+      const p = personeller.find((x) => x.id === pid);
+      if (p && isFaaliyetPersonelKapsaminda(p)) ids.add(pid);
+    };
+
+    for (const raw of f.aktifPersonelListesi || []) {
+      const pid = String(raw || '').trim();
+      if (pid) addIfScoped(pid);
+    }
+
+    if (f.personelMesaiSaatleri) {
+      for (const [pid, hrs] of Object.entries(f.personelMesaiSaatleri)) {
+        if (Number(hrs) > 0) addIfScoped(pid);
+      }
+    }
+
+    if (f.personelId) addIfScoped(f.personelId);
+
+    if (ids.size > 0) return ids.size;
+    return 0;
+  }
+
+  // Eski davranış (personeller filtre bilgisi yokken)
+  const fromList = (f.aktifPersonelListesi || []).map((x) => String(x || '').trim()).filter(Boolean);
   if (fromList.length > 0) return new Set(fromList).size;
   if (f.personelMesaiSaatleri) {
     const n = Object.values(f.personelMesaiSaatleri).filter((h) => Number(h) > 0).length;
@@ -285,9 +311,16 @@ export function resolveFaaliyetEkip(
     if (!raw) continue;
     const byId = personeller.find((p) => p.id === raw);
     const byName = byId || findPersonelByName(personeller, raw);
+
+    // Sadece ana firma saha işçilerini göster (taşeron/idari/formenleri chip'e koyma)
+    if (byId && !isFaaliyetPersonelKapsaminda(byId)) continue;
+    if (byName && !isFaaliyetPersonelKapsaminda(byName)) continue;
+
     const adSoyad = byName
       ? `${byName.ad} ${byName.soyad}`.trim()
       : raw;
+    // Personel bulunamazsa (raw id/nickname) chip'e yazmayalım.
+    if (!byName) continue;
     const key = normalizeTurkishName(adSoyad);
     if (seen.has(key)) continue;
     seen.add(key);
@@ -307,7 +340,9 @@ export function resolveFaaliyetEkip(
     for (const [pid, hrs] of Object.entries(f.personelMesaiSaatleri)) {
       if (!(Number(hrs) > 0)) continue;
       const p = personeller.find((x) => x.id === pid);
-      const adSoyad = p ? `${p.ad} ${p.soyad}`.trim() : pid;
+      if (!p) continue;
+      if (!isFaaliyetPersonelKapsaminda(p)) continue;
+      const adSoyad = `${p.ad} ${p.soyad}`.trim();
       const key = normalizeTurkishName(adSoyad);
       if (seen.has(key)) continue;
       seen.add(key);
@@ -318,6 +353,7 @@ export function resolveFaaliyetEkip(
   if (out.length === 0 && f.personelId) {
     const p = personeller.find((x) => x.id === f.personelId);
     if (p) {
+      if (!isFaaliyetPersonelKapsaminda(p)) return out;
       out.push({
         id: p.id,
         adSoyad: `${p.ad} ${p.soyad}`.trim(),
@@ -503,7 +539,7 @@ export function buildPeriodFaaliyetOzeti(
     kampFaaliyetleri
   );
   const kampCalisanSayisi = kampPeriod.reduce(
-    (n, f) => n + kampFaaliyetCalisanSayisi(f),
+    (n, f) => n + kampFaaliyetCalisanSayisi(f, personeller),
     0
   );
   return {

@@ -1019,7 +1019,7 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
                   personKampFaaliyetleri.map((f) => {
                     const fotolar = getFaaliyetFotolar(f);
                     const ekip = resolveFaaliyetEkip(f, personeller);
-                    const calisan = kampFaaliyetCalisanSayisi(f);
+                    const calisan = kampFaaliyetCalisanSayisi(f, personeller);
                     return (
                       <article
                         key={`kamp-${f.id}`}
@@ -1113,7 +1113,7 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
               </span>
               <span className="bg-teal-700 text-white rounded-full px-2.5 py-1 inline-flex items-center gap-1">
                 <Users size={11} />
-                {dayKampFaaliyetleri.reduce((n, f) => n + kampFaaliyetCalisanSayisi(f), 0)} kamp çalışan
+                {dayKampFaaliyetleri.reduce((n, f) => n + kampFaaliyetCalisanSayisi(f, personeller), 0)} kamp çalışan
               </span>
               <span className="bg-indigo-50 text-indigo-800 border border-indigo-100 rounded-full px-2.5 py-1 inline-flex items-center gap-1">
                 <Images size={11} />
@@ -1327,7 +1327,7 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
                   {dayKampFaaliyetleri.map((f) => {
                     const fotolar = getFaaliyetFotolar(f);
                     const ekip = resolveFaaliyetEkip(f, personeller);
-                    const calisan = kampFaaliyetCalisanSayisi(f);
+                    const calisan = kampFaaliyetCalisanSayisi(f, personeller);
                     return (
                       <article
                         key={`day-kamp-${f.id}`}
