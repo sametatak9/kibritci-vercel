@@ -225,6 +225,8 @@ export interface TesisatciFaaliyet {
   aciklama: string;
   fotoUrl?: string | null;
   fotoUrls?: string[];
+  /** Faaliyete bağlanan personel id'leri (Faaliyeti Olan Personeller) */
+  aktifPersonelListesi?: string[];
   personelMesaiSaatleri?: Record<string, number>;
   durum?: string;
   kaydeden?: string;
@@ -244,6 +246,7 @@ export interface MermerciFaaliyet {
   aciklama: string;
   fotoUrl?: string | null;
   fotoUrls?: string[];
+  aktifPersonelListesi?: string[];
   personelMesaiSaatleri?: Record<string, number>;
   durum?: string;
   kaydeden?: string;

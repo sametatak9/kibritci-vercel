@@ -22,7 +22,7 @@ import {
   Printer,
   Loader2,
 } from 'lucide-react';
-import { AylikYoklamaMap, KampFaaliyet, Personel, SahaFaaliyeti } from '../types/erp';
+import { AylikYoklamaMap, KampFaaliyet, MermerciFaaliyet, Personel, SahaFaaliyeti, TesisatciFaaliyet } from '../types/erp';
 import {
   formatMesaiFaaliyetLabel,
   getFaaliyetFotolar,
@@ -47,6 +47,44 @@ import { isKampciGorev, normalizeTurkishName } from '../lib/yoklamaUtils';
 import { db } from '../lib/firebase';
 import { collection, onSnapshot } from 'firebase/firestore';
 import { GunlukFaaliyetProgramScreen } from './GunlukFaaliyetProgramScreen';
+
+function tesisatciToSaha(f: TesisatciFaaliyet): SahaFaaliyeti {
+  return {
+    id: f.id,
+    personelId: f.aktifPersonelListesi?.[0] || '',
+    tarih: f.tarih,
+    isNiteligi: f.isNiteligi || 'Tesisat faaliyeti',
+    parsel: f.calismaAlani || '',
+    blok: f.yerleskeAdi || '',
+    aciklama: f.aciklama || '',
+    fotoUrl: f.fotoUrl || undefined,
+    fotoUrls: f.fotoUrls,
+    aktifPersonelListesi: f.aktifPersonelListesi,
+    personelMesaiSaatleri: f.personelMesaiSaatleri,
+    faaliyetTipi: f.faaliyetGrubu === 'MESAI' ? 'MESAI_SAHA' : 'NORMAL',
+    kaynakEkran: 'TESISATCI_MOBIL',
+    kaydeden: f.kaydeden,
+  };
+}
+
+function mermerciToSaha(f: MermerciFaaliyet): SahaFaaliyeti {
+  return {
+    id: f.id,
+    personelId: f.aktifPersonelListesi?.[0] || '',
+    tarih: f.tarih,
+    isNiteligi: f.isNiteligi || 'Mermer faaliyeti',
+    parsel: f.parsel || '',
+    blok: f.blok || '',
+    aciklama: f.aciklama || '',
+    fotoUrl: f.fotoUrl || undefined,
+    fotoUrls: f.fotoUrls,
+    aktifPersonelListesi: f.aktifPersonelListesi,
+    personelMesaiSaatleri: f.personelMesaiSaatleri,
+    faaliyetTipi: f.faaliyetGrubu === 'MESAI' ? 'MESAI_SAHA' : 'NORMAL',
+    kaynakEkran: 'MERMERCI_MOBIL',
+    kaydeden: f.kaydeden,
+  };
+}
 
 type ViewMode = 'personel' | 'gun' | 'program';
 
@@ -106,6 +144,8 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
   const [selectedPersonId, setSelectedPersonId] = useState<string | null>(null);
   const [lightbox, setLightbox] = useState<{ urls: string[]; index: number } | null>(null);
   const [kampFaaliyetleri, setKampFaaliyetleri] = useState<KampFaaliyet[]>([]);
+  const [tesisatciFaaliyetleri, setTesisatciFaaliyetleri] = useState<TesisatciFaaliyet[]>([]);
+  const [mermerciFaaliyetleri, setMermerciFaaliyetleri] = useState<MermerciFaaliyet[]>([]);
   const [exportingExcel, setExportingExcel] = useState(false);
 
   useEffect(() => {
@@ -116,6 +156,34 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
     });
     return () => unsub();
   }, []);
+
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, 'tesisatciFaaliyetleri'), (snap) => {
+      const list: TesisatciFaaliyet[] = [];
+      snap.forEach((d) => list.push({ id: d.id, ...(d.data() as Omit<TesisatciFaaliyet, 'id'>) }));
+      setTesisatciFaaliyetleri(list);
+    });
+    return () => unsub();
+  }, []);
+
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, 'mermerciFaaliyetleri'), (snap) => {
+      const list: MermerciFaaliyet[] = [];
+      snap.forEach((d) => list.push({ id: d.id, ...(d.data() as Omit<MermerciFaaliyet, 'id'>) }));
+      setMermerciFaaliyetleri(list);
+    });
+    return () => unsub();
+  }, []);
+
+  /** Formen saha + tesisatçı + mermerci (program atama havuzuna karışmaz) */
+  const tumSahaFaaliyetleri = useMemo(
+    () => [
+      ...sahaFaaliyetleri,
+      ...tesisatciFaaliyetleri.map(tesisatciToSaha),
+      ...mermerciFaaliyetleri.map(mermerciToSaha),
+    ],
+    [sahaFaaliyetleri, tesisatciFaaliyetleri, mermerciFaaliyetleri]
+  );
 
   const periodLabel = useMemo(
     () =>
@@ -129,25 +197,25 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
   const faaliyetPersoneller = useMemo(
     () =>
       buildFaaliyetPersoneller(
-        sahaFaaliyetleri,
+        tumSahaFaaliyetleri,
         personeller,
         selectedYear,
         selectedMonth,
         kampFaaliyetleri
       ),
-    [sahaFaaliyetleri, kampFaaliyetleri, personeller, selectedYear, selectedMonth]
+    [tumSahaFaaliyetleri, kampFaaliyetleri, personeller, selectedYear, selectedMonth]
   );
 
   const periodOzet = useMemo(
     () =>
       buildPeriodFaaliyetOzeti(
-        sahaFaaliyetleri,
+        tumSahaFaaliyetleri,
         personeller,
         selectedYear,
         selectedMonth,
         kampFaaliyetleri
       ),
-    [sahaFaaliyetleri, kampFaaliyetleri, personeller, selectedYear, selectedMonth]
+    [tumSahaFaaliyetleri, kampFaaliyetleri, personeller, selectedYear, selectedMonth]
   );
 
   const filteredList = useMemo(() => {
@@ -195,12 +263,12 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
       selectedPerson
         ? getPersonFaaliyetleriInPeriod(
             selectedPerson,
-            sahaFaaliyetleri,
+            tumSahaFaaliyetleri,
             selectedYear,
             selectedMonth
           )
         : [],
-    [selectedPerson, sahaFaaliyetleri, selectedYear, selectedMonth]
+    [selectedPerson, tumSahaFaaliyetleri, selectedYear, selectedMonth]
   );
 
   const personKampFaaliyetleri = useMemo(
@@ -232,10 +300,10 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
   );
 
   const daySahaFaaliyetleri = useMemo((): SahaFaaliyeti[] => {
-    return filterFaaliyetlerByDate<SahaFaaliyeti>(sahaFaaliyetleri, selectedDate).sort((a, b) =>
+    return filterFaaliyetlerByDate<SahaFaaliyeti>(tumSahaFaaliyetleri, selectedDate).sort((a, b) =>
       String(b.isNiteligi || '').localeCompare(String(a.isNiteligi || ''), 'tr')
     );
-  }, [sahaFaaliyetleri, selectedDate]);
+  }, [tumSahaFaaliyetleri, selectedDate]);
 
   const dayKampFaaliyetleri = useMemo((): KampFaaliyet[] => {
     return filterFaaliyetlerByDate<KampFaaliyet>(kampFaaliyetleri, selectedDate).sort((a, b) =>
@@ -246,13 +314,13 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
   const dayOzet = useMemo(
     () =>
       buildDayFaaliyetOzeti(
-        sahaFaaliyetleri,
+        tumSahaFaaliyetleri,
         kampFaaliyetleri,
         personeller,
         selectedDate,
         yoklamalar
       ),
-    [sahaFaaliyetleri, kampFaaliyetleri, personeller, selectedDate, yoklamalar]
+    [tumSahaFaaliyetleri, kampFaaliyetleri, personeller, selectedDate, yoklamalar]
   );
 
   const dayPersonelRaporu = useMemo(
@@ -689,13 +757,13 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
               <div className="p-8 text-center text-slate-400 text-xs space-y-2">
                 <Camera className="mx-auto opacity-30" size={28} />
                 <p className="font-bold text-slate-500">Bu dönemde faaliyetli personel yok</p>
-                <p>Formen / idari saha veya kampçı faaliyetleri girdikçe burada listelenir.</p>
+                <p>Formen / tesisatçı / mermerci / kampçı faaliyetleri girdikçe burada listelenir.</p>
               </div>
             ) : (
               filteredList.map((p) => {
                 const count = getPersonFaaliyetleriInPeriod(
                   p,
-                  sahaFaaliyetleri,
+                  tumSahaFaaliyetleri,
                   selectedYear,
                   selectedMonth
                 ).length;
@@ -707,7 +775,7 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
                 ).length;
                 const fotoCount = countPersonFaaliyetFotolar(
                   p,
-                  sahaFaaliyetleri,
+                  tumSahaFaaliyetleri,
                   selectedYear,
                   selectedMonth,
                   kampFaaliyetleri

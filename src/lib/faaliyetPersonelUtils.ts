@@ -19,6 +19,7 @@ export type FaaliyetPersonelKaynak = {
   kaydedenKampci?: string;
   kaydeden?: string;
   kaydedenFormen?: string;
+  kaynakEkran?: string;
 };
 
 function findPersonelByEmail(
@@ -105,6 +106,19 @@ export function personMatchesFaaliyet(
   ) {
     return true;
   }
+
+  // Tesisatçı / Mermerci mobil kaydeden — kendi faaliyetine bağlanır
+  const kaynak = String((f as FaaliyetPersonelKaynak).kaynakEkran || '');
+  const kaydedenEmail = String((f as FaaliyetPersonelKaynak).kaydeden || '')
+    .trim()
+    .toLowerCase();
+  if (
+    kaydedenEmail &&
+    (kaynak === 'TESISATCI_MOBIL' || kaynak === 'MERMERCI_MOBIL') &&
+    String(p.eposta || '').trim().toLowerCase() === kaydedenEmail
+  ) {
+    return true;
+  }
   return false;
 }
 
@@ -187,6 +201,13 @@ function absorbFaaliyetPersonel(
   // Yalnızca kampçı kaydeden — saha kaydeden/formen e-postası çalışan listesine girmez
   const kaydedenKampci = findPersonelByEmail(personeller, f.kaydedenKampci);
   if (kaydedenKampci && isKampciGorev(kaydedenKampci.gorev)) addPerson(kaydedenKampci);
+
+  // Tesisatçı / Mermerci mobil kaydeden
+  const kaynak = String(f.kaynakEkran || '');
+  if (kaynak === 'TESISATCI_MOBIL' || kaynak === 'MERMERCI_MOBIL') {
+    const kaydedenMobil = findPersonelByEmail(personeller, f.kaydeden);
+    if (kaydedenMobil) addPerson(kaydedenMobil);
+  }
 }
 
 /** Seçili ayda saha ∪ kamp faaliyetine bağlı personeller */

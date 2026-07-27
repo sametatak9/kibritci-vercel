@@ -3,11 +3,12 @@ import {
   Gem, ClipboardList, Camera, CheckCircle, RefreshCw, LogOut, Pencil, Trash2, Calendar
 } from 'lucide-react';
 import { collection, deleteDoc, doc, onSnapshot, setDoc } from 'firebase/firestore';
-import { AylikYoklamaMap, MermerciFaaliyet, Personel } from '../types/erp';
-import { db } from '../lib/firebase';
+import { AylikYoklamaMap, MermerciFaaliyet, Personel, SahaFaaliyeti } from '../types/erp';
+import { db, cleanUndefined } from '../lib/firebase';
 import { compressImage } from '../lib/imageCompress';
 import { todayDateKey, formatDateLabelTr, normalizeDateKey } from '../lib/dateKeyUtils';
 import { applySahaMesaiToYoklama, normalizeMesaiHours } from '../lib/sahaFaaliyetUtils';
+import { ensureSahaFaaliyetFotolarPersisted } from '../lib/sahaFaaliyetFotoStorage';
 import { isMermerciGorev } from '../lib/yoklamaUtils';
 import { PARSEL_BLOK_MAP, PARSEL_LIST, defaultBlokForParsel } from '../data/parselBlokMap';
 import { KampGunlukYoklamaTab } from './KampGunlukYoklamaTab';
@@ -166,9 +167,44 @@ export const MermerciMobilScreen: React.FC<MermerciMobilScreenProps> = ({
                 .map(([pid, h]) => [pid, normalizeMesaiHours(Number(h))])
                 .filter(([, h]) => Number(h) > 0)
             )
-          : undefined;
+          : null;
 
-      const payload: MermerciFaaliyet = {
+      const kaydedenEmail = String(currentUser?.email || 'mermerci').trim().toLowerCase();
+      let aktifPersonelListesi: string[] = [];
+      if (mesaiMap && Object.keys(mesaiMap).length > 0) {
+        aktifPersonelListesi = Object.keys(mesaiMap);
+      } else {
+        const self = mermerciPersoneller.find(
+          (p) => String(p.eposta || '').trim().toLowerCase() === kaydedenEmail
+        );
+        if (self?.id) aktifPersonelListesi = [self.id];
+        else if (existing?.aktifPersonelListesi?.length) {
+          aktifPersonelListesi = [...existing.aktifPersonelListesi];
+        } else if (mermerciPersoneller.length === 1) {
+          aktifPersonelListesi = [mermerciPersoneller[0].id];
+        }
+      }
+
+      const fotoSeed = fotoUrl || existing?.fotoUrl || '';
+      let fotoPayload: { fotoUrl?: string | null; fotoUrls?: string[] } = {
+        fotoUrl: fotoSeed || null,
+        fotoUrls: fotoSeed ? [fotoSeed] : [],
+      };
+      try {
+        const persisted = await ensureSahaFaaliyetFotolarPersisted({
+          id,
+          fotoUrl: fotoPayload.fotoUrl || undefined,
+          fotoUrls: fotoPayload.fotoUrls,
+        } as SahaFaaliyeti);
+        fotoPayload = {
+          fotoUrl: persisted.fotoUrl || null,
+          fotoUrls: persisted.fotoUrls || (persisted.fotoUrl ? [persisted.fotoUrl] : []),
+        };
+      } catch (fotoErr) {
+        console.warn('Mermerci foto Storage atlandı:', fotoErr);
+      }
+
+      const payload: Record<string, unknown> = {
         id,
         tarih: normalizeDateKey(faaliyetTarih),
         faaliyetGrubu,
@@ -176,22 +212,27 @@ export const MermerciMobilScreen: React.FC<MermerciMobilScreenProps> = ({
         parsel,
         blok: blok || 'GENEL SAHA',
         aciklama: aciklama.trim(),
-        fotoUrl: fotoUrl || existing?.fotoUrl || null,
-        fotoUrls: fotoUrl || existing?.fotoUrl ? [fotoUrl || existing?.fotoUrl || ''] : undefined,
-        personelMesaiSaatleri: mesaiMap,
+        fotoUrl: fotoPayload.fotoUrl,
+        fotoUrls: fotoPayload.fotoUrls?.length ? fotoPayload.fotoUrls : [],
+        aktifPersonelListesi,
         durum: 'ONAY BEKLİYOR',
         kaydeden: currentUser?.email || 'mermerci',
         kaynakEkran: 'MERMERCI_MOBIL',
         olusturulma: existing?.olusturulma || new Date().toISOString(),
         guncellenme: new Date().toISOString(),
       };
+      if (mesaiMap && Object.keys(mesaiMap).length > 0) {
+        payload.personelMesaiSaatleri = mesaiMap;
+      } else {
+        payload.personelMesaiSaatleri = null;
+      }
 
-      await setDoc(doc(db, 'mermerciFaaliyetleri', id), payload);
+      await setDoc(doc(db, 'mermerciFaaliyetleri', id), cleanUndefined(payload));
 
       if (faaliyetGrubu === 'MESAI' || existing?.faaliyetGrubu === 'MESAI') {
         await syncMesai(
-          payload.tarih,
-          faaliyetGrubu === 'MESAI' ? mesaiMap : undefined,
+          String(payload.tarih),
+          faaliyetGrubu === 'MESAI' && mesaiMap ? mesaiMap : undefined,
           existing?.faaliyetGrubu === 'MESAI' ? existing.personelMesaiSaatleri : undefined
         );
       }

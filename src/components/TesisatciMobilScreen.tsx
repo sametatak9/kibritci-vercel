@@ -5,12 +5,13 @@ import {
 } from 'lucide-react';
 import { collection, deleteDoc, doc, onSnapshot, setDoc } from 'firebase/firestore';
 import {
-  AylikYoklamaMap, CariKart, CariKartIslem, Fatura, KampYerleske, Personel, TesisatciFaaliyet
+  AylikYoklamaMap, CariKart, CariKartIslem, Fatura, KampYerleske, Personel, SahaFaaliyeti, TesisatciFaaliyet
 } from '../types/erp';
-import { db } from '../lib/firebase';
+import { db, cleanUndefined } from '../lib/firebase';
 import { compressImage } from '../lib/imageCompress';
 import { todayDateKey, formatDateLabelTr, normalizeDateKey } from '../lib/dateKeyUtils';
 import { applySahaMesaiToYoklama, normalizeMesaiHours } from '../lib/sahaFaaliyetUtils';
+import { ensureSahaFaaliyetFotolarPersisted } from '../lib/sahaFaaliyetFotoStorage';
 import { isTesisatciGorev } from '../lib/yoklamaUtils';
 import { vibrateYildirimAlert } from '../lib/yildirimTankerUtils';
 import { KampGunlukYoklamaTab } from './KampGunlukYoklamaTab';
@@ -220,33 +221,73 @@ export const TesisatciMobilScreen: React.FC<TesisatciMobilScreenProps> = ({
                 .map(([pid, h]) => [pid, normalizeMesaiHours(Number(h))])
                 .filter(([, h]) => Number(h) > 0)
             )
-          : undefined;
+          : null;
 
-      const payload: TesisatciFaaliyet = {
+      const kaydedenEmail = String(currentUser?.email || 'tesisatci').trim().toLowerCase();
+      let aktifPersonelListesi: string[] = [];
+      if (mesaiMap && Object.keys(mesaiMap).length > 0) {
+        aktifPersonelListesi = Object.keys(mesaiMap);
+      } else {
+        const self = tesisatciPersoneller.find(
+          (p) => String(p.eposta || '').trim().toLowerCase() === kaydedenEmail
+        );
+        if (self?.id) aktifPersonelListesi = [self.id];
+        else if (existing?.aktifPersonelListesi?.length) {
+          aktifPersonelListesi = [...existing.aktifPersonelListesi];
+        } else if (tesisatciPersoneller.length === 1) {
+          aktifPersonelListesi = [tesisatciPersoneller[0].id];
+        }
+      }
+
+      const fotoSeed = fotoUrl || existing?.fotoUrl || '';
+      let fotoPayload: { fotoUrl?: string | null; fotoUrls?: string[] } = {
+        fotoUrl: fotoSeed || null,
+        fotoUrls: fotoSeed ? [fotoSeed] : [],
+      };
+      try {
+        const persisted = await ensureSahaFaaliyetFotolarPersisted({
+          id,
+          fotoUrl: fotoPayload.fotoUrl || undefined,
+          fotoUrls: fotoPayload.fotoUrls,
+        } as SahaFaaliyeti);
+        fotoPayload = {
+          fotoUrl: persisted.fotoUrl || null,
+          fotoUrls: persisted.fotoUrls || (persisted.fotoUrl ? [persisted.fotoUrl] : []),
+        };
+      } catch (fotoErr) {
+        console.warn('Tesisatçı foto Storage atlandı:', fotoErr);
+      }
+
+      const payload: Record<string, unknown> = {
         id,
         tarih: normalizeDateKey(faaliyetTarih),
         faaliyetGrubu,
         isNiteligi,
         calismaAlani,
-        yerleskeAdi:
-          calismaAlani === 'OFİS' ? 'Ofis' : yerleskeAdi.trim() || 'Kamp',
+        yerleskeAdi: calismaAlani === 'OFİS' ? 'Ofis' : yerleskeAdi.trim() || 'Kamp',
         aciklama: aciklama.trim(),
-        fotoUrl: fotoUrl || existing?.fotoUrl || null,
-        fotoUrls: fotoUrl || existing?.fotoUrl ? [fotoUrl || existing?.fotoUrl || ''] : undefined,
-        personelMesaiSaatleri: mesaiMap,
+        fotoUrl: fotoPayload.fotoUrl,
+        fotoUrls: fotoPayload.fotoUrls?.length ? fotoPayload.fotoUrls : [],
+        aktifPersonelListesi,
         durum: 'ONAY BEKLİYOR',
         kaydeden: currentUser?.email || 'tesisatci',
         kaynakEkran: 'TESISATCI_MOBIL',
         olusturulma: existing?.olusturulma || new Date().toISOString(),
         guncellenme: new Date().toISOString(),
       };
+      // Firestore undefined kabul etmez — mesai yoksa alanı yazma / null
+      if (mesaiMap && Object.keys(mesaiMap).length > 0) {
+        payload.personelMesaiSaatleri = mesaiMap;
+      } else {
+        payload.personelMesaiSaatleri = null;
+      }
 
-      await setDoc(doc(db, 'tesisatciFaaliyetleri', id), payload);
+      await setDoc(doc(db, 'tesisatciFaaliyetleri', id), cleanUndefined(payload));
 
       if (faaliyetGrubu === 'MESAI' || existing?.faaliyetGrubu === 'MESAI') {
         await syncMesai(
-          payload.tarih,
-          faaliyetGrubu === 'MESAI' ? mesaiMap : undefined,
+          String(payload.tarih),
+          faaliyetGrubu === 'MESAI' && mesaiMap ? mesaiMap : undefined,
           existing?.faaliyetGrubu === 'MESAI' ? existing.personelMesaiSaatleri : undefined
         );
       }
