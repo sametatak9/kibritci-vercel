@@ -29,6 +29,7 @@ export const PORTAL_PAGES = [
   { key: "depocu_ekrani", label: "Depocu Mobil Paneli", group: "İDARİ İŞLER & SAHA" },
   { key: "imalat_terminali", label: "İmalat Terminali", group: "İDARİ İŞLER & SAHA" },
   { key: "onay_islemleri", label: "Onay Havuzu & İmzalar", group: "RAPOR VE İLETİŞİM" },
+  { key: "dijital_onay", label: "Dijital Onay", group: "RAPOR VE İLETİŞİM" },
   { key: "admin", label: "Üyelik Onay & İmza", group: "ADMİNİSTRATOR" },
   { key: "yetki_verme", label: "Sayfa Yetkilendirme", group: "ADMİNİSTRATOR" },
 ] as const;
