@@ -77,7 +77,7 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
   setStokKartlar,
   setStokIslemGecmisi,
 }) => {
-  const [activeTab, setActiveTab] = useState<'satin_alma' | 'guvenlik_belgeleri' | 'kampci_belgeleri' | 'formen_belgeleri' | 'gunluk_loglar' | 'sofor_talepleri' | 'depocu_talepleri' | 'gecmis' | 'imzalar' | 'anahtarci_tutanaklari'>('satin_alma');
+  const [activeTab, setActiveTab] = useState<'satin_alma' | 'guvenlik_belgeleri' | 'kampci_belgeleri' | 'tesisat_mermer_belgeleri' | 'formen_belgeleri' | 'gunluk_loglar' | 'sofor_talepleri' | 'depocu_talepleri' | 'gecmis' | 'imzalar' | 'anahtarci_tutanaklari'>('satin_alma');
   const [selectedYoneticiEmail, setSelectedYoneticiEmail] = useState<string>('');
   const [stampText, setStampText] = useState<string>('🔵 ŞİRKET GENEL MÜDÜRÜ (E-İMZA)');
   const [customStamp, setCustomStamp] = useState<string>('');
@@ -96,6 +96,8 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
 
   const [kampSayimlar, setKampSayimlar] = useState<any[]>([]);
   const [kampFaaliyetler, setKampFaaliyetler] = useState<any[]>([]);
+  const [tesisatciFaaliyetler, setTesisatciFaaliyetler] = useState<any[]>([]);
+  const [mermerciFaaliyetler, setMermerciFaaliyetler] = useState<any[]>([]);
   const [gunlukAkisRaporlari, setGunlukAkisRaporlari] = useState<any[]>([]);
 
   const [aracOnayTalepleri, setAracOnayTalepleri] = useState<any[]>([]);
@@ -494,6 +496,24 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
     };
   }, []);
 
+  // Tesisatçı & Mermerci mobil faaliyetleri (onay havuzu)
+  useEffect(() => {
+    const unsubTesisatci = onSnapshot(collection(db, 'tesisatciFaaliyetleri'), (snapshot) => {
+      const list: any[] = [];
+      snapshot.forEach((d) => list.push({ id: d.id, ...d.data() }));
+      setTesisatciFaaliyetler(list);
+    });
+    const unsubMermerci = onSnapshot(collection(db, 'mermerciFaaliyetleri'), (snapshot) => {
+      const list: any[] = [];
+      snapshot.forEach((d) => list.push({ id: d.id, ...d.data() }));
+      setMermerciFaaliyetler(list);
+    });
+    return () => {
+      unsubTesisatci();
+      unsubMermerci();
+    };
+  }, []);
+
   useEffect(() => {
     const unsub = onSnapshot(collection(db, 'mobilGunlukAkisRaporlari'), (snapshot) => {
       const list: any[] = [];
@@ -562,6 +582,41 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
       const docRef = doc(db, type === 'sayim' ? 'kampDepoSayimlari' : 'kampGunlukFaaliyetleri', id);
       await updateDoc(docRef, { durum: 'REDDEDİLDİ' });
       alert("Kayıt reddedildi.");
+    } catch (err) {
+      console.error(err);
+      alert("Reddetme işlemi başarısız.");
+    }
+  };
+
+  const tesisatMermerCollection = (type: 'tesisatci' | 'mermerci') =>
+    type === 'tesisatci' ? 'tesisatciFaaliyetleri' : 'mermerciFaaliyetleri';
+
+  const handleApproveTesisatMermer = async (type: 'tesisatci' | 'mermerci', id: string) => {
+    try {
+      const matchedUser = kullanicilar.find(u => u.email?.toLowerCase() === currentUser?.email?.toLowerCase());
+      const role = matchedUser?.yetki || 'YÖNETİCİ';
+      if (!canApproveMobilDocuments(role, currentUser?.email)) {
+        alert('Bu belgeyi onaylama yetkiniz bulunmuyor.');
+        return;
+      }
+      const updateData = buildSingleApprovalUpdate(currentUser?.email || 'yonetici@kibritci.com', role);
+      await updateDoc(doc(db, tesisatMermerCollection(type), id), updateData);
+      alert(`${type === 'tesisatci' ? 'Tesisatçı' : 'Mermerci'} faaliyeti onaylandı.`);
+    } catch (err) {
+      console.error(err);
+      alert("Onaylama işlemi sırasında bir hata oluştu.");
+    }
+  };
+
+  const handleRejectTesisatMermer = async (type: 'tesisatci' | 'mermerci', id: string) => {
+    if (!window.confirm("Bu faaliyeti reddetmek istediğinize emin misiniz?")) return;
+    try {
+      await updateDoc(doc(db, tesisatMermerCollection(type), id), {
+        durum: 'REDDEDİLDİ',
+        onaylayanYonetici: currentUser?.email || 'yonetici',
+        onayTarihi: new Date().toISOString(),
+      });
+      alert("Faaliyet reddedildi.");
     } catch (err) {
       console.error(err);
       alert("Reddetme işlemi başarısız.");
@@ -967,6 +1022,18 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
     return canApproveMobilDocuments(currentUserRole, currentUser?.email);
   });
 
+  const pendingTesisatciFaaliyetler = tesisatciFaaliyetler.filter((doc) => {
+    if (!isMobilDocPending(doc)) return false;
+    return canApproveMobilDocuments(currentUserRole, currentUser?.email);
+  });
+
+  const pendingMermerciFaaliyetler = mermerciFaaliyetler.filter((doc) => {
+    if (!isMobilDocPending(doc)) return false;
+    return canApproveMobilDocuments(currentUserRole, currentUser?.email);
+  });
+
+  const tesisatMermerCount = pendingTesisatciFaaliyetler.length + pendingMermerciFaaliyetler.length;
+
   const pendingGunlukAkis = gunlukAkisRaporlari.filter(
     (doc) =>
       isMobilDocPending(doc) &&
@@ -1002,6 +1069,7 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
     pendingPersonelCount +
     pendingKampSayimlar.length +
     pendingKampFaaliyetler.length +
+    tesisatMermerCount +
     pendingGunlukAkis.length +
     pendingSoforCount +
     pendingDepocuCount +
@@ -1018,6 +1086,7 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
     | 'satin_alma'
     | 'guvenlik_belgeleri'
     | 'kampci_belgeleri'
+    | 'tesisat_mermer_belgeleri'
     | 'formen_belgeleri'
     | 'gunluk_loglar'
     | 'sofor_talepleri'
@@ -1036,6 +1105,7 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
     { id: 'satin_alma', label: 'Satın Alma', shortLabel: 'Satın Alma', count: pendingRequests.length, icon: ShoppingCart },
     { id: 'guvenlik_belgeleri', label: 'Güvenlik Belgeleri', shortLabel: 'Güvenlik', count: guvenlikCount, icon: Truck },
     { id: 'kampci_belgeleri', label: 'Kampçı Belgeleri', shortLabel: 'Kampçı', count: kampciCount, icon: Package },
+    { id: 'tesisat_mermer_belgeleri', label: 'Tesisatçı & Mermerci', shortLabel: 'Tesisat/Mermer', count: tesisatMermerCount, icon: FileText },
     { id: 'formen_belgeleri', label: 'Formen Belgeleri', shortLabel: 'Formen', count: pendingPersonelCount, icon: UserCheck },
     { id: 'gunluk_loglar', label: 'Günlük Loglar', shortLabel: 'Loglar', count: pendingGunlukAkis.length, icon: FileText },
     { id: 'sofor_talepleri', label: 'Şoför Talepleri', shortLabel: 'Şoför', count: pendingSoforCount, icon: Truck },
@@ -2197,6 +2267,78 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
                     </div>
                   )}
                 </div>
+              )}
+            </div>
+          )}
+
+          {activeTab === 'tesisat_mermer_belgeleri' && (
+            <div className="space-y-6">
+              {tesisatMermerCount === 0 ? (
+                <div className="text-center py-16 text-slate-400 text-sm">
+                  Onay bekleyen tesisatçı / mermerci faaliyeti bulunmuyor.
+                </div>
+              ) : (
+                [
+                  { type: 'tesisatci' as const, title: 'Tesisatçı Faaliyet Onayları', items: pendingTesisatciFaaliyetler },
+                  { type: 'mermerci' as const, title: 'Mermerci Faaliyet Onayları', items: pendingMermerciFaaliyetler },
+                ].map(({ type, title, items }) =>
+                  items.length === 0 ? null : (
+                    <div key={type} className="space-y-3">
+                      <h3 className="font-display font-black text-xs text-slate-600 tracking-wider flex items-center space-x-2 uppercase">
+                        <FileText size={14} className="text-amber-700" />
+                        <span>{title} ({items.length})</span>
+                      </h3>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {items.map((docItem) => {
+                          const foto =
+                            docItem.fotoUrl ||
+                            (Array.isArray(docItem.fotoUrls) ? docItem.fotoUrls[0] : '') ||
+                            '';
+                          return (
+                            <div key={docItem.id} className="bg-white border border-slate-200 p-4 rounded-2xl flex flex-col justify-between hover:border-slate-300 transition space-y-3">
+                              <div>
+                                <div className="flex justify-between items-start">
+                                  <span className="font-mono bg-amber-500/10 border border-amber-200/20 text-amber-700 text-[10px] font-bold px-2 py-0.5 rounded-md">
+                                    {type === 'tesisatci' ? 'TESİSAT' : 'MERMER'} #{String(docItem.id).substring(0, 6).toUpperCase()}
+                                  </span>
+                                  <span className="text-[10px] text-slate-500 font-mono font-bold">{docItem.tarih}</span>
+                                </div>
+                                <p className="text-xs text-slate-800 font-bold mt-2.5">İş: {docItem.isNiteligi || '—'}</p>
+                                <p className="text-[10.5px] text-slate-400 mt-1">
+                                  Alan: {docItem.calismaAlani || docItem.parsel || '—'}
+                                  {docItem.yerleskeAdi ? ` · ${docItem.yerleskeAdi}` : ''}
+                                </p>
+                                <p className="text-[10.5px] text-slate-400 mt-1">Açıklama: {docItem.aciklama || '—'}</p>
+                                <p className="text-[10px] text-amber-700/80 mt-0.5">Gönderen: {docItem.kaydeden || '—'}</p>
+                                {foto && (
+                                  <div className="mt-2.5 rounded-xl overflow-hidden border border-slate-200 aspect-video bg-slate-100 flex items-center justify-center relative group">
+                                    <img src={foto} alt="Faaliyet" className="w-full h-full object-cover group-hover:scale-105 transition duration-300" referrerPolicy="no-referrer" />
+                                  </div>
+                                )}
+                              </div>
+                              <div className="flex gap-2 pt-2.5 border-t border-slate-100">
+                                <button
+                                  onClick={() => handleRejectTesisatMermer(type, docItem.id)}
+                                  className="flex-1 bg-red-950 hover:bg-red-900 border border-red-900/30 text-red-300 py-1.5 px-3 rounded-lg text-[10px] font-black tracking-widest transition flex items-center justify-center space-x-1"
+                                >
+                                  <X size={11} />
+                                  <span>Reddet</span>
+                                </button>
+                                <button
+                                  onClick={() => handleApproveTesisatMermer(type, docItem.id)}
+                                  className="flex-1 bg-amber-600 hover:bg-amber-700 active:scale-95 text-white py-1.5 px-3 rounded-lg text-[10px] font-black tracking-widest transition flex items-center justify-center space-x-1"
+                                >
+                                  <Check size={11} />
+                                  <span>Onayla</span>
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )
+                )
               )}
             </div>
           )}
