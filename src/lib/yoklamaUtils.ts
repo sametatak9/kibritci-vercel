@@ -32,7 +32,9 @@ export function isKampciGorev(gorev?: string): boolean {
 }
 
 export function isFormenGorev(gorev?: string): boolean {
-  return normalizeGorevKey(gorev).includes('FORMEN');
+  const g = normalizeGorevKey(gorev);
+  // FORMEN / FORMAN / "şantiye formeni" vb.
+  return g.includes('FORMEN') || g.includes('FORMAN');
 }
 
 export function isKampciTesisatciMermerci(gorev?: string): boolean {

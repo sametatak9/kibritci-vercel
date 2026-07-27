@@ -5,6 +5,7 @@ import {
   findPersonelByName,
   getYoklamaDay,
   isFaaliyetPersonelKapsaminda,
+  isFormenGorev,
   isKampciGorev,
   normalizeTurkishName,
 } from './yoklamaUtils';
@@ -17,6 +18,7 @@ export type FaaliyetPersonelKaynak = {
   tarih?: string;
   kaydedenKampci?: string;
   kaydeden?: string;
+  kaydedenFormen?: string;
 };
 
 function findPersonelByEmail(
@@ -82,6 +84,9 @@ export function personMatchesFaaliyet(
   p: Personel,
   f: SahaFaaliyeti | KampFaaliyet | FaaliyetPersonelKaynak
 ): boolean {
+  // Formen fotoğraf/kayıt ekler; çalışan değildir — faaliyetli personel sayılmaz
+  if (isFormenGorev(p.gorev) || !isFaaliyetPersonelKapsaminda(p)) return false;
+
   const list = f.aktifPersonelListesi || [];
   if (list.some((entry) => String(entry).trim() === p.id)) return true;
   const fullName = normalizeTurkishName(`${p.ad} ${p.soyad}`);
@@ -89,13 +94,15 @@ export function personMatchesFaaliyet(
   if (f.personelMesaiSaatleri && Number(f.personelMesaiSaatleri[p.id]) > 0) return true;
   if (f.personelId === p.id) return true;
 
-  // Kampçı kaydeden (e-posta) — kampçı personelin kendi kayıtları listede görünsün
-  const kaydedenEmail = String(
-    (f as FaaliyetPersonelKaynak).kaydedenKampci || (f as FaaliyetPersonelKaynak).kaydeden || ''
-  )
+  // Yalnızca kampçı kaydeden e-postası — formen/kaydeden saha e-postası çalışan sayılmaz
+  const kaydedenKampci = String((f as FaaliyetPersonelKaynak).kaydedenKampci || '')
     .trim()
     .toLowerCase();
-  if (kaydedenEmail && String(p.eposta || '').trim().toLowerCase() === kaydedenEmail) {
+  if (
+    kaydedenKampci &&
+    isKampciGorev(p.gorev) &&
+    String(p.eposta || '').trim().toLowerCase() === kaydedenKampci
+  ) {
     return true;
   }
   return false;
@@ -177,9 +184,9 @@ function absorbFaaliyetPersonel(
       }
     }
   }
-  // Kampçı kaydeden — e-posta ile personel kartına bağla (formen/idari/taşeron elenir)
-  const kaydeden = findPersonelByEmail(personeller, f.kaydedenKampci || f.kaydeden);
-  if (kaydeden) addPerson(kaydeden);
+  // Yalnızca kampçı kaydeden — saha kaydeden/formen e-postası çalışan listesine girmez
+  const kaydedenKampci = findPersonelByEmail(personeller, f.kaydedenKampci);
+  if (kaydedenKampci && isKampciGorev(kaydedenKampci.gorev)) addPerson(kaydedenKampci);
 }
 
 /** Seçili ayda saha ∪ kamp faaliyetine bağlı personeller */
