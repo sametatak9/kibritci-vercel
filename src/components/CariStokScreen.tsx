@@ -54,6 +54,14 @@ type HistoryCollection =
   | 'cariIslemGecmisi'
   | 'hazirTutanaklar';
 
+type HistoryLogKalem = {
+  urunAdi: string;
+  miktar?: number | string;
+  birim?: string;
+  birimFiyat?: number;
+  toplam?: number;
+};
+
 type HistoryLog = {
   id: string;
   type: string;
@@ -62,6 +70,7 @@ type HistoryLog = {
   date: string;
   badgeColor: string;
   collection?: HistoryCollection;
+  kalemler?: HistoryLogKalem[];
 };
 
 type GenericDetail = {
@@ -226,6 +235,17 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
     setHistoryFilter('ALL');
     try {
       const logs: HistoryLog[] = [];
+      // Belge kalemlerini rapora taşımak için normalize eder
+      const mapKalemler = (kalemler: any): HistoryLogKalem[] | undefined => {
+        if (!Array.isArray(kalemler) || kalemler.length === 0) return undefined;
+        return kalemler.map((k: any) => ({
+          urunAdi: k.urunAdi || k.malzemeAdi || k.stokAdi || '-',
+          miktar: k.miktar,
+          birim: k.birim || k.cinsi,
+          birimFiyat: k.birimFiyat != null ? Number(k.birimFiyat) : undefined,
+          toplam: k.toplam != null ? Number(k.toplam) : undefined,
+        }));
+      };
       logs.push({
         id: 'init',
         type: 'KART AÇILIŞI',
@@ -248,6 +268,7 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
               date: data.tarih || '',
               badgeColor: 'bg-slate-100 text-slate-800',
               collection: 'satinAlmaTalepleri',
+              kalemler: mapKalemler(data.kalemler),
             });
           }
         });
@@ -270,6 +291,7 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
               date: data.tarih || '',
               badgeColor: 'bg-amber-100 text-amber-800',
               collection: 'irsaliyeler',
+              kalemler: mapKalemler(data.kalemler),
             });
           }
         });
@@ -286,6 +308,7 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
               date: data.tarih || '',
               badgeColor: 'bg-stone-200 text-stone-800',
               collection: 'faturalar',
+              kalemler: mapKalemler(data.kalemler),
             });
           }
         });
@@ -1000,6 +1023,7 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
         type: log.type,
         title: log.title,
         desc: log.desc,
+        kalemler: log.kalemler,
       })),
       format,
     });
