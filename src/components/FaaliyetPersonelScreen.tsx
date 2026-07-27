@@ -480,8 +480,8 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
               Faaliyeti Olan Personeller
             </h1>
             <p className="text-xs text-slate-300 mt-2 max-w-xl leading-relaxed">
-              Salt okunur çalışma günlüğü: saha ve kampçı faaliyetleri — personel, ekip, çalışan
-              sayısı ve fotoğraflarla birlikte.
+              Ana firma saha personeli (Düz işçi, Tesisatçı, Kampçı vb.) — Formen ve idari kadro
+              hariç. Saha ve kampçı faaliyetleri, ekip ve fotoğraflarla.
             </p>
           </div>
           <div className="flex flex-col items-stretch sm:items-end gap-2">

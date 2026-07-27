@@ -4,6 +4,7 @@ import { getFaaliyetFotolar } from './sahaFaaliyetUtils';
 import {
   findPersonelByName,
   getYoklamaDay,
+  isFaaliyetPersonelKapsaminda,
   isKampciGorev,
   normalizeTurkishName,
 } from './yoklamaUtils';
@@ -47,6 +48,10 @@ function isAktifPersonel(p: Personel): boolean {
   return p.durum === true || String(p.durum).toLowerCase() === 'true';
 }
 
+function shouldIncludeFaaliyetPersonel(p: Personel | undefined | null): p is Personel {
+  return !!p?.id && isFaaliyetPersonelKapsaminda(p);
+}
+
 export function personMatchesFaaliyet(
   p: Personel,
   f: SahaFaaliyeti | KampFaaliyet | FaaliyetPersonelKaynak
@@ -78,11 +83,12 @@ export function personMatchesKampFaaliyet(
   p: Personel,
   f: KampFaaliyet | FaaliyetPersonelKaynak
 ): boolean {
+  if (!isFaaliyetPersonelKapsaminda(p)) return false;
   if (personMatchesFaaliyet(p, f)) return true;
   return isKampciGorev(p.gorev);
 }
 
-/** Dönemde kamp faaliyeti varsa aktif KAMPÇI görevli personelleri listeye ekle */
+/** Dönemde kamp faaliyeti varsa aktif KAMPÇI görevli (ana firma) personelleri listeye ekle */
 function absorbAktifKampciPersoneller(
   personeller: Personel[],
   matched: Map<string, Personel>
@@ -90,6 +96,7 @@ function absorbAktifKampciPersoneller(
   for (const p of personeller) {
     if (!isAktifPersonel(p)) continue;
     if (!isKampciGorev(p.gorev)) continue;
+    if (!shouldIncludeFaaliyetPersonel(p)) continue;
     matched.set(p.id, p);
   }
 }
@@ -140,7 +147,7 @@ function absorbFaaliyetPersonel(
   matched: Map<string, Personel>
 ) {
   const addPerson = (p: Personel | undefined | null) => {
-    if (p?.id) matched.set(p.id, p);
+    if (shouldIncludeFaaliyetPersonel(p)) matched.set(p.id, p);
   };
 
   for (const entry of f.aktifPersonelListesi || []) {
@@ -161,7 +168,7 @@ function absorbFaaliyetPersonel(
       }
     }
   }
-  // Kampçı kaydeden — e-posta ile personel kartına bağla
+  // Kampçı kaydeden — e-posta ile personel kartına bağla (formen/idari/taşeron elenir)
   const kaydeden = findPersonelByEmail(personeller, f.kaydedenKampci || f.kaydeden);
   if (kaydeden) addPerson(kaydeden);
 }
@@ -187,6 +194,7 @@ export function buildFaaliyetPersoneller(
 
   const byName = new Map<string, Personel>();
   for (const p of matched.values()) {
+    if (!shouldIncludeFaaliyetPersonel(p)) continue;
     const key = normalizeTurkishName(`${p.ad} ${p.soyad}`);
     const prev = byName.get(key);
     if (!prev || personScore(p) > personScore(prev)) byName.set(key, p);
@@ -389,6 +397,7 @@ export function buildDayPersonelRaporu(
   const [y, m, d] = dk ? dk.split('-').map(Number) : [0, 0, 0];
 
   const faaliyetliPersoneller: DayFaaliyetPersonelSatir[] = Array.from(matched.values())
+    .filter((p) => shouldIncludeFaaliyetPersonel(p))
     .map((p) => {
       const pSaha = saha.filter((f) => personMatchesFaaliyet(p, f));
       const pKamp = kamp.filter((f) => personMatchesKampFaaliyet(p, f));
@@ -411,6 +420,7 @@ export function buildDayPersonelRaporu(
   const yokPersoneller: DayPersonelRaporu['yokPersoneller'] = [];
   if (y && m && d) {
     for (const p of personeller) {
+      if (!shouldIncludeFaaliyetPersonel(p)) continue;
       const isAktif = p.durum === true || String(p.durum).toLowerCase() === 'true';
       if (!isAktif) continue;
       const cell = getYoklamaDay(yoklamalar[p.id], y, m, d);

@@ -31,6 +31,10 @@ export function isKampciGorev(gorev?: string): boolean {
   return normalizeGorevKey(gorev).includes('KAMPCI');
 }
 
+export function isFormenGorev(gorev?: string): boolean {
+  return normalizeGorevKey(gorev).includes('FORMEN');
+}
+
 export function isKampciTesisatciMermerci(gorev?: string): boolean {
   if (!gorev) return false;
   const g = normalizeGorevKey(gorev);
@@ -370,6 +374,19 @@ export function isIdariPersonel(p?: Personel): boolean {
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '');
   return dep === 'IDARI' || dep.includes('IDARI PERSONEL') || dep === 'OFIS / IDARI';
+}
+
+/**
+ * Faaliyeti Olan Personeller kapsamı:
+ * yalnızca Ana Firma saha işçileri (Düz işçi, Tesisatçı, Kampçı, …).
+ * Taşeron, idari kadro ve Formen hariç.
+ */
+export function isFaaliyetPersonelKapsaminda(p?: Personel): boolean {
+  if (!p) return false;
+  if (isTaseronPersonel(p)) return false;
+  if (isIdariPersonel(p)) return false;
+  if (isFormenGorev(p.gorev)) return false;
+  return true;
 }
 
 export function findPersonelByName(personeller: Personel[], adSoyad: string): Personel | undefined {
