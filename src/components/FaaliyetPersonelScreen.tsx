@@ -46,45 +46,8 @@ import { formatDateLabelTr, todayDateKey } from '../lib/dateKeyUtils';
 import { isKampciGorev, normalizeTurkishName } from '../lib/yoklamaUtils';
 import { db } from '../lib/firebase';
 import { collection, onSnapshot } from 'firebase/firestore';
+import { tesisatciToSaha, mermerciToSaha } from '../lib/mobilFaaliyetAdapter';
 import { GunlukFaaliyetProgramScreen } from './GunlukFaaliyetProgramScreen';
-
-function tesisatciToSaha(f: TesisatciFaaliyet): SahaFaaliyeti {
-  return {
-    id: f.id,
-    personelId: f.aktifPersonelListesi?.[0] || '',
-    tarih: f.tarih,
-    isNiteligi: f.isNiteligi || 'Tesisat faaliyeti',
-    parsel: f.calismaAlani || '',
-    blok: f.yerleskeAdi || '',
-    aciklama: f.aciklama || '',
-    fotoUrl: f.fotoUrl || undefined,
-    fotoUrls: f.fotoUrls,
-    aktifPersonelListesi: f.aktifPersonelListesi,
-    personelMesaiSaatleri: f.personelMesaiSaatleri,
-    faaliyetTipi: f.faaliyetGrubu === 'MESAI' ? 'MESAI_SAHA' : 'NORMAL',
-    kaynakEkran: 'TESISATCI_MOBIL',
-    kaydeden: f.kaydeden,
-  };
-}
-
-function mermerciToSaha(f: MermerciFaaliyet): SahaFaaliyeti {
-  return {
-    id: f.id,
-    personelId: f.aktifPersonelListesi?.[0] || '',
-    tarih: f.tarih,
-    isNiteligi: f.isNiteligi || 'Mermer faaliyeti',
-    parsel: f.parsel || '',
-    blok: f.blok || '',
-    aciklama: f.aciklama || '',
-    fotoUrl: f.fotoUrl || undefined,
-    fotoUrls: f.fotoUrls,
-    aktifPersonelListesi: f.aktifPersonelListesi,
-    personelMesaiSaatleri: f.personelMesaiSaatleri,
-    faaliyetTipi: f.faaliyetGrubu === 'MESAI' ? 'MESAI_SAHA' : 'NORMAL',
-    kaynakEkran: 'MERMERCI_MOBIL',
-    kaydeden: f.kaydeden,
-  };
-}
 
 type ViewMode = 'personel' | 'gun' | 'program';
 
