@@ -55,8 +55,42 @@ export function kibritciLogoHtml(heightPx = 56): string {
   return `<img src="${url}" alt="Kibritçi İnşaat" class="kibritci-logo" style="height:${heightPx}px;width:auto;max-width:220px;object-fit:contain;background:transparent;border:none;display:block;" />`;
 }
 
-export function kibritciReportHeaderHtml(title: string, subtitle?: string): string {
-  const headerUrl = getKibritciReportHeaderUrl();
+async function fetchAsDataUrl(url: string): Promise<string | null> {
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const blob = await res.blob();
+    return await new Promise<string | null>((resolve) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(typeof reader.result === 'string' ? reader.result : null);
+      reader.onerror = () => resolve(null);
+      reader.readAsDataURL(blob);
+    });
+  } catch {
+    return null;
+  }
+}
+
+export interface KibritciReportAssets {
+  headerDataUrl?: string | null;
+  watermarkDataUrl?: string | null;
+}
+
+/** Rapor görsellerini base64 olarak yükler — indirilen HTML'de de görünsün diye gömülür */
+export async function loadKibritciReportAssets(): Promise<KibritciReportAssets> {
+  const [headerDataUrl, watermarkDataUrl] = await Promise.all([
+    fetchAsDataUrl(getKibritciReportHeaderUrl()),
+    fetchAsDataUrl(getKibritciWatermarkUrl()),
+  ]);
+  return { headerDataUrl, watermarkDataUrl };
+}
+
+export function kibritciReportHeaderHtml(
+  title: string,
+  subtitle?: string,
+  opts?: { headerDataUrl?: string | null }
+): string {
+  const headerUrl = opts?.headerDataUrl || getKibritciReportHeaderUrl();
   return `
     <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;border-bottom:3px solid #1e4e78;padding-bottom:14px;margin-bottom:6px;background:transparent;">
       <div style="display:flex;flex-direction:column;gap:6px;">

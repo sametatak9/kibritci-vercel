@@ -4,6 +4,7 @@ import {
   kibritciReportHeaderHtml,
   getKibritciWatermarkUrl,
   KIBRITCI_COMPANY,
+  type KibritciReportAssets,
 } from './kibritciBrand';
 import { getReportEmailToolbarHtml, installReportEmailGlobalBridge } from './reportEmail';
 
@@ -12,6 +13,7 @@ export function buildKibritciReportHtml(options: {
   subtitle?: string;
   bodyHtml: string;
   meta?: string[];
+  assets?: KibritciReportAssets;
 }): string {
   const metaRows = (options.meta || [])
     .map((m) => `<p style="margin:0;font-size:11px;color:#64748b">${m}</p>`)
@@ -22,7 +24,7 @@ export function buildKibritciReportHtml(options: {
     fileName: `${String(options.title).replace(/[^\w.\-ğüşıöçĞÜŞİÖÇ ]+/gi, '_').slice(0, 60) || 'Kibritci_Rapor'}.html`,
   });
 
-  const watermarkUrl = getKibritciWatermarkUrl();
+  const watermarkUrl = options.assets?.watermarkDataUrl || getKibritciWatermarkUrl();
 
   return `<!DOCTYPE html>
 <html lang="tr">
@@ -50,7 +52,7 @@ export function buildKibritciReportHtml(options: {
   <div class="page">
     <div class="watermark"></div>
     <div class="head">
-      ${kibritciReportHeaderHtml(options.title, options.subtitle)}
+      ${kibritciReportHeaderHtml(options.title, options.subtitle, { headerDataUrl: options.assets?.headerDataUrl })}
     </div>
     ${metaRows ? `<div class="meta">${metaRows}</div>` : ''}
     <div class="content">${options.bodyHtml.replace(/\n/g, '<br/>')}</div>

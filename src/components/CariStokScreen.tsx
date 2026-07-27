@@ -1005,11 +1005,11 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
     }
   };
 
-  const exportLogs = (format: 'csv' | 'html') => {
+  const exportLogs = async (format: 'csv' | 'html') => {
     const card = csTab === 'cari' ? selectedCari : selectedStok;
     if (!card) return;
     const name = csTab === 'cari' ? (card as CariKart).unvan : (card as StokKart).stokAdi;
-    exportHistoryReport({
+    await exportHistoryReport({
       title: 'Kart Geçmiş Hareket Raporu',
       fileBase: `Kibritci_${csTab === 'cari' ? 'Cari' : 'Stok'}_Gecmis_${card.id}`,
       meta: [
