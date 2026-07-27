@@ -5,7 +5,8 @@ import {
 } from 'lucide-react';
 import { db, parseYoklamaSnapshotData, saveDocument } from '../lib/firebase';
 import { collection, doc, getDoc, onSnapshot, query, where } from 'firebase/firestore';
-import { Personel, AylikYoklamaMap, SahaKolajFoto, ProgramliFaaliyet } from '../types/erp';
+import { Personel, AylikYoklamaMap, SahaKolajFoto, ProgramliFaaliyet, TesisatciFaaliyet, MermerciFaaliyet } from '../types/erp';
+import { tesisatciToSaha, mermerciToSaha } from '../lib/mobilFaaliyetAdapter';
 import { CorporateReportLayout } from './CorporateReportLayout';
 import { buildPersonelListForMonth, isDayActiveForPersonel, normalizeTurkishName } from '../lib/yoklamaUtils';
 import { resolveStubPersonelFromLegacyId } from '../lib/legacyYoklamaImport';
@@ -266,6 +267,8 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
   const [selectedYear, setSelectedYear] = useState(now.getFullYear());
   const [selectedMonth, setSelectedMonth] = useState(now.getMonth() + 1);
   const [kampFaaliyetleri, setKampFaaliyetleri] = useState<any[]>([]);
+  const [tesisatciFaaliyetleri, setTesisatciFaaliyetleri] = useState<TesisatciFaaliyet[]>([]);
+  const [mermerciFaaliyetleri, setMermerciFaaliyetleri] = useState<MermerciFaaliyet[]>([]);
   const [kolajFotolari, setKolajFotolari] = useState<SahaKolajFoto[]>([]);
   const [excludedStaffIds, setExcludedStaffIds] = useState<string[]>([]);
   const [reportType, setReportType] = useState<'NORMAL' | 'E-IMZALI'>('NORMAL');
@@ -293,8 +296,32 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
       snap.forEach((docSnap) => list.push({ id: docSnap.id, ...docSnap.data() }));
       setKampFaaliyetleri(list);
     });
-    return () => unsubKamp();
+    const unsubTesisatci = onSnapshot(collection(db, 'tesisatciFaaliyetleri'), (snap) => {
+      const list: TesisatciFaaliyet[] = [];
+      snap.forEach((d) => list.push({ id: d.id, ...(d.data() as Omit<TesisatciFaaliyet, 'id'>) }));
+      setTesisatciFaaliyetleri(list);
+    });
+    const unsubMermerci = onSnapshot(collection(db, 'mermerciFaaliyetleri'), (snap) => {
+      const list: MermerciFaaliyet[] = [];
+      snap.forEach((d) => list.push({ id: d.id, ...(d.data() as Omit<MermerciFaaliyet, 'id'>) }));
+      setMermerciFaaliyetleri(list);
+    });
+    return () => {
+      unsubKamp();
+      unsubTesisatci();
+      unsubMermerci();
+    };
   }, []);
+
+  // Saha + tesisatçı + mermerci birleşik liste (ZER YAPI Hakediş tüm faaliyetleri kapsar)
+  const tumSahaFaaliyetleri = useMemo(
+    () => [
+      ...(sahaFaaliyetleri || []),
+      ...tesisatciFaaliyetleri.map(tesisatciToSaha),
+      ...mermerciFaaliyetleri.map(mermerciToSaha),
+    ],
+    [sahaFaaliyetleri, tesisatciFaaliyetleri, mermerciFaaliyetleri]
+  );
 
   useEffect(() => {
     const q = query(collection(db, 'sahaKolajFotolari'), where('albumKey', '==', donemKey));
@@ -314,10 +341,10 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
         yil: selectedYear,
         ay: selectedMonth,
         kolajFotolari,
-        sahaFaaliyetleri,
+        sahaFaaliyetleri: tumSahaFaaliyetleri,
         programliFaaliyetler,
       }),
-    [donemKey, selectedYear, selectedMonth, kolajFotolari, sahaFaaliyetleri, programliFaaliyetler]
+    [donemKey, selectedYear, selectedMonth, kolajFotolari, tumSahaFaaliyetleri, programliFaaliyetler]
   );
 
   // Yazdırma performansını korumak için üst sınır; tüm sayım subtitle'da gösterilir
@@ -402,8 +429,8 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
   const activeStaffRows = allStaffRows.filter(r => !excludedStaffIds.includes(r.personel.id));
 
   const monthlySahaFaaliyetleri = useMemo(
-    () => filterByMonth(sahaFaaliyetleri, selectedYear, selectedMonth),
-    [sahaFaaliyetleri, selectedYear, selectedMonth]
+    () => filterByMonth(tumSahaFaaliyetleri, selectedYear, selectedMonth),
+    [tumSahaFaaliyetleri, selectedYear, selectedMonth]
   );
 
   const monthlyKampFaaliyetleri = useMemo(
