@@ -4,7 +4,7 @@ import {
   ClipboardList, X, RefreshCw, FileText, Truck, Receipt, Home, User, Users, Eye, UserX, Upload, Archive, Printer
 } from 'lucide-react';
 import { collection, doc, getDoc, getDocs } from 'firebase/firestore';
-import { CariKart, Fatura, Irsaliye, Personel, SatinAlmaTalebi, StokKart, StokKartIslem } from '../types/erp';
+import { CariKart, Fatura, Irsaliye, Personel, SatinAlmaTalebi, StokKart, StokKartIslem, CariKartIslem } from '../types/erp';
 import { db, removeDocument } from '../lib/firebase';
 import { warnIfDuplicateCari, warnIfDuplicateStok } from '../lib/duplicateNameUtils';
 import { exportHistoryReport } from '../lib/reportExport';
@@ -16,12 +16,14 @@ import { openBase64InNewTab } from '../lib/fileViewerUtils';
 import { CariTimeline } from './CariTimeline';
 import {
   applyCariStokExcelImport,
+  applyBirbesanFaturaPlans,
   ensureBirbesanCari,
   isBirbesanStokArsiv,
   mergeExcelLinesByStokName,
   normalizeImportText,
   parseCariStokExcelFiles,
 } from '../lib/cariStokExcelImport';
+import birbesanFaturalarData from '../../data/birbesan/birbesan-faturalar.json';
 import {
   printCariStokTopluYazdir,
   stokIslemleriForCariStoklar,
@@ -34,6 +36,11 @@ interface CariStokScreenProps {
   stokKartlar: StokKart[];
   setStokKartlar: React.Dispatch<React.SetStateAction<StokKart[]>>;
   stokIslemGecmisi?: StokKartIslem[];
+  setStokIslemGecmisi?: React.Dispatch<React.SetStateAction<StokKartIslem[]>>;
+  faturalar?: Fatura[];
+  setFaturalar?: React.Dispatch<React.SetStateAction<Fatura[]>>;
+  cariIslemGecmisi?: CariKartIslem[];
+  setCariIslemGecmisi?: React.Dispatch<React.SetStateAction<CariKartIslem[]>>;
   personeller?: Personel[];
   setPersoneller?: React.Dispatch<React.SetStateAction<Personel[]>>;
 }
@@ -83,6 +90,11 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
   stokKartlar,
   setStokKartlar,
   stokIslemGecmisi = [],
+  setStokIslemGecmisi,
+  faturalar = [],
+  setFaturalar,
+  cariIslemGecmisi = [],
+  setCariIslemGecmisi,
   personeller = [],
   setPersoneller,
 }) => {
@@ -801,10 +813,10 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
         alert(`Excel okunamadı.\n${warnings.join('\n') || 'Veri satırı bulunamadı.'}`);
         return;
       }
-      const merged = mergeExcelLinesByStokName(lines);
       const ok = window.confirm(
         `${files.length} dosyadan ${lines.length} satır okundu.\n` +
-          `Aynı isimli kalemler birleştirildi → ${merged.length} benzersiz stok kartı.\n` +
+          `Her Excel dosyası ayrı fatura olarak BİRBESAN cari kartına işlenecek.\n` +
+          `Stok kartları açılır; mevcut hareket geçmişi korunur.\n` +
           `Hedef cari: ${selectedCari.unvan}\n\nDevam edilsin mi?`
       );
       if (!ok) return;
@@ -819,6 +831,12 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
         cari,
         stokKartlar,
         setStokKartlar,
+        faturalar,
+        setFaturalar,
+        cariIslemGecmisi,
+        setCariIslemGecmisi,
+        stokIslemGecmisi,
+        setStokIslemGecmisi,
         archiveAsTedarikci: normalizeImportText(cari.unvan).includes('birbesan'),
         stokKaynak: normalizeImportText(cari.unvan).includes('birbesan') ? 'BIRBESAN_EXCEL' : undefined,
       });
@@ -827,8 +845,8 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
         `Excel aktarımı tamamlandı.\n` +
           `Yeni stok kartı: ${summary.createdStok}\n` +
           `Güncellenen stok: ${summary.updatedStok}\n` +
-          `Arşiv fatura: ${summary.createdFatura}\n` +
-          `Stok hareketi: ${summary.createdStokIslem}` +
+          `Fatura: ${summary.createdFatura} (atlanan: ${summary.skippedFatura})\n` +
+          `Stok hareketi: ${summary.createdStokIslem} (korunan: ${summary.skippedStokIslem})` +
           (normalizeImportText(cari.unvan).includes('birbesan')
             ? '\n\nBİRBESAN stokları Stok sekmesi → Arşiv listesinde.'
             : '')
@@ -859,11 +877,10 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
         alert(`Excel okunamadı.\n${warnings.join('\n') || 'Veri satırı bulunamadı.'}`);
         return;
       }
-      const merged = mergeExcelLinesByStokName(lines);
       const ok = window.confirm(
         `${files.length} Excel dosyasından ${lines.length} satır okundu.\n` +
-          `Aynı isimli kalemler birleştirildi → ${merged.length} BİRBESAN stok kartı.\n` +
-          `Toplam miktarlar toplanarak tek karta yazılacak.\n\nDevam edilsin mi?`
+          `${files.length} dosya → ${files.length} fatura olarak BİRBESAN cari kartına işlenecek.\n` +
+          `Stok kartları açılır; mevcut hareket geçmişi korunur.\n\nDevam edilsin mi?`
       );
       if (!ok) return;
 
@@ -873,24 +890,81 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
         cari,
         stokKartlar,
         setStokKartlar,
+        faturalar,
+        setFaturalar,
+        cariIslemGecmisi,
+        setCariIslemGecmisi,
+        stokIslemGecmisi,
+        setStokIslemGecmisi,
         archiveAsTedarikci: true,
         stokKaynak: 'BIRBESAN_EXCEL',
       });
 
       setCsTab('stok');
       setStokListeTab('ARSIV');
+      setSelectedCariId(cari.id);
+      void loadHistoryData('cari', cari.id, cari.unvan, cari.kod);
 
       alert(
         `BİRBESAN arşiv aktarımı tamamlandı.\n` +
           `Yeni stok kartı: ${summary.createdStok}\n` +
           `Güncellenen stok: ${summary.updatedStok}\n` +
-          `Arşiv fatura: ${summary.createdFatura}`
+          `Fatura: ${summary.createdFatura} (atlanan: ${summary.skippedFatura})\n` +
+          `Stok hareketi: ${summary.createdStokIslem} (korunan: ${summary.skippedStokIslem})`
       );
     } catch (err) {
       alert(`Excel aktarım hatası: ${String((err as Error)?.message || err)}`);
     } finally {
       setExcelImporting(false);
       if (birbesanExcelInputRef.current) birbesanExcelInputRef.current.value = '';
+    }
+  };
+
+  const handleBirbesanCatalogFaturalar = async () => {
+    const cari = ensureBirbesanCari(cariKartlar, setCariKartlar);
+    const plans = birbesanFaturalarData.faturalar || [];
+    if (!plans.length) {
+      alert('BİRBESAN fatura kataloğu bulunamadı.');
+      return;
+    }
+    const ok = window.confirm(
+      `2 Excel tablosu BİRBESAN faturası olarak işlenecek:\n` +
+        plans.map((p) => `• ${p.faturaNo} (${p.kalemler.length} kalem)`).join('\n') +
+        `\n\nStok kartları açılır; mevcut işlem geçmişi korunur.\nDevam edilsin mi?`
+    );
+    if (!ok) return;
+
+    setExcelImporting(true);
+    try {
+      const summary = await applyBirbesanFaturaPlans({
+        cari,
+        plans,
+        stokKartlar,
+        setStokKartlar,
+        faturalar,
+        setFaturalar,
+        cariIslemGecmisi,
+        setCariIslemGecmisi,
+        stokIslemGecmisi,
+        setStokIslemGecmisi,
+        archiveAsTedarikci: true,
+        stokKaynak: 'BIRBESAN_EXCEL',
+      });
+
+      setSelectedCariId(cari.id);
+      setCsTab('cari');
+      void loadHistoryData('cari', cari.id, cari.unvan, cari.kod);
+
+      alert(
+        `BİRBESAN fatura aktarımı tamamlandı.\n` +
+          `Yeni stok: ${summary.createdStok} · Güncellenen: ${summary.updatedStok}\n` +
+          `Fatura: ${summary.createdFatura} (atlanan: ${summary.skippedFatura})\n` +
+          `Stok hareketi: ${summary.createdStokIslem} (korunan: ${summary.skippedStokIslem})`
+      );
+    } catch (err) {
+      alert(`Fatura aktarım hatası: ${String((err as Error)?.message || err)}`);
+    } finally {
+      setExcelImporting(false);
     }
   };
 
@@ -1186,6 +1260,18 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
                         <Upload size={12} />
                         {excelImporting ? 'Aktarılıyor…' : 'Excel Stok Aktar'}
                       </button>
+                      {normalizeImportText(selectedCari.unvan).includes('birbesan') && (
+                        <button
+                          type="button"
+                          onClick={() => void handleBirbesanCatalogFaturalar()}
+                          disabled={excelImporting}
+                          className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-[11px] font-bold bg-amber-50 text-amber-950 border border-amber-200 cursor-pointer disabled:opacity-50"
+                          title="2 Excel tablosunu BİRBESAN faturası + stok kartı olarak kaydet"
+                        >
+                          <Receipt size={12} />
+                          {excelImporting ? 'İşleniyor…' : '2 Excel → Fatura Kes'}
+                        </button>
+                      )}
                     </>
                   )}
                   <button

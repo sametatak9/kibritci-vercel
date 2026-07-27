@@ -34,6 +34,8 @@ export type CariStokImportSummary = {
   createdFatura: number;
   createdCariIslem: number;
   createdStokIslem: number;
+  skippedFatura: number;
+  skippedStokIslem: number;
   lineCount: number;
   uniqueStokCount: number;
 };
@@ -348,7 +350,10 @@ export const findCariByUnvan = (unvan: string, cariler: CariKart[]): CariKart | 
 const buildFaturaGroups = (lines: CariStokExcelLine[]) => {
   const groups = new Map<string, CariStokExcelLine[]>();
   for (const line of lines) {
-    const key = `${line.tarih}::${line.belgeNo || line.sourceFile}-${line.rowNo}`;
+    const sourceBase = String(line.sourceFile || 'excel').split('#')[0];
+    const key = line.belgeNo
+      ? `belge::${line.tarih}::${line.belgeNo}`
+      : `file::${sourceBase}`;
     const bucket = groups.get(key) || [];
     bucket.push(line);
     groups.set(key, bucket);
@@ -356,11 +361,74 @@ const buildFaturaGroups = (lines: CariStokExcelLine[]) => {
   return groups;
 };
 
+const stableFaturaId = (cariId: string, belgeNo: string): string => {
+  const slug = normalizeImportText(belgeNo).replace(/[^a-z0-9]+/g, '_').slice(0, 40);
+  return `fat_${cariId}_${slug}`;
+};
+
+const stableStokIslemId = (faturaId: string, stokId: string, rowKey: string): string =>
+  `stk_islem_${faturaId}_${stokId}_${normalizeImportText(rowKey).replace(/[^a-z0-9]+/g, '_').slice(0, 24)}`;
+
+const faturaExistsForBelge = (
+  faturalar: Fatura[],
+  cariId: string,
+  belgeNo: string
+): Fatura | null =>
+  faturalar.find(
+    (f) =>
+      f.cariKartId === cariId &&
+      normalizeImportText(f.faturaNo || '') === normalizeImportText(belgeNo)
+  ) || null;
+
+const stokIslemExists = (islemler: StokKartIslem[], id: string): boolean =>
+  islemler.some((i) => i.id === id);
+
+const cariIslemExists = (islemler: CariKartIslem[], id: string): boolean =>
+  islemler.some((i) => i.id === id);
+
+const computeStockTotalMiktar = (
+  stokId: string,
+  normKey: string,
+  mergedLines: MergedStokLine[],
+  existingIslemler: StokKartIslem[]
+): number => {
+  const fromMerged = mergedLines.find((m) => canonicalStokKey(m.urunAdi) === normKey)?.miktar;
+  const fromHistory = existingIslemler
+    .filter((i) => i.stokKartId === stokId)
+    .reduce((sum, i) => {
+      const delta = Number(i.miktarDegisimi || 0);
+      if (i.islemTipi === 'CIKIS') return sum - Math.abs(delta);
+      return sum + Math.abs(delta);
+    }, 0);
+  if (fromHistory > 0) return fromHistory;
+  return Number(fromMerged || 0);
+};
+
+export type BirbesanFaturaKalem = {
+  urunAdi: string;
+  miktar: number;
+  birim: string;
+  birimFiyat?: number;
+};
+
+export type BirbesanFaturaPlan = {
+  faturaNo: string;
+  tarih: string;
+  aciklama?: string;
+  kalemler: BirbesanFaturaKalem[];
+};
+
 export const applyCariStokExcelImport = async (options: {
   lines: CariStokExcelLine[];
   cari: CariKart;
   stokKartlar: StokKart[];
   setStokKartlar: (updater: StokKart[] | ((prev: StokKart[]) => StokKart[])) => void;
+  faturalar?: Fatura[];
+  setFaturalar?: (updater: Fatura[] | ((prev: Fatura[]) => Fatura[])) => void;
+  cariIslemGecmisi?: CariKartIslem[];
+  setCariIslemGecmisi?: (updater: CariKartIslem[] | ((prev: CariKartIslem[]) => CariKartIslem[])) => void;
+  stokIslemGecmisi?: StokKartIslem[];
+  setStokIslemGecmisi?: (updater: StokKartIslem[] | ((prev: StokKartIslem[]) => StokKartIslem[])) => void;
   importTag?: string;
   /** Tedarikçi Excel arşivi — stok kartları Stok sekmesinde Arşiv'de listelenir */
   archiveAsTedarikci?: boolean;
@@ -371,14 +439,18 @@ export const applyCariStokExcelImport = async (options: {
   const archiveAsTedarikci = Boolean(options.archiveAsTedarikci);
   const stokKaynak = options.stokKaynak || (archiveAsTedarikci ? 'BIRBESAN_EXCEL' : undefined);
   const mergedLines = mergeExcelLinesByStokName(lines);
-  const hasPrices = mergedLines.some((l) => l.birimFiyat > 0);
   const mutableStoklar = [...stokKartlar];
+  const mutableFaturalar = [...(options.faturalar || [])];
+  const mutableCariIslemler = [...(options.cariIslemGecmisi || [])];
+  const mutableStokIslemler = [...(options.stokIslemGecmisi || [])];
   const summary: CariStokImportSummary = {
     createdStok: 0,
     updatedStok: 0,
     createdFatura: 0,
     createdCariIslem: 0,
     createdStokIslem: 0,
+    skippedFatura: 0,
+    skippedStokIslem: 0,
     lineCount: lines.length,
     uniqueStokCount: mergedLines.length,
   };
@@ -390,6 +462,9 @@ export const applyCariStokExcelImport = async (options: {
     let stok = archiveAsTedarikci
       ? findExistingTedarikciStok(meta.urunAdi, mutableStoklar, cari.id)
       : findExistingStok(meta.urunAdi, mutableStoklar);
+    const existingIslemler = mutableStokIslemler.filter((i) => i.stokKartId === stok?.id);
+    const hasHistory = existingIslemler.length > 0;
+
     if (!stok) {
       stok = {
         id: `sk_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
@@ -412,21 +487,30 @@ export const applyCariStokExcelImport = async (options: {
       await saveDocument('stokKartlar', stok);
       summary.createdStok += 1;
     } else {
-      const prevMiktar = Number(stok.miktar || 0);
-      const nextMiktar = archiveAsTedarikci ? meta.miktar : prevMiktar + meta.miktar;
+      const nextMiktar = hasHistory
+        ? Math.max(
+            Number(stok.miktar || 0),
+            meta.miktar,
+            computeStockTotalMiktar(stok.id, norm, mergedLines, existingIslemler)
+          )
+        : archiveAsTedarikci
+          ? meta.miktar
+          : Number(stok.miktar || 0) + meta.miktar;
       const next: StokKart = {
         ...stok,
         stokAdi: meta.urunAdi.length >= stok.stokAdi.length ? meta.urunAdi : stok.stokAdi,
         birim: meta.birim || stok.birim,
         miktar: nextMiktar,
         sonBirimFiyat: meta.birimFiyat || stok.sonBirimFiyat,
-        sonFiyatTarihi: meta.tarih,
+        sonFiyatTarihi: meta.birimFiyat > 0 ? meta.tarih : stok.sonFiyatTarihi,
         tedarikciCariId: cari.id,
         tedarikciUnvan: cari.unvan,
         arsivde: archiveAsTedarikci ? true : stok.arsivde,
         stokKaynak: stokKaynak || stok.stokKaynak,
         kategori: archiveAsTedarikci ? 'BİRBESAN Arşiv' : stok.kategori,
-        aciklama: `${String(stok.aciklama || '').trim()}\n${importTag} Güncel toplam: ${nextMiktar} ${meta.birim}.`.trim(),
+        aciklama: hasHistory
+          ? String(stok.aciklama || '').trim() || `${importTag} Mevcut hareket geçmişi korundu.`
+          : `${String(stok.aciklama || '').trim()}\n${importTag} Güncel toplam: ${nextMiktar} ${meta.birim}.`.trim(),
       };
       const idx = mutableStoklar.findIndex((x) => x.id === stok!.id);
       if (idx >= 0) mutableStoklar[idx] = next;
@@ -439,16 +523,20 @@ export const applyCariStokExcelImport = async (options: {
 
   setStokKartlar(mutableStoklar);
 
-  if (!hasPrices) {
-    return summary;
-  }
-
   const groups = buildFaturaGroups(lines);
   for (const [groupKey, groupLines] of groups.entries()) {
     const tarih = groupLines[0]?.tarih || new Date().toISOString().slice(0, 10);
-    const belgeNo = groupLines[0]?.belgeNo || `EXC-${tarih.replace(/-/g, '')}`;
-    const faturaId = `fat_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const sourceBase = String(groupLines[0]?.sourceFile || 'excel').split('#')[0];
+    const belgeNo =
+      groupLines[0]?.belgeNo ||
+      `BIRBESAN-${sourceBase.replace(/\.[^.]+$/, '').replace(/[^a-zA-Z0-9]+/g, '-').slice(-24)}-${tarih}`;
+    const existingFatura = faturaExistsForBelge(mutableFaturalar, cari.id, belgeNo);
+    if (existingFatura) {
+      summary.skippedFatura += 1;
+      continue;
+    }
 
+    const faturaId = stableFaturaId(cari.id, belgeNo);
     const kalemler: FaturaItem[] = groupLines.map((line, idx) => {
       const stokId = stokIdByNorm.get(canonicalStokKey(line.urunAdi));
       const toplam = line.toplam || line.birimFiyat * line.miktar;
@@ -482,40 +570,256 @@ export const applyCariStokExcelImport = async (options: {
       eImzalar: [],
     };
     await saveDocument('faturalar', fatura);
+    mutableFaturalar.unshift(fatura);
     summary.createdFatura += 1;
 
-    const cariIslem: CariKartIslem = {
-      id: `cari_islem_${faturaId}`,
-      cariKartId: cari.id,
-      islemTipi: 'FATURA',
-      islemId: faturaId,
-      islemBaslik: `Fatura ${belgeNo}`,
-      islemDetay: `${kalemler.length} kalem · ₺${fatura.genelToplam.toLocaleString('tr-TR')} ${importTag}`,
-      tutar: fatura.genelToplam,
-      tarih,
-      belgeNo,
-    };
-    await saveDocument('cariIslemGecmisi', cariIslem);
-    summary.createdCariIslem += 1;
+    const cariIslemId = `cari_islem_${faturaId}`;
+    if (!cariIslemExists(mutableCariIslemler, cariIslemId)) {
+      const cariIslem: CariKartIslem = {
+        id: cariIslemId,
+        cariKartId: cari.id,
+        islemTipi: 'FATURA',
+        islemId: faturaId,
+        islemBaslik: `Fatura ${belgeNo}`,
+        islemDetay: `${kalemler.length} kalem · ₺${fatura.genelToplam.toLocaleString('tr-TR')} ${importTag}`,
+        tutar: fatura.genelToplam,
+        tarih,
+        belgeNo,
+      };
+      await saveDocument('cariIslemGecmisi', cariIslem);
+      mutableCariIslemler.unshift(cariIslem);
+      summary.createdCariIslem += 1;
+    }
 
     for (const line of groupLines) {
       const stokId = stokIdByNorm.get(canonicalStokKey(line.urunAdi));
       if (!stokId) continue;
+      const stokIslemId = stableStokIslemId(faturaId, stokId, `${line.rowNo}-${line.urunAdi}`);
+      if (stokIslemExists(mutableStokIslemler, stokIslemId)) {
+        summary.skippedStokIslem += 1;
+        continue;
+      }
       const stokIslem: StokKartIslem = {
-        id: `stk_islem_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        id: stokIslemId,
         stokKartId: stokId,
         islemTipi: 'GIRIS',
         islemId: faturaId,
         islemBaslik: `Excel fatura ${belgeNo}`,
-        islemDetay: `${line.urunAdi} · ${line.miktar} ${line.birim} · ₺${line.birimFiyat}`,
+        islemDetay: `${line.urunAdi} · ${line.miktar} ${line.birim}${line.birimFiyat > 0 ? ` · ₺${line.birimFiyat}` : ''}`,
         miktarDegisimi: line.miktar,
         tarih,
         belgeNo,
       };
       await saveDocument('stokIslemGecmisi', stokIslem);
+      mutableStokIslemler.unshift(stokIslem);
       summary.createdStokIslem += 1;
     }
   }
+
+  options.setFaturalar?.(mutableFaturalar);
+  options.setCariIslemGecmisi?.(mutableCariIslemler);
+  options.setStokIslemGecmisi?.(mutableStokIslemler);
+
+  return summary;
+};
+
+export const applyBirbesanFaturaPlans = async (options: {
+  cari: CariKart;
+  plans: BirbesanFaturaPlan[];
+  stokKartlar: StokKart[];
+  setStokKartlar: (updater: StokKart[] | ((prev: StokKart[]) => StokKart[])) => void;
+  faturalar?: Fatura[];
+  setFaturalar?: (updater: Fatura[] | ((prev: Fatura[]) => Fatura[])) => void;
+  cariIslemGecmisi?: CariKartIslem[];
+  setCariIslemGecmisi?: (updater: CariKartIslem[] | ((prev: CariKartIslem[]) => CariKartIslem[])) => void;
+  stokIslemGecmisi?: StokKartIslem[];
+  setStokIslemGecmisi?: (updater: StokKartIslem[] | ((prev: StokKartIslem[]) => StokKartIslem[])) => void;
+  importTag?: string;
+  archiveAsTedarikci?: boolean;
+  stokKaynak?: StokKart['stokKaynak'];
+}): Promise<CariStokImportSummary> => {
+  const { cari, plans, stokKartlar, setStokKartlar } = options;
+  const importTag = options.importTag || `[BirbesanFatura:${cari.unvan}]`;
+  const archiveAsTedarikci = options.archiveAsTedarikci !== false;
+  const stokKaynak = options.stokKaynak || 'BIRBESAN_EXCEL';
+  const allKalemler = plans.flatMap((p) => p.kalemler);
+  const excelLines: CariStokExcelLine[] = allKalemler.map((k, idx) => ({
+    sourceFile: 'birbesan-faturalar.json',
+    rowNo: idx + 1,
+    tarih: plans.find((p) => p.kalemler.includes(k))?.tarih || new Date().toISOString().slice(0, 10),
+    belgeNo: plans.find((p) => p.kalemler.includes(k))?.faturaNo || '',
+    urunAdi: k.urunAdi,
+    birim: k.birim,
+    miktar: k.miktar,
+    birimFiyat: k.birimFiyat || 0,
+    toplam: (k.birimFiyat || 0) * k.miktar,
+  }));
+
+  const mergedLines = mergeExcelLinesByStokName(excelLines);
+  const mutableStoklar = [...stokKartlar];
+  const mutableFaturalar = [...(options.faturalar || [])];
+  const mutableCariIslemler = [...(options.cariIslemGecmisi || [])];
+  const mutableStokIslemler = [...(options.stokIslemGecmisi || [])];
+  const summary: CariStokImportSummary = {
+    createdStok: 0,
+    updatedStok: 0,
+    createdFatura: 0,
+    createdCariIslem: 0,
+    createdStokIslem: 0,
+    skippedFatura: 0,
+    skippedStokIslem: 0,
+    lineCount: allKalemler.length,
+    uniqueStokCount: mergedLines.length,
+  };
+  const stokIdByNorm = new Map<string, string>();
+
+  for (const meta of mergedLines) {
+    const norm = canonicalStokKey(meta.urunAdi);
+    let stok = findExistingTedarikciStok(meta.urunAdi, mutableStoklar, cari.id);
+    const existingIslemler = mutableStokIslemler.filter((i) => i.stokKartId === stok?.id);
+    const hasHistory = existingIslemler.length > 0;
+
+    if (!stok) {
+      stok = {
+        id: `sk_birbesan_${norm.slice(0, 20).replace(/[^a-z0-9]/g, '_')}_${Date.now()}`,
+        stokKodu: `BB-${String(summary.createdStok + 1).padStart(3, '0')}`,
+        stokAdi: meta.urunAdi,
+        kategori: 'BİRBESAN Arşiv',
+        birim: meta.birim || 'ADET',
+        kritikSeviye: 0,
+        durum: 'AKTIF',
+        aciklama: `${importTag} BİRBESAN fatura kataloğu. Toplam: ${meta.miktar} ${meta.birim}.`,
+        miktar: meta.miktar,
+        sonBirimFiyat: meta.birimFiyat || undefined,
+        sonFiyatTarihi: meta.tarih,
+        tedarikciCariId: cari.id,
+        tedarikciUnvan: cari.unvan,
+        arsivde: true,
+        stokKaynak,
+      };
+      mutableStoklar.unshift(stok);
+      await saveDocument('stokKartlar', stok);
+      summary.createdStok += 1;
+    } else {
+      const nextMiktar = hasHistory
+        ? Math.max(Number(stok.miktar || 0), meta.miktar)
+        : meta.miktar;
+      const next: StokKart = {
+        ...stok,
+        stokAdi: meta.urunAdi.length >= stok.stokAdi.length ? meta.urunAdi : stok.stokAdi,
+        birim: meta.birim || stok.birim,
+        miktar: nextMiktar,
+        tedarikciCariId: cari.id,
+        tedarikciUnvan: cari.unvan,
+        arsivde: true,
+        stokKaynak,
+        kategori: 'BİRBESAN Arşiv',
+        aciklama: hasHistory
+          ? String(stok.aciklama || '').trim() || `${importTag} Mevcut hareket geçmişi korundu.`
+          : `${importTag} Toplam: ${nextMiktar} ${meta.birim}.`,
+      };
+      const idx = mutableStoklar.findIndex((x) => x.id === stok!.id);
+      if (idx >= 0) mutableStoklar[idx] = next;
+      stok = next;
+      await saveDocument('stokKartlar', next);
+      summary.updatedStok += 1;
+    }
+    stokIdByNorm.set(norm, stok.id);
+  }
+
+  setStokKartlar(mutableStoklar);
+
+  for (const plan of plans) {
+    const { faturaNo, tarih, kalemler, aciklama } = plan;
+    const existingFatura = faturaExistsForBelge(mutableFaturalar, cari.id, faturaNo);
+    if (existingFatura) {
+      summary.skippedFatura += 1;
+      continue;
+    }
+
+    const faturaId = stableFaturaId(cari.id, faturaNo);
+    const faturaKalemler: FaturaItem[] = kalemler.map((line, idx) => {
+      const stokId = stokIdByNorm.get(canonicalStokKey(line.urunAdi));
+      const toplam = (line.birimFiyat || 0) * line.miktar;
+      return {
+        id: `fi_${faturaId}_${idx}`,
+        urunAdi: line.urunAdi,
+        miktar: line.miktar,
+        birim: line.birim,
+        birimFiyat: line.birimFiyat || 0,
+        kdvOran: 20,
+        toplam,
+        stokKartId: stokId,
+      };
+    });
+
+    const toplamTutar = faturaKalemler.reduce((s, k) => s + (k.toplam || 0), 0);
+    const kdvTutar = Math.round(toplamTutar * 0.2 * 100) / 100;
+    const fatura: Fatura = {
+      id: faturaId,
+      faturaNo,
+      tarih,
+      cariKartId: cari.id,
+      cariUnvan: cari.unvan,
+      toplamTutar,
+      kdvTutar,
+      genelToplam: toplamTutar + kdvTutar,
+      durum: 'ONAYLANDI',
+      rapor: aciklama || importTag,
+      kalemler: faturaKalemler,
+      bagliIrsaliyeler: [],
+      eImzalar: [],
+    };
+    await saveDocument('faturalar', fatura);
+    mutableFaturalar.unshift(fatura);
+    summary.createdFatura += 1;
+
+    const cariIslemId = `cari_islem_${faturaId}`;
+    if (!cariIslemExists(mutableCariIslemler, cariIslemId)) {
+      const cariIslem: CariKartIslem = {
+        id: cariIslemId,
+        cariKartId: cari.id,
+        islemTipi: 'FATURA',
+        islemId: faturaId,
+        islemBaslik: `Fatura ${faturaNo}`,
+        islemDetay: `${faturaKalemler.length} kalem · BİRBESAN Excel ${importTag}`,
+        tutar: fatura.genelToplam,
+        tarih,
+        belgeNo: faturaNo,
+      };
+      await saveDocument('cariIslemGecmisi', cariIslem);
+      mutableCariIslemler.unshift(cariIslem);
+      summary.createdCariIslem += 1;
+    }
+
+    for (const [lineIdx, line] of kalemler.entries()) {
+      const stokId = stokIdByNorm.get(canonicalStokKey(line.urunAdi));
+      if (!stokId) continue;
+      const stokIslemId = stableStokIslemId(faturaId, stokId, `${lineIdx}-${line.urunAdi}`);
+      if (stokIslemExists(mutableStokIslemler, stokIslemId)) {
+        summary.skippedStokIslem += 1;
+        continue;
+      }
+      const stokIslem: StokKartIslem = {
+        id: stokIslemId,
+        stokKartId: stokId,
+        islemTipi: 'GIRIS',
+        islemId: faturaId,
+        islemBaslik: `BİRBESAN fatura ${faturaNo}`,
+        islemDetay: `${line.urunAdi} · ${line.miktar} ${line.birim}`,
+        miktarDegisimi: line.miktar,
+        tarih,
+        belgeNo: faturaNo,
+      };
+      await saveDocument('stokIslemGecmisi', stokIslem);
+      mutableStokIslemler.unshift(stokIslem);
+      summary.createdStokIslem += 1;
+    }
+  }
+
+  options.setFaturalar?.(mutableFaturalar);
+  options.setCariIslemGecmisi?.(mutableCariIslemler);
+  options.setStokIslemGecmisi?.(mutableStokIslemler);
 
   return summary;
 };

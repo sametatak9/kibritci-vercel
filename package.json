@@ -34,7 +34,9 @@
     "birbesan:import": "node scripts/import-birbesan-stok-xlsx.mjs --dir data/birbesan --execute",
     "birbesan:seed:dry-run": "node scripts/seed-birbesan-stok-catalog.mjs --dry-run",
     "birbesan:seed": "node scripts/seed-birbesan-stok-catalog.mjs --execute",
-    "birbesan:dedupe": "node scripts/seed-birbesan-stok-catalog.mjs --execute --dedupe-only"
+    "birbesan:dedupe": "node scripts/seed-birbesan-stok-catalog.mjs --execute --dedupe-only",
+    "birbesan:faturalar:dry-run": "node scripts/seed-birbesan-faturalar.mjs --dry-run",
+    "birbesan:faturalar": "node scripts/seed-birbesan-faturalar.mjs --execute"
   },
   "dependencies": {
     "@google/genai": "^2.10.0",
