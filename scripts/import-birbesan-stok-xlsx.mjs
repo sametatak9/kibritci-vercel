@@ -173,9 +173,29 @@ const parseWorksheet = (ws, sourceFile) => {
   return { lines, meta: detected };
 };
 
-const findExistingStok = (urunAdi, stoklar) => {
-  const norm = normalizeText(urunAdi);
-  return stoklar.find((s) => normalizeText(s.stokAdi) === norm) || null;
+const canonicalStokKey = (raw) =>
+  normalizeText(raw)
+    .replace(/\s*\.\s*/g, '.')
+    .replace(/(\d)\s+mm\b/g, '$1mm')
+    .replace(/\(\s*n\s*\)/g, '(n)')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+const mergeLinesByStokName = (lines) => {
+  const bucket = new Map();
+  for (const line of lines) {
+    const key = canonicalStokKey(line.urunAdi);
+    if (!key) continue;
+    const prev = bucket.get(key);
+    if (!prev) {
+      bucket.set(key, { ...line, urunAdi: line.urunAdi.trim() });
+      continue;
+    }
+    prev.miktar += line.miktar || 0;
+    if (line.urunAdi.trim().length > prev.urunAdi.length) prev.urunAdi = line.urunAdi.trim();
+    if (line.birim) prev.birim = line.birim;
+  }
+  return [...bucket.values()];
 };
 
 const findExistingTedarikciStok = (urunAdi, stoklar, cariId) => {
@@ -278,19 +298,16 @@ if (!cari) {
 }
 
 const importTag = `[BirbesanXLSX:${cari.unvan}]`;
-const latestByStok = new Map();
-for (const line of allLines) {
-  const norm = normalizeText(line.urunAdi);
-  const prev = latestByStok.get(norm);
-  if (!prev || line.tarih >= prev.tarih) latestByStok.set(norm, line);
-}
+const mergedLines = mergeLinesByStokName(allLines);
+console.log(`Birleştirilmiş benzersiz stok: ${mergedLines.length} (ham satır: ${allLines.length})`);
 
 let createdStok = 0;
 let updatedStok = 0;
 const stokIdByNorm = new Map();
 const mutableStoklar = [...stoklar];
 
-for (const [norm, line] of latestByStok.entries()) {
+for (const line of mergedLines) {
+  const norm = canonicalStokKey(line.urunAdi);
   let stok = findExistingTedarikciStok(line.urunAdi, mutableStoklar, cari.id);
   if (!stok) {
     stok = {
@@ -299,9 +316,10 @@ for (const [norm, line] of latestByStok.entries()) {
       stokAdi: line.urunAdi,
       kategori: 'BİRBESAN Arşiv',
       birim: line.birim,
+      miktar: line.miktar,
       kritikSeviye: 0,
       durum: 'AKTIF',
-      aciklama: `${importTag} Excel aktarımından oluşturuldu.`,
+      aciklama: `${importTag} Toplam miktar: ${line.miktar} ${line.birim}.`,
       sonBirimFiyat: line.birimFiyat || undefined,
       sonFiyatTarihi: line.tarih,
       tedarikciCariId: cari.id,
@@ -315,7 +333,9 @@ for (const [norm, line] of latestByStok.entries()) {
   } else {
     const next = {
       ...stok,
+      stokAdi: line.urunAdi.length >= stok.stokAdi.length ? line.urunAdi : stok.stokAdi,
       birim: line.birim || stok.birim,
+      miktar: line.miktar,
       sonBirimFiyat: line.birimFiyat || stok.sonBirimFiyat,
       sonFiyatTarihi: line.tarih,
       tedarikciCariId: cari.id,
@@ -323,6 +343,7 @@ for (const [norm, line] of latestByStok.entries()) {
       arsivde: true,
       stokKaynak: 'BIRBESAN_EXCEL',
       kategori: 'BİRBESAN Arşiv',
+      aciklama: `${importTag} Güncel toplam: ${line.miktar} ${line.birim}.`,
     };
     await setDoc(doc(db, 'stokKartlar', stok.id), next);
     updatedStok += 1;

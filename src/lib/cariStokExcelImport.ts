@@ -45,6 +45,8 @@ const HEADER_HINTS: Record<keyof Omit<CariStokExcelLine, 'sourceFile' | 'rowNo'>
     'stok adi',
     'stok adı',
     'malzeme',
+    'malzeme(sinifi)aciklamasi',
+    'malzeme aciklamasi',
     'urun',
     'ürün',
     'aciklama',
@@ -56,8 +58,8 @@ const HEADER_HINTS: Record<keyof Omit<CariStokExcelLine, 'sourceFile' | 'rowNo'>
     'tanım',
     'stok',
   ],
-  birim: ['birim', 'olcu', 'ölçü', 'br'],
-  miktar: ['miktar', 'adet', 'tonaj', 'kg', 'lt', 'metre', 'miktarı'],
+  birim: ['birim', 'birimi', 'olcu', 'ölçü', 'br'],
+  miktar: ['miktar', 'satis miktari', 'satış miktarı', 'satis miktar', 'adet', 'tonaj', 'kg', 'lt', 'metre', 'miktarı'],
   birimFiyat: ['birim fiyat', 'birimfiyat', 'bf', 'net fiyat', 'fiyat', 'birim tutar'],
   toplam: ['tutar', 'toplam', 'genel toplam', 'net tutar', 'kdv haric', 'kdv hariç'],
 };
@@ -73,6 +75,52 @@ export const normalizeImportText = (raw: unknown): string =>
     .replace(/[öÖ]/g, 'o')
     .replace(/\s+/g, ' ')
     .trim();
+
+/** Aynı stok adını farklı yazımlarda birleştirmek için (M. BACA / M.BACA, Ø600 mm / Ø600mm) */
+export const canonicalStokKey = (raw: string): string =>
+  normalizeImportText(raw)
+    .replace(/\s*\.\s*/g, '.')
+    .replace(/(\d)\s+mm\b/g, '$1mm')
+    .replace(/\(\s*n\s*\)/g, '(n)')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+export type MergedStokLine = {
+  urunAdi: string;
+  birim: string;
+  miktar: number;
+  birimFiyat: number;
+  tarih: string;
+  kaynakSatir: number;
+};
+
+/** İki Excel / çok satırda aynı isimli stokları tek satırda topla */
+export const mergeExcelLinesByStokName = (lines: CariStokExcelLine[]): MergedStokLine[] => {
+  const bucket = new Map<string, MergedStokLine>();
+  for (const line of lines) {
+    const key = canonicalStokKey(line.urunAdi);
+    if (!key) continue;
+    const prev = bucket.get(key);
+    if (!prev) {
+      bucket.set(key, {
+        urunAdi: line.urunAdi.trim(),
+        birim: line.birim || 'ADET',
+        miktar: line.miktar || 0,
+        birimFiyat: line.birimFiyat || 0,
+        tarih: line.tarih,
+        kaynakSatir: 1,
+      });
+      continue;
+    }
+    prev.miktar += line.miktar || 0;
+    prev.kaynakSatir += 1;
+    if (line.urunAdi.trim().length > prev.urunAdi.length) prev.urunAdi = line.urunAdi.trim();
+    if (line.birimFiyat > 0) prev.birimFiyat = line.birimFiyat;
+    if (line.tarih >= prev.tarih) prev.tarih = line.tarih;
+    if (line.birim) prev.birim = line.birim;
+  }
+  return [...bucket.values()];
+};
 
 const levenshteinDistance = (a: string, b: string): number => {
   const s = normalizeImportText(a);
@@ -252,14 +300,14 @@ export const parseCariStokExcelFiles = async (files: File[]): Promise<CariStokEx
 };
 
 export const findExistingStok = (urunAdi: string, stoklar: StokKart[]): StokKart | null => {
-  const norm = normalizeImportText(urunAdi);
+  const norm = canonicalStokKey(urunAdi);
   if (!norm) return null;
-  const exact = stoklar.find((s) => normalizeImportText(s.stokAdi) === norm);
+  const exact = stoklar.find((s) => canonicalStokKey(s.stokAdi) === norm);
   if (exact) return exact;
   let best: StokKart | null = null;
   let bestDist = 999;
   for (const s of stoklar) {
-    const dist = levenshteinDistance(norm, s.stokAdi);
+    const dist = levenshteinDistance(norm, canonicalStokKey(s.stokAdi));
     if (dist < bestDist) {
       bestDist = dist;
       best = s;
@@ -322,6 +370,8 @@ export const applyCariStokExcelImport = async (options: {
   const importTag = options.importTag || `[ExcelImport:${cari.unvan}]`;
   const archiveAsTedarikci = Boolean(options.archiveAsTedarikci);
   const stokKaynak = options.stokKaynak || (archiveAsTedarikci ? 'BIRBESAN_EXCEL' : undefined);
+  const mergedLines = mergeExcelLinesByStokName(lines);
+  const hasPrices = mergedLines.some((l) => l.birimFiyat > 0);
   const mutableStoklar = [...stokKartlar];
   const summary: CariStokImportSummary = {
     createdStok: 0,
@@ -330,36 +380,27 @@ export const applyCariStokExcelImport = async (options: {
     createdCariIslem: 0,
     createdStokIslem: 0,
     lineCount: lines.length,
-    uniqueStokCount: 0,
+    uniqueStokCount: mergedLines.length,
   };
-
-  const latestByStok = new Map<string, { birim: string; birimFiyat: number; tarih: string }>();
-  for (const line of lines) {
-    const norm = normalizeImportText(line.urunAdi);
-    const prev = latestByStok.get(norm);
-    if (!prev || line.tarih >= prev.tarih) {
-      latestByStok.set(norm, { birim: line.birim, birimFiyat: line.birimFiyat, tarih: line.tarih });
-    }
-  }
-  summary.uniqueStokCount = latestByStok.size;
 
   const stokIdByNorm = new Map<string, string>();
 
-  for (const [norm, meta] of latestByStok.entries()) {
-    const sampleName = lines.find((l) => normalizeImportText(l.urunAdi) === norm)?.urunAdi || norm;
+  for (const meta of mergedLines) {
+    const norm = canonicalStokKey(meta.urunAdi);
     let stok = archiveAsTedarikci
-      ? findExistingTedarikciStok(sampleName, mutableStoklar, cari.id)
-      : findExistingStok(sampleName, mutableStoklar);
+      ? findExistingTedarikciStok(meta.urunAdi, mutableStoklar, cari.id)
+      : findExistingStok(meta.urunAdi, mutableStoklar);
     if (!stok) {
       stok = {
         id: `sk_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
         stokKodu: `STK-${Math.floor(1000 + Math.random() * 9000)}`,
-        stokAdi: sampleName,
+        stokAdi: meta.urunAdi,
         kategori: archiveAsTedarikci ? 'BİRBESAN Arşiv' : 'Kaba İnşaat İmalatı',
         birim: meta.birim || 'ADET',
         kritikSeviye: 0,
         durum: 'AKTIF',
-        aciklama: `${importTag} Excel aktarımından oluşturuldu.`,
+        aciklama: `${importTag} Excel aktarımından oluşturuldu. Toplam miktar: ${meta.miktar} ${meta.birim}.`,
+        miktar: meta.miktar,
         sonBirimFiyat: meta.birimFiyat || undefined,
         sonFiyatTarihi: meta.tarih,
         tedarikciCariId: cari.id,
@@ -371,9 +412,13 @@ export const applyCariStokExcelImport = async (options: {
       await saveDocument('stokKartlar', stok);
       summary.createdStok += 1;
     } else {
+      const prevMiktar = Number(stok.miktar || 0);
+      const nextMiktar = archiveAsTedarikci ? meta.miktar : prevMiktar + meta.miktar;
       const next: StokKart = {
         ...stok,
+        stokAdi: meta.urunAdi.length >= stok.stokAdi.length ? meta.urunAdi : stok.stokAdi,
         birim: meta.birim || stok.birim,
+        miktar: nextMiktar,
         sonBirimFiyat: meta.birimFiyat || stok.sonBirimFiyat,
         sonFiyatTarihi: meta.tarih,
         tedarikciCariId: cari.id,
@@ -381,9 +426,7 @@ export const applyCariStokExcelImport = async (options: {
         arsivde: archiveAsTedarikci ? true : stok.arsivde,
         stokKaynak: stokKaynak || stok.stokKaynak,
         kategori: archiveAsTedarikci ? 'BİRBESAN Arşiv' : stok.kategori,
-        aciklama: String(stok.aciklama || '').includes(importTag)
-          ? stok.aciklama
-          : `${String(stok.aciklama || '').trim()}\n${importTag}`.trim(),
+        aciklama: `${String(stok.aciklama || '').trim()}\n${importTag} Güncel toplam: ${nextMiktar} ${meta.birim}.`.trim(),
       };
       const idx = mutableStoklar.findIndex((x) => x.id === stok!.id);
       if (idx >= 0) mutableStoklar[idx] = next;
@@ -396,6 +439,10 @@ export const applyCariStokExcelImport = async (options: {
 
   setStokKartlar(mutableStoklar);
 
+  if (!hasPrices) {
+    return summary;
+  }
+
   const groups = buildFaturaGroups(lines);
   for (const [groupKey, groupLines] of groups.entries()) {
     const tarih = groupLines[0]?.tarih || new Date().toISOString().slice(0, 10);
@@ -403,7 +450,7 @@ export const applyCariStokExcelImport = async (options: {
     const faturaId = `fat_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
     const kalemler: FaturaItem[] = groupLines.map((line, idx) => {
-      const stokId = stokIdByNorm.get(normalizeImportText(line.urunAdi));
+      const stokId = stokIdByNorm.get(canonicalStokKey(line.urunAdi));
       const toplam = line.toplam || line.birimFiyat * line.miktar;
       return {
         id: `fi_${faturaId}_${idx}`,
@@ -452,7 +499,7 @@ export const applyCariStokExcelImport = async (options: {
     summary.createdCariIslem += 1;
 
     for (const line of groupLines) {
-      const stokId = stokIdByNorm.get(normalizeImportText(line.urunAdi));
+      const stokId = stokIdByNorm.get(canonicalStokKey(line.urunAdi));
       if (!stokId) continue;
       const stokIslem: StokKartIslem = {
         id: `stk_islem_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,

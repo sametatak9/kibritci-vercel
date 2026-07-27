@@ -31,7 +31,10 @@
     "auth:sync-claims": "node scripts/sync-auth-claims.mjs",
     "birbesan:inspect": "node scripts/import-birbesan-stok-xlsx.mjs --dir data/birbesan --inspect",
     "birbesan:import:dry-run": "node scripts/import-birbesan-stok-xlsx.mjs --dir data/birbesan --dry-run",
-    "birbesan:import": "node scripts/import-birbesan-stok-xlsx.mjs --dir data/birbesan --execute"
+    "birbesan:import": "node scripts/import-birbesan-stok-xlsx.mjs --dir data/birbesan --execute",
+    "birbesan:seed:dry-run": "node scripts/seed-birbesan-stok-catalog.mjs --dry-run",
+    "birbesan:seed": "node scripts/seed-birbesan-stok-catalog.mjs --execute",
+    "birbesan:dedupe": "node scripts/seed-birbesan-stok-catalog.mjs --execute --dedupe-only"
   },
   "dependencies": {
     "@google/genai": "^2.10.0",

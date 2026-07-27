@@ -18,6 +18,7 @@ import {
   applyCariStokExcelImport,
   ensureBirbesanCari,
   isBirbesanStokArsiv,
+  mergeExcelLinesByStokName,
   normalizeImportText,
   parseCariStokExcelFiles,
 } from '../lib/cariStokExcelImport';
@@ -783,10 +784,10 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
         alert(`Excel okunamadı.\n${warnings.join('\n') || 'Veri satırı bulunamadı.'}`);
         return;
       }
-      const uniqueCount = new Set(lines.map((l) => normalizeImportText(l.urunAdi))).size;
+      const merged = mergeExcelLinesByStokName(lines);
       const ok = window.confirm(
-        `${files.length} dosyadan ${lines.length} kalem bulundu.\n` +
-          `${uniqueCount} benzersiz stok kartı oluşturulacak veya güncellenecek.\n` +
+        `${files.length} dosyadan ${lines.length} satır okundu.\n` +
+          `Aynı isimli kalemler birleştirildi → ${merged.length} benzersiz stok kartı.\n` +
           `Hedef cari: ${selectedCari.unvan}\n\nDevam edilsin mi?`
       );
       if (!ok) return;
@@ -841,10 +842,11 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
         alert(`Excel okunamadı.\n${warnings.join('\n') || 'Veri satırı bulunamadı.'}`);
         return;
       }
-      const uniqueCount = new Set(lines.map((l) => normalizeImportText(l.urunAdi))).size;
+      const merged = mergeExcelLinesByStokName(lines);
       const ok = window.confirm(
-        `${files.length} Excel dosyasından ${lines.length} kalem bulundu.\n` +
-          `${uniqueCount} BİRBESAN stok kartı arşive eklenecek veya güncellenecek.\n\nDevam edilsin mi?`
+        `${files.length} Excel dosyasından ${lines.length} satır okundu.\n` +
+          `Aynı isimli kalemler birleştirildi → ${merged.length} BİRBESAN stok kartı.\n` +
+          `Toplam miktarlar toplanarak tek karta yazılacak.\n\nDevam edilsin mi?`
       );
       if (!ok) return;
 
@@ -1094,7 +1096,8 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
                           <p className="text-[10px] font-mono font-bold text-slate-500">{st.stokKodu}</p>
                           <p className="text-xs font-black text-slate-900 truncate mt-0.5">{st.stokAdi}</p>
                           <p className="text-[10px] text-teal-800 font-bold mt-0.5">
-                            {st.birim} · {st.kategori}
+                            {st.birim}
+                            {st.miktar != null && st.miktar > 0 ? ` · ${Number(st.miktar).toLocaleString('tr-TR')}` : ''}
                             {st.sonBirimFiyat != null && st.sonBirimFiyat > 0
                               ? ` · ₺${st.sonBirimFiyat.toLocaleString('tr-TR')}`
                               : ''}
