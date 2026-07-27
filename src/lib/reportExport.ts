@@ -3,6 +3,7 @@ import {
   downloadKibritciReportHtml,
   openKibritciReportPrint,
 } from './kibritciReportTemplate';
+import { loadKibritciReportAssets, type KibritciReportAssets } from './kibritciBrand';
 
 export type ReportExportFormat = 'html' | 'csv' | 'txt';
 
@@ -57,6 +58,7 @@ export function buildHistoryTableHtml(options: {
   subtitle?: string;
   meta?: string[];
   logs: HistoryLogRow[];
+  assets?: KibritciReportAssets;
 }): string {
   const rows = options.logs
     .map((log) => {
@@ -88,16 +90,17 @@ export function buildHistoryTableHtml(options: {
     subtitle: options.subtitle,
     meta: options.meta,
     bodyHtml,
+    assets: options.assets,
   });
 }
 
-export function exportHistoryReport(options: {
+export async function exportHistoryReport(options: {
   title: string;
   fileBase: string;
   meta: string[];
   logs: HistoryLogRow[];
   format: ReportExportFormat;
-}): void {
+}): Promise<void> {
   if (options.logs.length === 0) {
     alert('İndirilecek kayıt bulunmamaktadır.');
     return;
@@ -130,10 +133,13 @@ export function exportHistoryReport(options: {
   }
 
   if (options.format === 'html') {
+    // Görselleri base64 gömerek indirilen HTML'de de antet/logo/filigranın görünmesini sağla
+    const assets = await loadKibritciReportAssets();
     const html = buildHistoryTableHtml({
       title: options.title,
       meta: options.meta,
       logs: options.logs,
+      assets,
     });
     downloadKibritciReportHtml(html, `${options.fileBase}.html`);
     return;
