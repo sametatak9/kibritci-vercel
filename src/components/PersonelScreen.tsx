@@ -744,8 +744,8 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
 
     const msg =
       dupes.length > 1
-        ? `"${target.ad} ${target.soyad}" için ${dupes.length} mükerrer kayıt bulundu. Hepsini kalıcı olarak silmek istiyor musunuz?`
-        : `"${target.ad} ${target.soyad}" kalıcı olarak silinsin mi?`;
+        ? `"${target.ad} ${target.soyad}" için ${dupes.length} mükerrer kayıt bulundu. Hepsi kalıcı silinecek ve kamptaki oda kayıtları da tahliye edilecek. Devam?`
+        : `"${target.ad} ${target.soyad}" kalıcı silinsin mi?\n(Kamp oda yerleşimi varsa otomatik tahliye edilir.)`;
 
     if (!confirm(msg)) return;
 

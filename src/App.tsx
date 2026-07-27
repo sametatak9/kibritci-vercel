@@ -77,6 +77,7 @@ import {
   parseYoklamaSnapshotData,
   syncArrayToFirestore,
   saveDocument,
+  removeDocument,
   fetchCollection,
   ensureFirestoreAuth,
 } from './lib/firebase';
@@ -125,7 +126,7 @@ const PublicGirisKayitScreen = lazy(() => import('./components/PublicGirisKayitS
 const PublicSatinAlmaShareScreen = lazy(() => import('./components/PublicSatinAlmaShareScreen').then(m => ({ default: m.PublicSatinAlmaShareScreen })));
 import { fetchSatinAlmaPublicShare } from './lib/satinAlmaPublicShare';
 import { installReportEmailGlobalBridge } from './lib/reportEmail';
-import { CANONICAL_ANA_FIRMA_ADI, isKibritciCompany } from './lib/yoklamaUtils';
+import { CANONICAL_ANA_FIRMA_ADI, isKibritciCompany, normalizeTurkishName } from './lib/yoklamaUtils';
 import {
   buildSaIrsaliyeFormPrefill,
   type SaIrsaliyeFormPrefill,
@@ -323,6 +324,11 @@ export default function App() {
   const yeditepeCariSeedRef = useRef(false);
   const kampRepairInFlightRef = useRef(false);
   const personelAutoCreateBlocklistRef = useRef(new Set<string>());
+  const personelDeletedIdBlocklistRef = useRef(new Set<string>());
+  const kampKayitlariRef = useRef(kampKayitlari);
+  const kampOdalariRef = useRef(kampOdalari);
+  kampKayitlariRef.current = kampKayitlari;
+  kampOdalariRef.current = kampOdalari;
   const persistenceFailureRef = useRef<(collection: string, message: string) => void>((c, m) => {
     console.error(`[persist:${c}]`, m);
   });
@@ -1546,21 +1552,75 @@ export default function App() {
 
   const handlePersonelDeleted = (deleted: Personel[]) => {
     if (!deleted.length) return;
+
+    const deletedIds = deleted.map((p) => p.id).filter(Boolean);
+    deletedIds.forEach((id) => personelDeletedIdBlocklistRef.current.add(id));
+
     deleted.forEach((p) => {
+      const fullName = `${p.ad || ''} ${p.soyad || ''}`.trim();
       personelAutoCreateBlocklistRef.current.add(personelNameKey(p));
-      void evictActiveKampResidentsForPersonel({
-        personelId: p.id,
-        personelIsim: `${p.ad || ''} ${p.soyad || ''}`.trim(),
-        cikisTarihi: p.istenCikisTarihi || new Date().toISOString().slice(0, 10),
-        kampOdalari,
-        kampKayitlari,
-      }).then((result) => {
-        if (result.evictedCount > 0) {
-          addNotification?.(
-            `${p.ad} ${p.soyad} silindi — kamptan ${result.evictedCount} oda kaydı tahliye edildi.`
-          );
-        }
-      });
+      personelAutoCreateBlocklistRef.current.add(normalizeTurkishName(fullName));
+      // Kamp kaydındaki yazım farkları için de engelle
+      personelAutoCreateBlocklistRef.current.add(fullName.toLocaleLowerCase('tr-TR'));
+    });
+
+    // Firestore silmeyi doğrudan da doğrula (array sync gecikse/başarısız olsa bile)
+    deletedIds.forEach((id) => {
+      void removeDocument('personeller', id).catch((err) =>
+        console.warn('[personel-delete] Firestore silme:', id, err)
+      );
+    });
+
+    // Önce UI’da kampı boşalt, sonra Firestore tahliye — silinen kişi listelerde kalmasın
+    const nameKeys = new Set(
+      deleted.flatMap((p) => {
+        const full = `${p.ad || ''} ${p.soyad || ''}`.trim();
+        return [normalizeTurkishName(full), personelNameKey(p)];
+      })
+    );
+    const idSet = new Set(deletedIds);
+    const cikisTarihi = new Date().toISOString().slice(0, 10);
+
+    setKampKayitlari((prev) =>
+      prev.map((k) => {
+        if (k.durum !== 'AKTIF') return k;
+        const byId = Boolean(k.personelId && idSet.has(k.personelId));
+        const byName = nameKeys.has(normalizeTurkishName(k.personelIsim || ''));
+        if (!byId && !byName) return k;
+        return { ...k, durum: 'PASIF' as const, cikisTarihi };
+      })
+    );
+
+    void (async () => {
+      let kayitlar = [...kampKayitlariRef.current];
+      let odalar = [...kampOdalariRef.current];
+      let totalEvicted = 0;
+
+      for (const p of deleted) {
+        const result = await evictActiveKampResidentsForPersonel({
+          personelId: p.id,
+          personelIds: deletedIds,
+          personelIsim: `${p.ad || ''} ${p.soyad || ''}`.trim(),
+          cikisTarihi: p.istenCikisTarihi || cikisTarihi,
+          kampOdalari: odalar,
+          kampKayitlari: kayitlar,
+        });
+        kayitlar = result.kampKayitlari;
+        odalar = result.kampOdalari;
+        totalEvicted += result.evictedCount;
+      }
+
+      setKampKayitlari(kayitlar);
+      setKampOdalari(odalar);
+
+      if (totalEvicted > 0) {
+        addNotification?.(
+          `Personel silindi — kamptan ${totalEvicted} oda kaydı tahliye edildi.`
+        );
+      }
+    })().catch((err) => {
+      console.error('[personel-delete] Kamp tahliye hatası:', err);
+      addNotification?.('Personel silindi ancak kamp tahliyesi tamamlanamadı — kontrol edin.');
     });
   };
 
@@ -1582,11 +1642,13 @@ export default function App() {
         personelId: p.id,
         personelIsim: `${p.ad || ''} ${p.soyad || ''}`.trim(),
         cikisTarihi: p.istenCikisTarihi || new Date().toISOString().slice(0, 10),
-        kampOdalari,
-        kampKayitlari,
+        kampOdalari: kampOdalariRef.current,
+        kampKayitlari: kampKayitlariRef.current,
       })
         .then((result) => {
           if (result.evictedCount > 0) {
+            setKampKayitlari(result.kampKayitlari);
+            setKampOdalari(result.kampOdalari);
             addNotification?.(
               `${p.ad} ${p.soyad} işten çıkarıldı — kamptaki odasından otomatik tahliye edildi (${result.evictedCount} kayıt).`
             );
@@ -1731,81 +1793,151 @@ export default function App() {
         setKampKayitlari(nextKayitlar);
       }
 
-      // 3. Find active residents who don't exist in personeller and create them
-      const activeResidents = kampKayitlari.filter(
-        (k) => k.durum === 'AKTIF'
-      );
+      // 3. Aktif kamp sakinleri: silinen personeli yeniden oluşturma —
+      //    yetim oda kaydını tahliye et; yalnızca bilinçli misafir yerleşimleri için kart aç.
+      const activeResidents = kampKayitlari.filter((k) => k.durum === 'AKTIF');
       const toCreate: Personel[] = [];
+      const orphanKayitIds = new Set<string>();
 
       activeResidents.forEach((k) => {
         const nameClean = k.personelIsim.trim();
         if (!nameClean) return;
 
-        const nameKey = nameClean.toLocaleLowerCase('tr-TR');
-        if (personelAutoCreateBlocklistRef.current.has(nameKey)) return;
+        const nameKeyLower = nameClean.toLocaleLowerCase('tr-TR');
+        const nameKeyNorm = normalizeTurkishName(nameClean);
+
+        if (personelAutoCreateBlocklistRef.current.has(nameKeyLower)) {
+          orphanKayitIds.add(k.id);
+          return;
+        }
+        if (personelAutoCreateBlocklistRef.current.has(nameKeyNorm)) {
+          orphanKayitIds.add(k.id);
+          return;
+        }
+        if (k.personelId && personelDeletedIdBlocklistRef.current.has(k.personelId)) {
+          orphanKayitIds.add(k.id);
+          return;
+        }
         if (isPlaceholderPersonelName(nameClean)) return;
 
-        const exists = personeller.some((p) => {
-          const fullName = `${p.ad} ${p.soyad}`.trim().toLocaleLowerCase('tr-TR');
-          return fullName === nameKey;
+        const existsById = Boolean(
+          k.personelId && personeller.some((p) => p.id === k.personelId)
+        );
+        const existsByName = personeller.some((p) => {
+          const fullName = `${p.ad} ${p.soyad}`.trim();
+          return (
+            fullName.toLocaleLowerCase('tr-TR') === nameKeyLower ||
+            normalizeTurkishName(fullName) === nameKeyNorm
+          );
         });
+
+        // personelId vardı ama kart silinmiş → yeniden oluşturma, kamptan düşür
+        if (k.personelId && !existsById) {
+          orphanKayitIds.add(k.id);
+          return;
+        }
+
+        if (existsById || existsByName) return;
 
         const alreadyQueued = toCreate.some((p) => {
-          const fullName = `${p.ad} ${p.soyad}`.trim().toLocaleLowerCase('tr-TR');
-          return fullName === nameClean.toLocaleLowerCase('tr-TR');
+          const fullName = `${p.ad} ${p.soyad}`.trim();
+          return (
+            fullName.toLocaleLowerCase('tr-TR') === nameKeyLower ||
+            normalizeTurkishName(fullName) === nameKeyNorm
+          );
         });
 
-        if (!exists && !alreadyQueued) {
-          const parts = nameClean.split(/\s+/);
-          const ad = parts.length > 1 ? parts.slice(0, -1).join(' ') : parts[0];
-          const soyad = parts.length > 1 ? parts[parts.length - 1] : '';
+        if (alreadyQueued) return;
 
-          const kampFirma = (k.calistigiFirma || '').trim();
-          const kampFirmaUpper = kampFirma.toLocaleUpperCase('tr-TR');
-          const isAnaFirma =
-            k.firmaTipi === 'ANA_FIRMA' ||
-            kampFirmaUpper === 'ANA FİRMA' ||
-            kampFirmaUpper === 'ANA FIRMA' ||
-            (Boolean(kampFirma) && isKibritciCompany(kampFirma));
+        const parts = nameClean.split(/\s+/);
+        const ad = parts.length > 1 ? parts.slice(0, -1).join(' ') : parts[0];
+        const soyad = parts.length > 1 ? parts[parts.length - 1] : '';
 
-          const newP: Personel = {
-            id: k.personelId || `p_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-            tcNo: '',
-            ad: ad,
-            soyad: soyad,
-            babaAdi: '',
-            dogumTarihi: '',
-            telefonNo: '',
-            eposta: '',
-            adres: '',
-            il: '',
-            ilce: '',
-            departman: 'ŞANTİYE',
-            gorev: 'DÜZ İŞÇİ',
-            iseGirisTarihi: k.girisTarihi || new Date().toISOString().split('T')[0],
-            cinsiyet: 'Erkek',
-            maas: 30000,
-            ucretTipi: 'Aylık',
-            sgkDurumu: "SGK'lı",
-            bankaAdi: '',
-            subeAdi: '',
-            ibanNo: '',
-            durum: true,
-            firmaTipi: isAnaFirma ? 'ANA_FIRMA' : 'TASERON',
-            firmaAdi: isAnaFirma
-              ? CANONICAL_ANA_FIRMA_ADI
-              : kampFirmaUpper || 'TAŞERON',
-          };
-          toCreate.push(newP);
-        }
+        const kampFirma = (k.calistigiFirma || '').trim();
+        const kampFirmaUpper = kampFirma.toLocaleUpperCase('tr-TR');
+        const isAnaFirma =
+          k.firmaTipi === 'ANA_FIRMA' ||
+          kampFirmaUpper === 'ANA FİRMA' ||
+          kampFirmaUpper === 'ANA FIRMA' ||
+          (Boolean(kampFirma) && isKibritciCompany(kampFirma));
+
+        const newP: Personel = {
+          id: k.personelId || `p_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+          tcNo: '',
+          ad: ad,
+          soyad: soyad,
+          babaAdi: '',
+          dogumTarihi: '',
+          telefonNo: '',
+          eposta: '',
+          adres: '',
+          il: '',
+          ilce: '',
+          departman: 'ŞANTİYE',
+          gorev: 'DÜZ İŞÇİ',
+          iseGirisTarihi: k.girisTarihi || new Date().toISOString().split('T')[0],
+          cinsiyet: 'Erkek',
+          maas: 30000,
+          ucretTipi: 'Aylık',
+          sgkDurumu: "SGK'lı",
+          bankaAdi: '',
+          subeAdi: '',
+          ibanNo: '',
+          durum: true,
+          firmaTipi: isAnaFirma ? 'ANA_FIRMA' : 'TASERON',
+          firmaAdi: isAnaFirma
+            ? CANONICAL_ANA_FIRMA_ADI
+            : kampFirmaUpper || 'TAŞERON',
+        };
+        toCreate.push(newP);
       });
+
+      let workingKayitlar = kampKayitlari;
+
+      if (orphanKayitIds.size > 0) {
+        const cikisTarihi = new Date().toISOString().slice(0, 10);
+        workingKayitlar = kampKayitlari.map((k) =>
+          orphanKayitIds.has(k.id) && k.durum === 'AKTIF'
+            ? { ...k, durum: 'PASIF' as const, cikisTarihi }
+            : k
+        );
+        setKampKayitlari(workingKayitlar);
+        orphanKayitIds.forEach((id) => {
+          const kayit = workingKayitlar.find((k) => k.id === id);
+          if (kayit) void saveDocument('kampKayitlari', kayit);
+        });
+        const affectedRooms = new Set(
+          [...orphanKayitIds]
+            .map((id) => {
+              const k = kampKayitlari.find((x) => x.id === id);
+              return k?.odaId || k?.roomId;
+            })
+            .filter(Boolean) as string[]
+        );
+        if (affectedRooms.size > 0) {
+          setKampOdalari((prev) =>
+            prev.map((room) => {
+              if (!affectedRooms.has(room.id)) return room;
+              const remaining = workingKayitlar.filter(
+                (k) =>
+                  (k.odaId === room.id || k.roomId === room.id) && k.durum === 'AKTIF'
+              ).length;
+              const durum =
+                remaining <= 0 ? 'BOŞ' : remaining >= room.kapasite ? 'DOLU' : 'KISMEN DOLU';
+              const updated = { ...room, durum: durum as KampOdasi['durum'] };
+              void saveDocument('kampOdalari', updated);
+              return updated;
+            })
+          );
+        }
+      }
 
       if (toCreate.length > 0) {
         console.log(`Auto-creating ${toCreate.length} missing personeller from active kampKayitlari...`, toCreate);
         setPersonellerWithSync((prev) => [...toCreate, ...prev]);
 
-        const nextKayitlar = kampKayitlari.map((k) => {
-          if (k.durum === 'AKTIF') {
+        workingKayitlar = workingKayitlar.map((k) => {
+          if (k.durum === 'AKTIF' && !orphanKayitIds.has(k.id)) {
             const matchedCreated = toCreate.find((p) => {
               const fullName = `${p.ad} ${p.soyad}`.trim().toLocaleLowerCase('tr-TR');
               return fullName === k.personelIsim.trim().toLocaleLowerCase('tr-TR');
@@ -1818,7 +1950,7 @@ export default function App() {
           }
           return k;
         });
-        setKampKayitlari(nextKayitlar);
+        setKampKayitlari(workingKayitlar);
       }
     }
   }, [personeller, kampKayitlari]);

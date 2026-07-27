@@ -104,28 +104,43 @@ export async function evictKampResident(
 }
 
 /**
- * İşten çıkarılan / pasife alınan personelin tüm aktif kamp oda kayıtlarını tahliye eder.
- * Oda doluluk durumunu yeniden hesaplar.
+ * İşten çıkarılan / silinen personelin tüm aktif kamp oda kayıtlarını tahliye eder.
+ * Oda doluluk durumunu yeniden hesaplar. Güncel kayit/oda listesini döner (UI state için).
  */
 export async function evictActiveKampResidentsForPersonel(options: {
   personelId?: string;
   personelIsim?: string;
+  /** Aynı kişiye ait ek id’ler (mükerrer personel kartları) */
+  personelIds?: string[];
   cikisTarihi?: string;
   kampOdalari: KampOdasi[];
   kampKayitlari: KampKaydi[];
-}): Promise<{ evictedCount: number; affectedRoomIds: string[] }> {
+}): Promise<{
+  evictedCount: number;
+  affectedRoomIds: string[];
+  kampKayitlari: KampKaydi[];
+  kampOdalari: KampOdasi[];
+}> {
   const cikisTarihi = options.cikisTarihi || todayIsoDate();
   const nameKey = normalizeTurkishName(options.personelIsim || '');
+  const idSet = new Set<string>(
+    [options.personelId, ...(options.personelIds || [])].filter(Boolean) as string[]
+  );
 
   const activeMatches = options.kampKayitlari.filter((k) => {
     if (k.durum !== 'AKTIF') return false;
-    if (options.personelId && k.personelId && k.personelId === options.personelId) return true;
+    if (k.personelId && idSet.has(k.personelId)) return true;
     if (nameKey && normalizeTurkishName(k.personelIsim || '') === nameKey) return true;
     return false;
   });
 
   if (activeMatches.length === 0) {
-    return { evictedCount: 0, affectedRoomIds: [] };
+    return {
+      evictedCount: 0,
+      affectedRoomIds: [],
+      kampKayitlari: options.kampKayitlari,
+      kampOdalari: options.kampOdalari,
+    };
   }
 
   let kayitlar = [...options.kampKayitlari];
@@ -158,7 +173,12 @@ export async function evictActiveKampResidentsForPersonel(options: {
     odalar = odalar.map((r) => (r.id === roomId ? updatedRoom : r));
   }
 
-  return { evictedCount: activeMatches.length, affectedRoomIds: Array.from(affectedRoomIds) };
+  return {
+    evictedCount: activeMatches.length,
+    affectedRoomIds: Array.from(affectedRoomIds),
+    kampKayitlari: kayitlar,
+    kampOdalari: odalar,
+  };
 }
 
 export function isPersonelAktifDurum(durum: unknown): boolean {
