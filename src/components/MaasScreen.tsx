@@ -45,6 +45,7 @@ export const MaasScreen: React.FC<MaasScreenProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [ibanFilter, setIbanFilter] = useState<IbanFilter>('HEPSI');
   const [bulkCopied, setBulkCopied] = useState(false);
+  const [eksikCopied, setEksikCopied] = useState(false);
 
   const daysInMonth = new Date(selectedYear, selectedMonth, 0).getDate();
 
@@ -171,6 +172,33 @@ export const MaasScreen: React.FC<MaasScreenProps> = ({
     setTimeout(() => setBulkCopied(false), 1600);
   };
 
+  const handleBulkCopyEksikIbanListesi = () => {
+    const rows = calculatedSalaries.filter((r) => !r.hasIban);
+    if (rows.length === 0) {
+      alert('Eksik IBAN’ı olan personel yok.');
+      return;
+    }
+    const header = 'Ad Soyad\tTC\tTelefon\tGörev\tNet Tutar\tIBAN Durumu';
+    const lines = rows.map((r) => {
+      const p = r.personel;
+      const ibanRaw = String(p.ibanNo || '').replace(/\s/g, '');
+      const durum = !ibanRaw || ibanRaw === 'TR' ? 'YOK' : 'GEÇERSİZ';
+      return [
+        `${p.ad || ''} ${p.soyad || ''}`.trim(),
+        p.tcNo || '',
+        p.telefonNo || '',
+        p.gorev || '',
+        r.netPayable.toFixed(2),
+        durum,
+      ].join('\t');
+    });
+    navigator.clipboard.writeText([header, ...lines].join('\n'));
+    setIbanFilter('IBAN_EKSIK');
+    setSearchQuery('');
+    setEksikCopied(true);
+    setTimeout(() => setEksikCopied(false), 2000);
+  };
+
   const [showMaasRaporu, setShowMaasRaporu] = useState(false);
 
   React.useEffect(() => {
@@ -232,7 +260,7 @@ export const MaasScreen: React.FC<MaasScreenProps> = ({
           <div className="min-w-0">
             <h3 className="font-display font-bold text-sm tracking-wide">Banka Ödeme Hazırlığı</h3>
             <p className="text-[11px] text-slate-300 mt-0.5">
-              IBAN’ı olan personelin net tutarı kopyalanabilir; eksik IBAN’lar ödeme listesinden ayrılır.
+              IBAN hazır olanları banka için kopyalayın; eksik IBAN listesini Excel / WhatsApp’a aktarın.
             </p>
           </div>
         </div>
@@ -264,6 +292,15 @@ export const MaasScreen: React.FC<MaasScreenProps> = ({
           >
             <AlertTriangle size={12} />
             Eksik IBAN · {ibanEksikCount}
+          </button>
+          <button
+            type="button"
+            onClick={handleBulkCopyEksikIbanListesi}
+            className="bg-amber-400 hover:bg-amber-300 text-slate-900 font-bold px-3 py-1.5 rounded-lg transition flex items-center gap-1.5 cursor-pointer"
+            title="Eksik IBAN listesini panoya kopyala (Excel’e yapıştırılabilir)"
+          >
+            {eksikCopied ? <Check size={13} /> : <Copy size={13} />}
+            {eksikCopied ? 'Liste Kopyalandı' : 'Eksik Listeyi Kopyala'}
           </button>
           <button
             type="button"
