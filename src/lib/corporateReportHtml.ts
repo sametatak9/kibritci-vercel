@@ -15,22 +15,25 @@ export const CORPORATE_COMPANY = {
 export function getCorporateReportCss(): string {
   return `
     .corporate-report{position:relative;display:flex;flex-direction:column;min-height:190mm;background:#fff;color:#1e293b;font-family:Inter,ui-sans-serif,system-ui,sans-serif;-webkit-print-color-adjust:exact;print-color-adjust:exact}
-    .corporate-report--landscape{min-height:277mm}
+    .corporate-report--portrait{min-height:277mm}
+    .corporate-report--landscape{min-height:190mm}
     .corporate-report-watermark-img{position:absolute;right:1.5%;top:50%;transform:translateY(-50%);width:420px;max-width:52%;height:auto;opacity:1;pointer-events:none;z-index:0}
     .corporate-report-logo-img{height:75px;width:auto;max-width:220px;display:block;object-fit:cover;object-position:left center;}
-    .corporate-report-header{position:relative;z-index:2;display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:12px;margin-bottom:16px}
+    .corporate-report-header{position:relative;z-index:2;display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:12px;margin-bottom:16px;flex-shrink:0}
     .corporate-report-meta{text-align:right}
     .corporate-report-doc-code{display:block;font-size:9px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;border:1px solid #334155;padding:3px 9px;background:#f8fafc;margin-bottom:3px}
     .corporate-report-date{display:block;font-size:8px;color:#64748b;font-family:JetBrains Mono,ui-monospace,monospace}
-    .corporate-report-body{position:relative;z-index:1;flex:1}
-    .corporate-report-footer{position:relative;z-index:2;margin-top:24px;padding-top:8px}
-    .corporate-report-footer-line{height:1px;background:linear-gradient(to right,transparent,#cbd5e1 15%,#cbd5e1 85%,transparent);margin-bottom:9px}
-    .corporate-report-footer-grid{display:grid;grid-template-columns:1fr auto auto;gap:20px;align-items:start;font-size:8px;line-height:1.45;color:#475569}
-    .corporate-report-footer-legal{font-weight:800;font-size:8px;letter-spacing:.04em;color:#334155;text-transform:uppercase;margin:0 0 3px}
-    .corporate-report-footer-address{font-size:7.5px;color:#64748b;margin:0}
-    .corporate-report-footer-contact{border-left:1px solid #e2e8f0;padding-left:16px;white-space:nowrap}
-    .corporate-report-footer-web{text-align:right;font-weight:600;color:#334155;align-self:end}
-    @media print{.corporate-report{min-height:auto}.corporate-report-watermark-img{opacity:1;-webkit-print-color-adjust:exact;print-color-adjust:exact}.corporate-report-logo-img{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
+    .corporate-report-body{position:relative;z-index:1;flex:1 1 auto}
+    .corporate-report-footer{position:relative;z-index:2;margin-top:auto;padding-top:18px;padding-bottom:2px;flex-shrink:0}
+    .corporate-report-footer-line{height:1px;background:linear-gradient(to right,transparent,#cbd5e1 15%,#cbd5e1 85%,transparent);margin-bottom:6px}
+    .corporate-report-footer-grid{display:grid;grid-template-columns:1fr auto auto;gap:8px 12px;align-items:end;font-size:6px;line-height:1.35;color:#64748b}
+    .corporate-report-footer-legal{font-weight:700;font-size:5.5px;letter-spacing:.03em;color:#475569;text-transform:uppercase;margin:0 0 2px}
+    .corporate-report-footer-address{font-size:5.5px;color:#94a3b8;margin:0}
+    .corporate-report-footer-contact{border-left:1px solid #e2e8f0;padding-left:10px;white-space:nowrap;font-size:5.5px}
+    .corporate-report-footer-contact p{margin:0}
+    .corporate-report-footer-web{text-align:right;font-weight:600;font-size:5.5px;color:#64748b;align-self:end}
+    .corporate-report-footer-web p{margin:0}
+    @media print{.corporate-report--portrait{min-height:270mm}.corporate-report-footer{margin-top:auto}.corporate-report-watermark-img{opacity:1;-webkit-print-color-adjust:exact;print-color-adjust:exact}.corporate-report-logo-img{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
   `;
 }
 

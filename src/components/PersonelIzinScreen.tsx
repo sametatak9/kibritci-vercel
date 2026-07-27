@@ -4,6 +4,7 @@ import {
 } from 'lucide-react';
 import { db } from '../lib/firebase';
 import { CorporateReportLayout } from './CorporateReportLayout';
+import { getCorporateReportCss } from '../lib/corporateReportHtml';
 import { collection, query, getDocs, doc, setDoc, deleteDoc, updateDoc } from 'firebase/firestore';
 import { HazirTutanakTab } from './HazirTutanakTab';
 import { ReportEmailButton } from './ReportEmailButton';
@@ -727,16 +728,16 @@ export const PersonelIzinScreen: React.FC<PersonelIzinScreenProps> = ({
                 </div>
 
                 {/* Sub signatures — yalnızca ıslak imza; dijital e-imza yok */}
-                <div className="grid grid-cols-2 gap-8 pt-8 border-t text-xs">
+                <div className="grid grid-cols-2 gap-8 pt-10 pb-6 border-t text-xs mt-6">
                   <div className="text-center space-y-4">
                     <p className="font-bold text-slate-500 border-b pb-1 uppercase">İzin Talep Eden Personel</p>
-                    <p className="text-slate-400 pt-6">Soyadı, Adı ve İmzası için Islak Alan</p>
+                    <p className="text-slate-400 pt-8">Soyadı, Adı ve İmzası için Islak Alan</p>
                     <div className="h-0.5 bg-slate-200 w-32 mx-auto mt-2"></div>
                     <span className="text-[10px] font-bold text-slate-400 uppercase">PERSONEL GÖREV İMZASI</span>
                   </div>
                   <div className="text-center space-y-4">
                     <p className="font-bold text-slate-500 border-b pb-1 uppercase">Şantiye Şefi Onay Makamı</p>
-                    <p className="text-slate-400 pt-6">Soyadı, Adı ve İmzası için Islak Alan</p>
+                    <p className="text-slate-400 pt-8">Soyadı, Adı ve İmzası için Islak Alan</p>
                     <div className="h-0.5 bg-slate-200 w-32 mx-auto mt-2"></div>
                     <span className="text-[10px] font-bold text-slate-500 uppercase">ŞANTİYE ŞEFİ</span>
                   </div>
@@ -751,7 +752,7 @@ export const PersonelIzinScreen: React.FC<PersonelIzinScreenProps> = ({
                 className="bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs py-2 px-4 rounded-xl flex items-center space-x-1 cursor-pointer"
                 payload={() => {
                   const printContent = document.getElementById('izin-print-area')?.innerHTML || '';
-                  const htmlSnippet = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>İzin Formu</title><script src="https://cdn.tailwindcss.com"><\/script></head><body class="bg-white p-8">${printContent}</body></html>`;
+                  const htmlSnippet = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>İzin Formu</title><script src="https://cdn.tailwindcss.com"><\/script><style>${getCorporateReportCss()}</style></head><body class="bg-white p-4">${printContent}</body></html>`;
                   return {
                     subject: `Kibritçi — Personel İzin Formu — ${selectedIzinForPdf.personelIsim}`,
                     body: `Personel: ${selectedIzinForPdf.personelIsim}\nUnvan: ${selectedIzinForPdf.unvan}\nİzin: ${selectedIzinForPdf.izinTipi}\nTarih: ${selectedIzinForPdf.baslangicTarihi} – ${selectedIzinForPdf.bitisTarihi}\nGün: ${selectedIzinForPdf.toplamGun}\nAçıklama: ${selectedIzinForPdf.aciklama || '-'}`,
@@ -771,14 +772,16 @@ export const PersonelIzinScreen: React.FC<PersonelIzinScreenProps> = ({
   <meta charset="utf-8">
   <title>Kibritci_Insaat_Personel_Izni_${selectedIzinForPdf.personelIsim.replace(/\s+/g, '_')}</title>
   <script src="https://cdn.tailwindcss.com"></script>
+  <style>${getCorporateReportCss()}
+    @page { size: A4 portrait; margin: 12mm 14mm; }
+    body { margin: 0; }
+  </style>
 </head>
-<body class="bg-white p-8">
-  <div class="max-w-3xl mx-auto border p-8 rounded-2xl shadow-sm">
-    ${printContent}
-  </div>
+<body class="bg-white">
+  ${printContent}
   <script>
     window.onload = function() {
-      window.print();
+      setTimeout(function(){ window.print(); }, 300);
     }
   </script>
 </body>

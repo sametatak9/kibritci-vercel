@@ -90,8 +90,12 @@ html {
   print-color-adjust: exact;
 }
 
-.corporate-report--landscape {
+.corporate-report--portrait {
   min-height: 277mm;
+}
+
+.corporate-report--landscape {
+  min-height: 190mm;
 }
 
 /* Hologram — sağ kenara yaslı (ortaya kaçmasın) */
@@ -156,58 +160,71 @@ html {
 .corporate-report-body {
   position: relative;
   z-index: 1;
-  flex: 1;
+  flex: 1 1 auto;
 }
 
 .corporate-report-footer {
   position: relative;
   z-index: 2;
-  margin-top: 1.5rem;
-  padding-top: 0.5rem;
+  margin-top: auto;
+  padding-top: 1.25rem;
+  padding-bottom: 0.15rem;
   flex-shrink: 0;
 }
 
 .corporate-report-footer-line {
   height: 1px;
   background: linear-gradient(to right, transparent, #cbd5e1 15%, #cbd5e1 85%, transparent);
-  margin-bottom: 0.55rem;
+  margin-bottom: 0.4rem;
 }
 
 .corporate-report-footer-grid {
   display: grid;
   grid-template-columns: 1fr auto auto;
-  gap: 1.25rem;
-  align-items: start;
-  font-size: 0.52rem;
-  line-height: 1.45;
-  color: #475569;
+  gap: 0.75rem 1rem;
+  align-items: end;
+  font-size: 0.38rem;
+  line-height: 1.35;
+  color: #64748b;
 }
 
 .corporate-report-footer-legal {
-  font-weight: 800;
-  font-size: 0.5rem;
-  letter-spacing: 0.04em;
-  color: #334155;
+  font-weight: 700;
+  font-size: 0.36rem;
+  letter-spacing: 0.03em;
+  color: #475569;
   text-transform: uppercase;
-  margin-bottom: 0.15rem;
+  margin: 0 0 0.1rem;
 }
 
 .corporate-report-footer-address {
-  font-size: 0.48rem;
-  color: #64748b;
+  font-size: 0.34rem;
+  color: #94a3b8;
+  margin: 0;
 }
 
 .corporate-report-footer-contact {
   border-left: 1px solid #e2e8f0;
-  padding-left: 1rem;
+  padding-left: 0.75rem;
   white-space: nowrap;
+  font-size: 0.36rem;
+  color: #64748b;
+}
+
+.corporate-report-footer-contact p {
+  margin: 0;
 }
 
 .corporate-report-footer-web {
   text-align: right;
   font-weight: 600;
-  color: #334155;
+  font-size: 0.36rem;
+  color: #64748b;
   align-self: end;
+}
+
+.corporate-report-footer-web p {
+  margin: 0;
 }
 
 @media print {
@@ -218,6 +235,7 @@ html {
 
   .corporate-report--portrait {
     page: portrait;
+    min-height: 270mm;
   }
 
   @page portrait {
@@ -235,8 +253,11 @@ html {
   }
 
   .corporate-report {
-    min-height: 0;
     overflow: visible;
+  }
+
+  .corporate-report-footer {
+    margin-top: auto;
   }
 
   .corporate-report-watermark-img,
