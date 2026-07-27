@@ -237,13 +237,34 @@ export const MaasScreen: React.FC<MaasScreenProps> = ({
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2 text-[11px]">
-          <span className="bg-emerald-500/15 border border-emerald-400/30 text-emerald-200 font-bold px-2.5 py-1.5 rounded-lg">
+          <button
+            type="button"
+            onClick={() => setIbanFilter('IBAN_HAZIR')}
+            className={`font-bold px-2.5 py-1.5 rounded-lg transition cursor-pointer border ${
+              ibanFilter === 'IBAN_HAZIR'
+                ? 'bg-emerald-400 text-slate-900 border-emerald-300'
+                : 'bg-emerald-500/15 border-emerald-400/30 text-emerald-200 hover:bg-emerald-500/25'
+            }`}
+            title="IBAN’ı hazır personel listesini göster"
+          >
             Ödenebilir · {ibanHazirCount} kişi · ₺{odenebilirNet.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}
-          </span>
-          <span className="bg-amber-500/15 border border-amber-400/30 text-amber-100 font-bold px-2.5 py-1.5 rounded-lg flex items-center gap-1">
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setIbanFilter('IBAN_EKSIK');
+              setSearchQuery('');
+            }}
+            className={`font-bold px-2.5 py-1.5 rounded-lg transition cursor-pointer border flex items-center gap-1 ${
+              ibanFilter === 'IBAN_EKSIK'
+                ? 'bg-amber-400 text-slate-900 border-amber-300'
+                : 'bg-amber-500/15 border-amber-400/30 text-amber-100 hover:bg-amber-500/25'
+            }`}
+            title="Eksik IBAN’ı olan personel listesini göster"
+          >
             <AlertTriangle size={12} />
             Eksik IBAN · {ibanEksikCount}
-          </span>
+          </button>
           <button
             type="button"
             onClick={handleBulkCopyIbans}
