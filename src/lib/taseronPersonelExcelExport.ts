@@ -85,7 +85,8 @@ export async function exportPersonelExcel(options: {
   const scope: PersonelExcelScope = options.scope || 'taseron';
   let rows: Personel[];
   if (scope === 'custom' && options.rows) {
-    rows = [...options.rows].sort(sortByFirmaThenName);
+    // custom scope: çağıranın verdiği sırayı koru (örn. göreve göre sıralama / gruplama)
+    rows = [...options.rows];
   } else if (scope === 'all') {
     rows = collectTumFirmalarPersoneller(options.personeller, { onlyActive: options.onlyActive });
   } else if (scope === 'ana_firma') {

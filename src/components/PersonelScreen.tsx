@@ -131,6 +131,7 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [historyPersonel, setHistoryPersonel] = useState<Personel | null>(null);
   const [exportFormat, setExportFormat] = useState<'html' | 'csv'>('csv');
+  const [gorevReportMode, setGorevReportMode] = useState<'SIRALA' | 'AYRI_RAPOR'>('SIRALA');
   const [showOnlyActive, setShowOnlyActive] = useState(false);
 
   // SGK PDF parsing states
@@ -815,21 +816,76 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
       { key: 'sgkDurumu', label: 'SGK' },
       { key: 'firmaAdi', label: 'Firma' },
     ];
-    const rows = filteredPersonel.map((p) => ({
+    const activeSuffix = showOnlyActive ? '_Aktif' : '';
+
+    const gorevKeyOf = (p: Personel) => displayPersonelGorev(p);
+    const safeFileKey = (raw: string) =>
+      String(raw || '')
+        .trim()
+        .replace(/[^a-zA-Z0-9ğüşıöçĞÜŞİÖÇ]+/g, '_')
+        .replace(/^_+|_+$/g, '') || 'GOREV';
+
+    const rowOf = (p: Personel) => ({
       ad: p.ad,
       soyad: p.soyad,
       tcNo: p.tcNo,
-      gorev: displayPersonelGorev(p),
+      gorev: gorevKeyOf(p),
       telefonNo: p.telefonNo,
       iseGirisTarihi: p.iseGirisTarihi,
       sgkDurumu: p.sgkDurumu,
       firmaAdi: p.firmaAdi || '',
-    }));
-    const activeSuffix = showOnlyActive ? '_Aktif' : '';
+    });
+
+    if (gorevReportMode === 'AYRI_RAPOR') {
+      const byGorev = new Map<string, Personel[]>();
+      for (const p of filteredPersonel) {
+        const key = gorevKeyOf(p);
+        const list = byGorev.get(key) || [];
+        list.push(p);
+        byGorev.set(key, list);
+      }
+
+      const gorevKeys = Array.from(byGorev.keys()).sort((a, b) =>
+        a.localeCompare(b, 'tr', { sensitivity: 'base' })
+      );
+
+      let total = 0;
+      for (const key of gorevKeys) {
+        const group = (byGorev.get(key) || [])
+          .slice()
+          .sort((a, b) => `${a.ad} ${a.soyad}`.localeCompare(`${b.ad} ${b.soyad}`, 'tr'));
+
+        const rows = group.map(rowOf);
+        total += rows.length;
+
+        exportPersonelRows(
+          rows,
+          cols,
+          `Kibritci_Personel_${exportFilterLabel}${activeSuffix}_${safeFileKey(key)}_${Date.now()}`,
+          exportFormat
+        );
+      }
+
+      alert(`${total} personel için ${gorevKeys.length} ayrı rapor indirildi.`);
+      return;
+    }
+
+    // SIRALA: tek dosya, önce göreve sonra isme göre
+    const rows = filteredPersonel
+      .slice()
+      .sort((a, b) => {
+        const ga = gorevKeyOf(a);
+        const gb = gorevKeyOf(b);
+        const d = ga.localeCompare(gb, 'tr', { sensitivity: 'base' });
+        if (d !== 0) return d;
+        return `${a.ad} ${a.soyad}`.localeCompare(`${b.ad} ${b.soyad}`, 'tr');
+      })
+      .map(rowOf);
+
     exportPersonelRows(
       rows,
       cols,
-      `Kibritci_Personel_${exportFilterLabel}${activeSuffix}_${Date.now()}`,
+      `Kibritci_Personel_${exportFilterLabel}${activeSuffix}_GOREV_SIRALI_${Date.now()}`,
       exportFormat
     );
   };
@@ -876,11 +932,60 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
       return;
     }
     try {
+      const gorevKeyOf = (p: Personel) => displayPersonelGorev(p);
+      const safeFileKey = (raw: string) =>
+        String(raw || '')
+          .trim()
+          .replace(/[^a-zA-Z0-9ğüşıöçĞÜŞİÖÇ]+/g, '_')
+          .replace(/^_+|_+$/g, '') || 'GOREV';
+
+      if (gorevReportMode === 'AYRI_RAPOR') {
+        const byGorev = new Map<string, Personel[]>();
+        for (const p of filteredPersonel) {
+          const key = gorevKeyOf(p);
+          const list = byGorev.get(key) || [];
+          list.push(p);
+          byGorev.set(key, list);
+        }
+
+        const gorevKeys = Array.from(byGorev.keys()).sort((a, b) =>
+          a.localeCompare(b, 'tr', { sensitivity: 'base' })
+        );
+
+        let total = 0;
+        for (const key of gorevKeys) {
+          const group = (byGorev.get(key) || [])
+            .slice()
+            .sort((a, b) => `${a.ad} ${a.soyad}`.localeCompare(`${b.ad} ${b.soyad}`, 'tr'));
+
+          const count = await exportSeciliPersonelExcel({
+            rows: group,
+            onlyActive: showOnlyActive,
+            title: `${CANONICAL_ANA_FIRMA_ADI} — ${firmaFilterSummary} Personel Listesi · ${key}`,
+            fileNamePrefix: `Secili_${exportFilterLabel}_${safeFileKey(key)}`,
+          });
+          total += count;
+        }
+
+        alert(`${total} personel için ${gorevKeys.length} ayrı Excel raporu indirildi.`);
+        return;
+      }
+
+      const rows = filteredPersonel
+        .slice()
+        .sort((a, b) => {
+          const ga = gorevKeyOf(a);
+          const gb = gorevKeyOf(b);
+          const d = ga.localeCompare(gb, 'tr', { sensitivity: 'base' });
+          if (d !== 0) return d;
+          return `${a.ad} ${a.soyad}`.localeCompare(`${b.ad} ${b.soyad}`, 'tr');
+        });
+
       const count = await exportSeciliPersonelExcel({
-        rows: filteredPersonel,
+        rows,
         onlyActive: showOnlyActive,
-        title: `${CANONICAL_ANA_FIRMA_ADI} — ${firmaFilterSummary} Personel Listesi`,
-        fileNamePrefix: `Secili_${exportFilterLabel}`,
+        title: `${CANONICAL_ANA_FIRMA_ADI} — ${firmaFilterSummary} Personel Listesi (Göreve göre sırala)`,
+        fileNamePrefix: `Secili_${exportFilterLabel}_GOREV_SIRALI`,
       });
       alert(`${count} personel (seçili filtre) Excel olarak indirildi.`);
     } catch (err) {
@@ -1648,6 +1753,15 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
             >
               <option value="csv">Excel (CSV)</option>
               <option value="html">HTML</option>
+            </select>
+            <select
+              value={gorevReportMode}
+              onChange={(e) => setGorevReportMode(e.target.value as 'SIRALA' | 'AYRI_RAPOR')}
+              className="text-[10px] font-bold px-2 py-2 rounded-xl border border-slate-200 bg-white text-slate-700 cursor-pointer"
+              title="Personel raporu göreve göre"
+            >
+              <option value="SIRALA">Göreve göre sırala</option>
+              <option value="AYRI_RAPOR">Görevlere göre ayrı rapor</option>
             </select>
             <button
               type="button"
