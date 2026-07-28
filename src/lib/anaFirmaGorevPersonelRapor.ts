@@ -78,36 +78,40 @@ export function buildAnaFirmaGorevPersonelReportHtml(
     });
   }
 
+  const cell = 'padding:2px 6px;border:1px solid #e2e8f0;line-height:1.25';
+  const th = 'padding:3px 6px;border:1px solid #cbd5e1;font-size:9px;text-transform:uppercase;letter-spacing:0.02em';
+
   const sections = groups
     .map((g, gi) => {
       const rows = g.personeller
         .map(
           (p, idx) => `<tr>
-          <td style="padding:5px 8px;border:1px solid #e2e8f0;text-align:center;width:36px">${idx + 1}</td>
-          <td style="padding:5px 8px;border:1px solid #e2e8f0;font-weight:600">${esc(p.ad)} ${esc(p.soyad)}</td>
-          <td style="padding:5px 8px;border:1px solid #e2e8f0;font-family:ui-monospace,monospace;font-size:11px">${esc(p.tcNo || '—')}</td>
-          <td style="padding:5px 8px;border:1px solid #e2e8f0">${esc(p.telefonNo || '—')}</td>
-          <td style="padding:5px 8px;border:1px solid #e2e8f0">${esc(p.iseGirisTarihi || '—')}</td>
-          <td style="padding:5px 8px;border:1px solid #e2e8f0;text-align:center">${p.durum ? 'Aktif' : 'Pasif'}</td>
+          <td style="${cell};text-align:center;width:28px">${idx + 1}</td>
+          <td style="${cell};font-weight:600">${esc(p.ad)} ${esc(p.soyad)}</td>
+          <td style="${cell};font-family:ui-monospace,monospace;font-size:10px">${esc(p.tcNo || '—')}</td>
+          <td style="${cell}">${esc(p.telefonNo || '—')}</td>
+          <td style="${cell}">${esc(p.iseGirisTarihi || '—')}</td>
+          <td style="${cell};text-align:center">${p.durum ? 'Aktif' : 'Pasif'}</td>
         </tr>`
         )
         .join('');
 
+      // Sıkı grup aralığı; page-break-inside:avoid kaldırıldı (boş sayfa israfı önlenir)
       return `
-      <section style="margin:${gi === 0 ? '0' : '22px'} 0 0;page-break-inside:avoid">
-        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;background:#1e3a5f;color:#fff;padding:8px 12px;border-radius:8px 8px 0 0">
-          <h2 style="margin:0;font-size:13px;font-weight:800;letter-spacing:0.04em;text-transform:uppercase">${esc(g.gorev)}</h2>
-          <span style="font-size:11px;font-weight:700;background:rgba(255,255,255,0.15);padding:3px 10px;border-radius:999px">${g.personeller.length} kişi</span>
+      <section style="margin:${gi === 0 ? '0' : '8px'} 0 0">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;background:#1e3a5f;color:#fff;padding:4px 8px;border-radius:4px 4px 0 0">
+          <h2 style="margin:0;font-size:11px;font-weight:800;letter-spacing:0.03em;text-transform:uppercase">${esc(g.gorev)}</h2>
+          <span style="font-size:10px;font-weight:700;background:rgba(255,255,255,0.15);padding:1px 7px;border-radius:999px">${g.personeller.length} kişi</span>
         </div>
-        <table style="width:100%;border-collapse:collapse;font-size:12px">
+        <table style="width:100%;border-collapse:collapse;font-size:11px">
           <thead>
             <tr style="background:#f1f5f9">
-              <th style="padding:6px 8px;border:1px solid #cbd5e1;text-align:center;font-size:10px;text-transform:uppercase">#</th>
-              <th style="padding:6px 8px;border:1px solid #cbd5e1;text-align:left;font-size:10px;text-transform:uppercase">Ad Soyad</th>
-              <th style="padding:6px 8px;border:1px solid #cbd5e1;text-align:left;font-size:10px;text-transform:uppercase">TC</th>
-              <th style="padding:6px 8px;border:1px solid #cbd5e1;text-align:left;font-size:10px;text-transform:uppercase">Telefon</th>
-              <th style="padding:6px 8px;border:1px solid #cbd5e1;text-align:left;font-size:10px;text-transform:uppercase">İşe Giriş</th>
-              <th style="padding:6px 8px;border:1px solid #cbd5e1;text-align:center;font-size:10px;text-transform:uppercase">Durum</th>
+              <th style="${th};text-align:center">#</th>
+              <th style="${th};text-align:left">Ad Soyad</th>
+              <th style="${th};text-align:left">TC</th>
+              <th style="${th};text-align:left">Telefon</th>
+              <th style="${th};text-align:left">İşe Giriş</th>
+              <th style="${th};text-align:center">Durum</th>
             </tr>
           </thead>
           <tbody>${rows}</tbody>
@@ -119,13 +123,13 @@ export function buildAnaFirmaGorevPersonelReportHtml(
   const ozet = groups
     .map(
       (g) =>
-        `<span style="display:inline-block;margin:2px 6px 2px 0;padding:3px 8px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:6px;font-size:11px"><strong>${esc(g.gorev)}</strong>: ${g.personeller.length}</span>`
+        `<span style="display:inline-block;margin:1px 4px 1px 0;padding:1px 6px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:4px;font-size:10px"><strong>${esc(g.gorev)}</strong>: ${g.personeller.length}</span>`
     )
     .join('');
 
   const bodyHtml = `
-    <p style="margin:0 0 10px;font-size:12px;color:#475569">Aynı görevdeki personeller alt alta gruplanmıştır. Toplam <strong>${total}</strong> kişi · <strong>${groups.length}</strong> görev grubu.</p>
-    <div style="margin:0 0 16px">${ozet}</div>
+    <p style="margin:0 0 6px;font-size:11px;color:#475569;line-height:1.3">Aynı görevdeki personeller alt alta gruplanmıştır. Toplam <strong>${total}</strong> kişi · <strong>${groups.length}</strong> görev grubu.</p>
+    <div style="margin:0 0 8px;line-height:1.35">${ozet}</div>
     ${sections}
   `;
 
