@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Calendar,
   Camera,
@@ -43,6 +43,10 @@ interface GunlukFaaliyetProgramScreenProps {
     updater: SahaFaaliyeti[] | ((prev: SahaFaaliyeti[]) => SahaFaaliyeti[])
   ) => void;
   currentUser?: { email?: string; uid?: string } | null;
+  /** Dışarıdan tarih (faaliyetsiz listeden geçiş) */
+  initialDate?: string;
+  /** Odaklanılacak / havuza seçilecek personel */
+  focusPersonId?: string | null;
 }
 
 const DURUM_STYLE: Record<string, string> = {
@@ -60,8 +64,10 @@ export const GunlukFaaliyetProgramScreen: React.FC<GunlukFaaliyetProgramScreenPr
   sahaFaaliyetleri,
   setSahaFaaliyetleri,
   currentUser,
+  initialDate,
+  focusPersonId = null,
 }) => {
-  const [selectedDate, setSelectedDate] = useState(todayDateKey());
+  const [selectedDate, setSelectedDate] = useState(initialDate || todayDateKey());
   const [havuzSearch, setHavuzSearch] = useState('');
   const [selectedHavuzIds, setSelectedHavuzIds] = useState<string[]>([]);
   const [editingGorevId, setEditingGorevId] = useState<string | null>(null);
@@ -76,6 +82,24 @@ export const GunlukFaaliyetProgramScreen: React.FC<GunlukFaaliyetProgramScreenPr
   const [detailPersonId, setDetailPersonId] = useState<string | null>(null);
   const [lightbox, setLightbox] = useState<{ urls: string[]; index: number } | null>(null);
   const [exportingExcel, setExportingExcel] = useState(false);
+
+  useEffect(() => {
+    if (initialDate) setSelectedDate(initialDate);
+  }, [initialDate]);
+
+  useEffect(() => {
+    if (!focusPersonId) return;
+    setSelectedHavuzIds((prev) =>
+      prev.includes(focusPersonId) ? prev : [...prev, focusPersonId]
+    );
+    setDraftStaff((prev) =>
+      prev.includes(focusPersonId) ? prev : [...prev, focusPersonId]
+    );
+    const p = personeller.find((x) => x.id === focusPersonId);
+    if (p) {
+      setHavuzSearch(`${p.ad} ${p.soyad}`.trim());
+    }
+  }, [focusPersonId, personeller]);
 
   const dayLabel = useMemo(() => formatDateLabelTr(selectedDate), [selectedDate]);
 

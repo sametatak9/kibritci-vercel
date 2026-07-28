@@ -7,7 +7,9 @@ import {
   isFaaliyetPersonelKapsaminda,
   isFormenGorev,
   isKampciGorev,
+  isPersonelVisibleInMonth,
   normalizeTurkishName,
+  asYoklamaGunMap,
 } from './yoklamaUtils';
 
 /** Saha veya kamp faaliyetinde personel eşleştirme için ortak şekil */
@@ -235,6 +237,48 @@ export function buildFaaliyetPersoneller(
   return Array.from(byName.values()).sort((a, b) =>
     `${a.ad} ${a.soyad}`.localeCompare(`${b.ad} ${b.soyad}`, 'tr')
   );
+}
+
+/**
+ * Seçili ayda faaliyet kapsamındaki (ana firma saha) personelden
+ * henüz hiç saha/kamp faaliyetine bağlanmamışlar.
+ */
+export function buildFaaliyetsizPersoneller(
+  sahaFaaliyetleri: SahaFaaliyeti[],
+  personeller: Personel[],
+  year: number,
+  month: number,
+  kampFaaliyetleri: Array<KampFaaliyet | FaaliyetPersonelKaynak> = [],
+  yoklamalar: AylikYoklamaMap = {}
+): Personel[] {
+  const faaliyetli = buildFaaliyetPersoneller(
+    sahaFaaliyetleri,
+    personeller,
+    year,
+    month,
+    kampFaaliyetleri
+  );
+  const faaliyetliIds = new Set(faaliyetli.map((p) => p.id));
+  const faaliyetliNames = new Set(
+    faaliyetli.map((p) => normalizeTurkishName(`${p.ad} ${p.soyad}`))
+  );
+
+  const byName = new Map<string, Personel>();
+  for (const p of personeller) {
+    if (!shouldIncludeFaaliyetPersonel(p)) continue;
+    if (!isPersonelVisibleInMonth(p, year, month, asYoklamaGunMap(yoklamalar[p.id]))) continue;
+    if (faaliyetliIds.has(p.id)) continue;
+    const nameKey = normalizeTurkishName(`${p.ad} ${p.soyad}`);
+    if (faaliyetliNames.has(nameKey)) continue;
+    const prev = byName.get(nameKey);
+    if (!prev || personScore(p) > personScore(prev)) byName.set(nameKey, p);
+  }
+
+  return Array.from(byName.values()).sort((a, b) => {
+    const ga = String(a.gorev || '').localeCompare(String(b.gorev || ''), 'tr');
+    if (ga !== 0) return ga;
+    return `${a.ad} ${a.soyad}`.localeCompare(`${b.ad} ${b.soyad}`, 'tr');
+  });
 }
 
 export function getPersonFaaliyetleriInPeriod(
