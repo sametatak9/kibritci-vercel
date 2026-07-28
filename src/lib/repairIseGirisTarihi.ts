@@ -146,16 +146,18 @@ export function repairCorruptedIseGirisTarihi(
     const markerCorrupt = CORRUPT_HIRE_MARKERS.has(current);
     const july2026Bulk =
       /^2026-07-\d{2}$/.test(current) && best < current && best < '2026-07-01';
+    // Bilgi amaçlı: sadece "reason" etiketlemesinde kullanılır, tek başına onarımı TETİKLEMEZ.
+    // Kullanıcının elle girdiği bir tarih, geçmiş seed/yoklama verisinden daha ileri bir
+    // tarih olsa bile "bozuk" sayılmamalı — bu, manuel düzeltmelerin geri alınmasına sebep oluyordu.
     const afterAttendance = !!(earliestAtt && current && current > earliestAtt);
-    const afterKnown = !!(known && current && current > known && (markerCorrupt || july2026Bulk || afterAttendance));
 
+    // Sadece gerçekten bilinen bozulma işaretleri (CORRUPT_HIRE_MARKERS) veya
+    // toplu 2026-07 kayması ya da boş/geçersiz tarih durumunda onarım tetiklenir.
     const needsRepair =
       !current ||
       !isPlausibleHire(current) ||
       markerCorrupt ||
-      july2026Bulk ||
-      afterAttendance ||
-      afterKnown;
+      july2026Bulk;
 
     if (!needsRepair) return p;
     if (current && isPlausibleHire(current) && best >= current && !markerCorrupt) return p;
@@ -167,9 +169,11 @@ export function repairCorruptedIseGirisTarihi(
       to: best,
       reason: markerCorrupt
         ? 'toplu-bozulma-isareti'
-        : afterAttendance
-          ? 'yoklama-oncesi-giris'
-          : 'seed-geri-yukle',
+        : july2026Bulk
+          ? 'toplu-temmuz-kaymasi'
+          : afterAttendance
+            ? 'yoklama-oncesi-giris'
+            : 'seed-geri-yukle',
     });
     return { ...p, iseGirisTarihi: best };
   });
