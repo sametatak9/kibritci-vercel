@@ -76,7 +76,17 @@ export function kampFaaliyetCalisanSayisi(
 }
 
 function isAktifPersonel(p: Personel): boolean {
-  return p.durum === true || String(p.durum).toLowerCase() === 'true';
+  if (p.durum === true) return true;
+  if (p.durum === false || p.durum == null) return false;
+  const s = String(p.durum).trim().toLocaleLowerCase('tr-TR');
+  return s === 'true' || s === 'aktif' || s === '1';
+}
+
+/** İşten çıkarılmış / ayrılmış — görev atama listelerinde gösterilmez */
+function isIstenCikmisPersonel(p: Personel): boolean {
+  if (!isAktifPersonel(p)) return true;
+  const exit = String(p.istenCikisTarihi || (p as { cikisTarihi?: string }).cikisTarihi || '').trim();
+  return Boolean(exit);
 }
 
 function shouldIncludeFaaliyetPersonel(p: Personel | undefined | null): p is Personel {
@@ -240,8 +250,9 @@ export function buildFaaliyetPersoneller(
 }
 
 /**
- * Seçili ayda faaliyet kapsamındaki (ana firma saha) personelden
+ * Seçili ayda faaliyet kapsamındaki aktif ana firma saha personelinden
  * henüz hiç saha/kamp faaliyetine bağlanmamışlar.
+ * İşten çıkarılmış / pasif personel dahil edilmez (görev atama için).
  */
 export function buildFaaliyetsizPersoneller(
   sahaFaaliyetleri: SahaFaaliyeti[],
@@ -266,6 +277,7 @@ export function buildFaaliyetsizPersoneller(
   const byName = new Map<string, Personel>();
   for (const p of personeller) {
     if (!shouldIncludeFaaliyetPersonel(p)) continue;
+    if (isIstenCikmisPersonel(p)) continue;
     if (!isPersonelVisibleInMonth(p, year, month, asYoklamaGunMap(yoklamalar[p.id]))) continue;
     if (faaliyetliIds.has(p.id)) continue;
     const nameKey = normalizeTurkishName(`${p.ad} ${p.soyad}`);

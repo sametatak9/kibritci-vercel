@@ -39,7 +39,7 @@ function parseDateParts(dateKey: string): { y: number; m: number; d: number } | 
   return { y, m, d };
 }
 
-/** O gün yoklamada Geldi olan saha personeli (taşeron / idari hariç) */
+/** O gün yoklamada Geldi olan aktif saha personeli (taşeron / idari / işten çıkmış hariç) */
 export function buildGeldiHavuzu(
   personeller: Personel[],
   yoklamalar: AylikYoklamaMap,
@@ -51,6 +51,9 @@ export function buildGeldiHavuzu(
   return personeller
     .filter((p) => {
       if (isTaseronPersonel(p) || isIdariPersonel(p)) return false;
+      const aktif = p.durum === true || String(p.durum).toLowerCase() === 'true';
+      if (!aktif) return false;
+      if (String(p.istenCikisTarihi || '').trim()) return false;
       const dayData = getYoklamaDay(yoklamalar[p.id], y, m, d);
       return dayData?.durum === 'Geldi';
     })

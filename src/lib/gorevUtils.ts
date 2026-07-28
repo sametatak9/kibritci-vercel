@@ -34,10 +34,12 @@ export function normalizeGorev(gorev?: string): string {
     return 'FORMEN';
   }
 
-  // KAMPÇI / Kampçı / KAMP GÖREVLİSİ → tek çatı
+  // KAMPÇI / Kampçı / KAMP GÖREVLİSİ / KAMP PERSONEL → tek çatı
   if (
     key === 'KAMPCI' ||
     key.startsWith('KAMPCI ') ||
+    key === 'KAMP PERSONEL' ||
+    key === 'KAMP PERSONELI' ||
     key === 'KAMP GOREVLISI' ||
     key === 'KAMP GOREVLI' ||
     key.includes('KAMP GOREV')

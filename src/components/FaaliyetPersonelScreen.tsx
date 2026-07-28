@@ -46,6 +46,7 @@ import {
 } from '../lib/faaliyetPersonelUtils';
 import { buildAtanmamisGeldiHavuzu } from '../lib/geldiHavuzuUtils';
 import { displayPersonelGorev } from '../lib/guvenlikHelpers';
+import { normalizeGorev } from '../lib/gorevUtils';
 import { formatDateLabelTr, todayDateKey } from '../lib/dateKeyUtils';
 import { isKampciGorev, normalizeTurkishName } from '../lib/yoklamaUtils';
 import { db } from '../lib/firebase';
@@ -204,7 +205,7 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
   const faaliyetsizByGorev = useMemo(() => {
     const map = new Map<string, Personel[]>();
     for (const p of filteredFaaliyetsiz) {
-      const g = displayPersonelGorev(p) || '—';
+      const g = normalizeGorev(displayPersonelGorev(p));
       const list = map.get(g) || [];
       list.push(p);
       map.set(g, list);
