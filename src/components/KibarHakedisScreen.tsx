@@ -370,12 +370,13 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
         kolajFotolari,
         sahaFaaliyetleri: tumSahaFaaliyetleri,
         programliFaaliyetler,
+        kampFaaliyetleri,
       }),
-    [donemKey, selectedYear, selectedMonth, kolajFotolari, tumSahaFaaliyetleri, programliFaaliyetler]
+    [donemKey, selectedYear, selectedMonth, kolajFotolari, tumSahaFaaliyetleri, programliFaaliyetler, kampFaaliyetleri]
   );
 
   // Yazdırma performansını korumak için üst sınır; tüm sayım subtitle'da gösterilir
-  const HAKEDIS_FOTO_LIMIT = 60;
+  const HAKEDIS_FOTO_LIMIT = 120;
   const kolajFotoLimit = useMemo(() => {
     const gruplar = groupKolajFotolari(birlesikKolajFotolari);
     const flat: SahaKolajFoto[] = [];
@@ -1162,7 +1163,9 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
               {/* —— 2. SAHA FAALİYETLERİ —— */}
               <section>
                 <p className="rpt-sec-title m-0">2 · Saha Faaliyet Raporları</p>
-                <p className="rpt-sec-sub">{sahaFaaliyetSatirlari.length} kayıt · eskiden yeniye tarih sırası</p>
+                <p className="rpt-sec-sub">
+                  {sahaFaaliyetSatirlari.length} kayıt · Formen + Tesisatçı + Mermerci · eskiden yeniye
+                </p>
                 {sahaFaaliyetSatirlari.length === 0 ? (
                   <p className="text-[9px] text-slate-400 italic">Bu dönemde saha faaliyeti kaydı yok.</p>
                 ) : (
@@ -1171,15 +1174,17 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
                       <colgroup>
                         <col style={{ width: '4%' }} />
                         <col style={{ width: '10%' }} />
-                        <col style={{ width: '9%' }} />
+                        <col style={{ width: '8%' }} />
+                        <col style={{ width: '8%' }} />
                         <col style={{ width: '7%' }} />
-                        <col style={{ width: '60%' }} />
+                        <col style={{ width: '53%' }} />
                         <col style={{ width: '10%' }} />
                       </colgroup>
                       <thead>
                         <tr>
                           <th className="rpt-align-c rpt-act-no">No</th>
                           <th className="rpt-align-l rpt-act-date">Tarih</th>
+                          <th className="rpt-align-l">Kaynak</th>
                           <th className="rpt-align-l rpt-act-parsel">Parsel</th>
                           <th className="rpt-align-l rpt-act-blok">Blok</th>
                           <th className="rpt-align-l rpt-act-desc">Yapılan İş / Faaliyet</th>
@@ -1193,6 +1198,15 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
                             <td className="rpt-act-date rpt-align-l">
                               <span className="rpt-act-date-main">{sf.tarihDate}</span>
                               {sf.tarihDay && <span className="rpt-act-date-day">{sf.tarihDay}</span>}
+                            </td>
+                            <td className="rpt-align-l text-[8px] font-bold uppercase text-slate-600">
+                              {sf.kaynakEkran === 'TESISATCI_MOBIL'
+                                ? 'Tesisatçı'
+                                : sf.kaynakEkran === 'MERMERCI_MOBIL'
+                                  ? 'Mermerci'
+                                  : sf.kaynakEkran === 'FORMEN_MOBIL'
+                                    ? 'Formen'
+                                    : 'Saha'}
                             </td>
                             <td className="rpt-act-parsel rpt-align-l" title={sf.parselKisa}>{sf.parselKisa}</td>
                             <td className="rpt-act-blok rpt-align-l" title={sf.blokKisa}>{sf.blokKisa}</td>
@@ -1209,7 +1223,12 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
               {/* —— 3. KAMP FAALİYETLERİ —— */}
               <section>
                 <p className="rpt-sec-title m-0">3 · Kamp / Lojman Faaliyetleri</p>
-                <p className="rpt-sec-sub">{kampFaaliyetSatirlari.length} kayıt</p>
+                <p className="rpt-sec-sub">
+                  {kampFaaliyetSatirlari.length} kayıt
+                  {kampFaaliyetSatirlari.filter((k) => k.fotoUrl).length > 0
+                    ? ` · ${kampFaaliyetSatirlari.filter((k) => k.fotoUrl).length} fotoğraflı`
+                    : ''}
+                </p>
                 {kampFaaliyetSatirlari.length === 0 ? (
                   <p className="text-[9px] text-slate-400 italic">Bu dönemde kamp faaliyeti kaydı yok.</p>
                 ) : (
@@ -1217,9 +1236,10 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
                     <table className="rpt-act-table">
                       <colgroup>
                         <col style={{ width: '4%' }} />
-                        <col style={{ width: '13%' }} />
-                        <col style={{ width: '16%' }} />
-                        <col style={{ width: '67%' }} />
+                        <col style={{ width: '12%' }} />
+                        <col style={{ width: '14%' }} />
+                        <col style={{ width: '55%' }} />
+                        <col style={{ width: '15%' }} />
                       </colgroup>
                       <thead>
                         <tr>
@@ -1227,6 +1247,7 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
                           <th className="rpt-align-l rpt-kamp-date">Tarih</th>
                           <th className="rpt-align-l rpt-kamp-tip">Tip</th>
                           <th className="rpt-align-l rpt-kamp-desc">Açıklama</th>
+                          <th className="rpt-align-c">Foto</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -1239,6 +1260,17 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
                             </td>
                             <td className="rpt-kamp-tip rpt-align-l">{kf.faaliyetTipi}</td>
                             <td className="rpt-kamp-desc rpt-align-l">{kf.aciklama}</td>
+                            <td className="rpt-align-c">
+                              {kf.fotoUrl ? (
+                                <img
+                                  src={kf.fotoUrl}
+                                  alt=""
+                                  className="w-12 h-12 object-cover rounded border border-slate-200 mx-auto"
+                                />
+                              ) : (
+                                <span className="text-[8px] text-slate-400">—</span>
+                              )}
+                            </td>
                           </tr>
                         ))}
                       </tbody>

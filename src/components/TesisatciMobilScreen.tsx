@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Wrench, ClipboardList, Truck, Camera, CheckCircle, RefreshCw, X, AlertTriangle,
-  LogOut, Pencil, Trash2, Calendar, Gauge
+  LogOut, Pencil, Trash2, Calendar, Gauge, Printer
 } from 'lucide-react';
 import { collection, deleteDoc, doc, onSnapshot, setDoc } from 'firebase/firestore';
 import {
@@ -14,6 +14,10 @@ import { applySahaMesaiToYoklama, normalizeMesaiHours } from '../lib/sahaFaaliye
 import { ensureSahaFaaliyetFotolarPersisted } from '../lib/sahaFaaliyetFotoStorage';
 import { isTesisatciGorev } from '../lib/yoklamaUtils';
 import { vibrateYildirimAlert } from '../lib/yildirimTankerUtils';
+import {
+  buildMobilGunlukFaaliyetReportHtml,
+  openMobilGunlukFaaliyetReport,
+} from '../lib/mobilGunlukFaaliyetReport';
 import { KampGunlukYoklamaTab } from './KampGunlukYoklamaTab';
 import { TesisatciYildirimTab } from './TesisatciYildirimTab';
 import { TesisatciSayacKesintiTab } from './TesisatciSayacKesintiTab';
@@ -143,6 +147,23 @@ export const TesisatciMobilScreen: React.FC<TesisatciMobilScreenProps> = ({
     () => faaliyetler.filter((f) => normalizeDateKey(f.tarih) === normalizeDateKey(faaliyetTarih)),
     [faaliyetler, faaliyetTarih]
   );
+
+  const handleTopluRaporla = () => {
+    if (gunlukFaaliyetler.length === 0) {
+      showStatus('error', 'Bu tarihte birleştirilecek faaliyet kaydı yok.');
+      return;
+    }
+    const html = buildMobilGunlukFaaliyetReportHtml({
+      rol: 'TESİSATÇI',
+      anchorDate: faaliyetTarih,
+      records: gunlukFaaliyetler,
+      olusturan: currentUser?.email || 'Tesisatçı',
+    });
+    openMobilGunlukFaaliyetReport(
+      html,
+      `Tesisatçı Günlük Rapor — ${formatDateLabelTr(faaliyetTarih)}`
+    );
+  };
 
   const handleFaaliyetFoto = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -645,9 +666,20 @@ export const TesisatciMobilScreen: React.FC<TesisatciMobilScreenProps> = ({
           </div>
 
           <div className="bg-white border border-slate-200 rounded-2xl p-4 space-y-3 shadow-sm">
-            <h4 className="text-[10px] font-black uppercase tracking-wider text-slate-700">
-              {formatDateLabelTr(faaliyetTarih)} — Kayıtlar ({gunlukFaaliyetler.length})
-            </h4>
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <h4 className="text-[10px] font-black uppercase tracking-wider text-slate-700">
+                {formatDateLabelTr(faaliyetTarih)} — Kayıtlar ({gunlukFaaliyetler.length})
+              </h4>
+              <button
+                type="button"
+                onClick={handleTopluRaporla}
+                disabled={gunlukFaaliyetler.length === 0}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-cyan-700 text-white text-[9px] font-black uppercase tracking-wide disabled:opacity-40 cursor-pointer"
+              >
+                <Printer size={12} />
+                Toplu Raporla ({gunlukFaaliyetler.length})
+              </button>
+            </div>
             {gunlukFaaliyetler.length === 0 ? (
               <p className="text-[11px] text-slate-400 italic">Bu tarihte faaliyet yok.</p>
             ) : (

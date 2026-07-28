@@ -83,21 +83,34 @@ export interface KampFaaliyetSatiri {
   tarihDay: string;
   faaliyetTipi: string;
   aciklama: string;
+  fotoUrl?: string;
   siraNo: number;
 }
 
-export function prepareKampFaaliyetRaporu(items: { id?: string; tarih?: string; faaliyetTipi?: string; aciklama?: string }[]): KampFaaliyetSatiri[] {
+export function prepareKampFaaliyetRaporu(
+  items: {
+    id?: string;
+    tarih?: string;
+    faaliyetTipi?: string;
+    kategori?: string;
+    aciklama?: string;
+    fotoUrl?: string | null;
+    photo?: string | null;
+  }[]
+): KampFaaliyetSatiri[] {
   const sorted = [...items].sort((a, b) => (a.tarih || '').localeCompare(b.tarih || ''));
   return sorted.map((kf, idx) => {
     const { date, day } = formatReportDateParts(kf.tarih || '');
+    const foto = String(kf.fotoUrl || kf.photo || '').trim();
     return {
       id: kf.id || `kamp-${idx}`,
       tarih: kf.tarih || '',
       tarihLabel: formatReportDate(kf.tarih || ''),
       tarihDate: date,
       tarihDay: day,
-      faaliyetTipi: kf.faaliyetTipi || '—',
+      faaliyetTipi: kf.faaliyetTipi || kf.kategori || '—',
       aciklama: kf.aciklama || '—',
+      fotoUrl: foto || undefined,
       siraNo: idx + 1,
     };
   });

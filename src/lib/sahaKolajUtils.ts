@@ -1,4 +1,5 @@
 import { SahaKolajFoto } from '../types/erp';
+import { getFaaliyetFotolar } from './sahaFaaliyetUtils';
 
 export const AY_ADLARI = [
   'Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran',
@@ -49,12 +50,16 @@ type SahaFaaliyetFotoKaynak = {
   tarih?: string;
   fotoUrl?: string;
   fotoUrls?: string[];
+  sahaFotoBase64?: string;
+  fotoBase64?: string;
+  fotograflar?: string[];
   isinAdi?: string;
   isNiteligi?: string;
   aciklama?: string;
   parsel?: string;
   blok?: string;
   kaydeden?: string;
+  kaynakEkran?: string;
 };
 
 type ProgramliFaaliyetFotoKaynak = {
@@ -73,9 +78,22 @@ type ProgramliFaaliyetFotoKaynak = {
   }>;
 };
 
+type KampFaaliyetFotoKaynak = {
+  id?: string;
+  tarih?: string;
+  fotoUrl?: string | null;
+  photo?: string | null;
+  faaliyetTipi?: string;
+  kategori?: string;
+  aciklama?: string;
+  yerleskeAdi?: string;
+  kaydeden?: string;
+  kaydedenKampci?: string;
+};
+
 /**
  * Kolaj ekranı ile aynı birleşik liste:
- * sahaKolajFotolari + dönemdeki saha faaliyet fotoğrafları + programlı faaliyet aşama fotoğrafları.
+ * sahaKolajFotolari + saha/tesisatçı/mermerci + kamp + programlı faaliyet fotoğrafları.
  */
 export function mergeAlbumFotolari(input: {
   albumKey: string;
@@ -84,6 +102,7 @@ export function mergeAlbumFotolari(input: {
   kolajFotolari: SahaKolajFoto[];
   sahaFaaliyetleri?: SahaFaaliyetFotoKaynak[];
   programliFaaliyetler?: ProgramliFaaliyetFotoKaynak[];
+  kampFaaliyetleri?: KampFaaliyetFotoKaynak[];
 }): SahaKolajFoto[] {
   const { albumKey, yil, ay } = input;
   const list: SahaKolajFoto[] = [...(input.kolajFotolari || [])];
@@ -91,26 +110,57 @@ export function mergeAlbumFotolari(input: {
 
   (input.sahaFaaliyetleri || []).forEach((sf) => {
     if (!sf.tarih || !String(sf.tarih).startsWith(albumKey)) return;
-    const urls = sf.fotoUrls || (sf.fotoUrl ? [sf.fotoUrl] : []);
+    const urls = getFaaliyetFotolar(sf);
     urls.forEach((url, i) => {
       if (!url) return;
       const id = `sf_${sf.id}_${i}`;
       if (list.some((x) => x.id === id)) return;
+      const kaynak =
+        sf.kaynakEkran === 'TESISATCI_MOBIL'
+          ? 'Tesisatçı'
+          : sf.kaynakEkran === 'MERMERCI_MOBIL'
+            ? 'Mermerci'
+            : sf.kaynakEkran === 'FORMEN_MOBIL'
+              ? 'Formen'
+              : 'Saha';
       list.push({
         id,
         albumKey,
         yil,
         ay,
         imageUrl: url,
-        baslik: sf.isinAdi || sf.isNiteligi || 'Günlük Faaliyet',
+        baslik: sf.isinAdi || sf.isNiteligi || `${kaynak} Faaliyeti`,
         aciklama: sf.aciklama,
-        grupAdi: `Parsel: ${sf.parsel || '—'} - Blok: ${sf.blok || '—'}`,
+        grupAdi: `${kaynak} · ${sf.parsel || '—'} / ${sf.blok || '—'}`,
         sira: siraOffset++,
         yuklemeTarihi: sf.tarih,
-        yukleyen: sf.kaydeden || 'Formen',
-        parsel: sf.parsel,
+        yukleyen: sf.kaydeden || kaynak,
+        parsel: sf.parsel || kaynak,
         blok: sf.blok,
       });
+    });
+  });
+
+  (input.kampFaaliyetleri || []).forEach((kf) => {
+    if (!kf.tarih || !String(kf.tarih).startsWith(albumKey)) return;
+    const url = String(kf.fotoUrl || kf.photo || '').trim();
+    if (!url) return;
+    const id = `kamp_${kf.id}_0`;
+    if (list.some((x) => x.id === id)) return;
+    list.push({
+      id,
+      albumKey,
+      yil,
+      ay,
+      imageUrl: url,
+      baslik: kf.faaliyetTipi || kf.kategori || 'Kamp Faaliyeti',
+      aciklama: kf.aciklama,
+      grupAdi: `Kamp · ${kf.yerleskeAdi || '—'}`,
+      sira: siraOffset++,
+      yuklemeTarihi: kf.tarih,
+      yukleyen: kf.kaydeden || kf.kaydedenKampci || 'Kampçı',
+      parsel: 'Kamp',
+      blok: kf.yerleskeAdi || 'Lojman',
     });
   });
 
