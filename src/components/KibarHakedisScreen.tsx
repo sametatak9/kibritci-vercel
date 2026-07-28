@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import {
   CreditCard, Calendar, Printer, ShieldCheck, CheckCircle2,
-  RefreshCw, UserX
+  RefreshCw, UserX, BarChart3, Copy
 } from 'lucide-react';
 import { db, parseYoklamaSnapshotData, saveDocument } from '../lib/firebase';
 import { collection, doc, getDoc, onSnapshot, query, where } from 'firebase/firestore';
@@ -150,6 +150,10 @@ const REPORT_CSS = `
   .rpt-summary-hakedis { border-color: #059669; background: #fafafa; }
   .rpt-summary-hakedis span:first-child { color: #047857; }
   .rpt-summary-hakedis .rpt-summary-val { color: #047857; font-size: 13pt; font-weight: 800; }
+  .rpt-compare-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }
+  .rpt-compare-card { border: 1px solid #d1d5db; border-radius: 4px; padding: 10px; background: #fafafa; }
+  .rpt-compare-card strong { color: #1f2937; }
+  .rpt-quote { border-left: 3px solid #059669; padding-left: 10px; font-size: 8.5pt; color: #374151; line-height: 1.45; background: #f9fafb; padding: 8px 10px; border-radius: 4px; }
   .rpt-sign-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 16px; }
   .rpt-sign-box {
     border: 1px solid #d1d5db; border-radius: 4px; padding: 14px 12px 12px;
@@ -210,6 +214,27 @@ function formatMoney(amount: number, fraction = 2): string {
     minimumFractionDigits: fraction,
     maximumFractionDigits: fraction,
   })}`;
+}
+
+function buildRoleMix(rows: StaffHakedisRow[]) {
+  const mix = {
+    duzIsci: 0,
+    usta: 0,
+    formen: 0,
+    senior: 0,
+    diger: 0,
+  };
+
+  rows.forEach((row) => {
+    const role = normalizeGorev(row.personel.gorev).toLowerCase();
+    if (role.includes('usta')) mix.usta += 1;
+    else if (role.includes('form')) mix.formen += 1;
+    else if (role.includes('şen') || role.includes('sen')) mix.senior += 1;
+    else if (role.includes('işçi') || role.includes('duz')) mix.duzIsci += 1;
+    else mix.diger += 1;
+  });
+
+  return mix;
 }
 
 const TURKISH_MONTHS = [
@@ -277,6 +302,7 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
   const [yoklamaSource, setYoklamaSource] = useState<AylikYoklamaMap>(yoklamalar);
   const [refreshingYoklama, setRefreshingYoklama] = useState(false);
   const [lastYoklamaRefreshAt, setLastYoklamaRefreshAt] = useState<string | null>(null);
+  const [copiedSummary, setCopiedSummary] = useState(false);
 
   const donemLabel = `${TURKISH_MONTHS[selectedMonth - 1]} ${selectedYear}`;
   const donemKey = `${selectedYear}-${String(selectedMonth).padStart(2, '0')}`;
@@ -362,35 +388,17 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
     return flat;
   }, [birlesikKolajFotolari]);
 
-  const monthPersoneller = useMemo(
-    () => buildPersonelListForMonth(personeller, yoklamaSource, selectedYear, selectedMonth, resolveStubPersonelFromLegacyId),
-    [personeller, yoklamaSource, selectedYear, selectedMonth]
-  );
-
-  const allStaffRows = useMemo((): StaffHakedisRow[] => {
+  const buildRowsForMonth = (year: number, month: number): StaffHakedisRow[] => {
+    const monthPersoneller = buildPersonelListForMonth(personeller, yoklamaSource, year, month, resolveStubPersonelFromLegacyId);
     const rows: StaffHakedisRow[] = [];
-    const personelIds = monthPersoneller.map((p) => p.id);
-    const hasAdem = monthPersoneller.some((p) => normalizeTurkishName(`${p.ad} ${p.soyad}`) === 'ADEMCAGLAR');
-    // #region agent log
-    fetch('http://127.0.0.1:7872/ingest/ef5f18bc-f649-42ac-a5a3-37f3283d64f9',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'9ac11e'},body:JSON.stringify({sessionId:'9ac11e',runId:'baseline-2',hypothesisId:'H5',location:'KibarHakedisScreen.tsx:allStaffRows(start)',message:'month personel list snapshot',data:{selectedYear,selectedMonth,personCount:monthPersoneller.length,hasAdem,firstIds:personelIds.slice(0,10)},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
-    monthPersoneller.forEach(p => {
+
+    monthPersoneller.forEach((p) => {
       const personMap = yoklamaSource[p.id] as Record<string, { durum?: string; mesaiSaati?: number }> | undefined;
-      const { geldiGun, mesaiSaat } = sumStrictMonthAttendance(
-        p,
-        personMap,
-        selectedYear,
-        selectedMonth
-      );
-      if (normalizeTurkishName(`${p.ad} ${p.soyad}`) === 'ADEMCAGLAR') {
-        const monthKeys = getStrictMonthKeys(personMap, selectedYear, selectedMonth);
-        // #region agent log
-        fetch('http://127.0.0.1:7872/ingest/ef5f18bc-f649-42ac-a5a3-37f3283d64f9',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'9ac11e'},body:JSON.stringify({sessionId:'9ac11e',runId:'baseline-2',hypothesisId:'H4',location:'KibarHakedisScreen.tsx:allStaffRows(adem)',message:'target row strict month source',data:{selectedYear,selectedMonth,personId:p.id,tcPresent:Boolean((p.tcNo || '').trim()),girdiGun:geldiGun,mesaiSaat,monthKeyCount:monthKeys.length,monthKeys:monthKeys.slice(0,31)},timestamp:Date.now()})}).catch(()=>{});
-        // #endregion
-      }
+      const { geldiGun, mesaiSaat } = sumStrictMonthAttendance(p, personMap, year, month);
+
       if (geldiGun > 0) {
-        const gunKazanci = calcGunKazanci(p, geldiGun, selectedYear, selectedMonth);
-        const mesaiKazanci = calcMesaiKazanci(p, mesaiSaat, selectedYear, selectedMonth);
+        const gunKazanci = calcGunKazanci(p, geldiGun, year, month);
+        const mesaiKazanci = calcMesaiKazanci(p, mesaiSaat, year, month);
         rows.push({
           personel: p,
           geldiGun,
@@ -402,10 +410,25 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
         });
       }
     });
+
     return rows.sort((a, b) =>
       `${a.personel.ad} ${a.personel.soyad}`.localeCompare(`${b.personel.ad} ${b.personel.soyad}`, 'tr')
     );
-  }, [monthPersoneller, yoklamaSource, selectedYear, selectedMonth]);
+  };
+
+  const allStaffRows = useMemo((): StaffHakedisRow[] => {
+    return buildRowsForMonth(selectedYear, selectedMonth);
+  }, [personeller, yoklamaSource, selectedYear, selectedMonth]);
+
+  const previousPeriod = useMemo(() => {
+    const prevMonth = selectedMonth === 1 ? 12 : selectedMonth - 1;
+    const prevYear = selectedMonth === 1 ? selectedYear - 1 : selectedYear;
+    return { year: prevYear, month: prevMonth };
+  }, [selectedYear, selectedMonth]);
+
+  const previousMonthRows = useMemo(() => {
+    return buildRowsForMonth(previousPeriod.year, previousPeriod.month);
+  }, [personeller, yoklamaSource, previousPeriod.year, previousPeriod.month]);
 
   const handleRefreshYoklama = async () => {
     setRefreshingYoklama(true);
@@ -454,6 +477,43 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
   const totalMesaiKazanci = activeStaffRows.reduce((s, r) => s + r.mesaiKazanci, 0);
   const totalMaasKazanci = activeStaffRows.reduce((s, r) => s + r.toplamKazanc, 0);
   const totalZerYapiHakedis = activeStaffRows.reduce((s, r) => s + r.zerYapiHakedis, 0);
+  const previousMonthTotalZerYapi = previousMonthRows.reduce((s, r) => s + r.zerYapiHakedis, 0);
+  const zerYapiDelta = totalZerYapiHakedis - previousMonthTotalZerYapi;
+  const zerYapiDeltaPct = previousMonthTotalZerYapi > 0 ? (zerYapiDelta / previousMonthTotalZerYapi) * 100 : 0;
+
+  const analysisSummary = useMemo(() => {
+    const roleMix = buildRoleMix(activeStaffRows);
+    const ortalamaKisiBasiKar = activeStaffRows.length > 0 ? totalZerYapiHakedis / activeStaffRows.length : 0;
+    const gunBasiKar = totalPersonDays > 0 ? totalZerYapiHakedis / totalPersonDays : 0;
+    const güçlüArgüman = [
+      `${donemLabel} döneminde ${activeStaffRows.length} personel üzerinden ${totalPersonDays} iş-günü kayıt altına alındı.`,
+      `Bu çalışma, ZER YAPI'nin şirkete sağladığı aylık katkıyı ${formatMoney(totalZerYapiHakedis, 0)} olarak ölçmektedir.`,
+      `Kişi başı ortalama katkı ${formatMoney(ortalamaKisiBasiKar, 0)}, gün başına katkı ise ${formatMoney(gunBasiKar, 0)} seviyesindedir.`,
+      `Rol dağılımı: ${roleMix.duzIsci} düz işçi, ${roleMix.usta} usta, ${roleMix.formen} formen, ${roleMix.senior} senior/diğer.`,
+    ].join(' ');
+
+    return {
+      roleMix,
+      ortalamaKisiBasiKar,
+      gunBasiKar,
+      güçlüArgüman,
+    };
+  }, [activeStaffRows, donemLabel, totalPersonDays, totalZerYapiHakedis]);
+
+  const shareableSummary = useMemo(() => {
+    return `${donemLabel} döneminde ${activeStaffRows.length} personel üzerinden ${totalPersonDays} iş-günü kaydedildi. ZER YAPI'nin şirkete sağladığı aylık katkı ${formatMoney(totalZerYapiHakedis, 0)} olarak hesaplandı. Kişi başı ortalama katkı ${formatMoney(analysisSummary.ortalamaKisiBasiKar, 0)}, gün başına katkı ise ${formatMoney(analysisSummary.gunBasiKar, 0)} seviyesine ulaştı. ${analysisSummary.güçlüArgüman}`;
+  }, [activeStaffRows.length, analysisSummary.gunBasiKar, analysisSummary.güçlüArgüman, analysisSummary.ortalamaKisiBasiKar, donemLabel, totalPersonDays, totalZerYapiHakedis]);
+
+  const handleCopySummary = async () => {
+    try {
+      await navigator.clipboard.writeText(shareableSummary);
+      setCopiedSummary(true);
+      showStatus('success', 'Sunum metni panoya kopyalandı.');
+      setTimeout(() => setCopiedSummary(false), 2000);
+    } catch {
+      showStatus('error', 'Panoya kopyalama sırasında bir sorun oluştu.');
+    }
+  };
 
   const handleExcludeStaff = (staffId: string) => {
     setExcludedStaffIds(prev => [...prev, staffId]);
@@ -483,10 +543,48 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
         faaliyetlerCount: monthlySahaFaaliyetleri.length + monthlyKampFaaliyetleri.length,
         durum: 'KAYDEDİLDİ',
         raporTipi: 'ZER_YAPI_HAKEDIS',
+        analiz: {
+          roleMix: analysisSummary.roleMix,
+          ortalamaKisiBasiKar: analysisSummary.ortalamaKisiBasiKar,
+          gunBasiKar: analysisSummary.gunBasiKar,
+          güçlüArgüman: analysisSummary.güçlüArgüman,
+        },
       });
       showStatus('success', `${donemLabel} ZER YAPI Hakediş Raporu kaydedildi!`);
     } catch (err: any) {
       showStatus('error', `Rapor kaydedilirken hata: ${err.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCreateAnalysisReport = async () => {
+    setLoading(true);
+    try {
+      const reportId = `ZER-YAPI-ANALIZ-${donemKey}-${Date.now()}`;
+      await saveDocument('kibarHakedisRaporlari', {
+        id: reportId,
+        donem: donemKey,
+        donemLabel,
+        yil: selectedYear,
+        ay: selectedMonth,
+        raporTipi: 'ZER_YAPI_AYLIK_ANALIZ',
+        durum: 'ANALIZ_KAYDEDİLDİ',
+        personelSayisi: activeStaffRows.length,
+        toplamCalismaGunu: totalPersonDays,
+        toplamTutar: totalZerYapiHakedis,
+        birimFiyat: ZER_YAPI_GUNLUK,
+        toplamMaasKazanci: totalMaasKazanci,
+        ortalamaKisiBasiKar: analysisSummary.ortalamaKisiBasiKar,
+        gunBasiKar: analysisSummary.gunBasiKar,
+        roleMix: analysisSummary.roleMix,
+        güçlüArgüman: analysisSummary.güçlüArgüman,
+        olusturan: currentUser?.email || 'sametatak9@gmail.com',
+        olusturmaTarihi: new Date().toISOString(),
+      });
+      showStatus('success', `${donemLabel} güçlü ZER YAPI aylık analiz raporu kaydedildi!`);
+    } catch (err: any) {
+      showStatus('error', `Analiz raporu kaydedilirken hata: ${err.message}`);
     } finally {
       setLoading(false);
     }
@@ -577,6 +675,14 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
           >
             <RefreshCw size={12} className={refreshingYoklama ? 'animate-spin' : ''} />
             <span>{refreshingYoklama ? 'Getiriliyor...' : 'Güncel Yoklamayı Getir'}</span>
+          </button>
+          <button
+            onClick={handleCreateAnalysisReport}
+            disabled={loading}
+            className="bg-violet-600 hover:bg-violet-700 text-white font-bold text-xs px-4 py-2.5 rounded-xl transition shadow cursor-pointer flex items-center space-x-1"
+          >
+            {loading ? <RefreshCw size={12} className="animate-spin" /> : <BarChart3 size={12} />}
+            <span>Güçlü Analiz Oluştur</span>
           </button>
           <button
             onClick={handleSaveReport}
@@ -701,6 +807,48 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
               <span className="text-[8px] text-emerald-600 block mt-1 font-semibold">
                 Formül: {totalPersonDays} gün × ₺{ZER_YAPI_GUNLUK} (maaş kazancından ayrı)
               </span>
+            </div>
+
+            <div className="bg-violet-50 border border-violet-200 p-4 rounded-xl space-y-2">
+              <span className="text-[9px] text-violet-800 font-black block uppercase tracking-wide">Aylık Kar Analizi</span>
+              <div className="flex justify-between text-[10px]">
+                <span className="text-violet-700">Kişi başı ortalama katkı</span>
+                <span className="font-mono font-bold text-violet-900">{formatMoney(analysisSummary.ortalamaKisiBasiKar, 0)}</span>
+              </div>
+              <div className="flex justify-between text-[10px]">
+                <span className="text-violet-700">Gün başına katkı</span>
+                <span className="font-mono font-bold text-violet-900">{formatMoney(analysisSummary.gunBasiKar, 0)}</span>
+              </div>
+              <div className="text-[8px] text-violet-700 font-semibold leading-relaxed">
+                {analysisSummary.güçlüArgüman}
+              </div>
+            </div>
+
+            <div className="bg-slate-50 border border-slate-200 p-4 rounded-xl space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-[9px] text-slate-700 font-black block uppercase tracking-wide">Sunum Hazır Metin</span>
+                <button onClick={handleCopySummary} className="flex items-center gap-1 border border-slate-300 rounded-lg px-2 py-1 text-[9px] font-bold text-slate-700 bg-white">
+                  <Copy size={10} /> {copiedSummary ? 'Kopyalandı' : 'Kopyala'}
+                </button>
+              </div>
+              <div className="text-[8px] text-slate-600 leading-relaxed">
+                {shareableSummary}
+              </div>
+            </div>
+
+            <div className="bg-amber-50 border border-amber-200 p-4 rounded-xl space-y-2">
+              <span className="text-[9px] text-amber-800 font-black block uppercase tracking-wide">Karşılaştırmalı Analiz</span>
+              <div className="flex justify-between text-[10px]">
+                <span className="text-amber-700">Bu ay</span>
+                <span className="font-mono font-bold text-amber-900">{formatMoney(totalZerYapiHakedis, 0)}</span>
+              </div>
+              <div className="flex justify-between text-[10px]">
+                <span className="text-amber-700">Önceki ay</span>
+                <span className="font-mono font-bold text-amber-900">{formatMoney(previousMonthTotalZerYapi, 0)}</span>
+              </div>
+              <div className="text-[8px] text-amber-700 font-semibold leading-relaxed">
+                {zerYapiDelta >= 0 ? 'Bu ay önceki aya göre artış var.' : 'Bu ay önceki aya göre gerileme var.'} Fark: {formatMoney(Math.abs(zerYapiDelta), 0)} ({Math.abs(zerYapiDeltaPct).toFixed(1)}%)
+              </div>
             </div>
           </div>
         </div>
@@ -954,6 +1102,22 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
                   <span>ZER YAPI Hakediş Toplamı</span>
                   <span className="rpt-summary-val">{formatMoney(totalZerYapiHakedis, 0)}</span>
                   <span className="rpt-summary-sub">{totalPersonDays} gün × ₺{ZER_YAPI_GUNLUK}</span>
+                </div>
+              </div>
+
+              <div className="rpt-compare-grid">
+                <div className="rpt-compare-card">
+                  <strong>Karşılaştırmalı analiz</strong>
+                  <div style={{ marginTop: 6, fontSize: '7.5pt', color: '#4b5563' }}>
+                    Bu ay: {formatMoney(totalZerYapiHakedis, 0)} · Önceki ay: {formatMoney(previousMonthTotalZerYapi, 0)}
+                  </div>
+                  <div style={{ marginTop: 4, fontSize: '7.5pt', color: '#4b5563' }}>
+                    Fark: {formatMoney(Math.abs(zerYapiDelta), 0)} ({Math.abs(zerYapiDeltaPct).toFixed(1)}%)
+                  </div>
+                </div>
+                <div className="rpt-compare-card">
+                  <strong>Sunum metni</strong>
+                  <div className="rpt-quote" style={{ marginTop: 6 }}>{shareableSummary}</div>
                 </div>
               </div>
 
