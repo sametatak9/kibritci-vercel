@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import {
   CreditCard, Calendar, Printer, ShieldCheck, CheckCircle2,
-  RefreshCw, UserX, BarChart3, Copy
+  RefreshCw, UserX, BarChart3, Copy, Download
 } from 'lucide-react';
 import { db, parseYoklamaSnapshotData, saveDocument } from '../lib/firebase';
 import { collection, doc, getDoc, onSnapshot, query, where } from 'firebase/firestore';
@@ -303,6 +303,7 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
   const [refreshingYoklama, setRefreshingYoklama] = useState(false);
   const [lastYoklamaRefreshAt, setLastYoklamaRefreshAt] = useState<string | null>(null);
   const [copiedSummary, setCopiedSummary] = useState(false);
+  const [downloadingReport, setDownloadingReport] = useState(false);
 
   const donemLabel = `${TURKISH_MONTHS[selectedMonth - 1]} ${selectedYear}`;
   const donemKey = `${selectedYear}-${String(selectedMonth).padStart(2, '0')}`;
@@ -485,10 +486,14 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
     const roleMix = buildRoleMix(activeStaffRows);
     const ortalamaKisiBasiKar = activeStaffRows.length > 0 ? totalZerYapiHakedis / activeStaffRows.length : 0;
     const gunBasiKar = totalPersonDays > 0 ? totalZerYapiHakedis / totalPersonDays : 0;
+    const öncekiAyDurum = previousMonthTotalZerYapi > 0
+      ? `${zerYapiDelta >= 0 ? 'artış' : 'azalış'} ${formatMoney(Math.abs(zerYapiDelta), 0)} (%${Math.abs(zerYapiDeltaPct).toFixed(1)})` 
+      : 'Yeterli önceki ay verisi yok';
     const güçlüArgüman = [
       `${donemLabel} döneminde ${activeStaffRows.length} personel üzerinden ${totalPersonDays} iş-günü kayıt altına alındı.`,
-      `Bu çalışma, ZER YAPI'nin şirkete sağladığı aylık katkıyı ${formatMoney(totalZerYapiHakedis, 0)} olarak ölçmektedir.`,
+      `Bu çalışma, ZER YAPI'nin aylık katkısını ${formatMoney(totalZerYapiHakedis, 0)} olarak ölçmektedir.`,
       `Kişi başı ortalama katkı ${formatMoney(ortalamaKisiBasiKar, 0)}, gün başına katkı ise ${formatMoney(gunBasiKar, 0)} seviyesindedir.`,
+      `Önceki ay karşılaştırması: ${öncekiAyDurum}.`,
       `Rol dağılımı: ${roleMix.duzIsci} düz işçi, ${roleMix.usta} usta, ${roleMix.formen} formen, ${roleMix.senior} senior/diğer.`,
     ].join(' ');
 
@@ -497,12 +502,13 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
       ortalamaKisiBasiKar,
       gunBasiKar,
       güçlüArgüman,
+      öncekiAyDurum,
     };
-  }, [activeStaffRows, donemLabel, totalPersonDays, totalZerYapiHakedis]);
+  }, [activeStaffRows, donemLabel, totalPersonDays, totalZerYapiHakedis, previousMonthTotalZerYapi, zerYapiDelta, zerYapiDeltaPct]);
 
   const shareableSummary = useMemo(() => {
-    return `${donemLabel} döneminde ${activeStaffRows.length} personel üzerinden ${totalPersonDays} iş-günü kaydedildi. ZER YAPI'nin şirkete sağladığı aylık katkı ${formatMoney(totalZerYapiHakedis, 0)} olarak hesaplandı. Kişi başı ortalama katkı ${formatMoney(analysisSummary.ortalamaKisiBasiKar, 0)}, gün başına katkı ise ${formatMoney(analysisSummary.gunBasiKar, 0)} seviyesine ulaştı. ${analysisSummary.güçlüArgüman}`;
-  }, [activeStaffRows.length, analysisSummary.gunBasiKar, analysisSummary.güçlüArgüman, analysisSummary.ortalamaKisiBasiKar, donemLabel, totalPersonDays, totalZerYapiHakedis]);
+    return `${donemLabel} döneminde ${activeStaffRows.length} personel üzerinden ${totalPersonDays} iş-günü kaydedildi. ZER YAPI'nin şirkete sağladığı aylık katkı ${formatMoney(totalZerYapiHakedis, 0)} olarak hesaplandı. Kişi başı ortalama katkı ${formatMoney(analysisSummary.ortalamaKisiBasiKar, 0)}, gün başına katkı ise ${formatMoney(analysisSummary.gunBasiKar, 0)} seviyesine ulaştı. Önceki ay verisiyle karşılaştırıldığında, fark ${analysisSummary.öncekiAyDurum}. ${analysisSummary.güçlüArgüman}`;
+  }, [activeStaffRows.length, analysisSummary.gunBasiKar, analysisSummary.güçlüArgüman, analysisSummary.ortalamaKisiBasiKar, analysisSummary.öncekiAyDurum, donemLabel, totalPersonDays, totalZerYapiHakedis]);
 
   const handleCopySummary = async () => {
     try {
@@ -587,6 +593,124 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
       showStatus('error', `Analiz raporu kaydedilirken hata: ${err.message}`);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const buildReportHtmlDocument = (content: string): string => `<!DOCTYPE html><html lang="tr"><head><meta charset="utf-8"><title>ZER_YAPI_Hakedis_${donemKey}</title><style>body{margin:0;padding:24px;font-family:'Segoe UI',Arial,sans-serif;color:#1f2937;background:#f8fafc;}${REPORT_CSS}</style></head><body><div class="report-root">${content}</div></body></html>`;
+
+  const handleDownloadHtml = () => {
+    const printContent = document.getElementById('kibar-report-print-area')?.innerHTML;
+    if (!printContent) return;
+    const html = buildReportHtmlDocument(printContent);
+    const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `ZER_YAPI_Hakedis_${donemKey}.html`;
+    a.click();
+    URL.revokeObjectURL(url);
+    showStatus('success', 'Rapor HTML olarak indiriliyor.');
+  };
+
+  const handleDownloadExcel = async () => {
+    setDownloadingReport(true);
+    try {
+      const { createExcelWorkbook } = await import('../lib/exceljsLoader');
+      const wb = await createExcelWorkbook();
+      const ws = wb.addWorksheet('ZER YAPI Rapor');
+      ws.addRow(['ZER YAPI HAKEDİŞ RAPORU', donemLabel]);
+      ws.addRow([]);
+      ws.addRow(['Personel Sayısı', activeStaffRows.length]);
+      ws.addRow(['Toplam İş Günü', totalPersonDays]);
+      ws.addRow(['Toplam ZER YAPI Tutarı', formatMoney(totalZerYapiHakedis, 0)]);
+      ws.addRow(['Kişi Başı Ortalama', formatMoney(analysisSummary.ortalamaKisiBasiKar, 0)]);
+      ws.addRow(['Gün Başı Ortalama', formatMoney(analysisSummary.gunBasiKar, 0)]);
+      ws.addRow(['Önceki Ay Tutarı', formatMoney(previousMonthTotalZerYapi, 0)]);
+      ws.addRow(['Fark', `${formatMoney(zerYapiDelta, 0)} (${Math.abs(zerYapiDeltaPct).toFixed(1)}%)`]);
+      ws.addRow([]);
+      const header = ['Ad Soyad', 'Görev', 'Geldi Gün', 'Mesai Saat', 'Toplam Maaş', 'ZER YAPI Hakedis'];
+      const headerRow = ws.addRow(header);
+      headerRow.font = { bold: true };
+      activeStaffRows.forEach((row) => {
+        ws.addRow([
+          `${row.personel.ad} ${row.personel.soyad}`,
+          normalizeGorev(row.personel.gorev),
+          row.geldiGun,
+          row.mesaiSaat,
+          row.toplamKazanc,
+          row.zerYapiHakedis,
+        ]);
+      });
+      const buffer = await wb.xlsx.writeBuffer();
+      const blob = new Blob([buffer as BlobPart], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `ZER_YAPI_Hakedis_${donemKey}.xlsx`;
+      a.click();
+      URL.revokeObjectURL(url);
+      showStatus('success', 'Rapor Excel olarak indirildi.');
+    } catch (err: any) {
+      showStatus('error', `Excel raporu oluşturulamadı: ${err?.message || err}`);
+    } finally {
+      setDownloadingReport(false);
+    }
+  };
+
+  const handleDownloadPdf = async () => {
+    setDownloadingReport(true);
+    try {
+      const { jsPDF } = await import('jspdf');
+      const doc = new jsPDF('p', 'mm', 'a4');
+      const pageWidth = doc.internal.pageSize.getWidth();
+      const margin = 14;
+      let y = 16;
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(14);
+      doc.text(`ZER YAPI Hakediş Raporu — ${donemLabel}`, margin, y);
+      y += 10;
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(10);
+      const summaryLines = [
+        `Personel sayısı: ${activeStaffRows.length}`,
+        `Toplam iş günü: ${totalPersonDays}`,
+        `Toplam ZER YAPI tutarı: ${formatMoney(totalZerYapiHakedis, 0)}`,
+        `Kişi başı ortalama: ${formatMoney(analysisSummary.ortalamaKisiBasiKar, 0)}`,
+        `Gün başına ortalama: ${formatMoney(analysisSummary.gunBasiKar, 0)}`,
+        `Önceki ay fark: ${analysisSummary.öncekiAyDurum}`,
+      ];
+      summaryLines.forEach((line) => {
+        const wrapped = doc.splitTextToSize(line, pageWidth - margin * 2);
+        doc.text(wrapped, margin, y);
+        y += wrapped.length * 5;
+      });
+      y += 6;
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(11);
+      doc.text('Personel Detayı', margin, y);
+      y += 7;
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(10);
+      doc.text('Ad Soyad / Görev / Geldi / Mesai / Hakedis', margin, y);
+      y += 6;
+      doc.setFont('helvetica', 'normal');
+      activeStaffRows.forEach((row, index) => {
+        if (index > 18) return;
+        const line = `${row.personel.ad} ${row.personel.soyad} / ${normalizeGorev(row.personel.gorev)} / ${row.geldiGun} / ${row.mesaiSaat} / ${formatMoney(row.zerYapiHakedis, 0)}`;
+        const wrapped = doc.splitTextToSize(line, pageWidth - margin * 2);
+        doc.text(wrapped, margin, y);
+        y += wrapped.length * 5;
+        if (y > doc.internal.pageSize.getHeight() - 20) {
+          doc.addPage();
+          y = margin;
+        }
+      });
+      doc.save(`ZER_YAPI_Hakedis_${donemKey}.pdf`);
+      showStatus('success', 'Rapor PDF olarak kaydedildi.');
+    } catch (err: any) {
+      showStatus('error', `PDF raporu indirilemedi: ${err?.message || err}`);
+    } finally {
+      setDownloadingReport(false);
     }
   };
 
@@ -866,9 +990,20 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
                 </button>
               </div>
             </div>
-            <button onClick={handlePrint} className="bg-slate-900 hover:bg-slate-950 text-white font-bold text-xs py-2 px-4 rounded-xl flex items-center space-x-1.5 shadow cursor-pointer">
-              <Printer size={13} /><span>Yazdır / PDF (A3)</span>
-            </button>
+            <div className="flex flex-wrap items-center gap-2">
+              <button onClick={handlePrint} className="bg-slate-900 hover:bg-slate-950 text-white font-bold text-xs py-2 px-4 rounded-xl flex items-center space-x-1.5 shadow cursor-pointer">
+                <Printer size={13} /><span>Yazdır / PDF (A3)</span>
+              </button>
+              <button onClick={handleDownloadHtml} className="bg-slate-700 hover:bg-slate-800 text-white font-bold text-xs py-2 px-4 rounded-xl flex items-center space-x-1.5 shadow cursor-pointer">
+                <Download size={13} /><span>HTML İndir</span>
+              </button>
+              <button onClick={handleDownloadExcel} className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs py-2 px-4 rounded-xl flex items-center space-x-1.5 shadow cursor-pointer">
+                <Download size={13} /><span>Excel İndir</span>
+              </button>
+              <button onClick={handleDownloadPdf} disabled={downloadingReport} className="bg-cyan-600 hover:bg-cyan-700 text-white font-bold text-xs py-2 px-4 rounded-xl flex items-center space-x-1.5 shadow cursor-pointer">
+                <Download size={13} /><span>{downloadingReport ? 'PDF Oluşturuluyor...' : 'PDF İndir'}</span>
+              </button>
+            </div>
           </div>
 
           <div className="bg-white border rounded-3xl p-6 shadow-sm">
@@ -878,6 +1013,19 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
               <p className="text-[10px] text-slate-500 font-bold uppercase mb-2">ZER YAPI · Aylık Hakediş & Faaliyet Mutabakatı · {donemLabel}</p>
               <div className="rpt-header-title mb-4">
                 Şantiye Sahası Aylık Hakediş ve Faaliyet Raporu — {donemLabel}
+              </div>
+
+              <div className="rpt-zer-box" style={{ borderColor: '#0f766e', background: '#ecfdf5' }}>
+                <h4>Matematiksel Analiz Özeti</h4>
+                <p className="rpt-zer-formula">
+                  Toplam katkı = {totalPersonDays} iş-gün × ₺{ZER_YAPI_GUNLUK} = {formatMoney(totalZerYapiHakedis, 0)}.
+                </p>
+                <p className="rpt-zer-meta">
+                  Kişi başı ortalama katkı = {formatMoney(analysisSummary.ortalamaKisiBasiKar, 0)}, gün başına ortalama katkı = {formatMoney(analysisSummary.gunBasiKar, 0)}.
+                </p>
+                <p className="rpt-zer-meta">
+                  Önceki ay karşılaştırması: {analysisSummary.öncekiAyDurum}.
+                </p>
               </div>
 
               {/* —— ZER YAPI Hakediş Özeti (rapor başı) —— */}
