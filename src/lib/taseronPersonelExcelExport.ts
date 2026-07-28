@@ -1,4 +1,8 @@
 import type { KampKaydi, KampOdasi, Personel } from '../types/erp';
+import {
+  flattenGorevGroups,
+  groupPersonelByGorev,
+} from './anaFirmaGorevPersonelRapor';
 import { displayPersonelGorev } from './guvenlikHelpers';
 import { formatPersonelKampYerlesim } from './taseronUtils';
 import {
@@ -59,15 +63,15 @@ export function collectTumFirmalarPersoneller(
     .sort(sortByFirmaThenName);
 }
 
-/** Yalnızca ana firma (Kibritçi İnşaat) personeli. */
+/** Yalnızca ana firma (Kibritçi İnşaat) personeli — göreve göre gruplu sıra. */
 export function collectAnaFirmaPersoneller(
   personeller: Personel[],
   options?: { onlyActive?: boolean }
 ): Personel[] {
-  return personeller
+  const pool = personeller
     .filter((p) => isAnaFirmaPersonel(p))
-    .filter((p) => (options?.onlyActive ? isAktif(p) : true))
-    .sort(sortByFirmaThenName);
+    .filter((p) => (options?.onlyActive ? isAktif(p) : true));
+  return flattenGorevGroups(groupPersonelByGorev(pool));
 }
 
 export async function exportPersonelExcel(options: {
@@ -131,7 +135,7 @@ export async function exportPersonelExcel(options: {
     (scope === 'all'
       ? `${CANONICAL_ANA_FIRMA_ADI} — Tüm Firmalar Personel Listesi (Ana Firma Dahil)`
       : scope === 'ana_firma'
-        ? `${CANONICAL_ANA_FIRMA_ADI} — Ana Firma Personel Listesi`
+        ? `${CANONICAL_ANA_FIRMA_ADI} — Ana Firma Personel Listesi (Göreve Göre)`
         : scope === 'custom'
           ? `${CANONICAL_ANA_FIRMA_ADI} — Seçili Firma Personel Listesi`
           : `${CANONICAL_ANA_FIRMA_ADI} — Tüm Taşeron Firma Personeli`);
@@ -194,7 +198,7 @@ export async function exportPersonelExcel(options: {
     { width: 36 },
   ];
 
-  rows.forEach((p) => {
+  const writePersonelRow = (p: Personel) => {
     const values: (string | number)[] = [
       firmaAdiLabel(p),
       firmaTipiLabel(p),
@@ -226,7 +230,22 @@ export async function exportPersonelExcel(options: {
       };
       cell.alignment = { vertical: 'middle' };
     });
-  });
+  };
+
+  if (scope === 'ana_firma') {
+    const groups = groupPersonelByGorev(rows);
+    for (const g of groups) {
+      const banner = sheet.addRow([`${g.gorev} — ${g.personeller.length} kişi`]);
+      sheet.mergeCells(banner.number, 1, banner.number, colCount);
+      const cell = banner.getCell(1);
+      cell.font = { name: 'Arial', size: 11, bold: true, color: { argb: 'FFFFFFFF' } };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E3A5F' } };
+      cell.alignment = { vertical: 'middle', horizontal: 'left' };
+      g.personeller.forEach(writePersonelRow);
+    }
+  } else {
+    rows.forEach(writePersonelRow);
+  }
 
   const buffer = await workbook.xlsx.writeBuffer();
   const blob = new Blob([buffer as BlobPart], {

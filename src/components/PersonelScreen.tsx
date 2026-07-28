@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Users, UserPlus, Trash2, CreditCard as Edit3, Camera, Search, ShieldCheck, Mail, Phone, MapPin, DollarSign, UserX, FileText, CloudUpload as UploadCloud, CircleCheck as CheckCircle2, CircleAlert as AlertCircle, Loader as Loader2, Building2, History, Download } from 'lucide-react';
+import { Users, UserPlus, Trash2, CreditCard as Edit3, Camera, Search, ShieldCheck, Mail, Phone, MapPin, DollarSign, UserX, FileText, CloudUpload as UploadCloud, CircleCheck as CheckCircle2, CircleAlert as AlertCircle, Loader as Loader2, Building2, History, Download, Printer } from 'lucide-react';
 import { CariKart, CariKartIslem, Personel } from '../types/erp';
 import { fetchApiJson } from '../lib/apiClient';
 import { compressImage } from '../lib/imageCompress';
@@ -13,6 +13,7 @@ import {
   exportTaseronPersonelExcel,
   exportTumFirmalarPersonelExcel,
 } from '../lib/taseronPersonelExcelExport';
+import { printAnaFirmaGorevPersonelReport } from '../lib/anaFirmaGorevPersonelRapor';
 import {
   AKVIZYON_GOREV,
   displayPersonelGorev,
@@ -980,10 +981,14 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
         personeller,
         onlyActive: showOnlyActive,
       });
-      alert(`${count} ana firma personeli Excel olarak indirildi.`);
+      alert(`${count} ana firma personeli Excel olarak indirildi (göreve göre gruplu).`);
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Excel oluşturulamadı.');
     }
+  };
+
+  const handlePrintAnaFirmaGorevRapor = () => {
+    printAnaFirmaGorevPersonelReport(personeller, { onlyActive: showOnlyActive });
   };
 
   const handleExportSeciliExcel = async () => {
@@ -1845,9 +1850,17 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
             </button>
             <button
               type="button"
+              onClick={handlePrintAnaFirmaGorevRapor}
+              className="flex items-center gap-1.5 text-[10px] font-bold px-3 py-2 bg-indigo-900 text-white rounded-xl hover:bg-indigo-950 cursor-pointer"
+              title="Ana firma personelini görev gruplarına göre yazdırılabilir rapor olarak aç"
+            >
+              <Printer size={12} /> Ana Firma Görev Raporu
+            </button>
+            <button
+              type="button"
               onClick={() => void handleExportAnaFirmaExcel()}
               className="flex items-center gap-1.5 text-[10px] font-bold px-3 py-2 bg-indigo-700 text-white rounded-xl hover:bg-indigo-800 cursor-pointer"
-              title="Yalnızca ana firma (Kibritçi İnşaat) personelini Excel (.xlsx) olarak indir"
+              title="Yalnızca ana firma (Kibritçi İnşaat) personelini Excel (.xlsx) olarak indir — göreve göre gruplu"
             >
               <Download size={12} /> Ana Firma Excel
             </button>
