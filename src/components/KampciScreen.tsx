@@ -379,6 +379,9 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
       durum: true,
       firmaTipi,
       firmaAdi: normalizedFirma,
+      // Kampçı kayıtları yazım hatası riski nedeniyle yönetici onayına düşer
+      onayDurumu: 'ONAY BEKLİYOR',
+      kaynak: 'KAMPCI',
     };
     await saveDocument('personeller', personel);
     return personel;
