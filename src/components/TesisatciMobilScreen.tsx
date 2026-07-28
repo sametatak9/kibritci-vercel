@@ -753,8 +753,6 @@ export const TesisatciMobilScreen: React.FC<TesisatciMobilScreenProps> = ({
       {activeSubTab === 'yildirim' && (
         <TesisatciYildirimTab
           cariKartlar={cariKartlar}
-          setCariKartlar={setCariKartlar}
-          setCariIslemGecmisi={setCariIslemGecmisi}
           faturalar={faturalar}
           currentUser={currentUser}
           addNotification={addNotification}
