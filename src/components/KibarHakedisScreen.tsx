@@ -618,17 +618,40 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
       const { createExcelWorkbook } = await import('../lib/exceljsLoader');
       const wb = await createExcelWorkbook();
       const ws = wb.addWorksheet('ZER YAPI Rapor');
+      // Header + rich summary
       ws.addRow(['ZER YAPI HAKEDİŞ RAPORU', donemLabel]);
       ws.addRow([]);
       ws.addRow(['Personel Sayısı', activeStaffRows.length]);
       ws.addRow(['Toplam İş Günü', totalPersonDays]);
+      ws.addRow(['Toplam Mesai Saati', totalMesaiSaat]);
+      ws.addRow(['Toplam Maaş Kazancı', formatMoney(totalMaasKazanci)]);
+      ws.addRow(['Toplam Gün Kazancı', formatMoney(totalGunKazanci)]);
       ws.addRow(['Toplam ZER YAPI Tutarı', formatMoney(totalZerYapiHakedis, 0)]);
       ws.addRow(['Kişi Başı Ortalama', formatMoney(analysisSummary.ortalamaKisiBasiKar, 0)]);
       ws.addRow(['Gün Başı Ortalama', formatMoney(analysisSummary.gunBasiKar, 0)]);
       ws.addRow(['Önceki Ay Tutarı', formatMoney(previousMonthTotalZerYapi, 0)]);
       ws.addRow(['Fark', `${formatMoney(zerYapiDelta, 0)} (${Math.abs(zerYapiDeltaPct).toFixed(1)}%)`]);
       ws.addRow([]);
-      const header = ['Ad Soyad', 'Görev', 'Geldi Gün', 'Mesai Saat', 'Toplam Maaş', 'ZER YAPI Hakedis'];
+
+      // Role mix breakdown
+      ws.addRow(['Rol Dağılım']);
+      const rm = analysisSummary.roleMix || { duzIsci: 0, usta: 0, formen: 0, senior: 0, diger: 0 };
+      ws.addRow(['Düz işçi', rm.duzIsci]);
+      ws.addRow(['Usta', rm.usta]);
+      ws.addRow(['Formen', rm.formen]);
+      ws.addRow(['Senior', rm.senior]);
+      ws.addRow(['Diğer', rm.diger]);
+      ws.addRow([]);
+
+      // Sunum / özet metni
+      ws.addRow(['Sunum Metni (Kısa)']);
+      const summary = String(analysisSummary.güçlüArgüman || shareableSummary || '');
+      // split into multiple rows to preserve readability in Excel
+      summary.split(/\n|\.|\!\s/).filter(Boolean).forEach((s) => ws.addRow([s.trim()]));
+      ws.addRow([]);
+
+      // Personel detay başlığı
+      const header = ['Ad Soyad', 'Görev', 'Geldi Gün', 'Mesai Saat', 'Gün Kazancı', 'Mesai Kazancı', 'Toplam Maaş', 'ZER YAPI Hakedis'];
       const headerRow = ws.addRow(header);
       headerRow.font = { bold: true };
       activeStaffRows.forEach((row) => {
@@ -637,6 +660,8 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
           normalizeGorev(row.personel.gorev),
           row.geldiGun,
           row.mesaiSaat,
+          row.gunKazanci,
+          row.mesaiKazanci,
           row.toplamKazanc,
           row.zerYapiHakedis,
         ]);
@@ -665,45 +690,63 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
       const pageWidth = doc.internal.pageSize.getWidth();
       const margin = 14;
       let y = 16;
+      // Title
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(14);
       doc.text(`ZER YAPI Hakediş Raporu — ${donemLabel}`, margin, y);
-      y += 10;
+      y += 8;
+
+      // Top summary + comparison
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(10);
-      const summaryLines = [
-        `Personel sayısı: ${activeStaffRows.length}`,
-        `Toplam iş günü: ${totalPersonDays}`,
-        `Toplam ZER YAPI tutarı: ${formatMoney(totalZerYapiHakedis, 0)}`,
-        `Kişi başı ortalama: ${formatMoney(analysisSummary.ortalamaKisiBasiKar, 0)}`,
-        `Gün başına ortalama: ${formatMoney(analysisSummary.gunBasiKar, 0)}`,
-        `Önceki ay fark: ${analysisSummary.öncekiAyDurum}`,
+      const topLines = [
+        `Personel sayısı: ${activeStaffRows.length} · Toplam iş günü: ${totalPersonDays} · Toplam mesai: ${totalMesaiSaat} sa`,
+        `Toplam ZER YAPI tutarı: ${formatMoney(totalZerYapiHakedis, 0)} · Önceki ay: ${formatMoney(previousMonthTotalZerYapi, 0)} · Fark: ${formatMoney(zerYapiDelta, 0)} (${Math.abs(zerYapiDeltaPct).toFixed(1)}%)`,
       ];
-      summaryLines.forEach((line) => {
+      topLines.forEach((line) => {
         const wrapped = doc.splitTextToSize(line, pageWidth - margin * 2);
         doc.text(wrapped, margin, y);
-        y += wrapped.length * 5;
+        y += wrapped.length * 6;
       });
+      y += 4;
+
+      // Role mix
+      doc.setFont('helvetica', 'bold');
+      doc.text('Rol Dağılım', margin, y);
       y += 6;
+      doc.setFont('helvetica', 'normal');
+      const rm2 = analysisSummary.roleMix || { duzIsci: 0, usta: 0, formen: 0, senior: 0, diger: 0 };
+      const roleLines = [`Düz işçi: ${rm2.duzIsci}`, `Usta: ${rm2.usta}`, `Formen: ${rm2.formen}`, `Senior: ${rm2.senior}`, `Diğer: ${rm2.diger}`];
+      roleLines.forEach((l) => { doc.text(l, margin, y); y += 5; });
+      y += 4;
+
+      // Presentation / shareable summary
+      doc.setFont('helvetica', 'italic');
+      doc.setFontSize(9);
+      const pres = String(shareableSummary || analysisSummary.güçlüArgüman || '');
+      const presWrapped = doc.splitTextToSize(pres, pageWidth - margin * 2);
+      doc.text(presWrapped, margin, y);
+      y += presWrapped.length * 5 + 6;
+
+      // Personel detay başlığı
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(11);
-      doc.text('Personel Detayı', margin, y);
+      doc.text('Personel Detayı (Ad / Görev / Geldi / Mesai / ZER YAPI)', margin, y);
       y += 7;
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(10);
-      doc.text('Ad Soyad / Görev / Geldi / Mesai / Hakedis', margin, y);
-      y += 6;
       doc.setFont('helvetica', 'normal');
-      activeStaffRows.forEach((row, index) => {
-        if (index > 18) return;
-        const line = `${row.personel.ad} ${row.personel.soyad} / ${normalizeGorev(row.personel.gorev)} / ${row.geldiGun} / ${row.mesaiSaat} / ${formatMoney(row.zerYapiHakedis, 0)}`;
+      doc.setFontSize(9);
+
+      // List person details with pagination
+      const pageHeight = doc.internal.pageSize.getHeight();
+      activeStaffRows.forEach((row) => {
+        const line = `${row.personel.ad} ${row.personel.soyad} / ${normalizeGorev(row.personel.gorev)} / ${row.geldiGun}g / ${row.mesaiSaat}sa / ${formatMoney(row.zerYapiHakedis, 0)}`;
         const wrapped = doc.splitTextToSize(line, pageWidth - margin * 2);
-        doc.text(wrapped, margin, y);
-        y += wrapped.length * 5;
-        if (y > doc.internal.pageSize.getHeight() - 20) {
+        if (y + wrapped.length * 5 > pageHeight - margin) {
           doc.addPage();
           y = margin;
         }
+        doc.text(wrapped, margin, y);
+        y += wrapped.length * 5;
       });
       doc.save(`ZER_YAPI_Hakedis_${donemKey}.pdf`);
       showStatus('success', 'Rapor PDF olarak kaydedildi.');
