@@ -1310,4 +1310,88 @@ app.post("/api/chat", async (req, res) => {
   }
 });
 
+/**
+ * Akvizyon grup nöbeti — 21:00 Europe/Istanbul sonrası otomatik kapat/arşiv.
+ * Auth: X-Cron-Secret veya Authorization: Bearer <CRON_SECRET>
+ */
+app.post('/api/cron/akvizyon-nobet-kapat', async (req, res) => {
+  const expected = String(process.env.CRON_SECRET || '').trim();
+  if (!expected) {
+    return res.status(503).json({ error: 'CRON_SECRET tanımlı değil' });
+  }
+  const headerSecret = String(req.headers['x-cron-secret'] || '').trim();
+  const bearer = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '').trim();
+  if (headerSecret !== expected && bearer !== expected) {
+    return res.status(401).json({ error: 'Yetkisiz cron isteği' });
+  }
+  if (!isFirebaseAdminConfigured()) {
+    return res.status(503).json({ error: 'Firebase Admin yapılandırılmamış' });
+  }
+
+  try {
+    const {
+      buildAkvizyonOtomatikKapanisPayload,
+      collectAkvizyonPersonelForDate,
+      istanbulTodayKey,
+      shouldAutoCloseAkvizyonNobet,
+      AKVIZYON_NOBET_KAPANIS_SAAT,
+    } = await import('../lib/akvizyonNobetAutoArchive');
+
+    const force = Boolean(req.body?.force);
+    const tarih = String(req.body?.tarih || istanbulTodayKey()).slice(0, 10);
+    const admin = getFirebaseAdmin();
+    const db = admin.firestore();
+
+    const existingSnap = await db.collection('akvizyonYoklamalari').doc(tarih).get();
+    const existing = existingSnap.exists
+      ? ({ id: existingSnap.id, ...existingSnap.data() } as any)
+      : null;
+
+    if (!force && !shouldAutoCloseAkvizyonNobet(tarih, existing)) {
+      return res.json({
+        success: true,
+        skipped: true,
+        reason: existing?.kilitli
+          ? 'already_locked'
+          : 'before_close_time',
+        tarih,
+        closeHour: AKVIZYON_NOBET_KAPANIS_SAAT,
+      });
+    }
+
+    const personelSnap = await db.collection('personeller').get();
+    const personeller = personelSnap.docs.map((d) => ({ id: d.id, ...d.data() })) as any[];
+    const akvizyonList = collectAkvizyonPersonelForDate(personeller, tarih);
+    const payload = buildAkvizyonOtomatikKapanisPayload({
+      tarih,
+      personelIds: akvizyonList.map((p) => p.id),
+      existing,
+      kaydeden: 'sistem_otomatik_cron',
+    });
+
+    await db.collection('akvizyonYoklamalari').doc(tarih).set(payload, { merge: true });
+    await db.collection('akvizyonNobetArsivleri').doc(tarih).set(
+      {
+        ...payload,
+        arsivTipi: 'AKVIZYON_GRUP_NOBET',
+        personelSayisi: akvizyonList.length,
+        geldiSayisi: Object.values(payload.yoklama || {}).filter((v) => v === 'Geldi').length,
+        gelmediSayisi: Object.values(payload.yoklama || {}).filter((v) => v === 'Gelmedi').length,
+      },
+      { merge: true }
+    );
+
+    return res.json({
+      success: true,
+      archived: true,
+      tarih,
+      personelSayisi: akvizyonList.length,
+      kapanisZamani: payload.kapanisZamani,
+    });
+  } catch (error: any) {
+    console.error('Akvizyon nöbet otomatik kapanış hatası:', error);
+    return res.status(500).json({ error: error.message || 'Otomatik kapanış başarısız' });
+  }
+});
+
 }

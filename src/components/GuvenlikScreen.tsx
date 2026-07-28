@@ -69,6 +69,15 @@ import {
 } from './GuvenlikKayitDuzenleModal';
 import { normalizeDateKey, todayDateKey, formatDateLabelTr } from '../lib/dateKeyUtils';
 import {
+  AKVIZYON_NOBET_KAPANIS_SAAT,
+  buildAkvizyonOtomatikKapanisPayload,
+  isAkvizyonNobetKapanisZamaniGecti,
+  isAkvizyonNobetKilitli,
+  istanbulTodayKey,
+  shouldAutoCloseAkvizyonNobet,
+  type AkvizyonYoklamaDoc,
+} from '../lib/akvizyonNobetAutoArchive';
+import {
   ENTO_MADEN_UNVAN,
   formatMicirMiktarLabel,
   kgToTon,
@@ -377,9 +386,88 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
 
   const canSaveAkvizyonYoklama = canTakeAkvizyonYoklama(userYetki, currentUser?.email);
 
+  const seciliGunAkvizyonDoc = useMemo(
+    () =>
+      (akvizyonArchives.find((a) => normalizeDateKey(a.tarih) === normalizeDateKey(islemTarihi)) ||
+        null) as AkvizyonYoklamaDoc | null,
+    [akvizyonArchives, islemTarihi]
+  );
+
+  const akvizyonNobetKilitli = useMemo(() => {
+    if (isAkvizyonNobetKilitli(seciliGunAkvizyonDoc)) return true;
+    return isAkvizyonNobetKapanisZamaniGecti(normalizeDateKey(islemTarihi) || islemTarihi);
+  }, [seciliGunAkvizyonDoc, islemTarihi]);
+
+  const canEditAkvizyonYoklama = canSaveAkvizyonYoklama && !akvizyonNobetKilitli;
+
+  const autoCloseAkvizyonRunning = useRef(false);
+
+  const runAkvizyonOtomatikKapanis = async (opts?: { silent?: boolean }) => {
+    const tarih = istanbulTodayKey();
+    const existing = (akvizyonArchives.find((a) => a.tarih === tarih) || null) as AkvizyonYoklamaDoc | null;
+    if (!shouldAutoCloseAkvizyonNobet(tarih, existing)) return false;
+    if (autoCloseAkvizyonRunning.current) return false;
+    autoCloseAkvizyonRunning.current = true;
+    try {
+      const personelIds = (personeller || [])
+        .filter((p) => isAkvizyonPersonel(p) && isPersonelActiveOnDate(p, tarih))
+        .map((p) => p.id);
+      const payload = buildAkvizyonOtomatikKapanisPayload({
+        tarih,
+        personelIds,
+        existing,
+        kaydeden: currentUser?.email || 'sistem_otomatik',
+      });
+      await setDoc(doc(db, 'akvizyonYoklamalari', tarih), payload, { merge: true });
+      await setDoc(
+        doc(db, 'akvizyonNobetArsivleri', tarih),
+        {
+          ...payload,
+          arsivTipi: 'AKVIZYON_GRUP_NOBET',
+          personelSayisi: personelIds.length,
+          geldiSayisi: Object.values(payload.yoklama || {}).filter((v) => v === 'Geldi').length,
+          gelmediSayisi: Object.values(payload.yoklama || {}).filter((v) => v === 'Gelmedi').length,
+        },
+        { merge: true }
+      );
+      if (!opts?.silent) {
+        showStatus(
+          'success',
+          `Akvizyon grup nöbeti saat ${AKVIZYON_NOBET_KAPANIS_SAAT}:00'da otomatik kapatılıp arşivlendi.`
+        );
+      }
+      if (addNotification) {
+        addNotification(
+          `${tarih} Akvizyon grup nöbeti otomatik kapatıldı ve arşivlendi (saat ${AKVIZYON_NOBET_KAPANIS_SAAT}:00).`
+        );
+      }
+      return true;
+    } catch (err) {
+      console.error('Akvizyon otomatik kapanış hatası:', err);
+      return false;
+    } finally {
+      autoCloseAkvizyonRunning.current = false;
+    }
+  };
+
+  useEffect(() => {
+    void runAkvizyonOtomatikKapanis({ silent: true });
+    const timer = window.setInterval(() => {
+      void runAkvizyonOtomatikKapanis({ silent: true });
+    }, 60_000);
+    return () => window.clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [akvizyonArchives, personeller]);
+
   const handleSaveAkvizyonYoklama = async () => {
     if (!canSaveAkvizyonYoklama) {
       alert('Hata: Akvizyon yoklama kaydı yalnızca Güvenlik, Kurucu ve Yönetici yetkileriyle yapılabilir.');
+      return;
+    }
+    if (akvizyonNobetKilitli) {
+      alert(
+        `Bu günün Akvizyon grup nöbeti kilitli. Saat ${AKVIZYON_NOBET_KAPANIS_SAAT}:00 sonrası otomatik arşivlenir / düzenlenemez.`
+      );
       return;
     }
     setLoadingAkvizyonYoklama(true);
@@ -395,7 +483,9 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
         tarih: islemTarihi,
         kayitZamani: getIslemZamani(),
         kaydeden: currentUser?.email,
-        yoklama: finalMap
+        yoklama: finalMap,
+        kilitli: false,
+        otomatikKapanis: false,
       });
 
       if (addNotification) {
@@ -5052,7 +5142,7 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
                 }
                 onKaydet={handleSaveAkvizyonYoklama}
                 kaydetLabel="Yoklamayı Kaydet"
-                kaydetDisabled={!canSaveAkvizyonYoklama || akvizyonPersoneller.length === 0}
+                kaydetDisabled={!canEditAkvizyonYoklama || akvizyonPersoneller.length === 0}
                 kaydetLoading={loadingAkvizyonYoklama}
               />
               
@@ -5071,6 +5161,24 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
                       <span className="font-mono font-black text-amber-600 bg-amber-500/10 px-2.5 py-0.5 rounded-lg border border-amber-500/20 text-xs">
                         {seciliTarihLabel}
                       </span>
+                    </div>
+
+                    <div className="bg-indigo-50 border border-indigo-200 rounded-2xl p-3 text-[11px] text-indigo-900 leading-relaxed">
+                      <p className="font-black uppercase tracking-wide text-[10px] mb-1">
+                        Grup nöbeti otomatik kapanış
+                      </p>
+                      <p>
+                        Her gün saat <strong>{AKVIZYON_NOBET_KAPANIS_SAAT}:00</strong> (İstanbul)
+                        Akvizyon grup nöbeti otomatik kapanır ve arşivlenir. İşaretlenmeyen personel
+                        <strong> Gelmedi</strong> sayılır.
+                      </p>
+                      {akvizyonNobetKilitli && (
+                        <p className="mt-2 font-bold text-rose-700 flex items-center gap-1.5">
+                          <Lock size={12} />
+                          Bu gün kilitli
+                          {seciliGunAkvizyonDoc?.otomatikKapanis ? ' · otomatik arşiv' : ''}.
+                        </p>
+                      )}
                     </div>
 
                     {!canSaveAkvizyonYoklama && (
@@ -5114,7 +5222,7 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
                           <div className="flex items-center gap-1.5 shrink-0">
                             <button
                               type="button"
-                              disabled={!canSaveAkvizyonYoklama}
+                              disabled={!canEditAkvizyonYoklama}
                               onClick={() => setAkvizyonYoklamaMap(prev => ({ ...prev, [item.id]: 'Geldi' }))}
                               className={`px-3 py-1.5 rounded-xl font-bold text-[9px] transition cursor-pointer ${
                                 status === 'Geldi' ? 'bg-emerald-600 text-white shadow-sm font-black' : 'bg-white hover:bg-slate-100 text-slate-500 border border-slate-200'
@@ -5124,7 +5232,7 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
                             </button>
                             <button
                               type="button"
-                              disabled={!canSaveAkvizyonYoklama}
+                              disabled={!canEditAkvizyonYoklama}
                               onClick={() => setAkvizyonYoklamaMap(prev => ({ ...prev, [item.id]: 'Gelmedi' }))}
                               className={`px-3 py-1.5 rounded-xl font-bold text-[9px] transition cursor-pointer ${
                                 status === 'Gelmedi' ? 'bg-rose-600 text-white shadow-sm font-black' : 'bg-white hover:bg-slate-100 text-slate-500 border border-slate-200'
@@ -5144,7 +5252,7 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
                     )}
                   </div>
 
-                  {canSaveAkvizyonYoklama && akvizyonPersoneller.length > 0 && (
+                  {canEditAkvizyonYoklama && akvizyonPersoneller.length > 0 && (
                     <button
                       onClick={handleSaveAkvizyonYoklama}
                       disabled={loadingAkvizyonYoklama}
@@ -5153,6 +5261,12 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
                       <Check size={13} />
                       <span>{loadingAkvizyonYoklama ? 'Kaydediliyor...' : 'YOKLAMAYI ARŞİVE KAYDET'}</span>
                     </button>
+                  )}
+                  {akvizyonNobetKilitli && (
+                    <div className="w-full bg-slate-100 border border-slate-200 text-slate-600 font-bold text-[11px] py-3 rounded-2xl flex items-center justify-center gap-2">
+                      <Lock size={13} />
+                      Nöbet kilitli — düzenleme kapalı (21:00 sonrası otomatik arşiv)
+                    </div>
                   )}
                 </div>
 
@@ -5177,6 +5291,11 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
                                 <Calendar size={12} className="text-amber-500" />
                                 <span className="font-bold text-xs text-slate-805 font-mono">{archive.tarih}</span>
                                 <span className="text-[9px] text-slate-400 font-mono">Kaydeden: {archive.kaydeden}</span>
+                                {(archive.kilitli || archive.otomatikKapanis) && (
+                                  <span className="text-[8px] font-black uppercase bg-indigo-100 text-indigo-800 border border-indigo-200 px-1.5 py-0.5 rounded-full">
+                                    {archive.otomatikKapanis ? 'Oto 21:00' : 'Kilitli'}
+                                  </span>
+                                )}
                               </div>
                               <div className="flex space-x-2 text-[9px] text-slate-500 font-mono font-bold">
                                 <span>Geldi: <strong className="text-emerald-600">{presentCount}</strong></span>
