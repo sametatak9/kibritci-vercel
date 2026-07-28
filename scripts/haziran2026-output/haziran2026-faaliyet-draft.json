@@ -1,0 +1,1799 @@
+{
+  "kaynak": "haziran2026-faaliyet.pdf",
+  "parsedAt": "2026-07-01T08:18:21.734Z",
+  "gunler": [
+    {
+      "tarih": "01.06.2026",
+      "faaliyetler": [
+        {
+          "isNiteligi": "SOFT KASA Şİ İMOBTER",
+          "blok": "AZA-B2",
+          "hamMetin": "3 usta tyardımcı AZA-B2 Soft kasa şi îmobter 160 Porsel",
+          "isciSayisi": 1,
+          "parsel": "160",
+          "ustaSayisi": 3
+        },
+        {
+          "isNiteligi": "SO DEPOSU İZABSYONA HAZIRLIK",
+          "blok": "C1",
+          "hamMetin": "3 düz işci 160 C1 Bibk so deposu izabsyona hazırlık",
+          "isciSayisi": 3,
+          "parsel": "160"
+        },
+        {
+          "isNiteligi": "EKSİK SİTT ÖRME",
+          "hamMetin": "2 usta 1 yardımcı 54 Porsel Eksik sitt örme",
+          "isciSayisi": 1,
+          "parsel": "54",
+          "ustaSayisi": 2
+        },
+        {
+          "isNiteligi": "TEMİZLİK",
+          "hamMetin": "2 düz işci 51 Porsel temizlik",
+          "isciSayisi": 2,
+          "parsel": "51"
+        },
+        {
+          "isNiteligi": "KÜP TAŞ LENTO DÖKÜMÜ",
+          "hamMetin": "2 düz işci küp taş lento dökümü",
+          "isciSayisi": 2,
+          "parsel": "157/46"
+        },
+        {
+          "isNiteligi": "SAP DİLEÜMÜ",
+          "blok": "C-2",
+          "hamMetin": "2 usta I yardımcı 46 Porsel C-2 Bilak sap dileümü",
+          "isciSayisi": 1,
+          "parsel": "46",
+          "ustaSayisi": 2
+        },
+        {
+          "isNiteligi": "TEMİZLİK",
+          "blok": "F1",
+          "hamMetin": "7 düz işci Lab Porsel f-Bikk temizlik",
+          "isciSayisi": 7,
+          "parsel": "LAB"
+        }
+      ],
+      "sayfaNo": 1
+    },
+    {
+      "tarih": "02.06.2026",
+      "faaliyetler": [
+        {
+          "isNiteligi": "HİTONG TAMİRLERİ",
+          "blok": "B-2",
+          "hamMetin": "3 usta Iyardımcı 160 Porsel B-2 hitong tamirleri",
+          "isciSayisi": 1,
+          "parsel": "160",
+          "ustaSayisi": 3
+        },
+        {
+          "isNiteligi": "BALKON WERMENTENİ ROSPA",
+          "blok": "B-3",
+          "hamMetin": "2 düz işci 160 Porsel B-3 Balkon wermenteni Rospa",
+          "isciSayisi": 2,
+          "parsel": "160"
+        },
+        {
+          "isNiteligi": "TEMİZLİK",
+          "hamMetin": "2 düz işci Fit Parsel temizlik",
+          "isciSayisi": 2,
+          "parsel": "FİT"
+        },
+        {
+          "isNiteligi": "ŞAFT KAPOMA",
+          "hamMetin": "2 usta lyardımes 5t Parsel şaft kapoma",
+          "isciSayisi": 1,
+          "parsel": "51",
+          "ustaSayisi": 2
+        },
+        {
+          "isNiteligi": "SOP DAKUMO",
+          "blok": "C-2",
+          "hamMetin": "2 usta lyardımcı 46 Porsel C-2 Bible sop dakumo",
+          "isciSayisi": 1,
+          "parsel": "46",
+          "ustaSayisi": 2
+        },
+        {
+          "isNiteligi": "BİNE ARKASINDA OİK SOFTBAN GROVUT DÖKÜMS",
+          "blok": "C-4, C-3",
+          "hamMetin": "I usta Luerdimer 51 Basel C-4, C-3 Bine arkasında oik Softban Grovut döküms",
+          "isciSayisi": 1,
+          "parsel": "51",
+          "ustaSayisi": 1
+        },
+        {
+          "isNiteligi": "KABA İNCE TEMİZLİK",
+          "blok": "F1",
+          "hamMetin": "10 din isei 4b Parsel kaba ince temizlik f-Bible",
+          "isciSayisi": 10,
+          "parsel": "46"
+        }
+      ],
+      "sayfaNo": 2
+    },
+    {
+      "tarih": "03.06.2026",
+      "faaliyetler": [
+        {
+          "isNiteligi": "SOP DİKOMİS",
+          "blok": "C-2",
+          "hamMetin": "2 usta Lyardıma C-2 Bibe sop dikomis 46-Bosel",
+          "isciSayisi": 1,
+          "parsel": "46",
+          "ustaSayisi": 2
+        },
+        {
+          "isNiteligi": "TEMİZLİK",
+          "blok": "E1",
+          "hamMetin": "5 düz işci 46 Porsel ElBiak temizlik",
+          "isciSayisi": 5,
+          "parsel": "46"
+        },
+        {
+          "isNiteligi": "PERDE REZERVASYONLARI KOPOMA",
+          "blok": "C3-CH",
+          "hamMetin": "lusta 2 yardımcı C3-Ch Perde rezervasyonları kopoma 5t Porsel",
+          "isciSayisi": 2,
+          "parsel": "51",
+          "ustaSayisi": 1
+        },
+        {
+          "isNiteligi": "ŞAFT İÇLERİNE LENTO AMA",
+          "blok": "A2-B2",
+          "hamMetin": "ista 160 Porsel BURUA2-B2 saft iclerine Lento Ama",
+          "parsel": "160",
+          "ustaSayisi": 1
+        },
+        {
+          "isNiteligi": "SO DEPOSU TEMİZLİĞİ VE C1 VERMEN ROSPASI YAPILDI",
+          "blok": "C1",
+          "hamMetin": "2 $60 Porsel so deposu temizliği ve Cl vermen Rospası yapildi",
+          "isciSayisi": 2,
+          "parsel": "160"
+        },
+        {
+          "isNiteligi": "REZERVASYON BETON DÖKÜMÜ",
+          "blok": "C-H",
+          "hamMetin": "Porsel C-h Rezervesen Beton docomo Yunus Polat - Enes Bulut - Metin astaner Hakon demir Baga",
+          "parsel": "157/46"
+        }
+      ],
+      "sayfaNo": 3
+    },
+    {
+      "tarih": "04.06.2026",
+      "faaliyetler": [
+        {
+          "isNiteligi": "SOFLARIN AKKI İMALATI",
+          "blok": "A4",
+          "hamMetin": "2.1sta 1 yardımı Sofların Akkı imalatı 160 Porsel ムーム",
+          "isciSayisi": 1,
+          "parsel": "160",
+          "ustaSayisi": 2
+        },
+        {
+          "isNiteligi": "SETTARIN LENTO İMALATI",
+          "blok": "A2B B-2",
+          "hamMetin": "2 usta 1 yardıma settarın lento imalatı 160 Porsel A2B B-2",
+          "isciSayisi": 1,
+          "parsel": "160",
+          "ustaSayisi": 2
+        },
+        {
+          "isNiteligi": "RASİA",
+          "blok": "C-3 A1B",
+          "hamMetin": "4 düz işci 160 Porsel C-3 A1B Rasia",
+          "isciSayisi": 4,
+          "parsel": "160"
+        },
+        {
+          "isNiteligi": "DAİRELERDE KIRIM İMALAT",
+          "blok": "A-1",
+          "hamMetin": "4 düz işci 51 Porsel A-1 Bilak dairelerde kirim imalat",
+          "isciSayisi": 4,
+          "parsel": "51"
+        },
+        {
+          "isNiteligi": "MERDİVEN YNAKLARI ALAS CELEME",
+          "blok": "B1-B4",
+          "hamMetin": "3 usta lyardımas 1-4 Biak merdiven ynakları Alas celeme 46 Porsel",
+          "isciSayisi": 1,
+          "parsel": "46",
+          "ustaSayisi": 3
+        },
+        {
+          "isNiteligi": "TEMİZLİK",
+          "blok": "E2",
+          "hamMetin": "7 düz işci E2 Bibk temizlik 46 Porsel",
+          "isciSayisi": 7,
+          "parsel": "46"
+        },
+        {
+          "isNiteligi": "REZERVOSUGNTAN SONLAMA",
+          "blok": "C0 CH",
+          "hamMetin": "Z düz LECT CO Ch Rezervosugntan sonlama B1 Porsel",
+          "isciSayisi": 2,
+          "parsel": "B1"
+        },
+        {
+          "isNiteligi": "DEENEJ DÖŞEME VE BETON DÖKÜMÜ",
+          "hamMetin": "51 Parsel deenej döşeme schin şchinagles - Enes Bolut ve beton döküنس",
+          "parsel": "51"
+        }
+      ],
+      "sayfaNo": 4
+    },
+    {
+      "tarih": "05.06.2026",
+      "faaliyetler": [
+        {
+          "isNiteligi": "TEMİZLİK",
+          "hamMetin": "düz sci 51 Porsel temizlik",
+          "isciSayisi": 1,
+          "parsel": "51"
+        },
+        {
+          "isNiteligi": "KÜS TOS LENTO DALELMO ELESİK SALT TOMİRLERİ",
+          "hamMetin": "lusta I yardmes Bt Porsel küs tos lento dalelmo Elesik salt tomirleri",
+          "isciSayisi": 1,
+          "parsel": "B1",
+          "ustaSayisi": 1
+        },
+        {
+          "isNiteligi": "WERDİVAN YANDILIR, AKI İNABTİ",
+          "blok": "F-1, B1",
+          "hamMetin": "3 usta 1 yardımas 46 Porsel werdivan yandılır, Aki inabti f-1 Bibk + 1 Bilak",
+          "isciSayisi": 1,
+          "parsel": "46",
+          "ustaSayisi": 3
+        },
+        {
+          "isNiteligi": "AKI TAMİRATLARI",
+          "blok": "A1",
+          "hamMetin": "2 usto I yardımı 160 Porsel al Akı tamiratları",
+          "isciSayisi": 1,
+          "parsel": "160",
+          "ustaSayisi": 2
+        },
+        {
+          "isNiteligi": "TAMİNLİK",
+          "blok": "E1 E2",
+          "hamMetin": "12 düz isci Ed Ez Bilak taminlik 46 Porsel",
+          "isciSayisi": 12,
+          "parsel": "46"
+        },
+        {
+          "isNiteligi": "TEMİZLİK",
+          "blok": "B1",
+          "hamMetin": "3 düz işci 160 Porsel Bl temizlik",
+          "isciSayisi": 3,
+          "parsel": "160"
+        }
+      ],
+      "sayfaNo": 5
+    },
+    {
+      "tarih": "06.06.2026",
+      "faaliyetler": [
+        {
+          "isNiteligi": "MERDİVEN VANAKLARI",
+          "blok": "A-C",
+          "hamMetin": "3 usta luerdımcı 46 Parsel A-C Bilak merdiven vanakları",
+          "isciSayisi": 1,
+          "parsel": "46",
+          "ustaSayisi": 3
+        },
+        {
+          "isNiteligi": "TEMİZLİK",
+          "blok": "E1 D1",
+          "hamMetin": "13 düz iSCT 46 Bisel E-Bible D-Bibk temizlik",
+          "isciSayisi": 13,
+          "parsel": "46"
+        },
+        {
+          "isNiteligi": "İZDOSİON İMDATI",
+          "blok": "F1",
+          "hamMetin": "I usta 2 yardımal 46 Porsel f Bibak izdosion imdatı",
+          "isciSayisi": 2,
+          "parsel": "46",
+          "ustaSayisi": 1
+        },
+        {
+          "isNiteligi": "ŞAFT KENARLARI ADI İMALATI",
+          "blok": "B1",
+          "hamMetin": "2 usta lyardımı 160 Porsel Bl bikk Eft kenarları adı imalatı",
+          "isciSayisi": 1,
+          "parsel": "160",
+          "ustaSayisi": 2
+        },
+        {
+          "isNiteligi": "LENTO ŞAFTİCİ İMABTI",
+          "blok": "B2",
+          "hamMetin": "2 usta 160 Porsel B2 Lento saftici imabtı",
+          "parsel": "160",
+          "ustaSayisi": 2
+        },
+        {
+          "isNiteligi": "ATI BATINDA TEMİZLİK",
+          "blok": "B2",
+          "hamMetin": "3 düz işci 160 Porsel B2 atı batında temizlik",
+          "isciSayisi": 3,
+          "parsel": "160"
+        },
+        {
+          "isNiteligi": "BİRA ETEFİ İZDAŞINA HAZIRLILA",
+          "hamMetin": "3 düz Sci 160 Borsel de bira etefi izdaşına hazırlıla",
+          "isciSayisi": 3,
+          "parsel": "160"
+        }
+      ],
+      "sayfaNo": 6
+    },
+    {
+      "tarih": "07.06.2026",
+      "faaliyetler": [
+        {
+          "isNiteligi": "KOLLEKTÖR DOLAPLARI ALTI YUTONG ÖRME",
+          "blok": "A-1 A2-A3-C",
+          "hamMetin": "3 usta 2 Yardımcı 1971-157-Passel kollektor dolapları altı yutong örme A-1 A2-A3-C..",
+          "isciSayisi": 2,
+          "parsel": "157",
+          "ustaSayisi": 3
+        },
+        {
+          "isNiteligi": "ARKASIDRANAJ",
+          "blok": "A-1",
+          "hamMetin": "4 kişi Yardımcı 146. Parsel A-1-ARKASIDRANAJ",
+          "isciSayisi": 4,
+          "parsel": "146"
+        },
+        {
+          "isNiteligi": "TEMİZLİK",
+          "blok": "D1",
+          "hamMetin": "6 kişi Düzişci 146-Parsel - D. Bolk. Temizlik",
+          "isciSayisi": 6,
+          "parsel": "146"
+        }
+      ],
+      "sayfaNo": 7
+    },
+    {
+      "tarih": "08.06.2026",
+      "faaliyetler": [
+        {
+          "isNiteligi": "ŞİLTE SERİRİNİ",
+          "blok": "R-2",
+          "hamMetin": "146-Parsel. 1. Formen - 1 Yardımı 1 Blok- R-2-BLOK Şilte serirni Pitt,",
+          "isciSayisi": 1,
+          "parsel": "146",
+          "ustaSayisi": 1
+        },
+        {
+          "isNiteligi": "ŞAFT İÇİ LENTO ATMA",
+          "blok": "B-2",
+          "hamMetin": "3 usta 160 Basel B-2 Eft ki lente atma",
+          "parsel": "160",
+          "ustaSayisi": 3
+        },
+        {
+          "isNiteligi": "EKSİK PARKE ÖNCESİ TAMİRLİNK",
+          "blok": "A1 A1B",
+          "hamMetin": "3 düz işçi 160 Parsel ALA AIB Eksik Parke öncesi tamirlink",
+          "isciSayisi": 3,
+          "parsel": "160"
+        },
+        {
+          "isNiteligi": "BİLAKLARDA ŞAFTLARDA ALA ACEME",
+          "blok": "C1-B1",
+          "hamMetin": "3 usta I düz işçi 160 Ersel C1-B1 Bilablarda şaftlarda Ala aceme",
+          "isciSayisi": 1,
+          "parsel": "160",
+          "ustaSayisi": 3
+        },
+        {
+          "isNiteligi": "DAİRE İÇİ KIRIM TEMİRLİK",
+          "blok": "B1 B2",
+          "hamMetin": "3 doz 51 Parsel BL B2 döine içi kırım temirlik",
+          "isciSayisi": 3,
+          "parsel": "51"
+        },
+        {
+          "isNiteligi": "KOLLEKTÖR DOLAP DAH HİLANG ÖRME",
+          "blok": "C-2 C3",
+          "hamMetin": "2 usta I grdımcı 51 Breed C-2 C3 che kollektor dolap dh hilang örme",
+          "isciSayisi": 1,
+          "parsel": "51",
+          "ustaSayisi": 2
+        },
+        {
+          "isNiteligi": "ALTEMİZLİK",
+          "blok": "D1",
+          "hamMetin": "13 dioz isci 46 Porsel D-Biak altemizlik",
+          "isciSayisi": 13,
+          "parsel": "46"
+        }
+      ],
+      "sayfaNo": 8
+    },
+    {
+      "tarih": "09.06.2026",
+      "faaliyetler": [
+        {
+          "isNiteligi": "BİTOK EKSPERTİZ İÇİN DAİRE TEMİZLENDİ VE FARE KAZIKLARIN ÜSTÜNDE PERDE EPOKSİ YAPILDI",
+          "hamMetin": "L46 Porsel | Bitok Ekspertiz icin doire 2- temizlendia fare kazıkların üstünde perde epoksi yapıldı.",
+          "parsel": "46"
+        },
+        {
+          "isNiteligi": "ŞAFT İÇİ LENTO ATMA",
+          "blok": "B-2",
+          "hamMetin": "2 usta Iyardımı 160 Ponsel B-2 sätt ici lento atma",
+          "isciSayisi": 1,
+          "parsel": "160",
+          "ustaSayisi": 2
+        },
+        {
+          "isNiteligi": "BİLAKLARDA ŞAFT ALA ÇEKİLDİ",
+          "blok": "C1 A1",
+          "hamMetin": "2 usta lygrdımcı 160 Porsel CL ANA Bilaklarda saft ala ceknd",
+          "isciSayisi": 1,
+          "parsel": "160",
+          "ustaSayisi": 2
+        },
+        {
+          "isNiteligi": "TEMİZLİK",
+          "blok": "C1 C-3",
+          "hamMetin": "Le düz işçi 160 Porsel cla C-3 Temizlik",
+          "isciSayisi": 4,
+          "parsel": "160"
+        },
+        {
+          "isNiteligi": "KOLLEKTÖR DOLAP TAMİRLERİ LENTO AMADATI BİNA GİRİŞLERİNDE",
+          "hamMetin": "Zosta lygerdimer 51 Persel 62 källkktast dolop tomirleri cento amadati Bina girislerinde",
+          "isciSayisi": 1,
+          "parsel": "51",
+          "ustaSayisi": 2
+        },
+        {
+          "isNiteligi": "TEMİZLİK",
+          "hamMetin": "3 düz şei 51 Parsed and temizlik",
+          "isciSayisi": 3,
+          "parsel": "51"
+        },
+        {
+          "isNiteligi": "SOP TEMİRLERİ",
+          "blok": "E1",
+          "hamMetin": "I usta 1 yardımaι 46 Porsel E Bible sop temirleri",
+          "isciSayisi": 1,
+          "parsel": "46",
+          "ustaSayisi": 1
+        },
+        {
+          "isNiteligi": "TEMİZLİK",
+          "blok": "B1",
+          "hamMetin": "46 321 16 Bible temizlik",
+          "isciSayisi": 16,
+          "parsel": "46"
+        },
+        {
+          "isNiteligi": "REZERVASYON BALIPLARINI SÖKÜMÜ",
+          "blok": "C3",
+          "hamMetin": "C3 Bilbk arkası Rezervasyon balıplarımı saku şchin şchincalo-Eks Enes Bulut 3 soat",
+          "parsel": "157/46"
+        }
+      ],
+      "sayfaNo": 9
+    },
+    {
+      "tarih": "10.06.2026",
+      "faaliyetler": [
+        {
+          "isNiteligi": "ŞAP DABİN TAMİRATLARI KİLİNA PULKDOR",
+          "blok": "B6",
+          "hamMetin": "2 usta 1 yardımcı Basel 6-Bible ap dabin tamiratlari 46 kilina pulkdor,",
+          "isciSayisi": 1,
+          "parsel": "46",
+          "ustaSayisi": 2
+        },
+        {
+          "isNiteligi": "TEMİZLİK",
+          "blok": "B6-B4",
+          "hamMetin": "15 dibz içct Parsel 6-4 Bilak temizlik 46",
+          "isciSayisi": 15,
+          "parsel": "46"
+        },
+        {
+          "isNiteligi": "BİNA GİRİŞLERİ LENTO İMDOTS",
+          "blok": "B1-B2",
+          "hamMetin": "2 usta 1 ugrdimar 51 51 Porsel Parsel B1-B2 B1 te-Bina girisleri Lenta imdots",
+          "isciSayisi": 1,
+          "parsel": "51",
+          "ustaSayisi": 2
+        },
+        {
+          "isNiteligi": "GENEL TEMİZLİK",
+          "hamMetin": "5 din işc 51 Porsel gerel temizlik",
+          "isciSayisi": 5,
+          "parsel": "51"
+        },
+        {
+          "isNiteligi": "GENEL TEMİZLİK",
+          "hamMetin": "5 düz isci 160 Porsel genel temizlik",
+          "isciSayisi": 5,
+          "parsel": "160"
+        },
+        {
+          "isNiteligi": "ŞAFT İÇİ HİTANG ÖRME",
+          "blok": "B-1",
+          "hamMetin": "I usta lugrama 160 Porsel soft içi hitang arme B-1",
+          "isciSayisi": 1,
+          "parsel": "160",
+          "ustaSayisi": 1
+        },
+        {
+          "isNiteligi": "ŞAFT KENARTIRI DER İMDATI",
+          "blok": "C1",
+          "hamMetin": "2 usta 1 yardımcı 160 Parsel, Ch Bilde saft kenartırı der imdati",
+          "isciSayisi": 1,
+          "parsel": "160",
+          "ustaSayisi": 2
+        },
+        {
+          "isNiteligi": "KALIP SÖKÜMÜ",
+          "hamMetin": "I düz ixi 51 Barsel kalıp saamis",
+          "isciSayisi": 1,
+          "parsel": "51"
+        },
+        {
+          "isNiteligi": "BETON DÖKÜMÜ",
+          "blok": "A1B",
+          "hamMetin": "A1B chısında Beton dökümü Metin Astener şchinşahinaglu 3 soot",
+          "parsel": "157/46"
+        }
+      ],
+      "sayfaNo": 10
+    },
+    {
+      "tarih": "11.06.2026",
+      "faaliyetler": [
+        {
+          "isNiteligi": "LENTO İMALATI",
+          "blok": "B-3",
+          "hamMetin": "lusta lugrdima 160 Parsel B-3 Lento imalatı",
+          "isciSayisi": 0,
+          "parsel": "160",
+          "ustaSayisi": 1
+        },
+        {
+          "isNiteligi": "TEMİZLİK",
+          "blok": "B2 B-1",
+          "hamMetin": "6 düz işct 160 Ersel B2 B-1 temizlik",
+          "isciSayisi": 6,
+          "parsel": "160",
+          "ustaSayisi": 0
+        },
+        {
+          "isNiteligi": "BİLEK SOFT BERARTEN ALA İMALATI",
+          "blok": "C-3",
+          "hamMetin": "2 usta Iyardıma 160 Porselat 160 Porsel, C-3 bible soft berarten Ala inabtic",
+          "isciSayisi": 0,
+          "parsel": "160",
+          "ustaSayisi": 3
+        },
+        {
+          "isNiteligi": "CENTO İMALATI",
+          "blok": "A3 C1",
+          "hamMetin": "2 uste loerdima 51 Porsed cento iondati A3 C1",
+          "isciSayisi": 0,
+          "parsel": "51",
+          "ustaSayisi": 3
+        },
+        {
+          "isNiteligi": "GENEL TEMİZLİK VE KIRIM",
+          "blok": "GENEL SAHA",
+          "hamMetin": "4 düz işci 51 Porsel genel temizlik ve kırım",
+          "isciSayisi": 4,
+          "parsel": "51",
+          "ustaSayisi": 0
+        },
+        {
+          "isNiteligi": "BİLEK TEMİZLİK",
+          "blok": "D-G",
+          "hamMetin": "10 duz ki 46 Parsel D- G Bikk temizlik",
+          "isciSayisi": 10,
+          "parsel": "46",
+          "ustaSayisi": 0
+        },
+        {
+          "isNiteligi": "FİRE STOP İMALATI",
+          "blok": "B1-F1-F2",
+          "hamMetin": "I uste lugrdimai 46 Parsel fire stop inabti Bl-f1-f2",
+          "isciSayisi": 0,
+          "parsel": "46",
+          "ustaSayisi": 1
+        },
+        {
+          "isNiteligi": "BİBT EXP",
+          "blok": "H",
+          "hamMetin": "2 usta 1 ugradimer 46 Porsel H- Bibt Exp",
+          "isciSayisi": 0,
+          "parsel": "46",
+          "ustaSayisi": 3
+        },
+        {
+          "isNiteligi": "ÇEVRE TEMİZLİĞİ MAKEME TOPARLAMA",
+          "blok": "GENEL SAHA",
+          "hamMetin": "6 düz işci 46 Porsel cerre temizliği makeme toporlama",
+          "isciSayisi": 6,
+          "parsel": "46",
+          "ustaSayisi": 0
+        }
+      ],
+      "sayfaNo": 11
+    },
+    {
+      "tarih": "12.06.2026",
+      "faaliyetler": [
+        {
+          "isNiteligi": "BİNA GİRİŞLERİ LENTO İMALATI",
+          "blok": "GENEL SAHA",
+          "hamMetin": "2 usta I yardımcı 51 Borsech Bina giristeri Lento inmadbti",
+          "isciSayisi": 0,
+          "parsel": "51",
+          "ustaSayisi": 3
+        },
+        {
+          "isNiteligi": "GENEL TEMİZLİK",
+          "blok": "GENEL SAHA",
+          "hamMetin": "Za düz işci 1 Parsel Genel femizlik",
+          "isciSayisi": 2,
+          "parsel": "1",
+          "ustaSayisi": 0
+        },
+        {
+          "isNiteligi": "ŞAFT KENARLARI VE LENTO İMALATI",
+          "blok": "133, A1B",
+          "hamMetin": "I usta yardımcı 160 Parsel 133, A1B sett kenarlam ve lento imalatı",
+          "isciSayisi": 0,
+          "parsel": "160",
+          "ustaSayisi": 2
+        },
+        {
+          "isNiteligi": "BİLEK ŞAP İMALATI",
+          "blok": "H",
+          "hamMetin": "2 usta lyardıma 46 Porsel H bilak şap indti",
+          "isciSayisi": 0,
+          "parsel": "46",
+          "ustaSayisi": 3
+        },
+        {
+          "isNiteligi": "TEMİZLİK",
+          "blok": "C1-ALB",
+          "hamMetin": "3 düz işci 160 Cl-ALB temirtie",
+          "isciSayisi": 3,
+          "parsel": "160",
+          "ustaSayisi": 0
+        },
+        {
+          "isNiteligi": "FİRE STEP İMALATI",
+          "blok": "F",
+          "hamMetin": "1 usta lyardıma LE Porsel f-Bible fire step indatı",
+          "isciSayisi": 0,
+          "parsel": "46",
+          "ustaSayisi": 2
+        },
+        {
+          "isNiteligi": "BİLEK TEMİZLİK",
+          "blok": "G-1",
+          "hamMetin": "7 düz işci 46 Porsel 6-1 Biblk temizlik",
+          "isciSayisi": 7,
+          "parsel": "46",
+          "ustaSayisi": 0
+        }
+      ],
+      "sayfaNo": 12
+    },
+    {
+      "tarih": "13.06.2026",
+      "faaliyetler": [
+        {
+          "isNiteligi": "BİLEK ŞAP TAMİRLERİ",
+          "blok": "E",
+          "hamMetin": "I usta I yardımcı 46 Ponsel E bikk şap tomirleri",
+          "isciSayisi": 0,
+          "parsel": "46",
+          "ustaSayisi": 2
+        },
+        {
+          "isNiteligi": "BİLEK FİRE STOP İMALATI",
+          "blok": "F",
+          "hamMetin": "2 usta I yardımcı 46 Porsel of bible fire sitop indots",
+          "isciSayisi": 0,
+          "parsel": "46",
+          "ustaSayisi": 3
+        },
+        {
+          "isNiteligi": "BİLEK SEPKİLİMA BOPUK BOLLEON ŞAP İMALATI",
+          "blok": "GENEL SAHA",
+          "hamMetin": "2 usta 1 yardımcı 46 Porsel und Bible sepkilima bopuk Bolleon sop imalatı",
+          "isciSayisi": 0,
+          "parsel": "46",
+          "ustaSayisi": 3
+        },
+        {
+          "isNiteligi": "SOFT KENARI ADI İMALATI",
+          "blok": "B2",
+          "hamMetin": "Zusta I yardıme, 16o Porsel B2 soft kenarı adı imalatı",
+          "isciSayisi": 0,
+          "parsel": "160",
+          "ustaSayisi": 3
+        },
+        {
+          "isNiteligi": "CENTO İMALATI",
+          "blok": "GENEL SAHA",
+          "hamMetin": "2 usta I grdıma Bid Porsel Cento imalati",
+          "isciSayisi": 0,
+          "parsel": "51",
+          "ustaSayisi": 3
+        },
+        {
+          "isNiteligi": "BİLEK TEMİZLİK",
+          "blok": "C-1",
+          "hamMetin": "5 düz iş +51 Barsel C-1 Bible temizlik",
+          "isciSayisi": 5,
+          "parsel": "51",
+          "ustaSayisi": 0
+        },
+        {
+          "isNiteligi": "BÖR KALIP İMALATI BİLEK",
+          "blok": "GENEL SAHA",
+          "hamMetin": "2 düz işc 4b Persel bör kalıp imalatı | Bilck",
+          "isciSayisi": 2,
+          "parsel": "46",
+          "ustaSayisi": 0
+        },
+        {
+          "isNiteligi": "BİLEK İSALE HACİM KIRIMLARI",
+          "blok": "H",
+          "hamMetin": "2 düz ięci ab Porsel H Bikk isale hacium kırımları",
+          "isciSayisi": 2,
+          "parsel": "46",
+          "ustaSayisi": 0
+        },
+        {
+          "isNiteligi": "BİLEK TEMİZLİK",
+          "blok": "G-1",
+          "hamMetin": "13 düz işci 46 Porsel 6-1 Bibk temizlik",
+          "isciSayisi": 13,
+          "parsel": "46",
+          "ustaSayisi": 0
+        }
+      ],
+      "sayfaNo": 13
+    },
+    {
+      "tarih": "14.06.2026",
+      "faaliyetler": [
+        {
+          "isNiteligi": "BİLEK FİRE SİTE İMALATI",
+          "blok": "F-2",
+          "hamMetin": "I usta I yerdimes 46 Parsel f-2 Bilde fire site? Imadah,",
+          "isciSayisi": 0,
+          "parsel": "46",
+          "ustaSayisi": 2
+        },
+        {
+          "isNiteligi": "BİLEK TEMİZLİK",
+          "blok": "E-1-6",
+          "hamMetin": "16 dbz işci 46 Persel E-1-6 Bllok temizlik",
+          "isciSayisi": 16,
+          "parsel": "46",
+          "ustaSayisi": 0
+        },
+        {
+          "isNiteligi": "BİLEK ŞAFT KENAR DEİ İMALATI",
+          "blok": "B-3",
+          "hamMetin": "2 usta luerdimer 160 Porsel B-3 Bilak salt kenar deı imabt,",
+          "isciSayisi": 0,
+          "parsel": "160",
+          "ustaSayisi": 2
+        },
+        {
+          "isNiteligi": "LENTO İMALATI",
+          "blok": "A1B",
+          "hamMetin": "I usta lyardıma 160 Porsel Lenta imalatı A1B",
+          "isciSayisi": 0,
+          "parsel": "160",
+          "ustaSayisi": 2
+        }
+      ],
+      "sayfaNo": 14
+    },
+    {
+      "tarih": "15.06.2026",
+      "faaliyetler": [
+        {
+          "isNiteligi": "TÜM BİNALARDA HİTANG TAMİRİ SONLAMA",
+          "blok": "GENEL SAHA",
+          "hamMetin": "2. usta Iyardımı Bt Porsel Tüm binalarda Hitang tamiri Sonlama",
+          "isciSayisi": 0,
+          "parsel": "51",
+          "ustaSayisi": 3
+        },
+        {
+          "isNiteligi": "PİÇ ÇUKURU KALIP İMALATI",
+          "blok": "GENEL SAHA",
+          "hamMetin": "I düz işci Lub Porsel te Pię cukoro kadıp imalatı",
+          "isciSayisi": 1,
+          "parsel": "46",
+          "ustaSayisi": 0
+        },
+        {
+          "isNiteligi": "BİKK FİRE STAP VE EKSİK DUVARLAR",
+          "blok": "F-2",
+          "hamMetin": "2 usta zyardıma Lib Porsel f-2 Bikk fire stap ve Eksik du duvoren",
+          "isciSayisi": 0,
+          "parsel": "46",
+          "ustaSayisi": 2
+        },
+        {
+          "isNiteligi": "BİLEK ŞAP TAMİRLERİ",
+          "blok": "1-2",
+          "hamMetin": "1 kişi 16 Parsel 1-2 Bilak sap tomirleri",
+          "isciSayisi": 1,
+          "parsel": "16",
+          "ustaSayisi": 0
+        },
+        {
+          "isNiteligi": "BİLALELARDA TEMİZLİK KARTANAMA",
+          "blok": "E-2G-H-1",
+          "hamMetin": "14 düz taxi 46 Porsel E-2G-H-1 Bilalelarda temizlik Kartanama",
+          "isciSayisi": 14,
+          "parsel": "46",
+          "ustaSayisi": 0
+        },
+        {
+          "isNiteligi": "TEMİZLİK",
+          "blok": "A1-A2 B1-B2",
+          "hamMetin": "Le düz işci 51 Parsel temizlik A1-A2 B1-B2",
+          "isciSayisi": 4,
+          "parsel": "51",
+          "ustaSayisi": 0
+        },
+        {
+          "isNiteligi": "SOFT KENARLARI DAİ İMALATI",
+          "blok": "B-3",
+          "hamMetin": "2 usta luerdina 160 Porsel B-3 soft kenarları dai indti",
+          "isciSayisi": 0,
+          "parsel": "160",
+          "ustaSayisi": 2
+        }
+      ],
+      "sayfaNo": 15
+    },
+    {
+      "tarih": "16.06.2026",
+      "faaliyetler": [
+        {
+          "isNiteligi": "CA TEMİZLİK",
+          "blok": "C-3",
+          "hamMetin": "fit Porsel C-3 Ca temizlik",
+          "isciSayisi": 0,
+          "parsel": "51",
+          "ustaSayisi": 0
+        },
+        {
+          "isNiteligi": "SU DEPOSU TEMİZLİK",
+          "blok": "GENEL SAHA",
+          "hamMetin": "5 diez işci 160 Porsel Su deposu temizlik",
+          "isciSayisi": 5,
+          "parsel": "160",
+          "ustaSayisi": 0
+        },
+        {
+          "isNiteligi": "ŞAFT KENARLARI AKI İMALATI",
+          "blok": "C-2",
+          "hamMetin": "2 osta I düz işci 160 Porsel C-2 gatt kenarlon akı imalatı",
+          "isciSayisi": 1,
+          "parsel": "160",
+          "ustaSayisi": 2
+        },
+        {
+          "isNiteligi": "GEBERİT BANYO GEBERİT TAMİRLERİ MOTTAK AKARTARI AKI TAMİRİ",
+          "blok": "GENEL SAHA",
+          "hamMetin": "2 uste ladıma 46 Parsel Gebent Bonya geberit tomirleri Mottak akartarı akı tamiri",
+          "isciSayisi": 0,
+          "parsel": "46",
+          "ustaSayisi": 2
+        },
+        {
+          "isNiteligi": "CENTA İMALATI SOFT İÇİ",
+          "blok": "A1B-A1A",
+          "hamMetin": "I usta Luerdina 169 Bick A1B-A1A Centa imalatı soft icl",
+          "isciSayisi": 0,
+          "parsel": "160",
+          "ustaSayisi": 1
+        },
+        {
+          "isNiteligi": "BİLEK TEMİZLİK BARTON SESİNİ",
+          "blok": "E-H-1",
+          "hamMetin": "1 dôr naci 46 Porsel E-H-1 Bibk temizlik barton Sesini",
+          "isciSayisi": 1,
+          "parsel": "46",
+          "ustaSayisi": 0
+        },
+        {
+          "isNiteligi": "EL SO DEPOLARI BETON İMALATI",
+          "blok": "B-1",
+          "hamMetin": "2 usta Iyardımcı 160 Porsel inabti B-1 el so depoları Beton",
+          "isciSayisi": 0,
+          "parsel": "160",
+          "ustaSayisi": 2
+        }
+      ],
+      "sayfaNo": 16
+    },
+    {
+      "tarih": "17.06.2026",
+      "faaliyetler": [
+        {
+          "isNiteligi": "BİLEK SATEN İMALATI",
+          "blok": "D",
+          "hamMetin": "2 bsta lyardımcı 6 Porsel D-Bilek saten imalatı",
+          "isciSayisi": 0,
+          "parsel": "46",
+          "ustaSayisi": 2
+        },
+        {
+          "isNiteligi": "MUTFAK İÇİ ŞAFT ÖRME",
+          "blok": "G-6",
+          "hamMetin": "2 usta i ugrdımca L.6 11 6-Bike Mutfak içi şaft örme",
+          "isciSayisi": 0,
+          "parsel": "46",
+          "ustaSayisi": 2
+        },
+        {
+          "isNiteligi": "BİLEK TEMİZLİK",
+          "blok": "G-1",
+          "hamMetin": "10 düz işci 4611 G-1 Bilok temizlite",
+          "isciSayisi": 10,
+          "parsel": "46",
+          "ustaSayisi": 0
+        },
+        {
+          "isNiteligi": "BİLEK PİÇ ÇUKURLARI KALIP SÜTÖMİS TEMİZLİK",
+          "blok": "1-E",
+          "hamMetin": "ム kişi 46 11 1-E bilak piç cukurları kalıp sütömis tomizlik",
+          "isciSayisi": 4,
+          "parsel": "46",
+          "ustaSayisi": 0
+        },
+        {
+          "isNiteligi": "BİLEK TEMİZLİK",
+          "blok": "A-2",
+          "hamMetin": "3 düz işci 51 Porsel A-2 Bilok temizlik",
+          "isciSayisi": 3,
+          "parsel": "51",
+          "ustaSayisi": 0
+        },
+        {
+          "isNiteligi": "BİLEK ŞAFT BENARBRİ ALA İNAKTİ",
+          "blok": "A1A",
+          "hamMetin": "luste lugradimas 160 Porsel ATA Bilda şaft benarbri ala inakti",
+          "isciSayisi": 0,
+          "parsel": "160",
+          "ustaSayisi": 1
+        },
+        {
+          "isNiteligi": "SODEPASİS KDEP İMALATI",
+          "blok": "C1",
+          "hamMetin": "Zusta lordma 160 11 Ch sodepasis kdep indati",
+          "isciSayisi": 0,
+          "parsel": "160",
+          "ustaSayisi": 2
+        },
+        {
+          "isNiteligi": "ONABİLİGA İMALATI",
+          "blok": "GENEL SAHA",
+          "hamMetin": "seghen ve düz işçi 160 Bersel onabiluga inctats",
+          "isciSayisi": 3,
+          "parsel": "160",
+          "ustaSayisi": 0
+        },
+        {
+          "isNiteligi": "İKPİLJES DİENOJ İZOBİSİGN VE BORO TAMİRATI",
+          "blok": "A2",
+          "hamMetin": "152 Brsel <3 ikpiljes dienoj izobsign A2 and boro taminatı",
+          "isciSayisi": 0,
+          "parsel": "152",
+          "ustaSayisi": 0
+        }
+      ],
+      "sayfaNo": 17
+    },
+    {
+      "tarih": "18.06.2026",
+      "faaliyetler": [
+        {
+          "isNiteligi": "SU DEPOSU BETON DÖKÜMÜ",
+          "blok": "C-1 B-1",
+          "hamMetin": "2-usta Burdıma 160 Porsel C-1 B-t sy deposu Beton döküلاسلا",
+          "isciSayisi": 0,
+          "parsel": "160",
+          "ustaSayisi": 2
+        },
+        {
+          "isNiteligi": "BİLEK STEN İMALATI",
+          "blok": "D",
+          "hamMetin": "2 usta yardıma 46 Porsel D-Bike Sten indahı",
+          "isciSayisi": 0,
+          "parsel": "46",
+          "ustaSayisi": 2
+        },
+        {
+          "isNiteligi": "DAİRE İÇİ TAPOROMA",
+          "blok": "GENEL SAHA",
+          "hamMetin": "La disz işci 51 Borsel Daire içi taporoma",
+          "isciSayisi": 4,
+          "parsel": "51",
+          "ustaSayisi": 0
+        },
+        {
+          "isNiteligi": "BİLEKLERDE KUSY TEMİZLİĞİ",
+          "blok": "1-14-G-D",
+          "hamMetin": "18 düz işci 46 Parso 1-14-6-D Bikekorda kusy Temizligi",
+          "isciSayisi": 18,
+          "parsel": "46",
+          "ustaSayisi": 0
+        },
+        {
+          "isNiteligi": "İSKELE TEMİZLİĞİ",
+          "blok": "GENEL SAHA",
+          "hamMetin": "iskele temizl",
+          "isciSayisi": 0,
+          "parsel": "157/46",
+          "ustaSayisi": 0
+        }
+      ],
+      "sayfaNo": 18
+    },
+    {
+      "tarih": "19.06.2026",
+      "faaliyetler": [
+        {
+          "isNiteligi": "SATEN İMALATI BİLEK",
+          "blok": "D",
+          "hamMetin": "2 usta lugrdima 46 Porsel saten imalatı D.Biak",
+          "isciSayisi": 0,
+          "parsel": "46",
+          "ustaSayisi": 2
+        },
+        {
+          "isNiteligi": "BİLEK TEMİZLİK",
+          "blok": "1-1T",
+          "hamMetin": "16 disz 1sci 46 Porsel 1-1t Bike temizlik",
+          "isciSayisi": 16,
+          "parsel": "46",
+          "ustaSayisi": 0
+        },
+        {
+          "isNiteligi": "SU DEPOLARI KALIP SÖKÜMÜ TEMİZLİK",
+          "blok": "B1-C1",
+          "hamMetin": "S düz işci 6 160 Porsel Bl-CA so depoları kalıp sekomis temizlias",
+          "isciSayisi": 6,
+          "parsel": "160",
+          "ustaSayisi": 0
+        },
+        {
+          "isNiteligi": "AUK İMALATI",
+          "blok": "C1-A2",
+          "hamMetin": "2 usta 1 vardımcı Bl Parsel CL-A2 auk imalatı",
+          "isciSayisi": 0,
+          "parsel": "51",
+          "ustaSayisi": 3
+        },
+        {
+          "isNiteligi": "TEMİZLİK BİLEK",
+          "blok": "C-L",
+          "hamMetin": "3 düz işci 651 Porsel temizlik C-L Bikk",
+          "isciSayisi": 3,
+          "parsel": "51",
+          "ustaSayisi": 0
+        },
+        {
+          "isNiteligi": "BİLEK KİLİNA ÜNİTESİ ŞAP TAMİRLERİ",
+          "blok": "E",
+          "hamMetin": "I usta luerdımcı 46 Porsel E bikok kilina ünitesi sap tomirleri",
+          "isciSayisi": 0,
+          "parsel": "46",
+          "ustaSayisi": 1
+        }
+      ],
+      "sayfaNo": 19
+    },
+    {
+      "tarih": "20.06.2026",
+      "faaliyetler": [
+        {
+          "isNiteligi": "BİLEKLERDE KOLLEKTÖR DATAL TAMİRATI",
+          "blok": "C1-C2",
+          "hamMetin": "2 oste 2 yardımcı Ch-C-2 Bilaklarda kollektor datal tominatı A1 Persel",
+          "isciSayisi": 0,
+          "parsel": "51",
+          "ustaSayisi": 4
+        },
+        {
+          "isNiteligi": "TEMİZLİK GANDNEL",
+          "blok": "GENEL SAHA",
+          "hamMetin": "3 düz işci 51 Porsel temizlik Gandnel",
+          "isciSayisi": 3,
+          "parsel": "51",
+          "ustaSayisi": 0
+        },
+        {
+          "isNiteligi": "BİLEK PİKA ÇUKURU TEMİZLİK",
+          "blok": "1-E-D",
+          "hamMetin": "7 düz 10 46 Porsel 1-E-D bible Pika cukoro temizliki",
+          "isciSayisi": 7,
+          "parsel": "46",
+          "ustaSayisi": 0
+        },
+        {
+          "isNiteligi": "GEBERİT TAMİRATI",
+          "blok": "C-3 D-4",
+          "hamMetin": "lusta Lyardımcı B1 Porsel Geberit taminant C-3 0-4",
+          "isciSayisi": 0,
+          "parsel": "51",
+          "ustaSayisi": 2
+        },
+        {
+          "isNiteligi": "BİLEK ŞAP TEMİNATI",
+          "blok": "GENEL SAHA",
+          "hamMetin": "1 usta lyardımer 46ersel | Bibk şap teminat.",
+          "isciSayisi": 0,
+          "parsel": "46",
+          "ustaSayisi": 1
+        },
+        {
+          "isNiteligi": "BEZONDAİRESİ TEMİZLİK",
+          "blok": "GENEL SAHA",
+          "hamMetin": "4 düz işc 160 Porsel bezondairesi temizlik",
+          "isciSayisi": 4,
+          "parsel": "160",
+          "ustaSayisi": 0
+        }
+      ],
+      "sayfaNo": 20
+    },
+    {
+      "tarih": "21.06. Pazar",
+      "faaliyetler": [
+        {
+          "isNiteligi": "GEBERİT TAMİRATI",
+          "blok": "BEDROOM KATARDA",
+          "hamMetin": "I osta Igordimaa 51 Persel Bedroom katarda Geberit tamirathan",
+          "isciSayisi": 0,
+          "parsel": "157/51",
+          "ustaSayisi": 1
+        },
+        {
+          "isNiteligi": "SU DEPOSU TEMİZLİĞİ",
+          "blok": "HOST SU DEPOSU",
+          "hamMetin": "6 Düz işci 160 Porsel Host sy deposu temizliği",
+          "isciSayisi": 6,
+          "parsel": "160/2",
+          "ustaSayisi": 0
+        }
+      ],
+      "sayfaNo": 21
+    },
+    {
+      "tarih": "22.06. Pazartesi",
+      "faaliyetler": [
+        {
+          "isNiteligi": "ŞAP TAMİRATI",
+          "blok": "H-BİBLE",
+          "hamMetin": "Lusta 2 yardımcı 846 Basel H-Bible Sap tomint.",
+          "isciSayisi": 2,
+          "parsel": "157/46",
+          "ustaSayisi": 1
+        },
+        {
+          "isNiteligi": "PİK ÇUKURU TEMİZLEME",
+          "blok": "E-D BİKAKLARDA",
+          "hamMetin": "5 düz işci 46 Porsel E-D Bikaklarda Pik dukuro temizleme",
+          "isciSayisi": 5,
+          "parsel": "157/46",
+          "ustaSayisi": 0
+        },
+        {
+          "isNiteligi": "BODRUM BATTERİ GEBERİT TAMİRATI",
+          "blok": "C-L C-3",
+          "hamMetin": "2 usta yardımcı 51 Porsel URU Bodrum batteri Geberit te miraty Sivasi C-LC-3",
+          "isciSayisi": 0,
+          "parsel": "157/51",
+          "ustaSayisi": 2
+        },
+        {
+          "isNiteligi": "KOLLEKTÖR DOLABI TAMİRATI",
+          "blok": "B1-B2",
+          "hamMetin": "3 uste (yardımcı 51 Ransel B1-B2 kollektor dolabı tamirati",
+          "isciSayisi": 0,
+          "parsel": "157/51",
+          "ustaSayisi": 3
+        },
+        {
+          "isNiteligi": "TEMİZLİK",
+          "blok": "A3",
+          "hamMetin": "4 düz işct 51 Porsel A3 temizle",
+          "isciSayisi": 4,
+          "parsel": "157/51",
+          "ustaSayisi": 0
+        },
+        {
+          "isNiteligi": "KALIP SÖKÜMÜ KURONGBZ ŞÜMÜ",
+          "blok": "",
+          "hamMetin": "Lusta 160 balıp söküm Kurongbz şümü",
+          "isciSayisi": 0,
+          "parsel": "160/2",
+          "ustaSayisi": 1
+        },
+        {
+          "isNiteligi": "TEMİZLİK",
+          "blok": "H BİKK",
+          "hamMetin": "#4b Porsel temizlik H Bikk Bitti",
+          "isciSayisi": 0,
+          "parsel": "157/46",
+          "ustaSayisi": 0
+        },
+        {
+          "isNiteligi": "KOLLEKTÖR DOLABI İMALATI",
+          "blok": "B2-2-3",
+          "hamMetin": "51 Porsel B2-2-3 Kollektör dolabı idati ibrahim Hamza- Halit Hamza - Mohammet Honza 5 Ecot Bithi",
+          "isciSayisi": 0,
+          "parsel": "157/51",
+          "ustaSayisi": 0
+        }
+      ],
+      "sayfaNo": 22
+    },
+    {
+      "tarih": "23.06. Salı",
+      "faaliyetler": [
+        {
+          "isNiteligi": "EKSİK KALAN ŞAFTLAR GEBERİT TAMİRATI",
+          "blok": "C3",
+          "hamMetin": "1 ipsta I yardımçı 51 Porsel C3 Eksik kalan şaflar geberit bomination f BT",
+          "isciSayisi": 1,
+          "parsel": "157/51",
+          "ustaSayisi": 1
+        },
+        {
+          "isNiteligi": "TEMİZLİK GENEL",
+          "blok": "B1",
+          "hamMetin": "3 dön isci B1 Porsel temizlik genel",
+          "isciSayisi": 3,
+          "parsel": "157/46",
+          "ustaSayisi": 0
+        },
+        {
+          "isNiteligi": "KOLLEKTÖR DOLAPLARI HİTANG TAMİRİ-LENTO İMALATI",
+          "blok": "C-2 BİBK",
+          "hamMetin": "2 este lundima 160 Parsel kaldeher dobbler Hitung tamiri-Lento imalatı C-2 Bibk",
+          "isciSayisi": 0,
+          "parsel": "160/2",
+          "ustaSayisi": 2
+        },
+        {
+          "isNiteligi": "TEMİZLİK",
+          "blok": "B1",
+          "hamMetin": "2 doż 160 Parsel Bl temizlik",
+          "isciSayisi": 2,
+          "parsel": "160/2",
+          "ustaSayisi": 0
+        },
+        {
+          "isNiteligi": "PİÇ ÇUKURU TEMİZLİK",
+          "blok": "BİLDE PİÇ ÇUKURU",
+          "hamMetin": "2 susta 46 Basel Bilde Pic cuburb temizlik Al Az",
+          "isciSayisi": 0,
+          "parsel": "157/46",
+          "ustaSayisi": 2
+        },
+        {
+          "isNiteligi": "SU HAT DEPOSU KALIP İMALATI",
+          "blok": "A1",
+          "hamMetin": "Al Parsel su Haat depesu laadip imdot,",
+          "isciSayisi": 0,
+          "parsel": "157/46",
+          "ustaSayisi": 0
+        },
+        {
+          "isNiteligi": "GRİ SU ADADAN SERAMİK İMALATI",
+          "blok": "A1",
+          "hamMetin": "2 usta Lub Porsel Al Gri su adadan seramik indat.",
+          "isciSayisi": 0,
+          "parsel": "157/46",
+          "ustaSayisi": 2
+        }
+      ],
+      "sayfaNo": 23
+    },
+    {
+      "tarih": "26.06. Çarşamba",
+      "faaliyetler": [
+        {
+          "isNiteligi": "SERAMİK İMALATI, PİT ÇUKURLARINDA SIVA",
+          "blok": "BİLAK KADE",
+          "hamMetin": "2 usta 2 yardımcı Lub Barsel 1 Blake kade seramik inalat, Pit cokorlarındı sive",
+          "isciSayisi": 2,
+          "parsel": "157/46",
+          "ustaSayisi": 2
+        },
+        {
+          "isNiteligi": "PİT ÇUKURU TEMİZLİK",
+          "blok": "A-B BİLAK",
+          "hamMetin": "4 düz işci L4b Porsel A-B Bilck Pit cokunu temizlik",
+          "isciSayisi": 4,
+          "parsel": "157/46",
+          "ustaSayisi": 0
+        },
+        {
+          "isNiteligi": "PİT ÇUKURU TEMİZLİK",
+          "blok": "1-D BİCK",
+          "hamMetin": "4 düz işci 16 Porsel 1-D Bick Pit cukuru temizliと",
+          "isciSayisi": 4,
+          "parsel": "157/46",
+          "ustaSayisi": 0
+        },
+        {
+          "isNiteligi": "ŞAFT KENARLARI İMALATI",
+          "blok": "C -BİLAK",
+          "hamMetin": "2 uste z uşadımı Lb Porsel C -Bilak soft kenarlon incoti",
+          "isciSayisi": 0,
+          "parsel": "157/46",
+          "ustaSayisi": 2
+        },
+        {
+          "isNiteligi": "KOLLEKTÖR DOLABI",
+          "blok": "C-3",
+          "hamMetin": "2 uste lyardıma 160 Porsel C-3 kallekter dalabı",
+          "isciSayisi": 0,
+          "parsel": "160/2",
+          "ustaSayisi": 2
+        },
+        {
+          "isNiteligi": "DAİRE İÇİ KIRIMLAR",
+          "blok": "",
+          "hamMetin": "2 düz işci il Porsed dine içi kırımlar",
+          "isciSayisi": 2,
+          "parsel": "157/46",
+          "ustaSayisi": 0
+        },
+        {
+          "isNiteligi": "SU DEPOLARINDA TEMİZLİK",
+          "blok": "B-1 C-1",
+          "hamMetin": "2 düz TSE 160 Parsel B-1 C-1 sudezalarında temizlik Bitti",
+          "isciSayisi": 2,
+          "parsel": "160/2",
+          "ustaSayisi": 0
+        }
+      ],
+      "sayfaNo": 24
+    },
+    {
+      "tarih": "26.06. Cuma",
+      "faaliyetler": [
+        {
+          "isNiteligi": "KOLLEKTÖR DOLABI TAMİRATI",
+          "blok": "C1 BİBK",
+          "hamMetin": "2 usta Lyardıma 160 Parsel cu Bibk kallaktär dolabı tamia Har",
+          "isciSayisi": 0,
+          "parsel": "160/2",
+          "ustaSayisi": 2
+        },
+        {
+          "isNiteligi": "TEMİZLİK",
+          "blok": "B-1 B-3",
+          "hamMetin": "5 düz işci 160 Parsel B-1 B-3 temizlik",
+          "isciSayisi": 5,
+          "parsel": "160/2",
+          "ustaSayisi": 0
+        },
+        {
+          "isNiteligi": "TEMİZLİK",
+          "blok": "B1 A3",
+          "hamMetin": "4 düz işi B1 Parsel A3 Temizlik",
+          "isciSayisi": 4,
+          "parsel": "157/46",
+          "ustaSayisi": 0
+        },
+        {
+          "isNiteligi": "KARTLARA ÖNCESİ ALA REZERVASYON ETRAF KALIP KESİMİ İSKELE",
+          "blok": "A1 C1 BİLAK",
+          "hamMetin": "2 List At Basel Cl bilak kartlara öncesi Ala Rezervasyon Etrofialaipon kesimi iskele",
+          "isciSayisi": 2,
+          "parsel": "157/46",
+          "ustaSayisi": 0
+        },
+        {
+          "isNiteligi": "SERAMİK İMALATI",
+          "blok": "BİLAK",
+          "hamMetin": "2. usta I yardımar 46 Porsel I Bilck seromile inobli",
+          "isciSayisi": 1,
+          "parsel": "157/46",
+          "ustaSayisi": 2
+        },
+        {
+          "isNiteligi": "ŞAFTLARDA HİTANG ÖRME KAPAMA",
+          "blok": "C1 BİLAK",
+          "hamMetin": "*2 usta 3 döz işçi 46 Porsel Cl Bilak saftlorda Hitang arme kapoma",
+          "isciSayisi": 3,
+          "parsel": "157/46",
+          "ustaSayisi": 2
+        },
+        {
+          "isNiteligi": "PİT ÇUKURU TEMİZLİK",
+          "blok": "B-P BİLAK",
+          "hamMetin": "8 disz isci 46 Parsel B-P Bilak Pit cokoro temizlik",
+          "isciSayisi": 8,
+          "parsel": "157/46",
+          "ustaSayisi": 0
+        },
+        {
+          "isNiteligi": "KOLLEKTÖR DOLAP TAMİRİ VE ALAPON İMALATI",
+          "blok": "D BİLAK",
+          "hamMetin": "2 usto lyardines it Porsele 160 bollector dobb tamiri yapon Ekibi cektik Alapon imalatı yapıldı. D Bilak",
+          "isciSayisi": 0,
+          "parsel": "160/2",
+          "ustaSayisi": 2
+        }
+      ],
+      "sayfaNo": 25
+    },
+    {
+      "tarih": "25.06. Çarşamba",
+      "faaliyetler": [
+        {
+          "isNiteligi": "KOLLEKTÖR DOLABI TAMİRATI",
+          "blok": "C1",
+          "hamMetin": "2 usta Luerdımcı 160 Porsel Cl kollektor databi tamiatori",
+          "isciSayisi": 0,
+          "parsel": "160/2",
+          "ustaSayisi": 2
+        },
+        {
+          "isNiteligi": "TEMİZLİK",
+          "blok": "B1",
+          "hamMetin": "3 düz işi 160 Porsel Bl Temizlik",
+          "isciSayisi": 3,
+          "parsel": "160/2",
+          "ustaSayisi": 0
+        },
+        {
+          "isNiteligi": "KURONGLER KALIP SÖKÜMÜ",
+          "blok": "A1",
+          "hamMetin": "2 kişi 151 Porsel Al kurongiler see kalıp sakümلام 160 Porsel A2 Bike\"",
+          "isciSayisi": 2,
+          "parsel": "160/2",
+          "ustaSayisi": 0
+        },
+        {
+          "isNiteligi": "KIRIM TEMİZLİK",
+          "blok": "",
+          "hamMetin": "3 düz se it Basel kirim temizlik",
+          "isciSayisi": 3,
+          "parsel": "157/46",
+          "ustaSayisi": 0
+        },
+        {
+          "isNiteligi": "ŞAFT ÖRME",
+          "blok": "RC-1 BİBLE",
+          "hamMetin": "2 usta 3 yardımcı 46 Porsel RC-1 Bible saft örme",
+          "isciSayisi": 3,
+          "parsel": "157/46",
+          "ustaSayisi": 2
+        },
+        {
+          "isNiteligi": "SERAMİK ÖRME",
+          "blok": "L-BİAK GİRİŞ SU ODALARI",
+          "hamMetin": "usta 1 yordmar 46 Porsel L-Biak Giri su odaları seramik darme",
+          "isciSayisi": 1,
+          "parsel": "157/46",
+          "ustaSayisi": 1
+        },
+        {
+          "isNiteligi": "PİT ÇUKURLARI TAMİRATI VE TEMİZLİĞİ",
+          "blok": "B-1-E-D",
+          "hamMetin": "10 düz işci 46 Porsel B-1-E-D Pit cukurtarı tamiratı ve temizliği",
+          "isciSayisi": 10,
+          "parsel": "157/46",
+          "ustaSayisi": 0
+        }
+      ],
+      "sayfaNo": 26
+    },
+    {
+      "tarih": "27.06. Cumartesi",
+      "faaliyetler": [
+        {
+          "isNiteligi": "PİT ÇUKURLARI SERAMİK İMALATI",
+          "blok": "BİLAK",
+          "hamMetin": "2 usta lyardıma 46 Porsel | Bilak Pit cukurları Seramik imabts",
+          "isciSayisi": 0,
+          "parsel": "157/46",
+          "ustaSayisi": 2
+        },
+        {
+          "isNiteligi": "ŞAFT İÇİ HİTANG ÖRME",
+          "blok": "C1-C2 BİLALETA",
+          "hamMetin": "2 usta 3 yardımer C1-C2 Bilaleta foşaft içi hitong amne 4b Porsel",
+          "isciSayisi": 3,
+          "parsel": "157/46",
+          "ustaSayisi": 2
+        },
+        {
+          "isNiteligi": "PİT ÇUKURU TEMİZLİĞİ",
+          "blok": "B-2 D-1",
+          "hamMetin": "4 düz işci 46 Barsel B-2 D-1 Pit cukurs temizligi",
+          "isciSayisi": 4,
+          "parsel": "157/46",
+          "ustaSayisi": 0
+        },
+        {
+          "isNiteligi": "PİT ÇUKURU TEMİZLİĞİ",
+          "blok": "D-2-61 BİLAKLARDA",
+          "hamMetin": "a diüz isci 4b Porsel D-2-61 Bilaklarda Pit cokoro temizligi",
+          "isciSayisi": 0,
+          "parsel": "157/46",
+          "ustaSayisi": 0
+        },
+        {
+          "isNiteligi": "KARTONLAMA",
+          "blok": "D-BİLAK",
+          "hamMetin": "a düz tęci 46 Barsel D-Bilak bertanbma",
+          "isciSayisi": 0,
+          "parsel": "157/46",
+          "ustaSayisi": 0
+        },
+        {
+          "isNiteligi": "TEMİZLİK",
+          "blok": "B1-B3 BİBELBEDA",
+          "hamMetin": "E düz tęci 160 Parsel B1-B3 Bibelbeda temizlik",
+          "isciSayisi": 0,
+          "parsel": "160/2",
+          "ustaSayisi": 0
+        },
+        {
+          "isNiteligi": "ŞAFTLARDA LENTO İMALATI",
+          "blok": "B-3",
+          "hamMetin": "2 usta 160 Possel B-3 septlarda lento imalatı",
+          "isciSayisi": 0,
+          "parsel": "160/2",
+          "ustaSayisi": 2
+        },
+        {
+          "isNiteligi": "KOLLEKTÖR DOLABI TAMİRATI",
+          "blok": "",
+          "hamMetin": "Tosta lyordinaat Gabiak Alap mobli 160 Parsel kalleletar dolaby tamirati",
+          "isciSayisi": 0,
+          "parsel": "160/2",
+          "ustaSayisi": 0
+        },
+        {
+          "isNiteligi": "KARTONLAMA",
+          "blok": "B1 A-3",
+          "hamMetin": "4 düz işci Bl Barsel A-3 Kartanama",
+          "isciSayisi": 4,
+          "parsel": "157/46",
+          "ustaSayisi": 0
+        },
+        {
+          "isNiteligi": "İSKELE ŞAFTI TOPARLAMA",
+          "blok": "GENEL SAHA",
+          "hamMetin": "2 döz şci scha geneli iştele sefti toparlama",
+          "isciSayisi": 2,
+          "parsel": "157/46",
+          "ustaSayisi": 0
+        }
+      ],
+      "sayfaNo": 27
+    },
+    {
+      "tarih": "28.06. Pazar",
+      "faaliyetler": [
+        {
+          "isNiteligi": "PİT ÇUKURU TEMİZLİK",
+          "blok": "D-BİLBLE",
+          "hamMetin": "düz işçi Porsel D-Bilble Pit cukuru temizlik 46",
+          "isciSayisi": 0,
+          "parsel": "157/46",
+          "ustaSayisi": 0
+        },
+        {
+          "isNiteligi": "SU DEPOLARI TEMİZLİK",
+          "blok": "B1 C1 BİBLE",
+          "hamMetin": "3 düz sci Bl Parsel C1 Bible su depoları temizlik",
+          "isciSayisi": 3,
+          "parsel": "157/46",
+          "ustaSayisi": 0
+        },
+        {
+          "isNiteligi": "ALKİPON İMALATI",
+          "blok": "BİBLE KANAN DAİRESİ",
+          "hamMetin": "2 usta tyardıma the lib Possel 6 Bible kanan dairesi Alkipon indati",
+          "isciSayisi": 0,
+          "parsel": "157/46",
+          "ustaSayisi": 2
+        },
+        {
+          "isNiteligi": "KAZAN DAİRESİ MERDİVEN İMALATI HAZIRLIĞI",
+          "blok": "C-4 C-3",
+          "hamMetin": "( formen 51 Porsel C-4 C-3 banan dairesi merdiven indd, hazırlısı",
+          "isciSayisi": 0,
+          "parsel": "157/51",
+          "ustaSayisi": 0
+        }
+      ],
+      "sayfaNo": 28
+    },
+    {
+      "tarih": "29.06. Pazartesi",
+      "faaliyetler": [
+        {
+          "isNiteligi": "KAZAN DAİRELERİ İNİŞ MERDİVEN İMALATI",
+          "blok": "C-4 C-3",
+          "hamMetin": "losta lyardımas 51 Porsel C-4 C-3 Kazan daireleri iniş merdiven imaktı",
+          "isciSayisi": 0,
+          "parsel": "157/51",
+          "ustaSayisi": 0
+        },
+        {
+          "isNiteligi": "TEMİZLİK KAREN SEMİ",
+          "blok": "A3",
+          "hamMetin": "4 düz işçi 51 Porsel temizlik A3 karen semi",
+          "isciSayisi": 4,
+          "parsel": "157/51",
+          "ustaSayisi": 0
+        },
+        {
+          "isNiteligi": "KOLLEKTÖR DOLAP İMALATI",
+          "blok": "A2B BİKK",
+          "hamMetin": "bste I jardines 160 Parsel A2B Bikk kellettür dieb. imalatı",
+          "isciSayisi": 1,
+          "parsel": "160/2",
+          "ustaSayisi": 0
+        },
+        {
+          "isNiteligi": "TEMİZLİK",
+          "blok": "B-1 B-3",
+          "hamMetin": "a dioz Pęci 160 Basel B-1 B-3 temiz live",
+          "isciSayisi": 0,
+          "parsel": "160/2",
+          "ustaSayisi": 0
+        },
+        {
+          "isNiteligi": "PİT ÇUKURU TEMİZLİK",
+          "blok": "D-2 C.BİCK",
+          "hamMetin": "6 düz işci 46 Porsel D-2 C.Bick Pit cukuru temizlik",
+          "isciSayisi": 6,
+          "parsel": "157/46",
+          "ustaSayisi": 0
+        },
+        {
+          "isNiteligi": "KARTONLAMA",
+          "blok": "D-BİLAK",
+          "hamMetin": "3 düz işci 4b Parsel D-Bilak kartorama",
+          "isciSayisi": 3,
+          "parsel": "157/46",
+          "ustaSayisi": 0
+        },
+        {
+          "isNiteligi": "GENEL FAALİYET",
+          "blok": "H-6-1 BİLAKLARDA",
+          "hamMetin": "7 düz işci 46 Porsel H-6-1 Bilaklarda",
+          "isciSayisi": 7,
+          "parsel": "157/46",
+          "ustaSayisi": 0
+        },
+        {
+          "isNiteligi": "GENEL FAALİYET",
+          "blok": "D-E BİCK",
+          "hamMetin": "G6 Porset DE BICK",
+          "isciSayisi": 0,
+          "parsel": "157/46",
+          "ustaSayisi": 0
+        },
+        {
+          "isNiteligi": "PİT ÇUKURLARI SERAMİK İMALATI",
+          "blok": "",
+          "hamMetin": "2 usta lurduma 46 Risel Pit costurari seramick imalatı",
+          "isciSayisi": 0,
+          "parsel": "157/46",
+          "ustaSayisi": 2
+        }
+      ],
+      "sayfaNo": 29
+    },
+    {
+      "tarih": "30.06. Salı",
+      "faaliyetler": [
+        {
+          "isNiteligi": "KAZAN DAİRESİ İNİŞ MERDİVEN İMALATI",
+          "blok": "B1 C-2 BİBLE",
+          "hamMetin": "lusta I yerding B1 Persel C-2 Bible banan doiesi îniş Merdiven imalatı",
+          "isciSayisi": 1,
+          "parsel": "157/46",
+          "ustaSayisi": 0
+        },
+        {
+          "isNiteligi": "TEMİZLİK",
+          "blok": "B1",
+          "hamMetin": "a düz işci Bd Porsele-l temizlik",
+          "isciSayisi": 0,
+          "parsel": "157/46",
+          "ustaSayisi": 0
+        },
+        {
+          "isNiteligi": "SU HASAT DEPOSU FİLELİ SIVA",
+          "blok": "",
+          "hamMetin": "2 usta luardmaa St Porsel su hasat deposu filelisiva",
+          "isciSayisi": 0,
+          "parsel": "157/51",
+          "ustaSayisi": 2
+        },
+        {
+          "isNiteligi": "KOLLEKTÖR DOLAP TAMİRATI",
+          "blok": "AZA BİLAK",
+          "hamMetin": "lusta Lyardines 160 Porsel AZA Bilak kollektör dolab tamarati",
+          "isciSayisi": 1,
+          "parsel": "160/2",
+          "ustaSayisi": 0
+        },
+        {
+          "isNiteligi": "TEMİZLİK",
+          "blok": "B-3 BİBK",
+          "hamMetin": "3 düz isen 160 Parsed B-3 bibk temirlik",
+          "isciSayisi": 3,
+          "parsel": "160/2",
+          "ustaSayisi": 0
+        },
+        {
+          "isNiteligi": "PİT ÇUKURU SERAMİK İMALATI",
+          "blok": "A BİBK",
+          "hamMetin": "2 usta lygdina, 46 Brael A bibk Pit autor seamale indofi",
+          "isciSayisi": 0,
+          "parsel": "157/46",
+          "ustaSayisi": 2
+        },
+        {
+          "isNiteligi": "TEMİZLİK",
+          "blok": "H BİLAK",
+          "hamMetin": "a disz Tęc 46 Porsel H bilak temizlik",
+          "isciSayisi": 0,
+          "parsel": "157/46",
+          "ustaSayisi": 0
+        },
+        {
+          "isNiteligi": "İSKELE TEMİZLİK",
+          "blok": "A BİLK",
+          "hamMetin": "3 محله 46 Porsel A bilk istele temizlik",
+          "isciSayisi": 0,
+          "parsel": "157/46",
+          "ustaSayisi": 0
+        },
+        {
+          "isNiteligi": "PİT ÇUKURU TEMİZLİK D BİBK KIRIM",
+          "blok": "A BİKK",
+          "hamMetin": "5 düz ixi Lab Parsel a bikk pit auturo teminlik D bibkha kırım",
+          "isciSayisi": 5,
+          "parsel": "157/46",
+          "ustaSayisi": 0
+        }
+      ],
+      "sayfaNo": 30
+    }
+  ]
+}
