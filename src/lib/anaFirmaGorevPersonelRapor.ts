@@ -1,5 +1,6 @@
 import type { Personel } from '../types/erp';
 import { displayPersonelGorev } from './guvenlikHelpers';
+import { normalizeGorev } from './gorevUtils';
 import {
   buildKibritciReportHtml,
   openKibritciReportPrint,
@@ -28,11 +29,11 @@ function sortByName(a: Personel, b: Personel): number {
   });
 }
 
-/** Aynı görevdekiler alt alta; görev grupları alfabetik */
+/** Aynı görevdekiler alt alta; eş anlamlı görevler tek çatıda (FORMEN, KAMPÇI vb.) */
 export function groupPersonelByGorev(personeller: Personel[]): GorevPersonelGroup[] {
   const map = new Map<string, Personel[]>();
   for (const p of personeller) {
-    const gorev = displayPersonelGorev(p) || '—';
+    const gorev = normalizeGorev(displayPersonelGorev(p));
     const list = map.get(gorev) || [];
     list.push(p);
     map.set(gorev, list);
