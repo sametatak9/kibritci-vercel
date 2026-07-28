@@ -829,6 +829,8 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
   }, [personeller]);
 
   const filteredPersonel = personeller.filter((p) => {
+    // Kampçının eklediği, yönetici onayı bekleyen personeller listede görünmez (Onay Havuzu'nda onaylanır)
+    if (p.onayDurumu === 'ONAY BEKLİYOR' && p.kaynak === 'KAMPCI') return false;
     if (showOnlyActive && !is_aktif_status(p.durum)) return false;
     if (!matchesFirmaFilter(p, firmaFilters)) return false;
     if (odemeFilter === 'TC' && validateTC(p.tcNo || '')) return false;

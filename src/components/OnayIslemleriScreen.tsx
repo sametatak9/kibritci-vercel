@@ -99,6 +99,7 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
   const [kampFaaliyetler, setKampFaaliyetler] = useState<any[]>([]);
   const [tesisatciFaaliyetler, setTesisatciFaaliyetler] = useState<any[]>([]);
   const [mermerciFaaliyetler, setMermerciFaaliyetler] = useState<any[]>([]);
+  const [bekleyenKampPersonelleri, setBekleyenKampPersonelleri] = useState<any[]>([]);
   const [gunlukAkisRaporlari, setGunlukAkisRaporlari] = useState<any[]>([]);
 
   const [aracOnayTalepleri, setAracOnayTalepleri] = useState<any[]>([]);
@@ -514,6 +515,54 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
       unsubMermerci();
     };
   }, []);
+
+  // Kampçının kurduğu, yönetici onayı bekleyen personeller
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, 'personeller'), (snapshot) => {
+      const list: any[] = [];
+      snapshot.forEach((d) => {
+        const v = d.data() as any;
+        if (v.onayDurumu === 'ONAY BEKLİYOR' && v.kaynak === 'KAMPCI') {
+          list.push({ id: d.id, ...v });
+        }
+      });
+      list.sort((a, b) => String(b.iseGirisTarihi || '').localeCompare(String(a.iseGirisTarihi || '')));
+      setBekleyenKampPersonelleri(list);
+    });
+    return () => unsub();
+  }, []);
+
+  const handleApproveKampPersonel = async (id: string) => {
+    try {
+      const matchedUser = kullanicilar.find((u) => u.email?.toLowerCase() === currentUser?.email?.toLowerCase());
+      const role = matchedUser?.yetki || 'YÖNETİCİ';
+      if (!canApproveMobilDocuments(role, currentUser?.email)) {
+        alert('Bu personeli onaylama yetkiniz bulunmuyor.');
+        return;
+      }
+      await updateDoc(doc(db, 'personeller', id), {
+        onayDurumu: 'ONAYLANDI',
+        onaylayanYonetici: currentUser?.email || 'yonetici',
+        onayTarihi: new Date().toISOString(),
+      });
+      alert('Kampçı personeli onaylandı ve sisteme işlendi.');
+    } catch (err) {
+      console.error(err);
+      alert('Onaylama sırasında hata oluştu.');
+    }
+  };
+
+  const handleRejectKampPersonel = async (id: string) => {
+    const p = bekleyenKampPersonelleri.find((x) => x.id === id);
+    if (!window.confirm(`"${p?.ad || ''} ${p?.soyad || ''}" kaydını reddedip silmek istiyor musunuz? (Kamp yerleşimi varsa otomatik tahliye edilir)`)) return;
+    try {
+      await deleteDoc(doc(db, 'personeller', id));
+      alert('Kampçı personel kaydı reddedildi ve silindi.');
+    } catch (err) {
+      console.error(err);
+      alert('Reddetme sırasında hata oluştu.');
+    }
+  };
 
   useEffect(() => {
     const unsub = onSnapshot(collection(db, 'mobilGunlukAkisRaporlari'), (snapshot) => {
@@ -1070,6 +1119,7 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
     pendingPersonelCount +
     pendingKampSayimlar.length +
     pendingKampFaaliyetler.length +
+    bekleyenKampPersonelleri.length +
     tesisatMermerCount +
     pendingGunlukAkis.length +
     pendingSoforCount +
@@ -1081,7 +1131,7 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
   const guvenlikCount =
     pendingWaybills.length + pendingInvoices.length + pendingMicirGateCount + pendingGateDocs.length;
   const kampciCount =
-    pendingKampSayimlar.length + pendingKampFaaliyetler.length + pendingVidanjorGateCount;
+    pendingKampSayimlar.length + pendingKampFaaliyetler.length + pendingVidanjorGateCount + bekleyenKampPersonelleri.length;
 
   type OnayTab =
     | 'satin_alma'
@@ -2127,6 +2177,52 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
                 setCariIslemGecmisi={setCariIslemGecmisi}
                 addNotification={addNotification}
               />
+
+              {/* Kampçının kurduğu, onay bekleyen personeller */}
+              <div className="border bg-white p-4.5 rounded-2xl border-amber-200 text-xs">
+                <div className="flex items-center justify-between">
+                  <div className="space-y-1">
+                    <span className="text-amber-700 font-bold block text-[11px] tracking-widest uppercase">👤 Kampçı Personel Onayları ({bekleyenKampPersonelleri.length})</span>
+                    <p className="text-slate-500 leading-relaxed text-[11px]">
+                      Kampçının eklediği yeni personeller (yazım hatası riski nedeniyle) yönetici onayı olmadan sisteme işlenmez. Onaylayın veya reddedin.
+                    </p>
+                  </div>
+                </div>
+
+                {bekleyenKampPersonelleri.length > 0 && (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-4">
+                    {bekleyenKampPersonelleri.map((p) => (
+                      <div key={p.id} className="border border-amber-200 bg-amber-50/40 rounded-xl p-3 flex flex-col justify-between space-y-2">
+                        <div>
+                          <div className="flex items-center justify-between">
+                            <span className="font-bold text-slate-800 text-[13px]">{p.ad} {p.soyad}</span>
+                            <span className="text-[9px] font-black uppercase bg-amber-200 text-amber-900 rounded-full px-2 py-0.5">Onay Bekliyor</span>
+                          </div>
+                          <p className="text-[10.5px] text-slate-500 mt-1">Görev: {p.gorev || '—'} · Firma: {p.firmaAdi || (p.firmaTipi === 'TASERON' ? 'Taşeron' : 'Kibritçi')}</p>
+                          <p className="text-[10.5px] text-slate-500">TC: {p.tcNo || '—'} · Tel: {p.telefonNo || '—'}</p>
+                          <p className="text-[9px] text-amber-700/80 mt-0.5 font-mono">Kaynak: KAMPÇI · Giriş: {p.iseGirisTarihi || '—'}</p>
+                        </div>
+                        <div className="flex gap-2 pt-1 border-t border-amber-100">
+                          <button
+                            type="button"
+                            onClick={() => handleRejectKampPersonel(p.id)}
+                            className="flex-1 bg-red-950 hover:bg-red-900 text-red-300 py-1.5 px-3 rounded-lg text-[10px] font-black tracking-widest transition flex items-center justify-center gap-1 cursor-pointer"
+                          >
+                            <X size={11} /> Reddet
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleApproveKampPersonel(p.id)}
+                            className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white py-1.5 px-3 rounded-lg text-[10px] font-black tracking-widest transition flex items-center justify-center gap-1 cursor-pointer"
+                          >
+                            <Check size={11} /> Onayla ve Sisteme İşle
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
 
               <div className="border bg-white p-4.5 rounded-2xl border-slate-200 flex justify-between items-center text-xs">
                 <div className="space-y-1">

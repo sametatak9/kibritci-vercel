@@ -28,6 +28,10 @@ export interface Personel {
   firmaAdi?: string;
   /** SAHA: puantaj/yoklama; IDARI: yoklama alınmaz, izin/tutanak/araç tahsis vb. evraklarda görünür */
   personelGrubu?: 'SAHA' | 'IDARI';
+  /** Kampçı gibi mobil kaynaklardan gelen kayıt yönetici onayına düşer */
+  onayDurumu?: 'ONAY BEKLİYOR' | 'ONAYLANDI' | 'REDDEDILDI';
+  /** Kaydı oluşturan kaynak (ör. KAMPCI) */
+  kaynak?: string;
 }
 
 export type YoklamaDurum = 'Geldi' | 'Yok' | 'İzinli' | 'Raporlu' | 'Pazar' | 'Tatil' | 'Girilmedi';
