@@ -2,7 +2,8 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { collection, onSnapshot, doc, setDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { normalizeYetki } from '../lib/yetkiUtils';
-import { PenTool, Check, X, FileText, Search, ShieldCheck, Stamp, BadgeCheck, Ban } from 'lucide-react';
+import { buildKibritciReportHtml, openKibritciReportPrint } from '../lib/kibritciReportTemplate';
+import { PenTool, X, FileText, Search, ShieldCheck, Stamp, BadgeCheck, Ban, Printer } from 'lucide-react';
 
 /**
  * DİJİTAL ONAY — bağımsız dijital imzalama sekmesi.
@@ -19,6 +20,8 @@ import { PenTool, Check, X, FileText, Search, ShieldCheck, Stamp, BadgeCheck, Ba
 interface DijitalOnayScreenProps {
   currentUser: any;
   kullanicilar: any[];
+  /** Onay Havuzu "İmza" sekmesi içinde gömülü render (dar padding) */
+  embedded?: boolean;
 }
 
 type BelgeTuru = 'TUTANAK' | 'FATURA' | 'İRSALİYE' | 'ANALİZ RAPORU';
@@ -54,7 +57,7 @@ const TUR_RENK: Record<BelgeTuru, string> = {
   'ANALİZ RAPORU': 'bg-violet-100 text-violet-800 border-violet-200',
 };
 
-export const DijitalOnayScreen: React.FC<DijitalOnayScreenProps> = ({ currentUser, kullanicilar }) => {
+export const DijitalOnayScreen: React.FC<DijitalOnayScreenProps> = ({ currentUser, kullanicilar, embedded }) => {
   const [tutanaklar, setTutanaklar] = useState<any[]>([]);
   const [faturalar, setFaturalar] = useState<any[]>([]);
   const [irsaliyeler, setIrsaliyeler] = useState<any[]>([]);
@@ -174,12 +177,49 @@ export const DijitalOnayScreen: React.FC<DijitalOnayScreenProps> = ({ currentUse
     }
   };
 
+  const handleRapor = (b: Belge) => {
+    const imzalar = imzalarByBelge.get(`${b.belgeTuru}_${b.belgeId}`) || [];
+    const imzaBarlari = imzalar
+      .map((x) => {
+        const renk = x.durum === 'IMZALANDI' ? '#059669' : '#e11d48';
+        const etiket = x.durum === 'IMZALANDI' ? '✓ DİJİTAL İMZALANDI' : '✕ DİJİTAL RED';
+        const imza = x.imzaGorseli
+          ? `<img src="${x.imzaGorseli}" style="height:38px;margin-top:6px;display:block" />`
+          : `<div style="font-family:'Segoe Script',cursive;font-style:italic;color:#0f6c5c;margin-top:6px;font-size:15px">${x.imzaText || ''}</div>`;
+        return `<div style="border:1.5px solid ${renk};border-radius:10px;padding:12px 14px;min-width:220px;display:inline-block;margin:6px;vertical-align:top">
+          <div style="font-size:10px;font-weight:800;color:${renk};text-transform:uppercase;letter-spacing:.3px">${etiket}</div>
+          <div style="font-size:12px;font-weight:800;margin-top:5px;color:#1e293b">${x.imzalayanUnvan || ''}</div>
+          <div style="font-size:11px;color:#334155">${x.imzalayanAdSoyad || ''}</div>
+          ${imza}
+          <div style="font-size:9px;color:#94a3b8;margin-top:5px;font-family:monospace">${new Date(x.tarih).toLocaleString('tr-TR')}</div>
+        </div>`;
+      })
+      .join('');
+    const bodyHtml = `
+      <table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:18px">
+        <tr><td style="padding:6px 8px;font-weight:700;width:150px;background:#f8fafc;border:1px solid #e2e8f0">Belge Türü</td><td style="padding:6px 8px;border:1px solid #e2e8f0">${b.belgeTuru}</td></tr>
+        <tr><td style="padding:6px 8px;font-weight:700;background:#f8fafc;border:1px solid #e2e8f0">Belge No</td><td style="padding:6px 8px;border:1px solid #e2e8f0">${b.belgeNo}</td></tr>
+        <tr><td style="padding:6px 8px;font-weight:700;background:#f8fafc;border:1px solid #e2e8f0">Tarih</td><td style="padding:6px 8px;border:1px solid #e2e8f0">${b.tarih || '—'}</td></tr>
+        <tr><td style="padding:6px 8px;font-weight:700;background:#f8fafc;border:1px solid #e2e8f0">Muhatap</td><td style="padding:6px 8px;border:1px solid #e2e8f0">${b.muhatap}</td></tr>
+        <tr><td style="padding:6px 8px;font-weight:700;background:#f8fafc;border:1px solid #e2e8f0">Konu</td><td style="padding:6px 8px;border:1px solid #e2e8f0">${b.baslik}</td></tr>
+      </table>
+      <div style="font-weight:800;font-size:12px;margin:14px 0 4px;text-transform:uppercase;color:#1e4e78;border-bottom:2px solid #1e4e78;padding-bottom:6px">Dijital İmza Barı</div>
+      <div style="margin-top:8px">${imzaBarlari || '<span style="color:#94a3b8;font-size:11px">Henüz dijital imza uygulanmadı.</span>'}</div>`;
+    const html = buildKibritciReportHtml({
+      title: 'Dijital İmzalı Evrak',
+      subtitle: `${b.belgeTuru} · ${b.belgeNo}`,
+      bodyHtml,
+      meta: [`Belge No: ${b.belgeNo}`, `Rapor Tarihi: ${new Date().toLocaleString('tr-TR')}`],
+    });
+    openKibritciReportPrint(html, `Dijital_Imza_${b.belgeNo}`);
+  };
+
   const toplamImzali = belgeler.filter((b) =>
     (imzalarByBelge.get(`${b.belgeTuru}_${b.belgeId}`) || []).some((x) => x.durum === 'IMZALANDI')
   ).length;
 
   return (
-    <div className="flex-grow p-6 min-h-[calc(100vh-52px)] overflow-y-auto flex flex-col font-sans bg-slate-50/50 space-y-5">
+    <div className={`flex flex-col font-sans space-y-5 ${embedded ? '' : 'flex-grow p-6 min-h-[calc(100vh-52px)] overflow-y-auto bg-slate-50/50'}`}>
       {/* Başlık */}
       <div className="bg-gradient-to-br from-slate-900 via-slate-800 to-indigo-900 text-white rounded-3xl p-5 sm:p-6 shadow-md">
         <div className="flex flex-wrap items-start justify-between gap-4">
@@ -273,6 +313,14 @@ export const DijitalOnayScreen: React.FC<DijitalOnayScreenProps> = ({ currentUse
                   </div>
 
                   <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => handleRapor(b)}
+                      className="text-[10px] font-black px-3 py-2 rounded-xl border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 transition flex items-center gap-1.5 cursor-pointer"
+                      title="Dijital imza barlı raporu aç (PDF/HTML olarak yazdır veya mail gönder)"
+                    >
+                      <Printer size={13} /> Rapor
+                    </button>
                     {benimImzam ? (
                       <span className={`text-[10px] font-black px-3 py-2 rounded-xl border flex items-center gap-1.5 ${
                         benimImzam.durum === 'IMZALANDI'
