@@ -23,6 +23,7 @@ import { DijitalOnayScreen } from './DijitalOnayScreen';
 import { ImzaOnizlemeStrip } from './ImzaOnizlemeStrip';
 import { AcilOnayBadge } from './AcilOnayBadge';
 import { VidanjorFisOnayPanel } from './VidanjorFisOnayPanel';
+import { YildirimTankerFisOnayPanel } from './YildirimTankerFisOnayPanel';
 import { MicirFisOnayPanel } from './MicirFisOnayPanel';
 import { KibritciLogo } from './KibritciLogo';
 import {
@@ -1027,10 +1028,11 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
   });
 
   const pendingWaybills = irsaliyeler.filter(doc => {
-    // Vidanjör / mıcır-stabilize / kapı evrak özel panelden yönetilir
+    // Vidanjör / mıcır-stabilize / Yıldırım / kapı evrak özel panelden yönetilir
     if (
       doc.kaynak === 'VIDANJOR_FIS' ||
       doc.kaynak === 'MICIR_STABILIZE_FIS' ||
+      doc.kaynak === 'YILDIRIM_TANKER_FIS' ||
       doc.kaynak === KAPI_EVRAK_KAYNAK
     ) {
       return false;
@@ -1082,7 +1084,14 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
     return canApproveMobilDocuments(currentUserRole, currentUser?.email);
   });
 
-  const tesisatMermerCount = pendingTesisatciFaaliyetler.length + pendingMermerciFaaliyetler.length;
+  const pendingYildirimGateCount = gelenEvraklar.filter(
+    (x) => x.durum === 'BEKLEMEDE' && x.kaynak === 'YILDIRIM_TANKER_FIS'
+  ).length;
+
+  const tesisatMermerCount =
+    pendingTesisatciFaaliyetler.length +
+    pendingMermerciFaaliyetler.length +
+    pendingYildirimGateCount;
 
   const pendingGunlukAkis = gunlukAkisRaporlari.filter(
     (doc) =>
@@ -1098,12 +1107,13 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
   const pendingSayimCount = depoSayimTalepleri.length;
   const pendingDepocuCount = pendingStokCount + pendingSayimCount;
 
-  // Vidanjör / mıcır-stabilize özel panelde onaylanır — genel güvenlik sihirbazına düşmesin
+  // Vidanjör / mıcır-stabilize / Yıldırım Tanker özel panelde onaylanır — genel güvenlik sihirbazına düşmesin
   const pendingGateDocs = gelenEvraklar.filter(
     (x) =>
       x.durum === 'BEKLEMEDE' &&
       x.kaynak !== 'VIDANJOR_FIS' &&
-      x.kaynak !== 'MICIR_STABILIZE_FIS'
+      x.kaynak !== 'MICIR_STABILIZE_FIS' &&
+      x.kaynak !== 'YILDIRIM_TANKER_FIS'
   );
   const pendingVidanjorGateCount = gelenEvraklar.filter(
     (x) => x.durum === 'BEKLEMEDE' && x.kaynak === 'VIDANJOR_FIS'
@@ -2370,10 +2380,21 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
 
           {activeTab === 'tesisat_mermer_belgeleri' && (
             <div className="space-y-6">
-              {tesisatMermerCount === 0 ? (
-                <div className="text-center py-16 text-slate-400 text-sm">
-                  Onay bekleyen tesisatçı / mermerci faaliyeti bulunmuyor.
-                </div>
+              <YildirimTankerFisOnayPanel
+                currentUser={currentUser}
+                cariKartlar={cariKartlar}
+                setCariKartlar={setCariKartlar}
+                setIrsaliyeler={setIrsaliyeler}
+                setCariIslemGecmisi={setCariIslemGecmisi}
+                addNotification={addNotification}
+              />
+
+              {pendingTesisatciFaaliyetler.length + pendingMermerciFaaliyetler.length === 0 ? (
+                pendingYildirimGateCount === 0 ? (
+                  <div className="text-center py-8 text-slate-400 text-sm">
+                    Onay bekleyen tesisatçı / mermerci faaliyeti bulunmuyor.
+                  </div>
+                ) : null
               ) : (
                 [
                   { type: 'tesisatci' as const, title: 'Tesisatçı Faaliyet Onayları', items: pendingTesisatciFaaliyetler },

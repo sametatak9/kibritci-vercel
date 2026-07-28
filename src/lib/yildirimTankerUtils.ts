@@ -48,7 +48,7 @@ export async function ensureYildirimTankerCari(
     adres: 'Yıldırım Tanker su teslimatı — tesisatçı fişlerinden otomatik oluşturuldu.',
     iban: '',
     durum: 'AKTIF',
-    notlar: 'Sistem tarafından Yıldırım Tanker fiş kaydında oluşturuldu. Fatura kontrolünde irsaliye toplamları bu cari altında toplanır.',
+    notlar: 'Sistem tarafından Yıldırım Tanker irsaliye onayında oluşturuldu. Fatura kontrolünde irsaliye toplamları bu cari altında toplanır.',
   };
   await saveDocument('cariKartlar', created);
   setCariKartlar?.((prev) => [created, ...prev.filter((c) => c.id !== created.id)]);

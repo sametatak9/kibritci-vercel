@@ -120,6 +120,7 @@ export interface Irsaliye {
   malzemeTipi?: 'MICIR' | 'STABILIZE' | string;
   icmeSuyuAdet?: number;
   sanayiSuyuAdet?: number;
+  damacaAdet?: number;
   cariKartId?: string;
   guvenlikEvrakId?: string;
   onaylayanYonetici?: string;
@@ -175,7 +176,7 @@ export interface MicirStabilizeFis {
   guncellenme?: string;
 }
 
-/** Tesisatçı — Yıldırım Tanker su fişi (irsaliye niteliğinde) */
+/** Tesisatçı — Yıldırım Tanker su irsaliye fişi (yönetici onayından sonra irsaliye + cari) */
 export interface YildirimTankerFis {
   id: string;
   tarih: string;
@@ -191,6 +192,10 @@ export interface YildirimTankerFis {
   guvenlikEvrakId?: string;
   kapıLogId?: string;
   kaydeden?: string;
+  durum?: 'YONETICI_ONAYINDA' | 'ONAYLANDI' | 'REDDEDILDI';
+  onaylayanYonetici?: string;
+  onayTarihi?: string;
+  redNedeni?: string;
   olusturulma: string;
   guncellenme?: string;
 }
