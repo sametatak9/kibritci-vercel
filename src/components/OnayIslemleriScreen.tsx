@@ -19,6 +19,7 @@ import {
 import { wrapCorporateReportHtml } from '../lib/corporateReportHtml';
 import { fetchApiJson } from '../lib/apiClient';
 import { GuvenlikEvrakOnayHavuzu } from './GuvenlikEvrakOnayHavuzu';
+import { DijitalOnayScreen } from './DijitalOnayScreen';
 import { ImzaOnizlemeStrip } from './ImzaOnizlemeStrip';
 import { AcilOnayBadge } from './AcilOnayBadge';
 import { VidanjorFisOnayPanel } from './VidanjorFisOnayPanel';
@@ -1112,7 +1113,7 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
     { id: 'depocu_talepleri', label: 'Depocu Talepleri', shortLabel: 'Depo', count: pendingDepocuCount, icon: Package },
     { id: 'anahtarci_tutanaklari', label: 'Anahtarcı Tutanakları', shortLabel: 'Anahtar', count: anahtarciTutanaklari.length, icon: FileText },
     { id: 'gecmis', label: 'Geçmiş Onaylar', shortLabel: 'Geçmiş', icon: CheckCircle },
-    { id: 'imzalar', label: 'İmza & Kaşe', shortLabel: 'İmza', icon: PenTool },
+    { id: 'imzalar', label: 'Dijital İmza & Onay', shortLabel: 'Dijital İmza', icon: PenTool },
   ];
 
   const activeTabMeta = onayNavTabs.find((t) => t.id === activeTab);
@@ -2680,33 +2681,7 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
           )}
 
           {activeTab === 'imzalar' && (
-            <div className="space-y-6">
-              <div className="bg-white p-5 border border-slate-200 rounded-3xl space-y-4">
-                <span className="font-display font-black text-xs text-slate-800 uppercase tracking-widest block border-b pb-2">Yetkili Dijital İmza &amp; Kaşe</span>
-                <p className="text-xs text-slate-500 leading-relaxed">
-                  Şirket yetkililerine atanan hazır e-imza kaşelerini aşağıdan görebilir, belge onaylarında basılmasını sağlayabilirsiniz:
-                </p>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs font-mono">
-                  <div className="bg-slate-50 p-4 border border-slate-200 rounded-xl space-y-2">
-                    <span className="text-slate-600 font-bold block">🔵 YÖNETİM KURULU BAŞKANLIĞI (YKB)</span>
-                    <p className="text-[11px] text-slate-500">Mevcut Kaşe: [KİBRİTÇİ İNŞAAT A.Ş. YÖNETİM KURULU ONAY MÜHRÜ]</p>
-                  </div>
-                  <div className="bg-slate-50 p-4 border border-slate-200 rounded-xl space-y-2">
-                    <span className="text-amber-405 font-bold block">🔴 PROJELER GENEL KOORDİNATÖRLÜĞÜ (PGK)</span>
-                    <p className="text-[11px] text-slate-500">Mevcut Kaşe: [ŞANTİYE VE PROJELER GENEL KOORDİNATÖRÜ MÜHRÜ]</p>
-                  </div>
-                  <div className="bg-slate-50 p-4 border border-slate-200 rounded-xl space-y-2">
-                    <span className="text-emerald-700 font-bold block">🟢 GENEL MÜDÜRLÜK MAKAMI (GM)</span>
-                    <p className="text-[11px] text-slate-500">Mevcut Kaşe: [KİBRİTÇİ İNŞAAT A.Ş. GENEL MÜDÜRLÜK KAŞESİ]</p>
-                  </div>
-                  <div className="bg-slate-50 p-4 border border-slate-200 rounded-xl space-y-2">
-                    <span className="text-purple-400 font-bold block">🟣 MALİ İŞLER CONTRE DİREKTÖRLÜĞÜ (MİD)</span>
-                    <p className="text-[11px] text-slate-500">Mevcut Kaşe: [MALİ İŞLER VE MUHASEBE GÜVENLİK CONTRESİ]</p>
-                  </div>
-                </div>
-              </div>
-            </div>
+            <DijitalOnayScreen currentUser={currentUser} kullanicilar={kullanicilar} embedded />
           )}
 
           {activeTab === 'gunluk_loglar' && (

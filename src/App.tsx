@@ -34,7 +34,6 @@ const KasaScreen = lazy(() => import('./components/KasaScreen').then(m => ({ def
 const IdariScreen = lazy(() => import('./components/IdariScreen').then(m => ({ default: m.IdariScreen })));
 const CariStokScreen = lazy(() => import('./components/CariStokScreen').then(m => ({ default: m.CariStokScreen })));
 const OnayIslemleriScreen = lazy(() => import('./components/OnayIslemleriScreen').then(m => ({ default: m.OnayIslemleriScreen })));
-const DijitalOnayScreen = lazy(() => import('./components/DijitalOnayScreen').then(m => ({ default: m.DijitalOnayScreen })));
 const FormenScreen = lazy(() => import('./components/FormenScreen').then(m => ({ default: m.FormenScreen })));
 const GuvenlikScreen = lazy(() => import('./components/GuvenlikScreen').then(m => ({ default: m.GuvenlikScreen })));
 const KampciScreen = lazy(() => import('./components/KampciScreen').then(m => ({ default: m.KampciScreen })));
@@ -3342,15 +3341,6 @@ export default function App() {
                   setStokKartlar={setStokKartlarWithSync}
                   setStokIslemGecmisi={setStokIslemGecmisiWithSync}
                 />
-              )}
-
-              {activeTab === "dijital_onay" && (
-                isYonetici ? (
-                  <DijitalOnayScreen
-                    currentUser={currentUser}
-                    kullanicilar={kullanicilar}
-                  />
-                ) : renderAccessDenied()
               )}
 
               {activeTab === "formen_ekrani" && (

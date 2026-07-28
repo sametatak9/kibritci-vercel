@@ -101,7 +101,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
       group: "RAPOR VE İLETİŞİM",
       items: [
         { key: "onay_islemleri", label: "Onay Havuzu & İmzalar", icon: ShieldCheck },
-        { key: "dijital_onay", label: "Dijital Onay", icon: PenTool },
       ]
     },
     {
@@ -189,10 +188,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
         }
 
         if (item.key === 'onay_islemleri') {
-          return canSeeOnayHavuzu;
-        }
-
-        if (item.key === 'dijital_onay') {
           return canSeeOnayHavuzu;
         }
 
