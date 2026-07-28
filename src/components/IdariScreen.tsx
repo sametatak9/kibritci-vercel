@@ -10,11 +10,12 @@ import {
   AracBakim, Demisbas, Tahsis, KampOdasi, KampKaydi, KampSarf, KampFaaliyet,
   SahaFaaliyeti, HazirTutanak, CariKart, StokKart, EpostaGonderim, Personel,
   KampYerleske, KampKat, SahaGunRaporArsiv, SahaFaaliyetTipi, AylikYoklamaMap,
-  ProgramliFaaliyet
+  ProgramliFaaliyet, TesisatciFaaliyet, MermerciFaaliyet
 } from '../types/erp';
 import { db, auth } from '../lib/firebase';
 import { SahaKolajScreen } from './SahaKolajScreen';
 import { ProgramliFaaliyetScreen } from './ProgramliFaaliyetScreen';
+import { tesisatciToSaha, mermerciToSaha } from '../lib/mobilFaaliyetAdapter';
 import {
   createKampYerleske,
   createKampKat,
@@ -144,6 +145,34 @@ export const IdariScreen: React.FC<IdariScreenProps> = ({
   programliFaaliyetler = [],
   setProgramliFaaliyetler
 }) => {
+  const [mobilTesisatciFaaliyetleri, setMobilTesisatciFaaliyetleri] = useState<TesisatciFaaliyet[]>([]);
+  const [mobilMermerciFaaliyetleri, setMobilMermerciFaaliyetleri] = useState<MermerciFaaliyet[]>([]);
+
+  useEffect(() => {
+    const unsubT = onSnapshot(collection(db, 'tesisatciFaaliyetleri'), (snap) => {
+      const list: TesisatciFaaliyet[] = [];
+      snap.forEach((d) => list.push({ id: d.id, ...(d.data() as Omit<TesisatciFaaliyet, 'id'>) }));
+      setMobilTesisatciFaaliyetleri(list);
+    });
+    const unsubM = onSnapshot(collection(db, 'mermerciFaaliyetleri'), (snap) => {
+      const list: MermerciFaaliyet[] = [];
+      snap.forEach((d) => list.push({ id: d.id, ...(d.data() as Omit<MermerciFaaliyet, 'id'>) }));
+      setMobilMermerciFaaliyetleri(list);
+    });
+    return () => {
+      unsubT();
+      unsubM();
+    };
+  }, []);
+
+  const tumSahaFaaliyetleri = useMemo(
+    () => [
+      ...(sahaFaaliyetleri || []),
+      ...mobilTesisatciFaaliyetleri.map(tesisatciToSaha),
+      ...mobilMermerciFaaliyetleri.map(mermerciToSaha),
+    ],
+    [sahaFaaliyetleri, mobilTesisatciFaaliyetleri, mobilMermerciFaaliyetleri]
+  );
 
   // ─────────────────────────────────────────────────────────────
   // 🚛 1. ARAÇ & DEMİRBAŞ STATES & EVENTS
@@ -1255,6 +1284,10 @@ export const IdariScreen: React.FC<IdariScreenProps> = ({
   };
 
   const handleStartEditSaha = (sf: SahaFaaliyeti) => {
+    if (sf.kaynakEkran === 'TESISATCI_MOBIL' || sf.kaynakEkran === 'MERMERCI_MOBIL') {
+      alert('Bu kayıt mobil paneldendir; İdari ekrandan düzenlenemez. Tesisatçı / Mermerci mobilinden güncellenir.');
+      return;
+    }
     setEditingSahaId(sf.id);
     setSahaKayitTarihi(normalizeDateKey(sf.tarih) || todayDateKey());
     setSahaNitelik(sf.isNiteligi);
@@ -1274,6 +1307,17 @@ export const IdariScreen: React.FC<IdariScreenProps> = ({
   };
 
   const handleDeleteSahaFaaliyeti = async (id: string) => {
+    const targetPreview =
+      sahaFaaliyetleri.find((sf) => sf.id === id) ||
+      tumSahaFaaliyetleri.find((sf) => sf.id === id);
+    if (
+      targetPreview?.kaynakEkran === 'TESISATCI_MOBIL' ||
+      targetPreview?.kaynakEkran === 'MERMERCI_MOBIL'
+    ) {
+      alert('Mobil panellerden gelen kayıtlar buradan silinemez.');
+      setDeleteConfirmSahaId(null);
+      return;
+    }
     if (deleteConfirmSahaId === id) {
       const target = sahaFaaliyetleri.find((sf) => sf.id === id);
       if (!target) return;
@@ -1347,12 +1391,12 @@ export const IdariScreen: React.FC<IdariScreenProps> = ({
   };
 
   const daySahaFaaliyetleri = useMemo(
-    () => sahaFaaliyetleri.filter((sf) => normalizeDateKey(sf.tarih) === selectedSahaGun),
-    [sahaFaaliyetleri, selectedSahaGun]
+    () => tumSahaFaaliyetleri.filter((sf) => normalizeDateKey(sf.tarih) === selectedSahaGun),
+    [tumSahaFaaliyetleri, selectedSahaGun]
   );
   const filteredTumSahaFaaliyetleri = useMemo(() => {
     const keyword = sahaSearchKeyword.toLocaleLowerCase('tr-TR').trim();
-    return [...sahaFaaliyetleri]
+    return [...tumSahaFaaliyetleri]
       .filter((sf) => (tumKayitTarihFiltre ? normalizeDateKey(sf.tarih) === tumKayitTarihFiltre : true))
       .filter((sf) => {
         if (!keyword) return true;
@@ -1360,7 +1404,8 @@ export const IdariScreen: React.FC<IdariScreenProps> = ({
           sf.isNiteligi.toLocaleLowerCase('tr-TR').includes(keyword) ||
           sf.aciklama.toLocaleLowerCase('tr-TR').includes(keyword) ||
           sf.parsel.toLocaleLowerCase('tr-TR').includes(keyword) ||
-          String(sf.blok || '').toLocaleLowerCase('tr-TR').includes(keyword)
+          String(sf.blok || '').toLocaleLowerCase('tr-TR').includes(keyword) ||
+          String(sf.kaynakEkran || '').toLocaleLowerCase('tr-TR').includes(keyword)
         );
       })
       .sort((a, b) => {
@@ -1368,7 +1413,7 @@ export const IdariScreen: React.FC<IdariScreenProps> = ({
         const bTs = new Date(b.programaGonderimTarihi || b.tarih).getTime();
         return bTs - aTs;
       });
-  }, [sahaFaaliyetleri, sahaSearchKeyword, tumKayitTarihFiltre]);
+  }, [tumSahaFaaliyetleri, sahaSearchKeyword, tumKayitTarihFiltre]);
   const filteredFormenFaaliyetleri = useMemo(
     () =>
       sahaFaaliyetleri
@@ -1475,7 +1520,7 @@ export const IdariScreen: React.FC<IdariScreenProps> = ({
 
   const handlePrintSahaGun = (date: string) => {
     const targetDate = normalizeDateKey(date);
-    const gunlukFaaliyetler = sahaFaaliyetleri.filter((sf) => normalizeDateKey(sf.tarih) === targetDate);
+    const gunlukFaaliyetler = tumSahaFaaliyetleri.filter((sf) => normalizeDateKey(sf.tarih) === targetDate);
     const yoklama = buildYoklamaSummaryForDate(targetDate);
     const rows = gunlukFaaliyetler
       .map(
@@ -1571,6 +1616,16 @@ export const IdariScreen: React.FC<IdariScreenProps> = ({
                 FORMEN
               </span>
             )}
+            {sf.kaynakEkran === 'TESISATCI_MOBIL' && (
+              <span className="text-[9px] bg-cyan-100 text-cyan-800 border border-cyan-200 rounded-full px-2 py-0.5 font-bold">
+                TESİSATÇI
+              </span>
+            )}
+            {sf.kaynakEkran === 'MERMERCI_MOBIL' && (
+              <span className="text-[9px] bg-violet-100 text-violet-800 border border-violet-200 rounded-full px-2 py-0.5 font-bold">
+                MERMERCİ
+              </span>
+            )}
           </div>
 
           <p className="text-xs text-slate-600 font-sans tracking-tight leading-relaxed">{sf.aciklama}</p>
@@ -1646,6 +1701,10 @@ export const IdariScreen: React.FC<IdariScreenProps> = ({
           })()}
 
           <div className="flex justify-end gap-2 pt-2 border-t mt-3 text-[10px]">
+            {sf.kaynakEkran === 'TESISATCI_MOBIL' || sf.kaynakEkran === 'MERMERCI_MOBIL' ? (
+              <span className="text-[9px] text-slate-400 italic self-center">Mobil kayıt — salt okunur</span>
+            ) : (
+              <>
             <button
               onClick={() => handleStartEditSaha(sf)}
               className="bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-800 font-bold py-1 px-2.5 rounded-lg transition cursor-pointer"
@@ -1666,6 +1725,8 @@ export const IdariScreen: React.FC<IdariScreenProps> = ({
               >
                 🗑️ Sil
               </button>
+            )}
+              </>
             )}
           </div>
         </div>
@@ -3603,7 +3664,7 @@ export const IdariScreen: React.FC<IdariScreenProps> = ({
 
           {sahaTabView === 'KOLAJ' && (
             <div className="flex-1 bg-white border shadow-sm rounded-2xl overflow-hidden relative">
-              <SahaKolajScreen currentUser={auth.currentUser || undefined} sahaFaaliyetleri={sahaFaaliyetleri} programliFaaliyetler={[]} />
+              <SahaKolajScreen currentUser={auth.currentUser || undefined} sahaFaaliyetleri={tumSahaFaaliyetleri} programliFaaliyetler={[]} />
             </div>
           )}
 
@@ -4099,8 +4160,8 @@ export const IdariScreen: React.FC<IdariScreenProps> = ({
                     <div key={d} className="text-[10px] font-bold text-slate-500 text-center">{d}</div>
                   ))}
                   {sahaTakvimGunleri.map((d) => {
-                    const dayCount = sahaFaaliyetleri.filter((sf) => normalizeDateKey(sf.tarih) === d.date).length;
-                    const dayFormen = sahaFaaliyetleri.filter((sf) => normalizeDateKey(sf.tarih) === d.date && sf.kaynakEkran === 'FORMEN_MOBIL').length;
+                    const dayCount = tumSahaFaaliyetleri.filter((sf) => normalizeDateKey(sf.tarih) === d.date).length;
+                    const dayFormen = tumSahaFaaliyetleri.filter((sf) => normalizeDateKey(sf.tarih) === d.date && sf.kaynakEkran === 'FORMEN_MOBIL').length;
                     return (
                       <button
                         key={d.date}
@@ -4158,7 +4219,7 @@ export const IdariScreen: React.FC<IdariScreenProps> = ({
             )}
 
             {sahaSubTab === 'parsel_analiz' && (
-              <ParselBlokAnalizPanel sahaFaaliyetleri={sahaFaaliyetleri} />
+              <ParselBlokAnalizPanel sahaFaaliyetleri={tumSahaFaaliyetleri} />
             )}
           </div>
 
@@ -4901,7 +4962,7 @@ export const IdariScreen: React.FC<IdariScreenProps> = ({
 
               {/* Work log loops */}
               <div className="space-y-4">
-                {sahaFaaliyetleri.filter(sf => {
+                {tumSahaFaaliyetleri.filter(sf => {
                   if (sahaReportType === 'GUNLUK') {
                     return sf.tarih === sahaReportDate;
                   } else {
@@ -4923,7 +4984,7 @@ export const IdariScreen: React.FC<IdariScreenProps> = ({
                         </tr>
                       </thead>
                       <tbody>
-                        {sahaFaaliyetleri.filter(sf => {
+                        {tumSahaFaaliyetleri.filter(sf => {
                           if (sahaReportType === 'GUNLUK') {
                             return sf.tarih === sahaReportDate;
                           } else {

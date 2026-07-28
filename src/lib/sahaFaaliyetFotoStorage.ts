@@ -96,3 +96,40 @@ export async function ensureSahaFaaliyetFotolarPersisted(
     fotoUrl: uploaded[0],
   };
 }
+
+/**
+ * Kamp faaliyet fotoğrafını Storage'a taşır (`kamp-faaliyet/{id}/…`).
+ * Başarısız olursa inline data URL döner (kayıt yine düşer).
+ */
+export async function ensureKampFaaliyetFotoPersisted(
+  faaliyetId: string,
+  fotoUrl?: string | null
+): Promise<string> {
+  const raw = String(fotoUrl || '').trim();
+  if (!raw) return '';
+  if (/^https?:\/\//i.test(raw) || raw.startsWith('blob:')) return raw;
+
+  const payload = await preparePayload(
+    raw.startsWith('data:') ? raw : `data:image/jpeg;base64,${raw}`
+  );
+
+  try {
+    const path = `kamp-faaliyet/${faaliyetId}/foto_${Date.now()}.jpg`;
+    const storageRef = ref(storage, path);
+    await withTimeout(
+      uploadString(storageRef, payload, 'data_url', {
+        contentType: payload.includes('image/png')
+          ? 'image/png'
+          : payload.includes('image/webp')
+            ? 'image/webp'
+            : 'image/jpeg',
+      }),
+      UPLOAD_TIMEOUT_MS,
+      'Kamp foto Storage'
+    );
+    return await withTimeout(getDownloadURL(storageRef), 6000, 'Kamp foto URL');
+  } catch (err) {
+    console.warn('Kamp foto Storage atlandı, inline kullanılacak:', faaliyetId, err);
+    return payload;
+  }
+}

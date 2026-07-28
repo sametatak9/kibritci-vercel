@@ -6,6 +6,7 @@ import {
 import { KampOdasi, KampKaydi, Personel, StokKart, KampYerleske, KampKat, CariKart, AylikYoklamaMap, Fatura } from '../types/erp';
 import { db, saveDocument } from '../lib/firebase';
 import { compressImage } from '../lib/imageCompress';
+import { ensureKampFaaliyetFotoPersisted } from '../lib/sahaFaaliyetFotoStorage';
 import { createKampYerleske, createKampKat, katsForYerleske, createKampOdasi, deleteKampOdasi, updateKampOdasi } from '../lib/kampYapisi';
 import { assignKampResident, evictKampResident } from '../lib/kampPlacementUtils';
 import { buildKampciGunlukOzet } from '../lib/gunlukAkisUtils';
@@ -1142,6 +1143,10 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
         aktifPersonelListesi = geldiIds;
       }
 
+      const persistedFoto = faaliyetFoto
+        ? await ensureKampFaaliyetFotoPersisted(actId, faaliyetFoto)
+        : null;
+
       const actData = {
         id: actId,
         tarih: bugunTarih,
@@ -1153,7 +1158,7 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
         personelId: aktifPersonelListesi[0],
         yerleskeAdi: faaliyetYerleske,
         aciklama: faaliyetAciklama.trim(),
-        fotoUrl: faaliyetFoto || null,
+        fotoUrl: persistedFoto || null,
         durum: 'ONAY BEKLİYOR',
         onaylayanIdariIsler: null,
         onaylayanMuhasebe: null

@@ -82,6 +82,9 @@ export const TesisatciMobilScreen: React.FC<TesisatciMobilScreenProps> = ({
   useEffect(() => {
     const unsub = onSnapshot(collection(db, 'bildirimler'), (snap) => {
       const now = Date.now();
+      const myEmail = String(currentUser?.email || '')
+        .trim()
+        .toLowerCase();
       snap.docChanges().forEach((change) => {
         if (change.type !== 'added') return;
         const id = change.doc.id;
@@ -89,14 +92,47 @@ export const TesisatciMobilScreen: React.FC<TesisatciMobilScreenProps> = ({
         const data = change.doc.data() as Record<string, unknown>;
         const tip = String(data.tip || '');
         const hedef = String(data.hedefRol || '').toLocaleUpperCase('tr-TR');
+        const hedefEmail = String(data.hedefEmail || '')
+          .trim()
+          .toLowerCase();
         const mesaj = String(data.mesaj || '');
         const ts = new Date(String(data.tarih || 0)).getTime();
-        if (Number.isFinite(ts) && now - ts > 120_000) return;
+        if (Number.isFinite(ts) && now - ts > 600_000) return;
+
+        const isOnaySonucu =
+          tip === 'YILDIRIM_TANKER_FIS_ONAYLANDI' || tip === 'YILDIRIM_TANKER_FIS_REDDEDILDI';
+        if (isOnaySonucu) {
+          if (hedef && !hedef.includes('TESISAT')) return;
+          if (hedefEmail && myEmail && hedefEmail !== myEmail) return;
+          seenNotifIds.current.add(id);
+          vibrateYildirimAlert();
+          setYildirimAlert(mesaj);
+          setActiveSubTab('yildirim');
+          showStatus(
+            tip === 'YILDIRIM_TANKER_FIS_ONAYLANDI' ? 'success' : 'error',
+            mesaj || (tip.includes('ONAYLANDI') ? 'İrsaliye onaylandı.' : 'İrsaliye reddedildi.')
+          );
+          try {
+            window.dispatchEvent(
+              new CustomEvent('app-toast', {
+                detail: {
+                  type: tip.includes('ONAYLANDI') ? 'success' : 'error',
+                  message: mesaj,
+                },
+              })
+            );
+          } catch {
+            /* ignore */
+          }
+          return;
+        }
+
         const isYildirim =
           tip === 'YILDIRIM_TANKER_GIRIS' ||
           tip === 'SU_TANKERI_GIRIS' ||
           (hedef.includes('TESISAT') && mesaj.toLocaleLowerCase('tr-TR').includes('tanker'));
         if (!isYildirim) return;
+        if (Number.isFinite(ts) && now - ts > 120_000) return;
         seenNotifIds.current.add(id);
         vibrateYildirimAlert();
         setYildirimAlert(mesaj || 'Yıldırım Tanker sahaya girdi — fiş yükleyin.');
@@ -113,7 +149,7 @@ export const TesisatciMobilScreen: React.FC<TesisatciMobilScreenProps> = ({
       });
     });
     return () => unsub();
-  }, []);
+  }, [currentUser?.email]);
 
   // ─── Faaliyet state ───────────────────────────────────────────
   const [faaliyetGrubu, setFaaliyetGrubu] = useState<'NORMAL' | 'MESAI'>('NORMAL');

@@ -105,6 +105,8 @@ export const YildirimTankerFisOnayPanel: React.FC<YildirimTankerFisOnayPanelProp
         `Yıldırım Tanker irsaliyesi onaylandı: ${result.fis.fisNo} · cari: ${result.fis.firmaUnvan}`,
         {
           tip: 'YILDIRIM_TANKER_FIS_ONAYLANDI',
+          hedefRol: 'TESİSATÇI',
+          hedefEmail: String(editing.kaydeden || '').trim().toLowerCase() || undefined,
           yildirimTankerFisId: result.fis.id,
           irsaliyeId: result.irsaliye.id,
           cariKartId: result.cariIslem.cariKartId,
@@ -134,7 +136,13 @@ export const YildirimTankerFisOnayPanel: React.FC<YildirimTankerFisOnayPanelProp
       });
       await addNotification?.(
         `Yıldırım Tanker fişi reddedildi: ${f.fisNo}${neden ? ` · ${neden}` : ''}`,
-        { tip: 'YILDIRIM_TANKER_FIS_REDDEDILDI', yildirimTankerFisId: f.id }
+        {
+          tip: 'YILDIRIM_TANKER_FIS_REDDEDILDI',
+          hedefRol: 'TESİSATÇI',
+          hedefEmail: String(f.kaydeden || '').trim().toLowerCase() || undefined,
+          yildirimTankerFisId: f.id,
+          redNedeni: neden,
+        }
       );
       if (editing?.id === f.id) setEditing(null);
     } catch (err: any) {

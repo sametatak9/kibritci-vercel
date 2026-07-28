@@ -14,6 +14,7 @@ import {
   filterYildirimFislerByMonth,
   sumYildirimSular,
   isYildirimTankerFirma,
+  compareYildirimFatura,
 } from '../lib/yildirimTankerUtils';
 import { buildYildirimKalemler } from '../lib/yildirimTankerOnayUtils';
 
@@ -103,6 +104,11 @@ export const TesisatciYildirimTab: React.FC<TesisatciYildirimTabProps> = ({
   );
 
   const aylikToplam = useMemo(() => sumYildirimSular(aylikFisler), [aylikFisler]);
+
+  const eslesme = useMemo(
+    () => compareYildirimFatura(fisler, faturalar, raporYil, raporAy, firmaUnvan),
+    [fisler, faturalar, raporYil, raporAy, firmaUnvan]
+  );
 
   const openFoto = (url?: string) => {
     if (!url) return;
@@ -327,8 +333,6 @@ export const TesisatciYildirimTab: React.FC<TesisatciYildirimTabProps> = ({
     showStatus?.('success', 'Aylık rapor indirildi.');
   };
 
-  void faturalar;
-
   return (
     <div className="space-y-4">
       {lightboxUrl && (
@@ -545,6 +549,58 @@ export const TesisatciYildirimTab: React.FC<TesisatciYildirimTabProps> = ({
               </div>
             ))}
           </div>
+        )}
+      </div>
+
+      <div
+        className={`rounded-2xl p-4 border space-y-3 ${
+          eslesme.faturaSayisi > 0 && !eslesme.uyumlu
+            ? 'bg-rose-50 border-rose-300'
+            : 'bg-white border-slate-200'
+        }`}
+      >
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h4 className="text-[10px] font-black uppercase tracking-wider text-slate-800">
+            Ay Sonu Fatura Eşleşmesi — {firmaUnvan}
+          </h4>
+          <p className="text-[9px] text-slate-500">
+            Onaylı fiş: İ{eslesme.fisIcme} · S{eslesme.fisSanayi} · D{eslesme.fisDamaca}
+          </p>
+        </div>
+        <div className="grid grid-cols-3 gap-2 text-center text-[11px]">
+          <div className="bg-white/80 border rounded-xl p-2">
+            <span className="text-[9px] text-slate-500 block uppercase">Fiş toplam</span>
+            <strong className="text-slate-900 text-sm">{eslesme.fisToplam}</strong>
+          </div>
+          <div className="bg-white/80 border rounded-xl p-2">
+            <span className="text-[9px] text-slate-500 block uppercase">Fatura toplam</span>
+            <strong className="text-slate-900 text-sm">
+              {eslesme.faturaSayisi === 0 ? '—' : eslesme.faturaToplam}
+            </strong>
+          </div>
+          <div className="bg-white/80 border rounded-xl p-2">
+            <span className="text-[9px] text-slate-500 block uppercase">Durum</span>
+            <strong
+              className={`text-sm ${
+                eslesme.faturaSayisi === 0
+                  ? 'text-slate-500'
+                  : eslesme.uyumlu
+                    ? 'text-emerald-600'
+                    : 'text-rose-600'
+              }`}
+            >
+              {eslesme.faturaSayisi === 0
+                ? 'Fatura yok'
+                : eslesme.uyumlu
+                  ? 'Uyumlu'
+                  : `Fark: ${eslesme.fark}`}
+            </strong>
+          </div>
+        </div>
+        {eslesme.faturaSayisi > 0 && !eslesme.uyumlu && (
+          <p className="text-[10px] text-rose-700 font-semibold">
+            Onaylı irsaliye adetleri ile fatura kalem toplamı uyuşmuyor — fatura geldiğinde kontrol edin.
+          </p>
         )}
       </div>
 
