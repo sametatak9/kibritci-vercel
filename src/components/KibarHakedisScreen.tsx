@@ -522,6 +522,31 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
     [monthlyKampFaaliyetleri]
   );
 
+  /** Kamp faaliyet fotoğrafları — tabloda yan yana değil, kolaj bölümünde */
+  const kampKolajFotolari = useMemo(() => {
+    const fromMerge = birlesikKolajFotolari.filter(
+      (f) => f.parsel === 'Kamp' || String(f.id || '').startsWith('kamp_')
+    );
+    if (fromMerge.length > 0) return fromMerge;
+    return kampFaaliyetSatirlari
+      .filter((k) => k.fotoUrl)
+      .map((k, i) => ({
+        id: `kamp_rpt_${k.id}`,
+        albumKey: donemKey,
+        yil: selectedYear,
+        ay: selectedMonth,
+        imageUrl: k.fotoUrl!,
+        baslik: k.faaliyetTipi || 'Kamp',
+        aciklama: k.aciklama,
+        grupAdi: 'Kamp Faaliyetleri',
+        sira: i + 1,
+        yuklemeTarihi: k.tarihDate || donemKey,
+        yukleyen: 'Kampçı',
+        parsel: 'Kamp',
+        blok: k.faaliyetTipi || 'Lojman',
+      })) as SahaKolajFoto[];
+  }, [birlesikKolajFotolari, kampFaaliyetSatirlari, donemKey, selectedYear, selectedMonth]);
+
   const totalPersonDays = activeStaffRows.reduce((s, r) => s + r.geldiGun, 0);
   const totalMesaiSaat = activeStaffRows.reduce((s, r) => s + r.mesaiSaat, 0);
   const totalGunKazanci = activeStaffRows.reduce((s, r) => s + r.gunKazanci, 0);
@@ -1275,10 +1300,11 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
                 <h4>Kontrol sonucu — mesai dahil aylık şirket kârı</h4>
                 <p className="rpt-zarar-msg">
                   Taban maaşlar {formatMoney(TABAN_FARK_TL, 0)} fazla olsaydı mesai hakedişleri de artardı
-                  (mesai = taban ÷ {analysisSummary.days} ÷ 7,5 × 1,5 × saat). Bu indirim sayesinde şirket
-                  bu ay <strong>{formatMoney(analysisSummary.aylikSirketKari, 0)}</strong> kâr ediyor:
-                  gün tasarrufu {formatMoney(analysisSummary.gunTasarrufu, 0)} + mesai tasarrufu{' '}
-                  {formatMoney(analysisSummary.mesaiTasarrufu, 0)} (mesai payı %{analysisSummary.mesaiPayiPct.toFixed(1)}).
+                  (mesai = taban ÷ {analysisSummary.days} ÷ 7,5 × 1,5 × saat). Hesap{' '}
+                  <strong>kişi bazlıdır</strong> — her personelin kendi maaş tabanı kullanılır; «ort. taban» yalnızca özet.
+                  Bu indirim sayesinde şirket bu ay <strong>{formatMoney(analysisSummary.aylikSirketKari, 0)}</strong> kâr ediyor:
+                  gün {formatMoney(analysisSummary.gunTasarrufu, 0)} + mesai {formatMoney(analysisSummary.mesaiTasarrufu, 0)}
+                  (mesai payı %{analysisSummary.mesaiPayiPct.toFixed(1)}).
                 </p>
                 <p className="rpt-math-formula">
                   Gün = (taban ÷ {analysisSummary.days}) × geldi · Mesai = (taban ÷ {analysisSummary.days} ÷ 7,5) × 1,5 × saat
@@ -1311,60 +1337,9 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
                 <p className="rpt-zer-meta">
                   {activeStaffRows.length} personel · {totalPersonDays} iş-günü · {totalMesaiSaat.toLocaleString('tr-TR', { maximumFractionDigits: 1 })} sa mesai
                   · kişi başı ortalama kâr {formatMoney(analysisSummary.ortalamaKisiMasrafArtisi, 0)}
-                  · mesai dahil doğrulandı
+                  · kişi bazlı maaş + mesai dahil ✓
                 </p>
               </div>
-
-              <section>
-                <p className="rpt-sec-title m-0">0 · Personel Bazında Şirket Kârı (Gün + Mesai)</p>
-                <p className="rpt-sec-sub">
-                  Her satır: mevcut taban → mevcut + {formatMoney(TABAN_FARK_TL, 0)} · aynı gün / aynı mesai · kâr = fark
-                </p>
-                <div className="rpt-table-wrap">
-                  <table className="rpt-staff-table">
-                    <thead>
-                      <tr>
-                        <th className="rpt-align-c">#</th>
-                        <th className="rpt-align-l">Ad Soyad</th>
-                        <th className="rpt-align-r">Şuanki Taban</th>
-                        <th className="rpt-align-r">+{formatMoney(TABAN_FARK_TL, 0)}</th>
-                        <th className="rpt-align-c">Gün</th>
-                        <th className="rpt-align-c">Mesai</th>
-                        <th className="rpt-align-r">Şuanki Toplam</th>
-                        <th className="rpt-align-r">+{formatMoney(TABAN_FARK_TL, 0)} Toplam</th>
-                        <th className="rpt-align-r">Şirket Kârı</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {analysisSummary.personelSenaryolari.map((p, idx) => (
-                        <tr key={`${p.adSoyad}-${idx}`}>
-                          <td className="rpt-align-c rpt-mono">{idx + 1}</td>
-                          <td className="rpt-name">{p.adSoyad}</td>
-                          <td className="rpt-td-num rpt-mono">{formatMoney(p.mevcutTaban, 0)}</td>
-                          <td className="rpt-td-num rpt-mono">{formatMoney(p.senaryoTaban, 0)}</td>
-                          <td className="rpt-align-c rpt-mono">{p.geldiGun}</td>
-                          <td className="rpt-align-c rpt-mono">{p.mesaiSaat}</td>
-                          <td className="rpt-td-num rpt-mono">{formatMoney(p.mevcutToplam, 0)}</td>
-                          <td className="rpt-td-num rpt-mono">{formatMoney(p.senaryoToplam, 0)}</td>
-                          <td className="rpt-td-num rpt-mono" style={{ color: '#047857', fontWeight: 800 }}>
-                            {formatMoney(p.sirketKari, 0)}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                    <tfoot>
-                      <tr className="rpt-foot">
-                        <td colSpan={6} className="rpt-align-r">TOPLAM AYLIK ŞİRKET KÂRI (GÜN+MESAİ)</td>
-                        <td className="rpt-td-num rpt-mono">{formatMoney(totalMaasKazanci, 0)}</td>
-                        <td className="rpt-td-num rpt-mono">{formatMoney(analysisSummary.senaryoToplamMasraf, 0)}</td>
-                        <td className="rpt-td-num rpt-mono" style={{ color: '#047857', fontWeight: 900 }}>
-                          {formatMoney(analysisSummary.aylikSirketKari, 0)}
-                        </td>
-                      </tr>
-                    </tfoot>
-                  </table>
-                </div>
-              </section>
 
               {/* —— ZER YAPI Hakediş Özeti —— */}
               <div className="rpt-zer-box">
@@ -1518,9 +1493,7 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
                 <p className="rpt-sec-title m-0">3 · Kamp / Lojman Faaliyetleri</p>
                 <p className="rpt-sec-sub">
                   {kampFaaliyetSatirlari.length} kayıt
-                  {kampFaaliyetSatirlari.filter((k) => k.fotoUrl).length > 0
-                    ? ` · ${kampFaaliyetSatirlari.filter((k) => k.fotoUrl).length} fotoğraflı`
-                    : ''}
+                  {kampKolajFotolari.length > 0 ? ` · ${kampKolajFotolari.length} fotoğraf kolajda` : ''}
                 </p>
                 {kampFaaliyetSatirlari.length === 0 ? (
                   <p className="text-[9px] text-slate-400 italic">Bu dönemde kamp faaliyeti kaydı yok.</p>
@@ -1528,11 +1501,10 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
                   <div className="rpt-table-wrap">
                     <table className="rpt-act-table">
                       <colgroup>
-                        <col style={{ width: '4%' }} />
-                        <col style={{ width: '12%' }} />
+                        <col style={{ width: '5%' }} />
                         <col style={{ width: '14%' }} />
-                        <col style={{ width: '55%' }} />
-                        <col style={{ width: '15%' }} />
+                        <col style={{ width: '18%' }} />
+                        <col style={{ width: '63%' }} />
                       </colgroup>
                       <thead>
                         <tr>
@@ -1540,7 +1512,6 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
                           <th className="rpt-align-l rpt-kamp-date">Tarih</th>
                           <th className="rpt-align-l rpt-kamp-tip">Tip</th>
                           <th className="rpt-align-l rpt-kamp-desc">Açıklama</th>
-                          <th className="rpt-align-c">Foto</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -1553,21 +1524,25 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
                             </td>
                             <td className="rpt-kamp-tip rpt-align-l">{kf.faaliyetTipi}</td>
                             <td className="rpt-kamp-desc rpt-align-l">{kf.aciklama}</td>
-                            <td className="rpt-align-c">
-                              {kf.fotoUrl ? (
-                                <img
-                                  src={kf.fotoUrl}
-                                  alt=""
-                                  className="w-12 h-12 object-cover rounded border border-slate-200 mx-auto"
-                                />
-                              ) : (
-                                <span className="text-[8px] text-slate-400">—</span>
-                              )}
-                            </td>
                           </tr>
                         ))}
                       </tbody>
                     </table>
+                  </div>
+                )}
+                {kampKolajFotolari.length > 0 && (
+                  <div className="mt-3">
+                    <p className="rpt-foto-grup">Kamp faaliyet foto kolajı ({kampKolajFotolari.length})</p>
+                    <div className="rpt-foto-grid">
+                      {kampKolajFotolari.slice(0, 48).map((f) => (
+                        <div key={f.id} className="rpt-foto-card">
+                          <img src={f.imageUrl} alt={f.baslik || 'Kamp foto'} />
+                          <div className="rpt-foto-cap">
+                            {(f.baslik || f.aciklama || 'Kamp').slice(0, 48)}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 )}
               </section>
@@ -1634,13 +1609,16 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
                     Aylık şirket kârı: {formatMoney(analysisSummary.aylikSirketKari, 0)}
                   </div>
                   <div style={{ marginTop: 4, fontSize: '7pt', color: '#047857' }}>
-                    Mesai dahil ✓ · {formatMoney(analysisSummary.mesaiTasarrufu, 0)}
+                    Kişi bazlı maaş ✓ · Mesai dahil ✓ · {formatMoney(analysisSummary.mesaiTasarrufu, 0)}
                   </div>
                 </div>
                 <div className="rpt-compare-card">
-                  <strong>Formül / sunum</strong>
-                  <div className="rpt-quote" style={{ marginTop: 6, whiteSpace: 'pre-wrap', fontFamily: 'Consolas, monospace', fontSize: '7.5pt' }}>
-                    {shareableSummary}
+                  <strong>ZER YAPI hakediş</strong>
+                  <div style={{ marginTop: 6, fontSize: '9pt', color: '#047857', fontWeight: 900 }}>
+                    {formatMoney(totalZerYapiHakedis, 0)}
+                  </div>
+                  <div style={{ marginTop: 4, fontSize: '7.5pt', color: '#4b5563' }}>
+                    {totalPersonDays} gün × ₺{ZER_YAPI_GUNLUK}
                   </div>
                 </div>
               </div>
