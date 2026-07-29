@@ -1432,6 +1432,7 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
                               currentUserEmail={currentUser?.email}
                               busy={patchBusyId === f.id}
                               onPatch={(patch) => patchSahaFaaliyet(f, patch)}
+                              onOpenFoto={openLightbox}
                             />
                           ) : (
                             f.isEtiketi || f.ilerlemeDurumu ? (
@@ -1855,6 +1856,7 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
                               currentUserEmail={currentUser?.email}
                               busy={patchBusyId === f.id}
                               onPatch={(patch) => patchSahaFaaliyet(f, patch)}
+                              onOpenFoto={openLightbox}
                               compact
                             />
                           ) : null}

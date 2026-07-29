@@ -457,6 +457,11 @@ export interface FaaliyetIlerlemeKaydi {
   fotoUrls?: string[];
   yazar?: string;
   yazarRol?: string;
+  /**
+   * Opsiyonel aşama — zorunlu değil.
+   * Temizlik vb. işlerde başlangıç/devam/bitiş foto ayrımı için.
+   */
+  asama?: 'BASLANGIC' | 'ILERLEME' | 'BITIS';
 }
 
 export interface SahaFaaliyeti {

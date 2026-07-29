@@ -34,3 +34,34 @@ export function ilerlemeDurumuLabel(d?: string | null): string {
   const k = String(d || '').toUpperCase() as FaaliyetIlerlemeDurumu;
   return ILERLEME_DURUM_LABEL[k] || '—';
 }
+
+export type FaaliyetAsamaAnahtari = 'BASLANGIC' | 'ILERLEME' | 'BITIS';
+
+export const FAALIYET_ASAMA_ONSETLERI: Array<{
+  key: FaaliyetAsamaAnahtari;
+  label: string;
+  hint: string;
+}> = [
+  { key: 'BASLANGIC', label: 'Başlangıç', hint: 'İşe başlarken / önce' },
+  { key: 'ILERLEME', label: 'Devam', hint: 'Sıradaki aşama / ara' },
+  { key: 'BITIS', label: 'Bitiş', hint: 'Tamamlandıktan sonra' },
+];
+
+export const FAALIYET_ASAMA_LABEL: Record<FaaliyetAsamaAnahtari, string> = {
+  BASLANGIC: 'Başlangıç',
+  ILERLEME: 'Devam',
+  BITIS: 'Bitiş',
+};
+
+export function normalizeFaaliyetAsama(raw?: string | null): FaaliyetAsamaAnahtari | '' {
+  const k = String(raw || '').trim().toLocaleUpperCase('tr-TR');
+  if (k === 'BASLANGIC' || k === 'BAŞLANGIÇ' || k === 'ONCE' || k === 'ÖNCE') return 'BASLANGIC';
+  if (k === 'ILERLEME' || k === 'DEVAM' || k === 'ARA') return 'ILERLEME';
+  if (k === 'BITIS' || k === 'BİTİŞ' || k === 'SONRA' || k === 'TAMAM') return 'BITIS';
+  return '';
+}
+
+export function faaliyetAsamaLabel(raw?: string | null): string {
+  const k = normalizeFaaliyetAsama(raw);
+  return k ? FAALIYET_ASAMA_LABEL[k] : '';
+}
