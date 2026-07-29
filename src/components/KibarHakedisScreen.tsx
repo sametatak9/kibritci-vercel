@@ -8,6 +8,7 @@ import { collection, doc, getDoc, onSnapshot, query, where } from 'firebase/fire
 import { Personel, AylikYoklamaMap, SahaKolajFoto, ProgramliFaaliyet, TesisatciFaaliyet, MermerciFaaliyet } from '../types/erp';
 import { tesisatciToSaha, mermerciToSaha } from '../lib/mobilFaaliyetAdapter';
 import { CorporateReportLayout } from './CorporateReportLayout';
+import { CORPORATE_COMPANY, getCorporateReportCss } from '../lib/corporateReportHtml';
 import { buildPersonelListForMonth, isDayActiveForPersonel, normalizeTurkishName } from '../lib/yoklamaUtils';
 import { resolveStubPersonelFromLegacyId } from '../lib/legacyYoklamaImport';
 import { normalizeGorev } from '../lib/gorevUtils';
@@ -153,6 +154,25 @@ const REPORT_CSS = `
   .rpt-summary-hakedis { border-color: #059669; background: #fafafa; }
   .rpt-summary-hakedis span:first-child { color: #047857; }
   .rpt-summary-hakedis .rpt-summary-val { color: #047857; font-size: 13pt; font-weight: 800; }
+  .rpt-zarar-box {
+    border: 2px solid #b91c1c; background: #fef2f2; border-radius: 4px;
+    padding: 14px 16px; margin: 10px 0; page-break-inside: avoid;
+  }
+  .rpt-zarar-box h4 {
+    margin: 0 0 6px; font-size: 9pt; color: #991b1b;
+    text-transform: uppercase; letter-spacing: 0.05em; font-weight: 800;
+  }
+  .rpt-zarar-hero {
+    font-size: 18pt; font-weight: 900; color: #b91c1c;
+    font-family: Consolas, 'Courier New', monospace; margin: 6px 0 4px;
+  }
+  .rpt-zarar-msg {
+    font-size: 8.5pt; color: #7f1d1d; line-height: 1.5; margin: 0 0 6px; font-weight: 600;
+  }
+  .rpt-antet-line {
+    font-size: 7pt; color: #64748b; text-transform: uppercase; letter-spacing: 0.04em;
+    margin: 0 0 8px; font-weight: 700;
+  }
   .rpt-compare-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }
   .rpt-compare-card { border: 1px solid #d1d5db; border-radius: 4px; padding: 10px; background: #fafafa; }
   .rpt-compare-card strong { color: #1f2937; }
@@ -543,26 +563,22 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
       .filter((p) => Math.abs(p.masrafFarki) >= 1);
 
     const güçlüArgüman = [
-      `${donemLabel} dönemi güçlü maaş senaryosu analizi, mevcut bordro/maaş tabanı ile «herkes ${formatMoney(SENARYO_MAAS_TABANI, 0)} maaş tabanıyla çalışsaydı» varsayımını aynı yoklama günleri ve aynı mesai saatleri üzerinden karşılaştırır.`,
-      `Bu dönemde rapora alınan ${activeStaffRows.length} personelin toplam ${totalPersonDays} iş-günü ve ${totalMesaiSaat.toLocaleString('tr-TR', { maximumFractionDigits: 1 })} saat mesaisi bulunmaktadır.`,
-      `Mevcut durumda gün kazancı ${formatMoney(totalGunKazanci, 0)}, mesai kazancı ${formatMoney(totalMesaiKazanci, 0)}, toplam personel masrafı ${formatMoney(totalMaasKazanci, 0)} olarak hesaplanmıştır.`,
-      `Maaş tabanı ${formatMoney(SENARYO_MAAS_TABANI, 0)}’a yükseldiğinde yalnızca aylık net maaş farkı değil; günlük hakediş ve mesai hakedişi de oransal olarak artar. Çünkü gün kazancı = (maaş ÷ ${days} gün) × geldi gün, mesai kazancı = (maaş ÷ ${days} ÷ 7,5) × 1,5 × mesai saati formülüyle tabana bağlıdır.`,
-      `Örnek: tabanı ${formatMoney(DEFAULT_MAAS_TABANI, 0)} olan bir personel ${formatMoney(SENARYO_MAAS_TABANI, 0)} alsaydı aylık tabanda ${formatMoney(ornekTabanFark, 0)} fazla görünürdü; ancak aynı ayda mesai yaptığı için toplam masraf artışı yalnızca bu ${formatMoney(ornekTabanFark, 0)} ile sınırlı kalmaz — mesai hakedişi de yükselir.`,
-      `Senaryo sonucu: ${formatMoney(SENARYO_MAAS_TABANI, 0)} tabanıyla gün kazancı ${formatMoney(senaryoGunToplam, 0)}, mesai kazancı ${formatMoney(senaryoMesaiToplam, 0)}, toplam masraf ${formatMoney(senaryoToplamMasraf, 0)} olurdu.`,
-      `Mevcut masrafa göre fark (ek yük): ${formatMoney(masrafArtisi, 0)} — bunun ${formatMoney(gunMasrafArtisi, 0)}’ı gün kazancından, ${formatMoney(mesaiMasrafArtisi, 0)}’ı mesai hakedişinden kaynaklanır.`,
-      `Personellerin ortalama mevcut tabanı ${formatMoney(ortalamaMevcutTaban, 0)}; senaryo tabanına göre kişi başı ortalama taban farkı ${formatMoney(ortalamaTabanFark, 0)}, kişi başı ortalama toplam masraf farkı (gün+mesai) ${formatMoney(ortalamaKisiMasrafArtisi, 0)}.`,
-      `${tabanAltinda} personelin mevcut tabanı ${formatMoney(SENARYO_MAAS_TABANI, 0)}’ın altında; ${tabanUstundeVeyaEsit} personelin tabanı eşit veya üzerindedir.`,
-      `ZER YAPI hakedişi (gün × ₺${ZER_YAPI_GUNLUK}) bu senaryodan bağımsızdır ve ${formatMoney(totalZerYapiHakedis, 0)} seviyesindedir. Rol dağılımı: ${roleMix.duzIsci} düz işçi, ${roleMix.usta} usta, ${roleMix.formen} formen, ${roleMix.senior} senior/diğer.`,
+      `AMAÇ: Şirkete göstermek — bu personel kadrosu kişi başı yaklaşık ${formatMoney(ornekTabanFark, 0)} daha pahalıya (ör. ${formatMoney(DEFAULT_MAAS_TABANI, 0)} → ${formatMoney(SENARYO_MAAS_TABANI, 0)}) çalışsaydı ${donemLabel} döneminde ne kadar zarar edilirdi.`,
+      `Kapsam: ${activeStaffRows.length} personel · ${totalPersonDays} iş-günü · ${totalMesaiSaat.toLocaleString('tr-TR', { maximumFractionDigits: 1 })} saat mesai. Mevcut toplam personel masrafı ${formatMoney(totalMaasKazanci, 0)} (gün ${formatMoney(totalGunKazanci, 0)} + mesai ${formatMoney(totalMesaiKazanci, 0)}).`,
+      `Senaryo: Aynı yoklama günleri ve aynı mesai saatleri korunur; herkesin maaş tabanı ${formatMoney(SENARYO_MAAS_TABANI, 0)} kabul edilir. Gün kazancı = (maaş ÷ ${days}) × geldi gün; mesai = (maaş ÷ ${days} ÷ 7,5) × 1,5 × saat — bu yüzden taban yükselince mesai hakedişi de artar.`,
+      `Sonuç: ${formatMoney(SENARYO_MAAS_TABANI, 0)} tabanıyla toplam masraf ${formatMoney(senaryoToplamMasraf, 0)} olurdu. Şirketin dönem zararı (fark) ${formatMoney(masrafArtisi, 0)} — kırılım: gün ${formatMoney(gunMasrafArtisi, 0)} + mesai ${formatMoney(mesaiMasrafArtisi, 0)}.`,
+      `Yorum: «Kişi başı ${formatMoney(ornekTabanFark, 0)} pahalı» yalnızca taban farkıdır; mesaili personelde gerçek zarar bundan daha yüksektir. Ortalama mevcut taban ${formatMoney(ortalamaMevcutTaban, 0)}; kişi başı ortalama dönem zararı ${formatMoney(ortalamaKisiMasrafArtisi, 0)}. ${tabanAltinda} personel ${formatMoney(SENARYO_MAAS_TABANI, 0)} altında.`,
+      `ZER YAPI hakedişi (gün × ₺${ZER_YAPI_GUNLUK} = ${formatMoney(totalZerYapiHakedis, 0)}) bu zarar hesabından bağımsızdır. Rol dağılımı: ${roleMix.duzIsci} düz işçi, ${roleMix.usta} usta, ${roleMix.formen} formen, ${roleMix.senior} senior/diğer.`,
     ].join(' ');
 
     const shareableParagraphs = [
-      `1) Amaç: ${donemLabel} için personel masrafının, maaş tabanı ${formatMoney(SENARYO_MAAS_TABANI, 0)} olsaydı ne kadar artacağını ortaya koymak.`,
-      `2) Yöntem: Aynı geldi günleri ve aynı mesai saatleri korunur; yalnızca maaş tabanı ${formatMoney(SENARYO_MAAS_TABANI, 0)} kabul edilir. Gün ve mesai hakedişleri yeniden hesaplanır.`,
-      `3) Mevcut masraf: Gün ${formatMoney(totalGunKazanci, 0)} + Mesai ${formatMoney(totalMesaiKazanci, 0)} = ${formatMoney(totalMaasKazanci, 0)}.`,
-      `4) Senaryo masrafı: Gün ${formatMoney(senaryoGunToplam, 0)} + Mesai ${formatMoney(senaryoMesaiToplam, 0)} = ${formatMoney(senaryoToplamMasraf, 0)}.`,
-      `5) Ek yük (fark): ${formatMoney(masrafArtisi, 0)} (gün farkı ${formatMoney(gunMasrafArtisi, 0)} · mesai farkı ${formatMoney(mesaiMasrafArtisi, 0)}).`,
-      `6) Yorum: Taban yükselince mesai birim ücreti de yükseldiği için toplam etki, yalnızca «kişi başı ${formatMoney(ornekTabanFark, 0)} zam» ifadesinden daha yüksektir (mesaili personelde).`,
-      `7) Kapsam: ${activeStaffRows.length} personel · ${totalPersonDays} iş-günü · ${totalMesaiSaat.toLocaleString('tr-TR', { maximumFractionDigits: 1 })} sa mesai · ortalama mevcut taban ${formatMoney(ortalamaMevcutTaban, 0)}.`,
+      `KİBRİTÇİ · ZER YAPI PERSONEL MALİYET FARK / ZARAR RAPORU — ${donemLabel}`,
+      `Amaç: Bu personeller kişi başı ~${formatMoney(ornekTabanFark, 0)} pahalıya çalışsaydı (${formatMoney(DEFAULT_MAAS_TABANI, 0)} → ${formatMoney(SENARYO_MAAS_TABANI, 0)}), şirketin dönem zararı ne olurdu?`,
+      `1) Mevcut masraf: ${formatMoney(totalMaasKazanci, 0)} (gün ${formatMoney(totalGunKazanci, 0)} + mesai ${formatMoney(totalMesaiKazanci, 0)}).`,
+      `2) 36.000 TL tabanlı senaryo masrafı: ${formatMoney(senaryoToplamMasraf, 0)} (gün ${formatMoney(senaryoGunToplam, 0)} + mesai ${formatMoney(senaryoMesaiToplam, 0)}).`,
+      `3) DÖNEM ZARARI (fark): ${formatMoney(masrafArtisi, 0)} — gün farkı ${formatMoney(gunMasrafArtisi, 0)} · mesai farkı ${formatMoney(mesaiMasrafArtisi, 0)}.`,
+      `4) Neden mesai de artar? Maaş tabanı yükselince saat ücreti yükselir; aynı mesai saati daha pahalıya gelir.`,
+      `5) Kapsam: ${activeStaffRows.length} personel · ${totalPersonDays} iş-günü · ${totalMesaiSaat.toLocaleString('tr-TR', { maximumFractionDigits: 1 })} sa mesai · ortalama mevcut taban ${formatMoney(ortalamaMevcutTaban, 0)} · kişi başı ortalama zarar ${formatMoney(ortalamaKisiMasrafArtisi, 0)}.`,
       güçlüArgüman,
     ].join('\n\n');
 
@@ -577,6 +593,7 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
       senaryoMesaiToplam,
       senaryoToplamMasraf,
       masrafArtisi,
+      donemZarari: masrafArtisi,
       gunMasrafArtisi,
       mesaiMasrafArtisi,
       ortalamaMevcutTaban,
@@ -673,7 +690,7 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
         donemLabel,
         yil: selectedYear,
         ay: selectedMonth,
-        raporTipi: 'ZER_YAPI_MAAS_SENARYO_ANALIZ',
+        raporTipi: 'ZER_YAPI_ZARAR_FARK_ANALIZ',
         durum: 'ANALIZ_KAYDEDİLDİ',
         personelSayisi: activeStaffRows.length,
         toplamCalismaGunu: totalPersonDays,
@@ -690,6 +707,8 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
         senaryoMesaiToplam: analysisSummary.senaryoMesaiToplam,
         senaryoToplamMasraf: analysisSummary.senaryoToplamMasraf,
         masrafArtisi: analysisSummary.masrafArtisi,
+        donemZarari: analysisSummary.donemZarari,
+        ornekTabanFark: analysisSummary.ornekTabanFark,
         gunMasrafArtisi: analysisSummary.gunMasrafArtisi,
         mesaiMasrafArtisi: analysisSummary.mesaiMasrafArtisi,
         ortalamaMevcutTaban: analysisSummary.ortalamaMevcutTaban,
@@ -697,7 +716,7 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
         olusturan: currentUser?.email || 'sametatak9@gmail.com',
         olusturmaTarihi: new Date().toISOString(),
       });
-      showStatus('success', `${donemLabel} güçlü maaş senaryosu analizi kaydedildi!`);
+      showStatus('success', `${donemLabel} zarar/fark raporu kaydedildi!`);
     } catch (err: any) {
       showStatus('error', `Analiz raporu kaydedilirken hata: ${err.message}`);
     } finally {
@@ -705,7 +724,7 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
     }
   };
 
-  const buildReportHtmlDocument = (content: string): string => `<!DOCTYPE html><html lang="tr"><head><meta charset="utf-8"><title>ZER_YAPI_Hakedis_${donemKey}</title><style>body{margin:0;padding:24px;font-family:'Segoe UI',Arial,sans-serif;color:#1f2937;background:#f8fafc;}${REPORT_CSS}</style></head><body><div class="report-root">${content}</div></body></html>`;
+  const buildReportHtmlDocument = (content: string): string => `<!DOCTYPE html><html lang="tr"><head><meta charset="utf-8"><title>ZER_YAPI_Fark_Zarar_${donemKey}</title><style>body{margin:0;padding:24px;font-family:'Segoe UI',Arial,sans-serif;color:#1f2937;background:#f8fafc;}${getCorporateReportCss()}${REPORT_CSS}</style></head><body><div class="report-root">${content}</div></body></html>`;
 
   const handleDownloadHtml = () => {
     const printContent = document.getElementById('kibar-report-print-area')?.innerHTML;
@@ -745,9 +764,10 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
       ws.addRow(['Senaryo mesai kazancı', formatMoney(analysisSummary.senaryoMesaiToplam, 0)]);
       ws.addRow(['Senaryo toplam masraf', formatMoney(analysisSummary.senaryoToplamMasraf, 0)]);
       ws.addRow(['Mevcut toplam masraf', formatMoney(totalMaasKazanci, 0)]);
-      ws.addRow(['Ek yük (fark)', formatMoney(analysisSummary.masrafArtisi, 0)]);
+      ws.addRow(['Ek yük / Dönem zararı', formatMoney(analysisSummary.donemZarari, 0)]);
       ws.addRow(['  · Gün farkı', formatMoney(analysisSummary.gunMasrafArtisi, 0)]);
       ws.addRow(['  · Mesai farkı', formatMoney(analysisSummary.mesaiMasrafArtisi, 0)]);
+      ws.addRow(['Örnek taban farkı (~6.000)', formatMoney(analysisSummary.ornekTabanFark, 0)]);
       ws.addRow(['Tabanı 36.000 altı personel', analysisSummary.tabanAltinda]);
       ws.addRow([]);
 
@@ -842,8 +862,8 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
       const topLines = [
         `Personel sayısı: ${activeStaffRows.length} · Toplam iş günü: ${totalPersonDays} · Toplam mesai: ${totalMesaiSaat} sa`,
         `ZER YAPI: ${formatMoney(totalZerYapiHakedis, 0)} · Mevcut personel masrafı: ${formatMoney(totalMaasKazanci, 0)}`,
-        `Senaryo (${formatMoney(SENARYO_MAAS_TABANI, 0)} taban): ${formatMoney(analysisSummary.senaryoToplamMasraf, 0)} · Ek yük: ${formatMoney(analysisSummary.masrafArtisi, 0)}`,
-        `Ek yük kırılımı — gün: ${formatMoney(analysisSummary.gunMasrafArtisi, 0)} · mesai: ${formatMoney(analysisSummary.mesaiMasrafArtisi, 0)}`,
+        `Senaryo (${formatMoney(SENARYO_MAAS_TABANI, 0)} taban): ${formatMoney(analysisSummary.senaryoToplamMasraf, 0)} · Dönem zararı: ${formatMoney(analysisSummary.donemZarari, 0)}`,
+        `Zarar kırılımı — gün: ${formatMoney(analysisSummary.gunMasrafArtisi, 0)} · mesai: ${formatMoney(analysisSummary.mesaiMasrafArtisi, 0)} · taban farkı örn: ${formatMoney(analysisSummary.ornekTabanFark, 0)}`,
       ];
       topLines.forEach((line) => {
         const wrapped = doc.splitTextToSize(line, pageWidth - margin * 2);
@@ -918,7 +938,10 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
       tr { page-break-inside: avoid; break-inside: avoid; }
       svg:not(.rpt-logo-mark) { display: none !important; }
       .rpt-logo-mark { display: block !important; max-height: 14mm; width: auto; }
+      .corporate-report-logo-img { display: block !important; height: 75px !important; width: auto !important; max-width: 220px !important; }
+      .corporate-report-watermark-img { display: block !important; }
       .rpt-foto-card img { display: block !important; }
+      ${getCorporateReportCss()}
       ${REPORT_CSS}
       @media print {
         html, body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
@@ -989,10 +1012,10 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
             onClick={handleCreateAnalysisReport}
             disabled={loading}
             className="bg-violet-600 hover:bg-violet-700 text-white font-bold text-xs px-4 py-2.5 rounded-xl transition shadow cursor-pointer flex items-center space-x-1"
-            title="36.000 TL maaş tabanı senaryosu: gün + mesai masraf farkını hesaplar ve kaydeder."
+            title="~6.000 TL pahalı çalışma senaryosu: dönem zararını hesaplar ve kaydeder."
           >
             {loading ? <RefreshCw size={12} className="animate-spin" /> : <BarChart3 size={12} />}
-            <span>Güçlü Analiz Oluştur</span>
+            <span>Zarar / Fark Raporu</span>
           </button>
           <button
             onClick={handleSaveReport}
@@ -1119,31 +1142,36 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
               </span>
             </div>
 
-            <div className="bg-violet-50 border border-violet-200 p-4 rounded-xl space-y-2">
-              <span className="text-[9px] text-violet-800 font-black block uppercase tracking-wide">
-                36.000 TL Maaş Senaryosu
+            <div className="bg-rose-50 border-2 border-rose-300 p-4 rounded-xl space-y-2">
+              <span className="text-[9px] text-rose-900 font-black block uppercase tracking-wide">
+                Dönem Zararı — ~{formatMoney(analysisSummary.ornekTabanFark, 0)} Pahalı Çalışma
               </span>
+              <p className="text-[8px] text-rose-800 font-semibold leading-relaxed">
+                Amaç: Bu personeller kişi başı ~{formatMoney(analysisSummary.ornekTabanFark, 0)} pahalıya
+                ({formatMoney(DEFAULT_MAAS_TABANI, 0)} → {formatMoney(SENARYO_MAAS_TABANI, 0)}) çalışsaydı
+                şirketin {donemLabel} zararı ne olurdu?
+              </p>
               <div className="flex justify-between text-[10px]">
-                <span className="text-violet-700">Mevcut toplam masraf</span>
-                <span className="font-mono font-bold text-violet-900">{formatMoney(totalMaasKazanci, 0)}</span>
+                <span className="text-rose-700">Mevcut masraf</span>
+                <span className="font-mono font-bold text-rose-900">{formatMoney(totalMaasKazanci, 0)}</span>
               </div>
               <div className="flex justify-between text-[10px]">
-                <span className="text-violet-700">Senaryo masrafı (36.000 taban)</span>
-                <span className="font-mono font-bold text-violet-900">{formatMoney(analysisSummary.senaryoToplamMasraf, 0)}</span>
+                <span className="text-rose-700">36.000 TL senaryo</span>
+                <span className="font-mono font-bold text-rose-900">{formatMoney(analysisSummary.senaryoToplamMasraf, 0)}</span>
               </div>
-              <div className="flex justify-between text-[10px] border-t border-violet-200 pt-2">
-                <span className="text-violet-800 font-bold">Ek yük (fark)</span>
-                <span className="font-mono font-black text-violet-950">{formatMoney(analysisSummary.masrafArtisi, 0)}</span>
+              <div className="flex justify-between text-[10px] border-t border-rose-200 pt-2">
+                <span className="text-rose-900 font-black">Dönem zararı</span>
+                <span className="font-mono font-black text-rose-950 text-sm">{formatMoney(analysisSummary.donemZarari, 0)}</span>
               </div>
-              <div className="flex justify-between text-[9px] text-violet-700">
-                <span>Gün farkı</span>
+              <div className="flex justify-between text-[9px] text-rose-700">
+                <span>Gün kaynaklı</span>
                 <span className="font-mono">{formatMoney(analysisSummary.gunMasrafArtisi, 0)}</span>
               </div>
-              <div className="flex justify-between text-[9px] text-violet-700">
-                <span>Mesai farkı</span>
+              <div className="flex justify-between text-[9px] text-rose-700">
+                <span>Mesai kaynaklı</span>
                 <span className="font-mono">{formatMoney(analysisSummary.mesaiMasrafArtisi, 0)}</span>
               </div>
-              <div className="text-[8px] text-violet-700 font-semibold leading-relaxed whitespace-pre-wrap">
+              <div className="text-[8px] text-rose-800 font-semibold leading-relaxed whitespace-pre-wrap max-h-40 overflow-y-auto">
                 {analysisSummary.güçlüArgüman}
               </div>
             </div>
@@ -1161,17 +1189,17 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
             </div>
 
             <div className="bg-amber-50 border border-amber-200 p-4 rounded-xl space-y-2">
-              <span className="text-[9px] text-amber-800 font-black block uppercase tracking-wide">Neden Mesai de Artar?</span>
+              <span className="text-[9px] text-amber-800 font-black block uppercase tracking-wide">Neden Zarar Sadece 6.000 Değil?</span>
               <div className="text-[8px] text-amber-800 font-semibold leading-relaxed">
-                Maaş tabanı {formatMoney(SENARYO_MAAS_TABANI, 0)} olsaydı gün ücreti ve mesai saat ücreti birlikte yükselirdi.
-                Örnek: tabanı {formatMoney(DEFAULT_MAAS_TABANI, 0)} olan biri {formatMoney(SENARYO_MAAS_TABANI, 0)} alsaydı aylık tabanda
-                {' '}{formatMoney(analysisSummary.ornekTabanFark, 0)} fazla görünürdü; aynı ayda mesai varsa toplam ek yük
-                yalnızca bu tutarla sınırlı kalmaz. Bu dönemdeki mesai kaynaklı ek yük:{' '}
+                Taban {formatMoney(analysisSummary.ornekTabanFark, 0)} artsa bile mesai saat ücreti de artar.
+                Bu dönemdeki mesai kaynaklı ek zarar:{' '}
                 <span className="font-mono font-black">{formatMoney(analysisSummary.mesaiMasrafArtisi, 0)}</span>.
+                Toplam dönem zararı:{' '}
+                <span className="font-mono font-black">{formatMoney(analysisSummary.donemZarari, 0)}</span>.
               </div>
               {analysisSummary.enCokEtkilenen.length > 0 && (
                 <div className="pt-1 space-y-1 border-t border-amber-200">
-                  <span className="text-[8px] text-amber-900 font-black uppercase">En çok etkilenen (ilk 5)</span>
+                  <span className="text-[8px] text-amber-900 font-black uppercase">En yüksek zarar (ilk 5)</span>
                   {analysisSummary.enCokEtkilenen.map((p) => (
                     <div key={p.adSoyad} className="flex justify-between text-[8px] text-amber-800 gap-2">
                       <span className="truncate">{p.adSoyad}</span>
@@ -1216,35 +1244,91 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
           <div className="bg-white border rounded-3xl p-6 shadow-sm">
             <div id="kibar-report-print-area" className="report-root bg-white text-xs text-slate-800">
               <style>{REPORT_CSS}</style>
-              <CorporateReportLayout orientation="landscape" docCode={`ZER-YAPI-${donemKey}`}>
-              <p className="text-[10px] text-slate-500 font-bold uppercase mb-2">ZER YAPI · Aylık Hakediş & Faaliyet Mutabakatı · {donemLabel}</p>
+              <CorporateReportLayout orientation="landscape" docCode={`ZER-FARK-${donemKey}`}>
+              <p className="rpt-antet-line">{CORPORATE_COMPANY.legalName}</p>
+              <p className="text-[10px] text-slate-500 font-bold uppercase mb-2">
+                ZER YAPI · Personel Maliyet Fark / Zarar Raporu · {donemLabel}
+              </p>
               <div className="rpt-header-title mb-4">
-                Şantiye Sahası Aylık Hakediş ve Faaliyet Raporu — {donemLabel}
+                Bu Personeller ~{formatMoney(analysisSummary.ornekTabanFark, 0)} Pahalıya Çalışsaydı — Dönem Zararı
               </div>
 
-              <div className="rpt-zer-box" style={{ borderColor: '#0f766e', background: '#ecfdf5' }}>
-                <h4>Güçlü Analiz — {formatMoney(SENARYO_MAAS_TABANI, 0)} Maaş Tabanı Senaryosu</h4>
-                <p className="rpt-zer-formula">
-                  Soru: Bu personeller {formatMoney(SENARYO_MAAS_TABANI, 0)} maaş tabanıyla çalışsaydı, aynı geldi günleri ve aynı mesai saatleriyle toplam personel masrafı ne kadar yükselirdi?
+              <div className="rpt-zarar-box">
+                <h4>Şirkete mesaj — dönem zararı</h4>
+                <p className="rpt-zarar-msg">
+                  Amaç: Bu personel kadrosu kişi başı yaklaşık {formatMoney(analysisSummary.ornekTabanFark, 0)} daha pahalıya
+                  çalışsaydı ({formatMoney(DEFAULT_MAAS_TABANI, 0)} → {formatMoney(SENARYO_MAAS_TABANI, 0)}), aynı geldi günleri
+                  ve aynı mesai saatleriyle şirketin {donemLabel} döneminde uğrayacağı ekstra maliyet (zarar) aşağıdadır.
+                  Taban yükselince mesai hakedişi de arttığı için zarar yalnızca «kişi × 6.000 TL» değildir.
                 </p>
+                <div className="rpt-zarar-hero">{formatMoney(analysisSummary.donemZarari, 0)}</div>
                 <p className="rpt-zer-formula">
-                  Mevcut masraf (gün + mesai) = {formatMoney(totalMaasKazanci, 0)} · Senaryo masrafı = {formatMoney(analysisSummary.senaryoToplamMasraf, 0)} ·
-                  <strong> Ek yük = {formatMoney(analysisSummary.masrafArtisi, 0)}</strong>
-                  {' '}(gün {formatMoney(analysisSummary.gunMasrafArtisi, 0)} + mesai {formatMoney(analysisSummary.mesaiMasrafArtisi, 0)}).
+                  Mevcut masraf {formatMoney(totalMaasKazanci, 0)} → 36.000 TL senaryo {formatMoney(analysisSummary.senaryoToplamMasraf, 0)}
+                  {' '}· Gün kaynaklı zarar {formatMoney(analysisSummary.gunMasrafArtisi, 0)}
+                  {' '}· Mesai kaynaklı zarar {formatMoney(analysisSummary.mesaiMasrafArtisi, 0)}
                 </p>
                 <p className="rpt-zer-meta">
-                  Ortalama mevcut taban {formatMoney(analysisSummary.ortalamaMevcutTaban, 0)} ·
-                  {analysisSummary.tabanAltinda} personel {formatMoney(SENARYO_MAAS_TABANI, 0)} altında ·
-                  kişi başı ortalama masraf farkı {formatMoney(analysisSummary.ortalamaKisiMasrafArtisi, 0)}.
-                  Taban yükselince mesai birim ücreti de yükselir; örnek taban farkı {formatMoney(analysisSummary.ornekTabanFark, 0)}
-                  ({formatMoney(DEFAULT_MAAS_TABANI, 0)} → {formatMoney(SENARYO_MAAS_TABANI, 0)}) yalnızca başlangıçtır.
+                  {activeStaffRows.length} personel · {totalPersonDays} iş-günü · {totalMesaiSaat.toLocaleString('tr-TR', { maximumFractionDigits: 1 })} sa mesai
+                  · ortalama mevcut taban {formatMoney(analysisSummary.ortalamaMevcutTaban, 0)}
+                  · kişi başı ortalama zarar {formatMoney(analysisSummary.ortalamaKisiMasrafArtisi, 0)}
                 </p>
-                <div className="rpt-quote" style={{ marginTop: 8 }}>{analysisSummary.güçlüArgüman}</div>
+                <div className="rpt-quote" style={{ marginTop: 8, borderLeftColor: '#b91c1c' }}>{analysisSummary.güçlüArgüman}</div>
               </div>
 
-              {/* —— ZER YAPI Hakediş Özeti (rapor başı) —— */}
+              <section>
+                <p className="rpt-sec-title m-0">0 · Personel Bazında Fark / Zarar Tablosu</p>
+                <p className="rpt-sec-sub">
+                  Mevcut taban vs {formatMoney(SENARYO_MAAS_TABANI, 0)} senaryosu — aynı gün / aynı mesai
+                </p>
+                <div className="rpt-table-wrap">
+                  <table className="rpt-staff-table">
+                    <thead>
+                      <tr>
+                        <th className="rpt-align-c">#</th>
+                        <th className="rpt-align-l">Ad Soyad</th>
+                        <th className="rpt-align-r">Mevcut Taban</th>
+                        <th className="rpt-align-r">Taban Fark</th>
+                        <th className="rpt-align-c">Gün</th>
+                        <th className="rpt-align-c">Mesai</th>
+                        <th className="rpt-align-r">Mevcut Toplam</th>
+                        <th className="rpt-align-r">Senaryo Toplam</th>
+                        <th className="rpt-align-r">Dönem Zararı</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {analysisSummary.personelSenaryolari.map((p, idx) => (
+                        <tr key={`${p.adSoyad}-${idx}`}>
+                          <td className="rpt-align-c rpt-mono">{idx + 1}</td>
+                          <td className="rpt-name">{p.adSoyad}</td>
+                          <td className="rpt-td-num rpt-mono">{formatMoney(p.mevcutTaban, 0)}</td>
+                          <td className="rpt-td-num rpt-mono">{formatMoney(p.tabanFark, 0)}</td>
+                          <td className="rpt-align-c rpt-mono">{p.geldiGun}</td>
+                          <td className="rpt-align-c rpt-mono">{p.mesaiSaat}</td>
+                          <td className="rpt-td-num rpt-mono">{formatMoney(p.mevcutToplam, 0)}</td>
+                          <td className="rpt-td-num rpt-mono">{formatMoney(p.senaryoToplam, 0)}</td>
+                          <td className="rpt-td-num rpt-mono" style={{ color: '#b91c1c', fontWeight: 800 }}>
+                            {formatMoney(p.masrafFarki, 0)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot>
+                      <tr className="rpt-foot">
+                        <td colSpan={6} className="rpt-align-r">TOPLAM DÖNEM ZARARI</td>
+                        <td className="rpt-td-num rpt-mono">{formatMoney(totalMaasKazanci, 0)}</td>
+                        <td className="rpt-td-num rpt-mono">{formatMoney(analysisSummary.senaryoToplamMasraf, 0)}</td>
+                        <td className="rpt-td-num rpt-mono" style={{ color: '#b91c1c', fontWeight: 900 }}>
+                          {formatMoney(analysisSummary.donemZarari, 0)}
+                        </td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              </section>
+
+              {/* —— ZER YAPI Hakediş Özeti —— */}
               <div className="rpt-zer-box">
-                <h4>ZER YAPI Hakediş Formülü — Dönem Kazancı</h4>
+                <h4>ZER YAPI Hakediş Formülü — Dönem Kazancı (zarar hesabından bağımsız)</h4>
                 <p className="rpt-zer-formula">
                   Formül: Toplam çalışma günü × ₺{ZER_YAPI_GUNLUK} günlük birim bedel
                   &nbsp;|&nbsp; {totalPersonDays} gün × ₺{ZER_YAPI_GUNLUK} = {formatMoney(totalZerYapiHakedis, 0)}
@@ -1252,7 +1336,6 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
                 <div className="rpt-zer-total">{formatMoney(totalZerYapiHakedis, 0)}</div>
                 <p className="rpt-zer-meta">
                   {activeStaffRows.length} personel · {totalPersonDays} iş-günü · {donemLabel}
-                  &nbsp;—&nbsp; Bu tutar maaş kazancından bağımsızdır.
                 </p>
               </div>
 
@@ -1486,10 +1569,14 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
 
               {/* —— Özet —— */}
               <div className="rpt-summary-grid">
-                <div className="rpt-summary-card">
-                  <span>Toplam Maaş Kazancı</span>
-                  <span className="rpt-summary-val">{formatMoney(totalMaasKazanci)}</span>
-                  <span className="rpt-summary-sub">Gün + mesai (bilgi amaçlı)</span>
+                <div className="rpt-summary-card" style={{ borderColor: '#b91c1c', background: '#fef2f2' }}>
+                  <span style={{ color: '#991b1b' }}>Dönem Zararı (~6.000 TL pahalı senaryo)</span>
+                  <span className="rpt-summary-val" style={{ color: '#b91c1c', fontSize: '14pt' }}>
+                    {formatMoney(analysisSummary.donemZarari, 0)}
+                  </span>
+                  <span className="rpt-summary-sub">
+                    Gün {formatMoney(analysisSummary.gunMasrafArtisi, 0)} + Mesai {formatMoney(analysisSummary.mesaiMasrafArtisi, 0)}
+                  </span>
                 </div>
                 <div className="rpt-summary-card rpt-summary-hakedis">
                   <span>ZER YAPI Hakediş Toplamı</span>
@@ -1500,19 +1587,16 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
 
               <div className="rpt-compare-grid">
                 <div className="rpt-compare-card">
-                  <strong>36.000 TL senaryosu — masraf farkı</strong>
+                  <strong>Fark özeti</strong>
                   <div style={{ marginTop: 6, fontSize: '7.5pt', color: '#4b5563' }}>
-                    Mevcut: {formatMoney(totalMaasKazanci, 0)} · Senaryo: {formatMoney(analysisSummary.senaryoToplamMasraf, 0)}
+                    Mevcut: {formatMoney(totalMaasKazanci, 0)} · 36.000 senaryo: {formatMoney(analysisSummary.senaryoToplamMasraf, 0)}
                   </div>
-                  <div style={{ marginTop: 4, fontSize: '8.5pt', color: '#047857', fontWeight: 800 }}>
-                    Ek yük: {formatMoney(analysisSummary.masrafArtisi, 0)}
-                  </div>
-                  <div style={{ marginTop: 4, fontSize: '7.5pt', color: '#4b5563' }}>
-                    Gün farkı {formatMoney(analysisSummary.gunMasrafArtisi, 0)} · Mesai farkı {formatMoney(analysisSummary.mesaiMasrafArtisi, 0)}
+                  <div style={{ marginTop: 4, fontSize: '9pt', color: '#b91c1c', fontWeight: 900 }}>
+                    Dönem zararı: {formatMoney(analysisSummary.donemZarari, 0)}
                   </div>
                 </div>
                 <div className="rpt-compare-card">
-                  <strong>Sunum metni (özet)</strong>
+                  <strong>Sunum metni</strong>
                   <div className="rpt-quote" style={{ marginTop: 6, whiteSpace: 'pre-wrap' }}>
                     {shareableSummary}
                   </div>
