@@ -1531,7 +1531,7 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
                 className="inline-flex items-center gap-1.5 bg-emerald-700 hover:bg-emerald-800 text-white text-[10px] font-black px-3 py-2 rounded-xl disabled:opacity-40 cursor-pointer"
               >
                 {exportingExcel ? <Loader2 size={13} className="animate-spin" /> : <FileSpreadsheet size={13} />}
-                {exportingExcel ? 'Excel…' : `Excel (${dayOzet.faaliyetSayisi})`}
+                {exportingExcel ? 'Fotoğraflar…' : `Excel (${dayOzet.faaliyetSayisi})`}
               </button>
               <button
                 type="button"

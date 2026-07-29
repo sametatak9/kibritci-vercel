@@ -9,6 +9,74 @@ import {
   isMesaiSahaFaaliyet,
 } from './sahaFaaliyetUtils';
 
+/** Excel'e gömmek için görseli JPEG base64'e çevirir (webp/data/http). */
+async function loadImageAsJpegBase64(url: string): Promise<string | null> {
+  const raw = String(url || '').trim();
+  if (!raw) return null;
+
+  const fromCanvas = (src: string): Promise<string | null> =>
+    new Promise((resolve) => {
+      const img = new Image();
+      if (!src.startsWith('data:')) img.crossOrigin = 'anonymous';
+      const finish = () => {
+        try {
+          const maxW = 520;
+          const scale = Math.min(1, maxW / Math.max(1, img.naturalWidth || img.width));
+          const w = Math.max(1, Math.round((img.naturalWidth || img.width) * scale));
+          const h = Math.max(1, Math.round((img.naturalHeight || img.height) * scale));
+          const canvas = document.createElement('canvas');
+          canvas.width = w;
+          canvas.height = h;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) {
+            resolve(null);
+            return;
+          }
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(0, 0, w, h);
+          ctx.drawImage(img, 0, 0, w, h);
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.75);
+          const b64 = dataUrl.replace(/^data:image\/jpeg;base64,/i, '');
+          resolve(b64 || null);
+        } catch {
+          resolve(null);
+        }
+      };
+      img.onload = finish;
+      img.onerror = () => resolve(null);
+      img.src = src;
+    });
+
+  if (raw.startsWith('data:image/')) {
+    const m = raw.match(/^data:image\/(png|jpe?g|webp);base64,(.+)$/i);
+    if (m && !/webp/i.test(m[1])) {
+      // png/jpeg doğrudan kullanılabilir; exceljs jpeg tercih
+      if (/jpe?g/i.test(m[1])) return m[2];
+    }
+    return fromCanvas(raw);
+  }
+
+  if (/^https?:\/\//i.test(raw) || raw.startsWith('blob:')) {
+    const viaImg = await fromCanvas(raw);
+    if (viaImg) return viaImg;
+    try {
+      const resp = await fetch(raw, { mode: 'cors' });
+      if (!resp.ok) return null;
+      const blob = await resp.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      try {
+        return await fromCanvas(objectUrl);
+      } finally {
+        URL.revokeObjectURL(objectUrl);
+      }
+    } catch {
+      return null;
+    }
+  }
+
+  return null;
+}
+
 function escapeHtml(value: string): string {
   return value
     .replace(/&/g, '&amp;')
@@ -335,7 +403,7 @@ export async function exportFaaliyetGunlukExcel(options: {
     },
   });
 
-  sheet.mergeCells('A1:I1');
+  sheet.mergeCells('A1:J1');
   const titleCell = sheet.getCell('A1');
   titleCell.value = 'Günlük Faaliyet Raporu';
   titleCell.font = { name: 'Arial', size: 14, bold: true, color: { argb: 'FFFFFFFF' } };
@@ -347,9 +415,9 @@ export async function exportFaaliyetGunlukExcel(options: {
   titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
   sheet.getRow(1).height = 28;
 
-  sheet.mergeCells('A2:I2');
+  sheet.mergeCells('A2:J2');
   const dateCell = sheet.getCell('A2');
-  dateCell.value = `Tarih: ${label} · Saha ${ozet.sahaSayisi} · Kamp ${ozet.kampSayisi} · Faaliyetli ${ozet.personelSayisi} · Yok ${ozet.yokSayisi}`;
+  dateCell.value = `Tarih: ${label} · Saha ${ozet.sahaSayisi} · Kamp ${ozet.kampSayisi} · Faaliyetli ${ozet.personelSayisi} · Yok ${ozet.yokSayisi} · Fotoğraflar gömülü (J sütunu + Fotoğraflar sekmesi)`;
   dateCell.font = { name: 'Arial', size: 11, italic: true };
   dateCell.alignment = { horizontal: 'center', vertical: 'middle' };
 
@@ -363,6 +431,7 @@ export async function exportFaaliyetGunlukExcel(options: {
     'Kaydeden',
     'Foto adedi',
     'Foto URL',
+    'Foto',
   ];
   const headerRow = sheet.addRow(headers);
   headerRow.eachCell((cell) => {
@@ -386,11 +455,12 @@ export async function exportFaaliyetGunlukExcel(options: {
     { width: 28 },
     { width: 22 },
     { width: 16 },
+    { width: 32 },
     { width: 36 },
-    { width: 40 },
     { width: 18 },
     { width: 10 },
-    { width: 48 },
+    { width: 28 },
+    { width: 22 },
   ];
 
   const thinBorder = {
@@ -403,58 +473,40 @@ export async function exportFaaliyetGunlukExcel(options: {
   type FotoSatir = {
     kaynak: string;
     baslik: string;
+    aciklama: string;
     urls: string[];
+    mainRowNumber?: number;
   };
   const fotoSatirlari: FotoSatir[] = [];
 
-  for (const f of options.sahaFaaliyetleri) {
-    const fotolar = getFaaliyetFotolar(f);
-    const kaynak = kaynakEtiket(f.kaynakEkran);
-    fotoSatirlari.push({
-      kaynak,
-      baslik: f.isNiteligi || '—',
-      urls: fotolar,
-    });
+  const addMainRow = async (opts: {
+    kaynak: string;
+    baslik: string;
+    tip: string;
+    konum: string;
+    personel: string;
+    aciklama: string;
+    kaydeden: string;
+    fotolar: string[];
+    highlightKamp?: boolean;
+  }) => {
     const row = sheet.addRow([
-      kaynak,
-      f.isNiteligi || '—',
-      (isMesaiSahaFaaliyet(f) ? 'Mesai · ' : '') + (f.faaliyetTipi || 'NORMAL'),
-      [f.parsel && `P:${f.parsel}`, f.blok && `B:${f.blok}`].filter(Boolean).join(' ') || '—',
-      ekipLabel(f, options.personeller) || '—',
-      f.aciklama || '—',
-      f.kaydedenFormen || f.kaydeden || '—',
-      fotolar.length,
-      fotolar.join('\n') || '—',
+      opts.kaynak,
+      opts.baslik,
+      opts.tip,
+      opts.konum,
+      opts.personel,
+      opts.aciklama,
+      opts.kaydeden,
+      opts.fotolar.length,
+      opts.fotolar[0] || '—',
+      opts.fotolar.length ? '' : '—',
     ]);
-    row.eachCell((cell) => {
-      cell.border = thinBorder;
-      cell.alignment = { vertical: 'top', wrapText: true };
-    });
-  }
-
-  for (const f of options.kampFaaliyetleri) {
-    const tip = [f.faaliyetTipi, f.faaliyetGrubu].filter(Boolean).join(' · ');
-    const fotolar = getFaaliyetFotolar(f);
-    fotoSatirlari.push({
-      kaynak: 'Kampçı',
-      baslik: f.yerleskeAdi || '—',
-      urls: fotolar,
-    });
-    const row = sheet.addRow([
-      'Kampçı',
-      f.yerleskeAdi || '—',
-      tip || '—',
-      '—',
-      ekipLabel(f, options.personeller) || '—',
-      f.aciklama || '—',
-      f.kaydedenKampci || '—',
-      fotolar.length,
-      fotolar.join('\n') || '—',
-    ]);
+    row.height = opts.fotolar.length > 0 ? 88 : 22;
     row.eachCell((cell, colNumber) => {
       cell.border = thinBorder;
       cell.alignment = { vertical: 'top', wrapText: true };
-      if (colNumber === 1) {
+      if (opts.highlightKamp && colNumber === 1) {
         cell.fill = {
           type: 'pattern',
           pattern: 'solid',
@@ -462,86 +514,151 @@ export async function exportFaaliyetGunlukExcel(options: {
         };
       }
     });
+
+    fotoSatirlari.push({
+      kaynak: opts.kaynak,
+      baslik: opts.baslik,
+      aciklama: opts.aciklama,
+      urls: opts.fotolar,
+      mainRowNumber: row.number,
+    });
+
+    // İlk fotoğrafı satıra göm (J sütunu = col 9, 0-based)
+    if (opts.fotolar[0]) {
+      const b64 = await loadImageAsJpegBase64(opts.fotolar[0]);
+      if (b64) {
+        const imageId = workbook.addImage({ base64: b64, extension: 'jpeg' });
+        sheet.addImage(imageId, {
+          tl: { col: 9, row: row.number - 1 },
+          ext: { width: 118, height: 78 },
+          editAs: 'oneCell',
+        });
+      }
+    }
+  };
+
+  for (const f of options.sahaFaaliyetleri) {
+    const fotolar = getFaaliyetFotolar(f);
+    await addMainRow({
+      kaynak: kaynakEtiket(f.kaynakEkran),
+      baslik: f.isNiteligi || '—',
+      tip: kaynakEtiket(f.kaynakEkran) + (isMesaiSahaFaaliyet(f) ? ' · Mesai' : ''),
+      konum:
+        [f.parsel && `P:${f.parsel}`, f.blok && `B:${f.blok}`].filter(Boolean).join(' ') || '—',
+      personel: ekipLabel(f, options.personeller) || '—',
+      aciklama: f.aciklama || '—',
+      kaydeden: f.kaydedenFormen || f.kaydeden || '—',
+      fotolar,
+    });
+  }
+
+  for (const f of options.kampFaaliyetleri) {
+    const tip = [f.faaliyetTipi, f.faaliyetGrubu].filter(Boolean).join(' · ');
+    const fotolar = getFaaliyetFotolar(f);
+    await addMainRow({
+      kaynak: 'Kampçı',
+      baslik: f.yerleskeAdi || '—',
+      tip: tip || '—',
+      konum: '—',
+      personel: ekipLabel(f, options.personeller) || '—',
+      aciklama: f.aciklama || '—',
+      kaydeden: f.kaydedenKampci || '—',
+      fotolar,
+      highlightKamp: true,
+    });
   }
 
   if (options.sahaFaaliyetleri.length === 0 && options.kampFaaliyetleri.length === 0) {
-    sheet.addRow(['—', 'Bu gün için kayıt yok', '', '', '', '', '', 0, '']);
+    sheet.addRow(['—', 'Bu gün için kayıt yok', '', '', '', '', '', 0, '', '']);
   }
 
-  // Fotoğraflar sayfası (görseller + URL)
+  // Fotoğraflar albüm sayfası — her kayıt için büyük görseller
   const fotoSheet = workbook.addWorksheet('Fotoğraflar', {
     pageSetup: { paperSize: 9, orientation: 'portrait', fitToPage: true, fitToWidth: 1 },
   });
-  fotoSheet.mergeCells('A1:D1');
+  fotoSheet.mergeCells('A1:E1');
   const fTitle = fotoSheet.getCell('A1');
   fTitle.value = `Faaliyet Fotoğrafları — ${label}`;
   fTitle.font = { name: 'Arial', size: 13, bold: true, color: { argb: 'FFFFFFFF' } };
   fTitle.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF312E81' } };
   fTitle.alignment = { horizontal: 'center', vertical: 'middle' };
-  fotoSheet.getRow(1).height = 24;
-  const fHeader = fotoSheet.addRow(['#', 'Kaynak', 'Başlık', 'Foto URL / Görsel']);
-  fHeader.eachCell((cell) => {
-    cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
-    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF4338CA' } };
-    cell.border = thinBorder;
-  });
-  fotoSheet.columns = [{ width: 5 }, { width: 14 }, { width: 28 }, { width: 60 }];
+  fotoSheet.getRow(1).height = 26;
 
-  let fotoRowIdx = 0;
+  fotoSheet.mergeCells('A2:E2');
+  const fHint = fotoSheet.getCell('A2');
+  fHint.value =
+    'Her kaydın fotoğrafları aşağıda gömülüdür. Ana sayfada da J sütununda ilk fotoğraf görünür.';
+  fHint.font = { name: 'Arial', size: 10, italic: true, color: { argb: 'FF475569' } };
+
+  fotoSheet.columns = [
+    { width: 6 },
+    { width: 16 },
+    { width: 28 },
+    { width: 36 },
+    { width: 28 },
+  ];
+
+  let albumNo = 0;
   for (const sat of fotoSatirlari) {
-    if (sat.urls.length === 0) {
-      fotoRowIdx += 1;
-      const row = fotoSheet.addRow([fotoRowIdx, sat.kaynak, sat.baslik, 'Foto yok']);
-      row.eachCell((cell) => {
+    albumNo += 1;
+    const head = fotoSheet.addRow([
+      albumNo,
+      sat.kaynak,
+      sat.baslik,
+      sat.aciklama || '',
+      sat.urls.length ? `${sat.urls.length} foto` : 'Foto yok',
+    ]);
+    head.eachCell((cell) => {
+      cell.border = thinBorder;
+      cell.font = { bold: true, size: 10 };
+      cell.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FFF1F5F9' },
+      };
+      cell.alignment = { vertical: 'middle', wrapText: true };
+    });
+    head.height = 28;
+
+    if (sat.urls.length === 0) continue;
+
+    // Her foto için ayrı satır + gömülü görsel (yan yana max 2)
+    for (let i = 0; i < sat.urls.length; i += 2) {
+      const chunk = sat.urls.slice(i, i + 2);
+      const imgRow = fotoSheet.addRow(['', '', '', '', '']);
+      imgRow.height = 150;
+      imgRow.eachCell((cell) => {
         cell.border = thinBorder;
       });
-      continue;
-    }
-    for (const url of sat.urls) {
-      fotoRowIdx += 1;
-      const excelRow = fotoSheet.addRow([fotoRowIdx, sat.kaynak, sat.baslik, url]);
-      excelRow.height = 90;
-      excelRow.eachCell((cell) => {
-        cell.border = thinBorder;
-        cell.alignment = { vertical: 'top', wrapText: true };
-      });
-      try {
-        let base64 = '';
-        let ext: 'jpeg' | 'png' = 'jpeg';
-        if (url.startsWith('data:image/')) {
-          const m = url.match(/^data:image\/(png|jpe?g|webp);base64,(.+)$/i);
-          if (m) {
-            ext = m[1].toLowerCase().includes('png') ? 'png' : 'jpeg';
-            base64 = m[2];
-          }
-        } else if (/^https?:\/\//i.test(url)) {
-          const resp = await fetch(url);
-          if (resp.ok) {
-            const blob = await resp.blob();
-            ext = blob.type.includes('png') ? 'png' : 'jpeg';
-            const buf = await blob.arrayBuffer();
-            const bytes = new Uint8Array(buf);
-            let binary = '';
-            for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
-            base64 = btoa(binary);
-          }
+
+      for (let j = 0; j < chunk.length; j++) {
+        const b64 = await loadImageAsJpegBase64(chunk[j]);
+        if (!b64) {
+          fotoSheet.getCell(imgRow.number, 3 + j).value = 'Görsel yüklenemedi';
+          continue;
         }
-        if (base64) {
-          const imageId = workbook.addImage({ base64, extension: ext });
-          // exceljs row is 1-based; current row = fotoSheet.rowCount
-          const r = fotoSheet.rowCount - 1;
-          fotoSheet.addImage(imageId, {
-            tl: { col: 3, row: r },
-            ext: { width: 160, height: 110 },
-          });
-        }
-      } catch {
-        /* URL / fetch hatası — metin URL kalsın */
+        const imageId = workbook.addImage({ base64: b64, extension: 'jpeg' });
+        fotoSheet.addImage(imageId, {
+          tl: { col: 1 + j * 2, row: imgRow.number - 1 },
+          ext: { width: 260, height: 140 },
+          editAs: 'oneCell',
+        });
       }
     }
   }
+
   if (fotoSatirlari.length === 0) {
-    fotoSheet.addRow(['—', '—', 'Bu gün fotoğraf yok', '']);
+    fotoSheet.addRow(['—', '—', 'Bu gün faaliyet kaydı yok', '', '']);
+  } else {
+    const withFoto = fotoSatirlari.filter((s) => s.urls.length > 0).length;
+    const note = fotoSheet.addRow([
+      '',
+      '',
+      `Toplam ${fotoSatirlari.length} kayıt · ${withFoto} kayıtta fotoğraf var`,
+      '',
+      '',
+    ]);
+    note.getCell(3).font = { italic: true, color: { argb: 'FF64748B' }, size: 9 };
   }
 
   // Faaliyeti olan personeller sayfası
