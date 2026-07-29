@@ -301,11 +301,13 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
         tarih: item.tarih || new Date().toISOString().split('T')[0],
         hareketTipi: 'ÇIKIŞ',
         tutar: parseFloat(item.tutar) || 0,
-        aciklama: `Şöför Yol Harcaması (Ödeme: ${item.surucu || 'Bilinmeyen'}) - ${item.aciklama || ''}`,
+        aciklama: `Şoför Yol Harcaması (Fiş: ${item.fisNo || '—'} · ${item.surucu || 'Bilinmeyen'}) - ${item.aciklama || ''}`,
         referansTipi: 'DİĞER',
+        referansId: item.id,
         fisEvrakUrl: item.faturaFotoUrl || '',
         soforOdemesi: true,
-        surucu: item.surucu || 'Bilinmeyen'
+        surucu: item.surucu || 'Bilinmeyen',
+        fisNo: item.fisNo || '',
       });
 
       alert("🎉 Yol harcaması onaylandı ve Haftalık Kasa'ya işlendi (şöföre ödemeler listesine notlandı).");
@@ -3524,6 +3526,11 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
                           <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-100 space-y-1">
                             <span className="text-[8px] font-bold text-slate-400 block uppercase">Açıklama:</span>
                             <p className="text-[10px] text-slate-700">{item.aciklama}</p>
+                            {item.fisNo && (
+                              <p className="text-[10px] font-mono font-bold text-slate-800 pt-1">
+                                Fiş No: {item.fisNo}
+                              </p>
+                            )}
                           </div>
 
                           {item.faturaFotoUrl && (

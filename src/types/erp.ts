@@ -304,6 +304,25 @@ export interface KasaHareketi {
   referansTipi: 'DİĞER' | 'FATURA' | 'İRSALİYE' | 'MAAS' | 'SATIN ALMA';
   referansId?: string;
   fisEvrakUrl?: string;
+  /** Şoför yol harcaması onayından gelen kayıt */
+  soforOdemesi?: boolean;
+  surucu?: string;
+  fisNo?: string;
+}
+
+/** Şoför — yol / masraf fişi (onay sonrası Haftalık Kasa) */
+export interface YolHarcamasi {
+  id: string;
+  tarih: string;
+  tutar: number;
+  aciklama: string;
+  fisNo: string;
+  faturaFotoUrl?: string;
+  durum: 'ONAY BEKLİYOR' | 'ONAYLANDI' | 'REDDEDİLDİ' | string;
+  surucu?: string;
+  onaylayanYonetici?: string;
+  onayTarihi?: string;
+  olusturulma?: string;
 }
 
 export interface AracBakim {
@@ -429,6 +448,17 @@ export interface KampFaaliyet {
 
 export type SahaFaaliyetTipi = 'NORMAL' | 'MESAI_SAHA';
 
+export type FaaliyetIlerlemeDurumu = 'BASLAMADI' | 'DEVAM' | 'TAMAMLANDI';
+
+export interface FaaliyetIlerlemeKaydi {
+  id: string;
+  tarih: string;
+  yorum: string;
+  fotoUrls?: string[];
+  yazar?: string;
+  yazarRol?: string;
+}
+
 export interface SahaFaaliyeti {
   id: string;
   personelId: string;
@@ -452,6 +482,10 @@ export interface SahaFaaliyeti {
   programaGonderildi?: boolean;
   programaGonderimTarihi?: string;
   iceriAktarimDurumu?: 'BEKLIYOR' | 'AKTARILDI';
+  /** İş grubu etiketi — KIRIM İŞLERİ, DRENAJ İŞLERİ vb. */
+  isEtiketi?: string;
+  ilerlemeDurumu?: FaaliyetIlerlemeDurumu;
+  ilerlemeKayitlari?: FaaliyetIlerlemeKaydi[];
 }
 
 export interface SahaGunRaporArsiv {
@@ -469,6 +503,9 @@ export interface SahaGunRaporArsiv {
     raporlu: number;
   };
   aciklama?: string;
+  genelNotlar?: string;
+  kaynak?: string;
+  htmlOzet?: string;
 }
 
 export type ProgramliFaaliyetAsamaAnahtari = 'BASLANGIC' | 'ILERLEME' | 'TAMAMLANMA';

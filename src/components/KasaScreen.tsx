@@ -49,6 +49,43 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
 
   // Weekly Cash Report Print Modal Toggle
   const [showWeeklyReportModal, setShowWeeklyReportModal] = useState(false);
+  const [soforIadeStart, setSoforIadeStart] = useState(startDate);
+  const [soforIadeEnd, setSoforIadeEnd] = useState(endDate);
+  const [soforIadeFiltre, setSoforIadeFiltre] = useState('');
+
+  const handleSoforMasrafIadeRaporu = async () => {
+    const {
+      filterSoforKasaHareketleri,
+      buildSoforMasrafIadeReportHtml,
+      openSoforMasrafIadeReport,
+    } = await import('../lib/yolHarcamaUtils');
+    const rows = filterSoforKasaHareketleri(
+      kasaHareketleri,
+      soforIadeStart || appliedStartDate,
+      soforIadeEnd || appliedEndDate,
+      soforIadeFiltre || undefined
+    );
+    if (rows.length === 0) {
+      alert('Seçili aralıkta şoför masraf kasa kaydı yok.');
+      return;
+    }
+    const html = buildSoforMasrafIadeReportHtml({
+      startDate: soforIadeStart || appliedStartDate,
+      endDate: soforIadeEnd || appliedEndDate,
+      items: rows.map((r) => ({
+        id: r.id,
+        tarih: r.tarih,
+        fisNo: r.fisNo,
+        aciklama: r.aciklama,
+        tutar: Number(r.tutar) || 0,
+        surucu: r.surucu,
+        fotoUrl: r.fisEvrakUrl,
+      })),
+      surucuFiltre: soforIadeFiltre || undefined,
+      olusturan: 'Haftalık Kasa',
+    });
+    openSoforMasrafIadeReport(html, 'Şoför Masraf İade Raporu');
+  };
 
   // Totals calculations based on currently loaded state
   const totalIn = kasaHareketleri
@@ -561,7 +598,46 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
           </div>
 
           {/* PDF & Excel Download summary bar */}
-          <div className="p-3 border-t bg-slate-50/50 flex justify-end gap-2 shrink-0 select-none">
+          <div className="p-3 border-t bg-slate-50/50 flex flex-col gap-2 shrink-0 select-none">
+            <div className="flex flex-wrap items-end gap-2 justify-end">
+              <div className="space-y-0.5">
+                <label className="text-[8px] font-bold text-slate-400 uppercase block">Şoför iade başlangıç</label>
+                <input
+                  type="date"
+                  value={soforIadeStart}
+                  onChange={(e) => setSoforIadeStart(e.target.value)}
+                  className="border border-slate-200 rounded-lg px-2 py-1 text-[10px]"
+                />
+              </div>
+              <div className="space-y-0.5">
+                <label className="text-[8px] font-bold text-slate-400 uppercase block">Bitiş</label>
+                <input
+                  type="date"
+                  value={soforIadeEnd}
+                  onChange={(e) => setSoforIadeEnd(e.target.value)}
+                  className="border border-slate-200 rounded-lg px-2 py-1 text-[10px]"
+                />
+              </div>
+              <div className="space-y-0.5">
+                <label className="text-[8px] font-bold text-slate-400 uppercase block">Şoför filtresi</label>
+                <input
+                  type="text"
+                  value={soforIadeFiltre}
+                  onChange={(e) => setSoforIadeFiltre(e.target.value)}
+                  placeholder="Tümü"
+                  className="border border-slate-200 rounded-lg px-2 py-1 text-[10px] w-28"
+                />
+              </div>
+              <button
+                type="button"
+                onClick={() => void handleSoforMasrafIadeRaporu()}
+                className="bg-indigo-600 hover:bg-indigo-700 border border-indigo-700 text-white text-[11px] font-bold py-1.5 px-3 rounded-lg flex items-center space-x-1.5 transition cursor-pointer"
+              >
+                <Printer size={12} />
+                <span>Şoför Masraf İade (A4)</span>
+              </button>
+            </div>
+            <div className="flex justify-end gap-2">
             <button 
               onClick={() => {
                 exportKasaExcel(filteredHareketler, appliedStartDate, appliedEndDate);
@@ -578,6 +654,7 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
               <Printer size={12} />
               <span>📊 Haftalık Kasa PDF Raporu Al</span>
             </button>
+            </div>
           </div>
         </div>
       </div>

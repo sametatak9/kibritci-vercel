@@ -30,6 +30,7 @@ import { KibritciLogo } from './KibritciLogo';
 import { wrapCorporateReportHtml } from '../lib/corporateReportHtml';
 import { KIBRITCI_LOGO_PATH } from '../lib/kibritciBrand';
 import type { SahaFaaliyetSaveSource } from '../lib/sahaFaaliyetPersistence';
+import { FAALIYET_ETIKET_ONSETLERI, normalizeFaaliyetEtiketi } from '../lib/faaliyetEtiketUtils';
 
 interface FormenScreenProps {
   personeller: Personel[];
@@ -153,6 +154,7 @@ export const FormenScreen: React.FC<FormenScreenProps> = ({
   const [parsel, setParsel] = useState('Parsel Bölge 157/46');
   const [blok, setBlok] = useState('GENEL SAHA');
   const [aciklama, setAciklama] = useState('');
+  const [isEtiketi, setIsEtiketi] = useState('');
   const [fotoUrls, setFotoUrls] = useState<string[]>([]);
   const [faaliyetPersonelIds, setFaaliyetPersonelIds] = useState<string[]>([]);
   const [faaliyetPersonelSearch, setFaaliyetPersonelSearch] = useState('');
@@ -779,6 +781,7 @@ ${satirlar
   const resetFaaliyetForm = () => {
     setIsNiteligi('');
     setAciklama('');
+    setIsEtiketi('');
     setFotoUrls([]);
     setSahaUstaSayisi(0);
     setSahaIsciSayisi(0);
@@ -797,6 +800,7 @@ ${satirlar
     setParsel(sf.parsel);
     setBlok(sf.blok);
     setAciklama(sf.aciklama || '');
+    setIsEtiketi(sf.isEtiketi || '');
     setFotoUrls(getFaaliyetFotolar(sf));
     setFaaliyetPersonelIds(Array.isArray(sf.aktifPersonelListesi) ? [...sf.aktifPersonelListesi] : []);
     setSahaUstaSayisi(sf.ustaSayisi || 0);
@@ -880,6 +884,9 @@ ${satirlar
       parsel,
       blok,
       aciklama,
+      isEtiketi: isEtiketi || previousRecord?.isEtiketi || undefined,
+      ilerlemeDurumu: previousRecord?.ilerlemeDurumu || (isEtiketi ? 'BASLAMADI' : undefined),
+      ilerlemeKayitlari: previousRecord?.ilerlemeKayitlari,
       fotoUrls: fotoUrls.length ? fotoUrls : undefined,
       fotoUrl: fotoUrls[0] || undefined,
       aktifPersonelListesi: faaliyetPersonelIds,
@@ -1991,6 +1998,40 @@ ${satirlar
                         onChange={(e) => setAciklama(e.target.value)}
                         className="w-full bg-slate-50 border border-slate-200 py-2 px-3 rounded-xl focus:outline-none focus:ring-1 focus:ring-amber-500 text-[10px] font-semibold text-slate-800 leading-snug"
                       />
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="font-bold text-slate-500 uppercase text-[8px] tracking-wider block">
+                        İş Etiketi
+                      </label>
+                      <select
+                        value={isEtiketi}
+                        onChange={(e) => setIsEtiketi(normalizeFaaliyetEtiketi(e.target.value))}
+                        className="w-full bg-slate-50 border border-slate-200 p-1.5 rounded-xl focus:outline-none focus:ring-1 focus:ring-amber-500 text-[10px] font-bold text-slate-800"
+                      >
+                        <option value="">— Etiket seç (opsiyonel) —</option>
+                        {FAALIYET_ETIKET_ONSETLERI.map((o) => (
+                          <option key={o} value={o}>
+                            {o}
+                          </option>
+                        ))}
+                      </select>
+                      <div className="flex flex-wrap gap-1">
+                        {FAALIYET_ETIKET_ONSETLERI.map((o) => (
+                          <button
+                            type="button"
+                            key={o}
+                            onClick={() => setIsEtiketi(o)}
+                            className={`py-1 px-2 rounded-lg text-[8px] font-bold border transition ${
+                              isEtiketi === o
+                                ? 'bg-amber-100 border-amber-300 text-slate-900'
+                                : 'bg-slate-50 hover:bg-slate-100 border-slate-200 text-slate-600'
+                            }`}
+                          >
+                            {o}
+                          </button>
+                        ))}
+                      </div>
                     </div>
 
                     <div className="space-y-1.5 border border-slate-200 rounded-2xl p-3 bg-slate-50/60">

@@ -133,3 +133,40 @@ export async function ensureKampFaaliyetFotoPersisted(
     return payload;
   }
 }
+
+/**
+ * Şoför yol harcaması fiş görselini Storage'a taşır (`yol-harcama/{id}/…`).
+ * Başarısız olursa inline data URL döner.
+ */
+export async function ensureYolHarcamaFotoPersisted(
+  harcamaId: string,
+  fotoUrl?: string | null
+): Promise<string> {
+  const raw = String(fotoUrl || '').trim();
+  if (!raw) return '';
+  if (/^https?:\/\//i.test(raw) || raw.startsWith('blob:')) return raw;
+
+  const payload = await preparePayload(
+    raw.startsWith('data:') ? raw : `data:image/jpeg;base64,${raw}`
+  );
+
+  try {
+    const path = `yol-harcama/${harcamaId}/fis_${Date.now()}.jpg`;
+    const storageRef = ref(storage, path);
+    await withTimeout(
+      uploadString(storageRef, payload, 'data_url', {
+        contentType: payload.includes('image/png')
+          ? 'image/png'
+          : payload.includes('image/webp')
+            ? 'image/webp'
+            : 'image/jpeg',
+      }),
+      UPLOAD_TIMEOUT_MS,
+      'Yol harcama foto Storage'
+    );
+    return await withTimeout(getDownloadURL(storageRef), 6000, 'Yol harcama foto URL');
+  } catch (err) {
+    console.warn('Yol harcama foto Storage atlandı, inline kullanılacak:', harcamaId, err);
+    return payload;
+  }
+}

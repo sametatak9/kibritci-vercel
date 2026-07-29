@@ -34,6 +34,7 @@ import {
   filterSahaFaaliyetleriByDate,
 } from '../lib/geldiHavuzuUtils';
 import { personMatchesFaaliyet } from '../lib/faaliyetPersonelUtils';
+import { FAALIYET_ETIKET_ONSETLERI, normalizeFaaliyetEtiketi } from '../lib/faaliyetEtiketUtils';
 
 interface GunlukFaaliyetProgramScreenProps {
   personeller: Personel[];
@@ -76,6 +77,7 @@ export const GunlukFaaliyetProgramScreen: React.FC<GunlukFaaliyetProgramScreenPr
   const [parsel, setParsel] = useState(PARSEL_LIST[0] || 'GENEL SAHA');
   const [blok, setBlok] = useState(defaultBlokForParsel(PARSEL_LIST[0] || 'GENEL SAHA'));
   const [aciklama, setAciklama] = useState('');
+  const [isEtiketi, setIsEtiketi] = useState('');
   const [draftStaff, setDraftStaff] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
 
@@ -171,6 +173,7 @@ export const GunlukFaaliyetProgramScreen: React.FC<GunlukFaaliyetProgramScreenPr
     setParsel(PARSEL_LIST[0] || 'GENEL SAHA');
     setBlok(defaultBlokForParsel(PARSEL_LIST[0] || 'GENEL SAHA'));
     setAciklama('');
+    setIsEtiketi('');
     setDraftStaff([]);
   };
 
@@ -200,6 +203,7 @@ export const GunlukFaaliyetProgramScreen: React.FC<GunlukFaaliyetProgramScreenPr
     setParsel(sf.parsel || PARSEL_LIST[0] || 'GENEL SAHA');
     setBlok(sf.blok || defaultBlokForParsel(sf.parsel || ''));
     setAciklama(sf.aciklama || '');
+    setIsEtiketi(sf.isEtiketi || '');
     setDraftStaff(Array.isArray(sf.aktifPersonelListesi) ? [...sf.aktifPersonelListesi] : []);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -235,6 +239,7 @@ export const GunlukFaaliyetProgramScreen: React.FC<GunlukFaaliyetProgramScreenPr
                   parsel,
                   blok,
                   aciklama: aciklama.trim(),
+                  isEtiketi: isEtiketi || undefined,
                   aktifPersonelListesi: draftStaff,
                   ustaSayisi: counts.usta,
                   isciSayisi: counts.isci,
@@ -254,6 +259,8 @@ export const GunlukFaaliyetProgramScreen: React.FC<GunlukFaaliyetProgramScreenPr
           parsel,
           blok,
           aciklama: aciklama.trim() || `${isNiteligi.trim()} — günlük program`,
+          isEtiketi: isEtiketi || undefined,
+          ilerlemeDurumu: isEtiketi ? 'BASLAMADI' : undefined,
           aktifPersonelListesi: draftStaff,
           ustaSayisi: counts.usta,
           isciSayisi: counts.isci,
@@ -623,6 +630,39 @@ export const GunlukFaaliyetProgramScreen: React.FC<GunlukFaaliyetProgramScreenPr
                   placeholder="Günlük iş açıklaması…"
                   className="w-full text-xs font-medium p-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-amber-400 resize-none"
                 />
+              </div>
+              <div className="sm:col-span-2">
+                <label className="text-[9px] font-black uppercase text-slate-400 block mb-1">
+                  İş Etiketi
+                </label>
+                <select
+                  value={isEtiketi}
+                  onChange={(e) => setIsEtiketi(normalizeFaaliyetEtiketi(e.target.value))}
+                  className="w-full text-xs font-bold p-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-amber-400"
+                >
+                  <option value="">— Opsiyonel —</option>
+                  {FAALIYET_ETIKET_ONSETLERI.map((o) => (
+                    <option key={o} value={o}>
+                      {o}
+                    </option>
+                  ))}
+                </select>
+                <div className="flex flex-wrap gap-1 mt-1.5">
+                  {FAALIYET_ETIKET_ONSETLERI.map((o) => (
+                    <button
+                      key={o}
+                      type="button"
+                      onClick={() => setIsEtiketi(o)}
+                      className={`text-[8px] font-bold px-1.5 py-0.5 rounded border cursor-pointer ${
+                        isEtiketi === o
+                          ? 'bg-amber-200 border-amber-400 text-amber-950'
+                          : 'bg-white border-slate-200 text-slate-500'
+                      }`}
+                    >
+                      {o}
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
 

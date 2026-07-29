@@ -22,8 +22,15 @@ import {
   Printer,
   Loader2,
   UserX,
+  Send,
+  Tag,
 } from 'lucide-react';
 import { AylikYoklamaMap, KampFaaliyet, MermerciFaaliyet, Personel, SahaFaaliyeti, TesisatciFaaliyet } from '../types/erp';
+import { FaaliyetEtiketIlerlemePanel } from './FaaliyetEtiketIlerlemePanel';
+import {
+  FAALIYET_ETIKET_ONSETLERI,
+  normalizeFaaliyetEtiketi,
+} from '../lib/faaliyetEtiketUtils';
 import {
   formatMesaiFaaliyetLabel,
   getFaaliyetFotolar,
@@ -63,6 +70,10 @@ interface FaaliyetPersonelScreenProps {
   setSahaFaaliyetleri: (
     updater: SahaFaaliyeti[] | ((prev: SahaFaaliyeti[]) => SahaFaaliyeti[])
   ) => void;
+  saveSahaFaaliyetNow?: (
+    record: SahaFaaliyeti,
+    kaynak?: import('../lib/sahaFaaliyetPersistence').SahaFaaliyetSaveSource
+  ) => Promise<unknown>;
   currentUser?: { email?: string; uid?: string } | null;
   canAssignProgram?: boolean;
 }
@@ -101,6 +112,7 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
   yoklamalar,
   sahaFaaliyetleri = [],
   setSahaFaaliyetleri,
+  saveSahaFaaliyetNow,
   currentUser,
   canAssignProgram = false,
 }) => {
@@ -117,6 +129,10 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
   const [exportingExcel, setExportingExcel] = useState(false);
   const [programFocusPersonId, setProgramFocusPersonId] = useState<string | null>(null);
   const [faaliyetsizSearch, setFaaliyetsizSearch] = useState('');
+  const [etiketFilter, setEtiketFilter] = useState('');
+  const [gunSonuNot, setGunSonuNot] = useState('');
+  const [gunSonuBusy, setGunSonuBusy] = useState(false);
+  const [patchBusyId, setPatchBusyId] = useState<string | null>(null);
 
   useEffect(() => {
     const unsub = onSnapshot(collection(db, 'kampGunlukFaaliyetleri'), (snap) => {
@@ -319,6 +335,85 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
       String(b.isNiteligi || '').localeCompare(String(a.isNiteligi || ''), 'tr')
     );
   }, [tumSahaFaaliyetleri, selectedDate]);
+
+  const daySahaFiltered = useMemo(() => {
+    const ef = normalizeFaaliyetEtiketi(etiketFilter);
+    if (!ef) return daySahaFaaliyetleri;
+    return daySahaFaaliyetleri.filter((f) => normalizeFaaliyetEtiketi(f.isEtiketi) === ef);
+  }, [daySahaFaaliyetleri, etiketFilter]);
+
+  const personFaaliyetFiltered = useMemo(() => {
+    const ef = normalizeFaaliyetEtiketi(etiketFilter);
+    if (!ef) return personFaaliyetleri;
+    return personFaaliyetleri.filter((f) => normalizeFaaliyetEtiketi(f.isEtiketi) === ef);
+  }, [personFaaliyetleri, etiketFilter]);
+
+  const editableSahaIds = useMemo(
+    () => new Set(sahaFaaliyetleri.map((f) => f.id)),
+    [sahaFaaliyetleri]
+  );
+
+  const patchSahaFaaliyet = async (base: SahaFaaliyeti, patch: Partial<SahaFaaliyeti>) => {
+    if (!editableSahaIds.has(base.id)) {
+      alert('Bu kayıt Formen/program saha koleksiyonunda değil; etiket burada düzenlenemez.');
+      return;
+    }
+    const next = { ...base, ...patch };
+    setPatchBusyId(base.id);
+    try {
+      if (saveSahaFaaliyetNow) {
+        await saveSahaFaaliyetNow(next, 'idari_saha');
+      } else {
+        setSahaFaaliyetleri((prev) => prev.map((f) => (f.id === next.id ? next : f)));
+      }
+    } catch (err: any) {
+      console.error(err);
+      alert(err?.message || 'Faaliyet güncellenemedi.');
+    } finally {
+      setPatchBusyId(null);
+    }
+  };
+
+  const handleGunSonuGonder = async () => {
+    if (daySahaFaaliyetleri.length === 0) {
+      alert('Bu gün için yönetime gönderilecek saha faaliyeti yok.');
+      return;
+    }
+    if (
+      !window.confirm(
+        `${dayLabel} için ${daySahaFaaliyetleri.length} saha kaydı yönetime gönderilsin mi?`
+      )
+    ) {
+      return;
+    }
+    setGunSonuBusy(true);
+    try {
+      const { submitFaaliyetGunSonuRapor, openFaaliyetGunSonuReport } = await import(
+        '../lib/faaliyetGunSonuRapor'
+      );
+      const { html } = await submitFaaliyetGunSonuRapor({
+        dateKey: selectedDate,
+        sahaFaaliyetleri: daySahaFaaliyetleri,
+        personeller,
+        genelNotlar: gunSonuNot,
+        olusturanEmail: currentUser?.email || 'yonetim',
+        yoklamaOzet: {
+          gelen: dayOzet.personelSayisi,
+          yok: dayOzet.yokSayisi,
+          izinli: 0,
+          raporlu: 0,
+        },
+      });
+      openFaaliyetGunSonuReport(html, `Gün Sonu — ${dayLabel}`);
+      alert('Gün sonu raporu arşive ve onay kuyruğuna yazıldı.');
+      setGunSonuNot('');
+    } catch (err: any) {
+      console.error(err);
+      alert(err?.message || 'Gün sonu raporu gönderilemedi.');
+    } finally {
+      setGunSonuBusy(false);
+    }
+  };
 
   const dayKampFaaliyetleri = useMemo((): KampFaaliyet[] => {
     return filterFaaliyetlerByDate<KampFaaliyet>(kampFaaliyetleri, selectedDate).sort((a, b) =>
@@ -1084,8 +1179,8 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
                       </p>
                     </div>
                   </div>
-                  <div className="text-[10px] font-bold uppercase tracking-wide text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
-                    Salt okunur · düzenleme yok
+                  <div className="text-[10px] font-bold uppercase tracking-wide text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2">
+                    Etiket &amp; ilerleme düzenlenebilir
                   </div>
                 </div>
 
@@ -1145,27 +1240,48 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <h3 className="text-xs font-black uppercase tracking-wider text-slate-700 flex items-center gap-2">
                     <Camera size={14} className="text-amber-600" />
-                    Yaptığı işler / saha faaliyetleri ({personFaaliyetleri.length})
+                    Yaptığı işler / saha faaliyetleri ({personFaaliyetFiltered.length}
+                    {etiketFilter ? ` / ${personFaaliyetleri.length}` : ''})
                   </h3>
-                  {personFotoSayisi > 0 && (
-                    <span className="text-[10px] font-bold text-amber-800 bg-amber-50 border border-amber-200 rounded-full px-2.5 py-1 inline-flex items-center gap-1">
-                      <Images size={12} />
-                      {personFotoSayisi} fotoğraf bu personelde
-                    </span>
-                  )}
+                  <div className="flex flex-wrap items-center gap-2">
+                    <label className="inline-flex items-center gap-1.5 text-[10px] font-bold text-slate-600">
+                      <Tag size={12} className="text-amber-600" />
+                      <select
+                        value={etiketFilter}
+                        onChange={(e) => setEtiketFilter(e.target.value)}
+                        className="text-[10px] font-bold bg-white border border-slate-200 rounded-lg px-2 py-1 cursor-pointer"
+                      >
+                        <option value="">Tüm etiketler</option>
+                        {FAALIYET_ETIKET_ONSETLERI.map((o) => (
+                          <option key={o} value={o}>
+                            {o}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    {personFotoSayisi > 0 && (
+                      <span className="text-[10px] font-bold text-amber-800 bg-amber-50 border border-amber-200 rounded-full px-2.5 py-1 inline-flex items-center gap-1">
+                        <Images size={12} />
+                        {personFotoSayisi} fotoğraf bu personelde
+                      </span>
+                    )}
+                  </div>
                 </div>
 
-                {personFaaliyetleri.length === 0 ? (
+                {personFaaliyetFiltered.length === 0 ? (
                   <div className="bg-slate-50 border border-slate-200 rounded-2xl p-8 text-center text-slate-400 text-xs">
-                    Bu ay için saha faaliyet kartı yok.
+                    {etiketFilter
+                      ? 'Bu etiket için saha faaliyet kartı yok.'
+                      : 'Bu ay için saha faaliyet kartı yok.'}
                   </div>
                 ) : (
-                  personFaaliyetleri.map((f) => {
+                  personFaaliyetFiltered.map((f) => {
                     const fotolar = getFaaliyetFotolar(f);
                     const ekip = resolveFaaliyetEkip(f, personeller);
                     const mesaiLabel = isMesaiSahaFaaliyet(f)
                       ? formatMesaiFaaliyetLabel(f, personeller)
                       : '';
+                    const canEdit = editableSahaIds.has(f.id);
 
                     return (
                       <article
@@ -1182,6 +1298,11 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
                                 <span className="text-[9px] font-black uppercase tracking-wide text-slate-600 bg-slate-100 px-2 py-0.5 rounded-full">
                                   {kaynakEtiket(f.kaynakEkran)}
                                 </span>
+                                {f.isEtiketi && (
+                                  <span className="text-[9px] font-black uppercase bg-amber-600 text-white px-2 py-0.5 rounded-full">
+                                    {normalizeFaaliyetEtiketi(f.isEtiketi)}
+                                  </span>
+                                )}
                                 {isMesaiSahaFaaliyet(f) && (
                                   <span className="text-[8px] font-black uppercase bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full">
                                     Mesai faaliyet
@@ -1242,6 +1363,22 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
                             </div>
                           ) : (
                             <p className="text-[11px] text-slate-400 italic">Açıklama girilmemiş.</p>
+                          )}
+
+                          {canEdit ? (
+                            <FaaliyetEtiketIlerlemePanel
+                              faaliyet={f}
+                              currentUserEmail={currentUser?.email}
+                              busy={patchBusyId === f.id}
+                              onPatch={(patch) => patchSahaFaaliyet(f, patch)}
+                            />
+                          ) : (
+                            f.isEtiketi || f.ilerlemeDurumu ? (
+                              <p className="text-[10px] text-slate-500 font-semibold">
+                                Etiket: {normalizeFaaliyetEtiketi(f.isEtiketi) || '—'} · İlerleme:{' '}
+                                {f.ilerlemeDurumu || '—'}
+                              </p>
+                            ) : null
                           )}
 
                           {renderEkipChips(f.id, ekip, selectedPerson?.id)}
@@ -1358,6 +1495,40 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
                 {exportingExcel ? <Loader2 size={13} className="animate-spin" /> : <FileSpreadsheet size={13} />}
                 {exportingExcel ? 'Excel…' : `Excel (${dayOzet.faaliyetSayisi})`}
               </button>
+              <button
+                type="button"
+                onClick={() => void handleGunSonuGonder()}
+                disabled={daySahaFaaliyetleri.length === 0 || gunSonuBusy}
+                className="inline-flex items-center gap-1.5 bg-amber-500 hover:bg-amber-400 text-slate-900 text-[10px] font-black px-3 py-2 rounded-xl disabled:opacity-40 cursor-pointer"
+                title="Parsel/blok/etiket raporunu yönetime gönder"
+              >
+                {gunSonuBusy ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
+                Günü yönetime gönder
+              </button>
+            </div>
+            <div className="w-full max-w-md space-y-1.5">
+              <textarea
+                value={gunSonuNot}
+                onChange={(e) => setGunSonuNot(e.target.value)}
+                rows={2}
+                placeholder="Formen / yönetici günlük görüşü (rapora eklenir)…"
+                className="w-full text-[10px] p-2 bg-amber-50/80 border border-amber-200 rounded-xl outline-none resize-none"
+              />
+              <label className="inline-flex items-center gap-1.5 text-[10px] font-bold text-slate-600">
+                <Tag size={12} className="text-amber-600" />
+                <select
+                  value={etiketFilter}
+                  onChange={(e) => setEtiketFilter(e.target.value)}
+                  className="text-[10px] font-bold bg-white border border-slate-200 rounded-lg px-2 py-1 cursor-pointer"
+                >
+                  <option value="">Tüm etiketler</option>
+                  {FAALIYET_ETIKET_ONSETLERI.map((o) => (
+                    <option key={o} value={o}>
+                      {o}
+                    </option>
+                  ))}
+                </select>
+              </label>
             </div>
             <div className="flex flex-wrap gap-2 text-[10px] font-bold justify-end">
               <span className="bg-amber-50 text-amber-900 border border-amber-200 rounded-full px-2.5 py-1">
@@ -1513,18 +1684,20 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
             </div>
           ) : (
             <>
-              {daySahaFaaliyetleri.length > 0 && (
+              {daySahaFiltered.length > 0 && (
                 <div className="space-y-3">
                   <h3 className="text-xs font-black uppercase tracking-wider text-slate-700 flex items-center gap-2">
                     <HardHat size={14} className="text-amber-600" />
-                    Saha faaliyetleri ({daySahaFaaliyetleri.length})
+                    Saha faaliyetleri ({daySahaFiltered.length}
+                    {etiketFilter ? ` / ${daySahaFaaliyetleri.length}` : ''})
                   </h3>
-                  {daySahaFaaliyetleri.map((f) => {
+                  {daySahaFiltered.map((f) => {
                     const fotolar = getFaaliyetFotolar(f);
                     const ekip = resolveFaaliyetEkip(f, personeller);
                     const mesaiLabel = isMesaiSahaFaaliyet(f)
                       ? formatMesaiFaaliyetLabel(f, personeller)
                       : '';
+                    const canEdit = editableSahaIds.has(f.id);
                     return (
                       <article
                         key={`day-saha-${f.id}`}
@@ -1537,6 +1710,11 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
                                 <span className="text-[9px] font-black uppercase tracking-wide text-slate-600 bg-slate-100 px-2 py-0.5 rounded-full">
                                   {kaynakEtiket(f.kaynakEkran)}
                                 </span>
+                                {f.isEtiketi && (
+                                  <span className="text-[9px] font-black uppercase bg-amber-600 text-white px-2 py-0.5 rounded-full">
+                                    {normalizeFaaliyetEtiketi(f.isEtiketi)}
+                                  </span>
+                                )}
                                 {isMesaiSahaFaaliyet(f) && (
                                   <span className="text-[8px] font-black uppercase bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full">
                                     Mesai faaliyet
@@ -1598,6 +1776,16 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
                           ) : (
                             <p className="text-[11px] text-slate-400 italic">Açıklama girilmemiş.</p>
                           )}
+
+                          {canEdit ? (
+                            <FaaliyetEtiketIlerlemePanel
+                              faaliyet={f}
+                              currentUserEmail={currentUser?.email}
+                              busy={patchBusyId === f.id}
+                              onPatch={(patch) => patchSahaFaaliyet(f, patch)}
+                              compact
+                            />
+                          ) : null}
 
                           {renderEkipChips(f.id, ekip) || (
                             <p className="text-[11px] text-slate-400 italic flex items-center gap-1.5">

@@ -500,9 +500,16 @@ export const LojistikScreen: React.FC<LojistikScreenProps> = ({
   // ==========================================
   const [harcamaTutar, setHarcamaTutar] = useState('');
   const [harcamaAciklama, setHarcamaAciklama] = useState('');
+  const [harcamaFisNo, setHarcamaFisNo] = useState('');
   const [harcamaTarih, setHarcamaTarih] = useState(new Date().toISOString().split('T')[0]);
   const [faturaFotoBase64, setFaturaFotoBase64] = useState<string | null>(null);
   const [compressing, setCompressing] = useState(false);
+  const [iadeRaporStart, setIadeRaporStart] = useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 14);
+    return d.toISOString().split('T')[0];
+  });
+  const [iadeRaporEnd, setIadeRaporEnd] = useState(new Date().toISOString().split('T')[0]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -511,7 +518,13 @@ export const LojistikScreen: React.FC<LojistikScreenProps> = ({
 
     setCompressing(true);
     try {
-      const compressed = await compressImage(file);
+      const rawBase64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (ev) => resolve(String(ev.target?.result || ''));
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+      const compressed = await compressImage(rawBase64);
       setFaturaFotoBase64(compressed);
     } catch (err) {
       console.error(err);
@@ -524,31 +537,79 @@ export const LojistikScreen: React.FC<LojistikScreenProps> = ({
   const handleSaveYolHarcamasi = async (e: React.FormEvent) => {
     e.preventDefault();
     const amount = parseFloat(harcamaTutar) || 0;
+    const fisNo = String(harcamaFisNo || '').trim();
     if (amount <= 0 || !harcamaAciklama) {
       alert('Lütfen geçerli bir Tutar ve Açıklama belirtin!');
+      return;
+    }
+    if (!fisNo) {
+      alert('Fiş numarası zorunludur.');
       return;
     }
 
     try {
       const hId = `harcama_${Date.now()}`;
+      let fotoUrl = faturaFotoBase64 || '';
+      if (fotoUrl) {
+        try {
+          const { ensureYolHarcamaFotoPersisted } = await import('../lib/sahaFaaliyetFotoStorage');
+          fotoUrl = await ensureYolHarcamaFotoPersisted(hId, fotoUrl);
+        } catch (err) {
+          console.warn('Yol harcama foto Storage atlandı', err);
+        }
+      }
       await setDoc(doc(db, 'yolHarcamalari', hId), {
         id: hId,
         tarih: harcamaTarih,
         tutar: amount,
         aciklama: harcamaAciklama,
-        faturaFotoUrl: faturaFotoBase64 || '',
+        fisNo,
+        faturaFotoUrl: fotoUrl,
         durum: 'ONAY BEKLİYOR',
-        surucu: currentChauffeurName
+        surucu: currentChauffeurName,
+        olusturulma: new Date().toISOString(),
       });
 
       showStatus('success', 'Yol harcaması ve evrak görseli başarıyla yöneticilere gönderildi!');
       setHarcamaTutar('');
       setHarcamaAciklama('');
+      setHarcamaFisNo('');
       setFaturaFotoBase64(null);
     } catch (err) {
       console.error(err);
       showStatus('error', 'Harcama kaydı gönderilemedi.');
     }
+  };
+
+  const handleSoforIadeRaporu = async () => {
+    const { filterYolHarcamalariByRange, buildSoforMasrafIadeReportHtml, openSoforMasrafIadeReport } =
+      await import('../lib/yolHarcamaUtils');
+    const items = filterYolHarcamalariByRange(
+      yolHarcamalari,
+      iadeRaporStart,
+      iadeRaporEnd,
+      currentChauffeurName
+    ).map((x) => ({
+      id: x.id,
+      tarih: x.tarih,
+      fisNo: x.fisNo,
+      aciklama: x.aciklama,
+      tutar: Number(x.tutar) || 0,
+      surucu: x.surucu,
+      fotoUrl: x.faturaFotoUrl,
+    }));
+    if (items.length === 0) {
+      alert('Seçili aralıkta masraf kaydı yok.');
+      return;
+    }
+    const html = buildSoforMasrafIadeReportHtml({
+      startDate: iadeRaporStart,
+      endDate: iadeRaporEnd,
+      items,
+      surucuFiltre: currentChauffeurName,
+      olusturan: currentChauffeurName,
+    });
+    openSoforMasrafIadeReport(html, 'Şoför Masraf İade Raporu');
   };
 
   // ==========================================
@@ -1194,7 +1255,18 @@ export const LojistikScreen: React.FC<LojistikScreenProps> = ({
                 </div>
 
                 <form onSubmit={handleSaveYolHarcamasi} className="space-y-4">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-bold text-slate-500 uppercase">Fiş No *</label>
+                      <input
+                        type="text"
+                        placeholder="Örn: A-14582"
+                        value={harcamaFisNo}
+                        onChange={(e) => setHarcamaFisNo(e.target.value)}
+                        required
+                        className="w-full rounded-xl border border-slate-300 px-3 py-2 text-xs focus:ring-2 focus:ring-slate-900 focus:border-slate-900/20 text-slate-800 font-mono font-bold"
+                      />
+                    </div>
                     <div className="space-y-1">
                       <label className="text-[10px] font-bold text-slate-500 uppercase">Tutar (TL)</label>
                       <input 
@@ -1289,6 +1361,68 @@ export const LojistikScreen: React.FC<LojistikScreenProps> = ({
                     </button>
                   </div>
                 </form>
+
+                <div className="border-t pt-4 space-y-3">
+                  <h3 className="text-xs font-bold text-slate-800">Şoför Masraf İade Raporu (A4)</h3>
+                  <p className="text-[10px] text-slate-500">
+                    Merkez geri ödemesi için fiş no, tutar ve görselleri tek A4 dökümde alın.
+                  </p>
+                  <div className="flex flex-wrap items-end gap-3">
+                    <div className="space-y-1">
+                      <label className="text-[9px] font-bold text-slate-500 uppercase">Başlangıç</label>
+                      <input
+                        type="date"
+                        value={iadeRaporStart}
+                        onChange={(e) => setIadeRaporStart(e.target.value)}
+                        className="rounded-xl border border-slate-300 px-3 py-2 text-xs"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[9px] font-bold text-slate-500 uppercase">Bitiş</label>
+                      <input
+                        type="date"
+                        value={iadeRaporEnd}
+                        onChange={(e) => setIadeRaporEnd(e.target.value)}
+                        className="rounded-xl border border-slate-300 px-3 py-2 text-xs"
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => void handleSoforIadeRaporu()}
+                      className="bg-amber-500 hover:bg-amber-400 text-slate-900 font-bold py-2 px-4 rounded-xl text-xs cursor-pointer"
+                    >
+                      A4 İade Raporu Yazdır
+                    </button>
+                  </div>
+                  {yolHarcamalari.length > 0 && (
+                    <div className="overflow-x-auto rounded-xl border border-slate-200">
+                      <table className="w-full text-[10px] text-left">
+                        <thead className="bg-slate-100">
+                          <tr>
+                            <th className="px-2 py-1.5">Tarih</th>
+                            <th className="px-2 py-1.5">Fiş No</th>
+                            <th className="px-2 py-1.5">Açıklama</th>
+                            <th className="px-2 py-1.5">Durum</th>
+                            <th className="px-2 py-1.5 text-right">Tutar</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {yolHarcamalari.slice(0, 20).map((exp) => (
+                            <tr key={exp.id} className="border-t border-slate-100">
+                              <td className="px-2 py-1.5 font-mono">{exp.tarih}</td>
+                              <td className="px-2 py-1.5 font-bold">{exp.fisNo || '—'}</td>
+                              <td className="px-2 py-1.5">{exp.aciklama}</td>
+                              <td className="px-2 py-1.5">{exp.durum}</td>
+                              <td className="px-2 py-1.5 text-right font-mono font-bold">
+                                {Number(exp.tutar || 0).toLocaleString('tr-TR')} ₺
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
               </div>
             )}
 
