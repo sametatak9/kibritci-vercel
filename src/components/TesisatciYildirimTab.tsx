@@ -239,7 +239,7 @@ export const TesisatciYildirimTab: React.FC<TesisatciYildirimTabProps> = ({
 
       if (addNotification) {
         await addNotification(
-          `Yıldırım Tanker irsaliyesi yönetici onayına gönderildi: ${fis.fisNo} · içme ${fis.icmeSuyuAdet} · sanayi ${fis.sanayiSuyuAdet} · damaca ${fis.damacaAdet || 0}`,
+          `Yıldırım Tanker irsaliyesi yönetici onayına gönderildi: ${fis.fisNo} · içme ${fis.icmeSuyuAdet} ton · sanayi ${fis.sanayiSuyuAdet} ton · damacana ${fis.damacaAdet || 0} adet`,
           {
             tip: 'YILDIRIM_TANKER_FIS_ONAY',
             hedefRol: 'YÖNETİCİ',
