@@ -297,11 +297,10 @@ export function buildFaaliyetsizPersoneller(
     faaliyetli.map((p) => normalizeTurkishName(`${p.ad} ${p.soyad}`))
   );
 
-  // Onaylı kamp kaydı var ama aktifPersonelListesi boşsa → o gün Geldi kampçıları faaliyetli say
+  // Onaylı kamp kaydı olan her gün → o gün Geldi tüm kampçılar faaliyetli
+  // (liste boş/kısmi fark etmez; KAMPÇI / Kampçı aynı kabul)
   for (const kf of onayliKamp) {
     if (!isFaaliyetInPeriod(kf, year, month)) continue;
-    const tagged = (kf.aktifPersonelListesi || []).filter(Boolean);
-    if (tagged.length > 0) continue;
     const dk = normalizeDateKey(kf.tarih);
     if (!dk) continue;
     const [y, m, d] = dk.split('-').map(Number);

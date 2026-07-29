@@ -114,6 +114,29 @@ export function resolveGeldiRolPersonelIds(
   return ids;
 }
 
+/** Mevcut liste + o gün Geldi kampçı id'leri (tekrarsız birleşim). */
+export function mergeGeldiKampciIntoList(
+  existing: string[] | undefined,
+  personeller: Personel[],
+  yoklamalar: AylikYoklamaMap,
+  dateKey: string,
+  options?: {
+    ensurePersonelId?: string | null;
+    ensureEmail?: string | null;
+  }
+): string[] {
+  const geldi = resolveGeldiRolPersonelIds(personeller, yoklamalar, dateKey, 'KAMPCI', options);
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const id of [...(existing || []), ...geldi]) {
+    const v = String(id || '').trim();
+    if (!v || seen.has(v)) continue;
+    seen.add(v);
+    out.push(v);
+  }
+  return out;
+}
+
 /** Eski kamp kayıtlarındaki yanlış ekibi yalnızca kampçılara indirger (onarım). */
 export function filterIdsToKampciOnly(
   personelIds: string[] | undefined,

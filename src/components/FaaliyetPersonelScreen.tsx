@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Camera,
   ChevronLeft,
@@ -49,6 +49,7 @@ import {
   formatFaaliyetTarihLabel,
   getPersonFaaliyetleriInPeriod,
   getPersonKampFaaliyetleriInPeriod,
+  isKampFaaliyetOnayli,
   kampFaaliyetCalisanSayisi,
   resolveFaaliyetEkip,
 } from '../lib/faaliyetPersonelUtils';
@@ -444,6 +445,55 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
       String(a.yerleskeAdi || '').localeCompare(String(b.yerleskeAdi || ''), 'tr')
     );
   }, [kampFaaliyetleri, selectedDate]);
+
+  /** Onaylı kamp kaydında eksik Geldi kampçıları otomatik göm (Kampçı/KAMPÇI fark etmez) */
+  const kampEmbedRepairKeyRef = useRef('');
+  useEffect(() => {
+    const onayli = dayKampFaaliyetleri.filter((f) => isKampFaaliyetOnayli(f));
+    if (onayli.length === 0) return;
+
+    let cancelled = false;
+    (async () => {
+      const { mergeGeldiKampciIntoList } = await import('../lib/mobilRolEtiketUtils');
+      const fingerprint = `${selectedDate}|${onayli
+        .map((f) => `${f.id}:${(f.aktifPersonelListesi || []).join(',')}`)
+        .join(';')}`;
+      if (kampEmbedRepairKeyRef.current === fingerprint) return;
+
+      let wrote = false;
+      const { doc, updateDoc } = await import('firebase/firestore');
+      for (const f of onayli) {
+        if (cancelled) return;
+        const before = (f.aktifPersonelListesi || [])
+          .map((x) => String(x || '').trim())
+          .filter(Boolean);
+        const merged = mergeGeldiKampciIntoList(
+          before,
+          personeller,
+          yoklamalar,
+          selectedDate,
+          { ensureEmail: f.kaydedenKampci || null }
+        );
+        if (merged.length === before.length && merged.every((id, i) => id === before[i])) {
+          continue;
+        }
+        await updateDoc(doc(db, 'kampGunlukFaaliyetleri', f.id), {
+          aktifPersonelListesi: merged,
+          personelId: merged[0] || f.personelId || null,
+        });
+        wrote = true;
+      }
+      if (!cancelled) {
+        kampEmbedRepairKeyRef.current = wrote
+          ? '' // snapshot gelince yeniden fingerprint
+          : fingerprint;
+      }
+    })().catch((err) => console.warn('[kamp-embed] otomatik gömme atlandı:', err));
+
+    return () => {
+      cancelled = true;
+    };
+  }, [dayKampFaaliyetleri, personeller, selectedDate, yoklamalar]);
 
   const dayOzet = useMemo(
     () =>

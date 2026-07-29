@@ -112,9 +112,9 @@ export function buildAtanmamisGeldiHavuzu(
   const dayKampOnayli = (kampFaaliyetleri || []).filter(
     (kf) => normalizeDateKey(kf.tarih) === normalizeDateKey(dateKey) && isKampFaaliyetOnayli(kf)
   );
-  const hasEmptyTaggedOnayliKamp = dayKampOnayli.some(
-    (kf) => !(kf.aktifPersonelListesi || []).filter(Boolean).length
-  );
+  // 1 onaylı kamp faaliyeti varsa o gün tüm Geldi kampçılar faaliyetli sayılır
+  // (liste kısmi dolu olsa bile — KAMPÇI / Kampçı yazım farkı önemli değil)
+  const hasOnayliKamp = dayKampOnayli.length > 0;
   return geldi.filter((p) => {
     if (assigned.has(p.id)) return false;
     const fullName = normalizeTurkishName(`${p.ad} ${p.soyad}`);
@@ -123,8 +123,7 @@ export function buildAtanmamisGeldiHavuzu(
     }
     // Kamp faaliyetinde kaydeden / eşleşme
     if (dayKampOnayli.some((kf) => personMatchesFaaliyet(p, kf))) return false;
-    // Onaylı kamp kaydı personel listesi boşsa: Kampçı Geldi'ler düşer
-    if (hasEmptyTaggedOnayliKamp && isKampciGorev(p.gorev)) {
+    if (hasOnayliKamp && isKampciGorev(p.gorev)) {
       return false;
     }
     return true;

@@ -596,29 +596,27 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
         role
       );
 
-      // Faaliyet onayında personel listesi boşsa → o gün Geldi kampçıları bağla
+      // Faaliyet onayında o gün Geldi tüm kampçıları listeye göm (kısmi liste olsa bile birleştir)
       if (type === 'faaliyet') {
         try {
           const { getDoc, getDocs: getAll } = await import('firebase/firestore');
           const snap = await getDoc(docRef);
           const raw = snap.exists() ? (snap.data() as any) : null;
           const existingList: string[] = Array.isArray(raw?.aktifPersonelListesi)
-            ? raw.aktifPersonelListesi.filter(Boolean)
+            ? raw.aktifPersonelListesi.map((x: unknown) => String(x || '').trim()).filter(Boolean)
             : [];
-          if (existingList.length === 0) {
-            const { resolveGeldiRolPersonelIds } = await import('../lib/mobilRolEtiketUtils');
-            const { fetchYoklamaMap } = await import('../lib/yoklamaPersistence');
-            const persSnap = await getAll(collection(db, 'personeller'));
-            const personeller = persSnap.docs.map((d) => ({ id: d.id, ...d.data() })) as any[];
-            const yoklamalar = await fetchYoklamaMap();
-            const tarih = String(raw?.tarih || new Date().toISOString().slice(0, 10));
-            const ids = resolveGeldiRolPersonelIds(personeller, yoklamalar, tarih, 'KAMPCI', {
-              ensureEmail: raw?.kaydedenKampci || null,
-            });
-            if (ids.length > 0) {
-              updateData.aktifPersonelListesi = ids;
-              updateData.personelId = ids[0];
-            }
+          const { mergeGeldiKampciIntoList } = await import('../lib/mobilRolEtiketUtils');
+          const { fetchYoklamaMap } = await import('../lib/yoklamaPersistence');
+          const persSnap = await getAll(collection(db, 'personeller'));
+          const personeller = persSnap.docs.map((d) => ({ id: d.id, ...d.data() })) as any[];
+          const yoklamalar = await fetchYoklamaMap();
+          const tarih = String(raw?.tarih || new Date().toISOString().slice(0, 10));
+          const merged = mergeGeldiKampciIntoList(existingList, personeller, yoklamalar, tarih, {
+            ensureEmail: raw?.kaydedenKampci || null,
+          });
+          if (merged.length > 0) {
+            updateData.aktifPersonelListesi = merged;
+            updateData.personelId = merged[0];
           }
         } catch (repairErr) {
           console.warn('[kamp-onay] personel listesi onarımı atlandı:', repairErr);

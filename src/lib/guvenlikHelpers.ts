@@ -1,5 +1,6 @@
 import { Personel } from '../types/erp';
 import { formatDateLabelTr, normalizeDateKey } from './dateKeyUtils';
+import { normalizeGorev } from './gorevUtils';
 import { isDayActiveForPersonel, isTaseronPersonel } from './yoklamaUtils';
 import { isFounderEmail } from './roleClaims';
 import { buildWhatsAppUrl } from './mobilOnayUtils';
@@ -442,7 +443,8 @@ export function resolveAkvizyonGorev(firmaAdi?: string | null, currentGorev?: st
 
 export function displayPersonelGorev(p?: Personel): string {
   if (!p) return '—';
-  return resolveAkvizyonGorev(p.firmaAdi, p.gorev);
+  // Kampçı / KAMPÇI / kamp görevlisi → tek etiket (KAMPÇI)
+  return normalizeGorev(resolveAkvizyonGorev(p.firmaAdi, p.gorev));
 }
 
 /** YYYY-MM-DD için işe giriş / işten çıkış penceresi */
