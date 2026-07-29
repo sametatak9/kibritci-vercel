@@ -39,8 +39,8 @@ interface StaffHakedisRow {
 }
 
 const ZER_YAPI_GUNLUK = 200;
-/** Sunum örneği: ortalama 50 kişi × 200 TL = günlük 10.000 TL şirket kârı */
-const ORNEK_GUNLUK_KISI = 50;
+/** Her personelin mevcut tabanına eklenen fark — «6.000 TL pahalıya çalışsaydı» */
+const TABAN_FARK_TL = 6_000;
 const DEFAULT_MAAS_TABANI = 30_000;
 
 /** Ekran önizleme + yazdırma — naif gri/beyaz rapor stili */
@@ -175,14 +175,15 @@ const REPORT_CSS = `
   .rpt-math-col {
     border: 1px solid #d1d5db; border-radius: 4px; padding: 10px; background: #fff;
   }
-  .rpt-math-col--now { border-color: #94a3b8; background: #f8fafc; }
-  .rpt-math-col--plus { border-color: #047857; background: #f0fdf4; }
+  .rpt-math-col--now { border-color: #64748b; background: #f8fafc; }
+  .rpt-math-col--plus { border-color: #b91c1c; background: #fff7f7; }
   .rpt-math-col--delta { border-color: #047857; background: #ecfdf5; }
   .rpt-math-col h5 {
     margin: 0 0 8px; font-size: 8pt; text-transform: uppercase; letter-spacing: 0.04em;
     font-weight: 800; color: #374151;
   }
-  .rpt-math-col--plus h5, .rpt-math-col--delta h5 { color: #065f46; }
+  .rpt-math-col--plus h5 { color: #991b1b; }
+  .rpt-math-col--delta h5 { color: #065f46; }
   .rpt-math-row {
     display: flex; justify-content: space-between; gap: 8px;
     font-size: 7.5pt; color: #4b5563; padding: 3px 0; border-bottom: 1px solid #f3f4f6;
@@ -532,52 +533,75 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
     const roleMix = buildRoleMix(activeStaffRows);
     const days = daysInMonth(selectedYear, selectedMonth);
     const ortalamaKisiBasiKar = activeStaffRows.length > 0 ? totalZerYapiHakedis / activeStaffRows.length : 0;
-    const gunBasiKar = ZER_YAPI_GUNLUK; // kişi-gün başına şirket avantajı
-    const ortalamaGunlukMevcudiyet = days > 0 ? totalPersonDays / days : 0;
-    const donemSirketKari = totalPersonDays * ZER_YAPI_GUNLUK; // = totalZerYapiHakedis
-    const ortalamaGunlukKar = days > 0 ? donemSirketKari / days : 0;
-    const ornekGunlukKar = ORNEK_GUNLUK_KISI * ZER_YAPI_GUNLUK; // 50 × 200 = 10.000
+    const gunBasiKar = totalPersonDays > 0 ? totalZerYapiHakedis / totalPersonDays : 0;
 
-    // ZER YAPI olmasa: şirket bu 200 TL/gün avantajını kaybeder
-    const zerYapisizMasraf = totalMaasKazanci; // mevcut bordro aynı kalır
-    const zerYapiliNetAvantaj = donemSirketKari;
+    let senaryoGunToplam = 0;
+    let senaryoMesaiToplam = 0;
+    let mevcutTabanToplam = 0;
+    let senaryoTabanToplam = 0;
 
     const personelSenaryolari = activeStaffRows.map((row) => {
       const mevcutTaban = resolveMaasTabani(row.personel);
+      const senaryoTaban = mevcutTaban + TABAN_FARK_TL;
+      mevcutTabanToplam += mevcutTaban;
+      senaryoTabanToplam += senaryoTaban;
+
+      // Aynı geldi gün + aynı mesai saati; taban +6000 → gün VE mesai hakedişi birlikte artar
+      const senaryoGun = calcGunKazanciFromWage(senaryoTaban, row.geldiGun, selectedYear, selectedMonth);
+      const senaryoMesai = calcMesaiKazanciFromWage(senaryoTaban, row.mesaiSaat, selectedYear, selectedMonth);
+      const senaryoToplam = senaryoGun + senaryoMesai;
+      senaryoGunToplam += senaryoGun;
+      senaryoMesaiToplam += senaryoMesai;
+
       return {
         adSoyad: `${row.personel.ad} ${row.personel.soyad}`.trim(),
         gorev: normalizeGorev(row.personel.gorev),
         mevcutTaban,
+        senaryoTaban,
+        tabanFark: TABAN_FARK_TL,
         geldiGun: row.geldiGun,
         mesaiSaat: row.mesaiSaat,
+        mevcutGun: row.gunKazanci,
+        mevcutMesai: row.mesaiKazanci,
         mevcutToplam: row.toplamKazanc,
-        gunlukUygunluk: ZER_YAPI_GUNLUK,
-        donemUygunluk: row.geldiGun * ZER_YAPI_GUNLUK,
-        zerYapiHakedis: row.zerYapiHakedis,
+        senaryoGun,
+        senaryoMesai,
+        senaryoToplam,
+        gunFarki: senaryoGun - row.gunKazanci,
+        mesaiFarki: senaryoMesai - row.mesaiKazanci,
+        // Bu satırın şirkete sağladığı tasarruf (= pahalı senaryo − şuanki)
+        sirketKari: senaryoToplam - row.toplamKazanc,
+        masrafFarki: senaryoToplam - row.toplamKazanc,
+        donemUygunluk: senaryoToplam - row.toplamKazanc,
       };
     });
 
-    const enCokKatkı = [...personelSenaryolari]
-      .sort((a, b) => b.donemUygunluk - a.donemUygunluk)
+    const senaryoToplamMasraf = senaryoGunToplam + senaryoMesaiToplam;
+    const gunTasarrufu = senaryoGunToplam - totalGunKazanci;
+    const mesaiTasarrufu = senaryoMesaiToplam - totalMesaiKazanci;
+    // Aylık şirket kârı = taban 6000 daha pahalı olsaydı ödenecek ekstra (gün + mesai)
+    const aylikSirketKari = senaryoToplamMasraf - totalMaasKazanci;
+    const ortalamaMevcutTaban = activeStaffRows.length > 0 ? mevcutTabanToplam / activeStaffRows.length : 0;
+    const ortalamaSenaryoTaban = activeStaffRows.length > 0 ? senaryoTabanToplam / activeStaffRows.length : 0;
+    const ortalamaKisiKari = activeStaffRows.length > 0 ? aylikSirketKari / activeStaffRows.length : 0;
+    const mesaiPayiPct = aylikSirketKari > 0 ? (mesaiTasarrufu / aylikSirketKari) * 100 : 0;
+
+    const enCokEtkilenen = [...personelSenaryolari]
+      .sort((a, b) => b.sirketKari - a.sirketKari)
       .slice(0, 5)
-      .filter((p) => p.donemUygunluk > 0);
+      .filter((p) => p.sirketKari >= 1);
 
     const güçlüArgüman = [
-      `ZER YAPI, personelin şirkete günlük ${formatMoney(ZER_YAPI_GUNLUK, 0)} daha uygun çalışmasının sebebidir.`,
-      `Formül: Dönem şirket kârı / avantajı = iş-günü × ${formatMoney(ZER_YAPI_GUNLUK, 0)}.`,
-      `${donemLabel}: ${activeStaffRows.length} personel · ${totalPersonDays} iş-günü × ${formatMoney(ZER_YAPI_GUNLUK, 0)} = ${formatMoney(donemSirketKari, 0)}.`,
-      `Örnek: ortalama ${ORNEK_GUNLUK_KISI} kişi bile ${formatMoney(ZER_YAPI_GUNLUK, 0)} az ücretle çalışsa şirket günlük ${formatMoney(ornekGunlukKar, 0)} kâr eder (${ORNEK_GUNLUK_KISI} × ${ZER_YAPI_GUNLUK}).`,
-      `Bu dönem ortalama günlük mevcudiyet ≈ ${ortalamaGunlukMevcudiyet.toLocaleString('tr-TR', { maximumFractionDigits: 1 })} kişi → ortalama günlük avantaj ≈ ${formatMoney(ortalamaGunlukKar, 0)}.`,
+      `Kontrol: Taban +${formatMoney(TABAN_FARK_TL, 0)} olsaydı hem gün hem mesai artardı — mesai formülü (taban ÷ ${days} ÷ 7,5) × 1,5 × saat tabana bağlıdır.`,
+      `Bu dönemde mesai tasarrufu ${formatMoney(mesaiTasarrufu, 0)} (toplam kârın %${mesaiPayiPct.toFixed(1)}’i); gün tasarrufu ${formatMoney(gunTasarrufu, 0)}.`,
+      `Aylık şirket kârı (indirim sayesinde) = ${formatMoney(aylikSirketKari, 0)} = şuanki ${formatMoney(totalMaasKazanci, 0)} yerine +${formatMoney(TABAN_FARK_TL, 0)} senaryosu ${formatMoney(senaryoToplamMasraf, 0)} ödememek.`,
     ].join(' ');
 
     const shareableParagraphs = [
-      `KİBRİTÇİ · ZER YAPI UYGUN ÇALIŞMA / ŞİRKET KÂRI — ${donemLabel}`,
-      `Amaç: Personelin günlük ${formatMoney(ZER_YAPI_GUNLUK, 0)} uygun çalışmasının şirket kârını göstermek.`,
-      `1) Birim: ${formatMoney(ZER_YAPI_GUNLUK, 0)} / kişi-gün`,
-      `2) Dönem: ${totalPersonDays} iş-günü × ${formatMoney(ZER_YAPI_GUNLUK, 0)} = ${formatMoney(donemSirketKari, 0)}`,
-      `3) Örnek: ${ORNEK_GUNLUK_KISI} kişi × ${formatMoney(ZER_YAPI_GUNLUK, 0)} = ${formatMoney(ornekGunlukKar, 0)} / gün`,
-      `4) Ort. günlük mevcudiyet ≈ ${ortalamaGunlukMevcudiyet.toLocaleString('tr-TR', { maximumFractionDigits: 1 })} → ort. günlük kâr ≈ ${formatMoney(ortalamaGunlukKar, 0)}`,
-      `5) Personel: ${activeStaffRows.length} · Mesai: ${totalMesaiSaat.toLocaleString('tr-TR', { maximumFractionDigits: 1 })} sa`,
+      `KİBRİTÇİ · ZER YAPI +${formatMoney(TABAN_FARK_TL, 0)} TABAN KARŞILAŞTIRMASI — ${donemLabel}`,
+      `Şuanki: ${formatMoney(totalMaasKazanci, 0)}  |  +${formatMoney(TABAN_FARK_TL, 0)}: ${formatMoney(senaryoToplamMasraf, 0)}  |  Aylık şirket kârı: ${formatMoney(aylikSirketKari, 0)}`,
+      `Gün tasarrufu: ${formatMoney(gunTasarrufu, 0)}  ·  Mesai tasarrufu: ${formatMoney(mesaiTasarrufu, 0)} (mesai dahil ✓)`,
+      `Kapsam: ${activeStaffRows.length} personel · ${totalPersonDays} iş-günü · ${totalMesaiSaat.toLocaleString('tr-TR', { maximumFractionDigits: 1 })} sa mesai`,
       güçlüArgüman,
     ].join('\n');
 
@@ -588,36 +612,32 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
       güçlüArgüman,
       shareableParagraphs,
       days,
-      donemSirketKari,
-      ortalamaGunlukKar,
-      ortalamaGunlukMevcudiyet,
-      ornekGunlukKar,
-      ornekGunlukKisi: ORNEK_GUNLUK_KISI,
+      tabanFarkTl: TABAN_FARK_TL,
+      senaryoMaasTabani: TABAN_FARK_TL,
+      senaryoGunToplam,
+      senaryoMesaiToplam,
+      senaryoToplamMasraf,
+      gunTasarrufu,
+      mesaiTasarrufu,
+      aylikSirketKari,
+      mesaiPayiPct,
+      // geriye uyum
+      masrafArtisi: aylikSirketKari,
+      donemZarari: aylikSirketKari,
+      donemSirketKari: aylikSirketKari,
+      gunMasrafArtisi: gunTasarrufu,
+      mesaiMasrafArtisi: mesaiTasarrufu,
+      ortalamaMevcutTaban,
+      ortalamaSenaryoTaban,
+      ortalamaTabanFark: TABAN_FARK_TL,
+      ortalamaKisiMasrafArtisi: ortalamaKisiKari,
+      ortalamaGunlukKar: 0,
+      ortalamaGunlukMevcudiyet: 0,
+      ornekGunlukKar: 0,
+      ornekGunlukKisi: 0,
       gunlukUygunluk: ZER_YAPI_GUNLUK,
-      zerYapisizMasraf,
-      zerYapiliNetAvantaj,
-      // geriye uyum alanları (eski UI/excel referansları kırılmasın)
-      tabanFarkTl: 0,
-      senaryoMaasTabani: 0,
-      senaryoGunToplam: totalGunKazanci,
-      senaryoMesaiToplam: totalMesaiKazanci,
-      senaryoToplamMasraf: totalMaasKazanci,
-      masrafArtisi: 0,
-      donemZarari: donemSirketKari,
-      gunMasrafArtisi: 0,
-      mesaiMasrafArtisi: 0,
-      ortalamaMevcutTaban: 0,
-      ortalamaSenaryoTaban: 0,
-      ortalamaTabanFark: 0,
-      ortalamaKisiMasrafArtisi: activeStaffRows.length > 0 ? donemSirketKari / activeStaffRows.length : 0,
-      tabanFarkToplam: 0,
-      tabanAltinda: 0,
-      tabanUstundeVeyaEsit: 0,
-      ornekTabanFark: ZER_YAPI_GUNLUK,
-      enCokEtkilenen: enCokKatkı.map((p) => ({
-        adSoyad: p.adSoyad,
-        masrafFarki: p.donemUygunluk,
-      })),
+      ornekTabanFark: TABAN_FARK_TL,
+      enCokEtkilenen,
       personelSenaryolari,
     };
   }, [
@@ -625,7 +645,9 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
     donemLabel,
     selectedMonth,
     selectedYear,
+    totalGunKazanci,
     totalMaasKazanci,
+    totalMesaiKazanci,
     totalMesaiSaat,
     totalPersonDays,
     totalZerYapiHakedis,
@@ -703,7 +725,7 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
         donemLabel,
         yil: selectedYear,
         ay: selectedMonth,
-        raporTipi: 'ZER_YAPI_UYGUN_CALISMA_ANALIZ',
+        raporTipi: 'ZER_YAPI_6000_TABAN_KAR_ANALIZ',
         durum: 'ANALIZ_KAYDEDİLDİ',
         personelSayisi: activeStaffRows.length,
         toplamCalismaGunu: totalPersonDays,
@@ -715,14 +737,16 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
         gunBasiKar: analysisSummary.gunBasiKar,
         roleMix: analysisSummary.roleMix,
         güçlüArgüman: analysisSummary.güçlüArgüman,
-        donemSirketKari: analysisSummary.donemSirketKari,
-        ortalamaGunlukKar: analysisSummary.ortalamaGunlukKar,
-        ortalamaGunlukMevcudiyet: analysisSummary.ortalamaGunlukMevcudiyet,
-        ornekGunlukKar: analysisSummary.ornekGunlukKar,
+        tabanFarkTl: TABAN_FARK_TL,
+        senaryoToplamMasraf: analysisSummary.senaryoToplamMasraf,
+        gunTasarrufu: analysisSummary.gunTasarrufu,
+        mesaiTasarrufu: analysisSummary.mesaiTasarrufu,
+        aylikSirketKari: analysisSummary.aylikSirketKari,
+        mesaiPayiPct: analysisSummary.mesaiPayiPct,
         olusturan: currentUser?.email || 'sametatak9@gmail.com',
         olusturmaTarihi: new Date().toISOString(),
       });
-      showStatus('success', `${donemLabel} uygun çalışma / şirket kârı analizi kaydedildi!`);
+      showStatus('success', `${donemLabel} +6.000 taban / aylık şirket kârı analizi kaydedildi!`);
     } catch (err: any) {
       showStatus('error', `Analiz raporu kaydedilirken hata: ${err.message}`);
     } finally {
@@ -764,14 +788,13 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
       ws.addRow(['Kişi Başı Ortalama ZER YAPI', formatMoney(analysisSummary.ortalamaKisiBasiKar, 0)]);
       ws.addRow(['Gün Başı Ortalama ZER YAPI', formatMoney(analysisSummary.gunBasiKar, 0)]);
       ws.addRow([]);
-      ws.addRow(['UYGUN ÇALIŞMA ANALİZİ', `günlük ${formatMoney(ZER_YAPI_GUNLUK, 0)}`]);
-      ws.addRow(['Personel', activeStaffRows.length]);
-      ws.addRow(['İş-günü', totalPersonDays]);
-      ws.addRow(['Ort. günlük mevcudiyet', analysisSummary.ortalamaGunlukMevcudiyet]);
-      ws.addRow(['Birim uygunluk', ZER_YAPI_GUNLUK]);
-      ws.addRow([`Örnek ${ORNEK_GUNLUK_KISI} × ${ZER_YAPI_GUNLUK}`, formatMoney(analysisSummary.ornekGunlukKar, 0)]);
-      ws.addRow(['Ort. günlük şirket kârı', formatMoney(analysisSummary.ortalamaGunlukKar, 0)]);
-      ws.addRow(['Dönem şirket kârı', formatMoney(analysisSummary.donemSirketKari, 0)]);
+      ws.addRow(['+6000 TABAN ANALİZİ (GÜN+MESAİ)', `mevcut + ${formatMoney(TABAN_FARK_TL, 0)}`]);
+      ws.addRow(['Şuanki toplam masraf', formatMoney(totalMaasKazanci, 0)]);
+      ws.addRow(['+6000 toplam masraf', formatMoney(analysisSummary.senaryoToplamMasraf, 0)]);
+      ws.addRow(['Gün tasarrufu', formatMoney(analysisSummary.gunTasarrufu, 0)]);
+      ws.addRow(['Mesai tasarrufu (dahil ✓)', formatMoney(analysisSummary.mesaiTasarrufu, 0)]);
+      ws.addRow(['Aylık şirket kârı', formatMoney(analysisSummary.aylikSirketKari, 0)]);
+      ws.addRow(['Mesai payı %', analysisSummary.mesaiPayiPct]);
       ws.addRow([]);
 
       // Role mix breakdown
@@ -793,7 +816,8 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
       // Senaryo personel detay
       ws.addRow(['Senaryo Personel Detayı']);
       const scenarioHeader = [
-        'Ad Soyad', 'Görev', 'Geldi Gün', 'Mesai Sa', '₺/Gün', 'Dönem Katkısı',
+        'Ad Soyad', 'Görev', 'Şuanki Taban', '+6000 Taban', 'Geldi', 'Mesai Sa',
+        'Şuanki Toplam', '+6000 Toplam', 'Şirket Kârı', 'Gün Δ', 'Mesai Δ',
       ];
       const scenarioHeaderRow = ws.addRow(scenarioHeader);
       scenarioHeaderRow.font = { bold: true };
@@ -801,10 +825,15 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
         ws.addRow([
           p.adSoyad,
           p.gorev,
+          p.mevcutTaban,
+          p.senaryoTaban,
           p.geldiGun,
           p.mesaiSaat,
-          ZER_YAPI_GUNLUK,
-          p.donemUygunluk,
+          p.mevcutToplam,
+          p.senaryoToplam,
+          p.sirketKari,
+          p.gunFarki,
+          p.mesaiFarki,
         ]);
       });
       ws.addRow([]);
@@ -861,8 +890,8 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
       const topLines = [
         `Personel sayısı: ${activeStaffRows.length} · Toplam iş günü: ${totalPersonDays} · Toplam mesai: ${totalMesaiSaat} sa`,
         `ZER YAPI: ${formatMoney(totalZerYapiHakedis, 0)} · Mevcut personel masrafı: ${formatMoney(totalMaasKazanci, 0)}`,
-        `ZER YAPI uygunluk: ${formatMoney(ZER_YAPI_GUNLUK, 0)}/gün · Dönem kârı: ${formatMoney(analysisSummary.donemSirketKari, 0)}`,
-        `Örnek: ${ORNEK_GUNLUK_KISI}×${ZER_YAPI_GUNLUK}=${formatMoney(analysisSummary.ornekGunlukKar, 0)}/gün · Ort. günlük: ${formatMoney(analysisSummary.ortalamaGunlukKar, 0)}`,
+        `+${formatMoney(TABAN_FARK_TL, 0)} senaryo: ${formatMoney(analysisSummary.senaryoToplamMasraf, 0)} · Aylık şirket kârı: ${formatMoney(analysisSummary.aylikSirketKari, 0)}`,
+        `Tasarruf — gün: ${formatMoney(analysisSummary.gunTasarrufu, 0)} · mesai (dahil ✓): ${formatMoney(analysisSummary.mesaiTasarrufu, 0)} · mesai payı %${analysisSummary.mesaiPayiPct.toFixed(1)}`,
       ];
       topLines.forEach((line) => {
         const wrapped = doc.splitTextToSize(line, pageWidth - margin * 2);
@@ -1011,10 +1040,10 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
             onClick={handleCreateAnalysisReport}
             disabled={loading}
             className="bg-violet-600 hover:bg-violet-700 text-white font-bold text-xs px-4 py-2.5 rounded-xl transition shadow cursor-pointer flex items-center space-x-1"
-            title="Günlük 200 TL uygun çalışma avantajını / dönem şirket kârını hesaplar ve kaydeder."
+            title="+6.000 TL taban senaryosu: gün + mesai tasarrufunu / aylık şirket kârını hesaplar."
           >
             {loading ? <RefreshCw size={12} className="animate-spin" /> : <BarChart3 size={12} />}
-            <span>Uygun Çalışma Analizi</span>
+            <span>+6.000 Analiz (Gün+Mesai)</span>
           </button>
           <button
             onClick={handleSaveReport}
@@ -1143,32 +1172,36 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
 
             <div className="bg-emerald-50 border-2 border-emerald-400 p-4 rounded-xl space-y-3">
               <span className="text-[9px] text-emerald-900 font-black block uppercase tracking-wide">
-                Günlük {formatMoney(ZER_YAPI_GUNLUK, 0)} Uygun Çalışma — Şirket Kârı
+                +{formatMoney(TABAN_FARK_TL, 0)} Taban — Aylık Şirket Kârı (Gün+Mesai)
               </span>
               <p className="text-[8px] text-emerald-800 font-semibold leading-relaxed">
-                ZER YAPI, personelin günlük {formatMoney(ZER_YAPI_GUNLUK, 0)} daha uygun çalışmasının sebebidir.
-                Örnek: {ORNEK_GUNLUK_KISI} kişi × {formatMoney(ZER_YAPI_GUNLUK, 0)} = {formatMoney(analysisSummary.ornekGunlukKar, 0)} / gün.
+                Taban {formatMoney(TABAN_FARK_TL, 0)} fazla olsaydı mesai de artardı. Bu indirim sayesinde şirket ayda
+                {' '}<span className="font-mono font-black">{formatMoney(analysisSummary.aylikSirketKari, 0)}</span> kâr ediyor
+                (gün {formatMoney(analysisSummary.gunTasarrufu, 0)} + mesai {formatMoney(analysisSummary.mesaiTasarrufu, 0)}).
               </p>
               <div className="grid grid-cols-3 gap-2 text-[8px]">
                 <div className="bg-white border border-slate-200 rounded-lg p-2 space-y-1">
-                  <span className="font-black uppercase text-slate-600 block">Kapsam</span>
-                  <div className="flex justify-between"><span>Personel</span><span className="font-mono">{activeStaffRows.length}</span></div>
-                  <div className="flex justify-between"><span>İş-günü</span><span className="font-mono">{totalPersonDays}</span></div>
-                  <div className="flex justify-between font-black border-t pt-1"><span>Ort. günlük</span><span className="font-mono">{analysisSummary.ortalamaGunlukMevcudiyet.toLocaleString('tr-TR', { maximumFractionDigits: 1 })}</span></div>
+                  <span className="font-black uppercase text-slate-600 block">Şuanki</span>
+                  <div className="flex justify-between"><span>Gün</span><span className="font-mono">{formatMoney(totalGunKazanci, 0)}</span></div>
+                  <div className="flex justify-between"><span>Mesai</span><span className="font-mono">{formatMoney(totalMesaiKazanci, 0)}</span></div>
+                  <div className="flex justify-between font-black border-t pt-1"><span>Toplam</span><span className="font-mono">{formatMoney(totalMaasKazanci, 0)}</span></div>
                 </div>
-                <div className="bg-white border border-emerald-200 rounded-lg p-2 space-y-1">
-                  <span className="font-black uppercase text-emerald-700 block">Formül</span>
-                  <div className="flex justify-between"><span>Birim</span><span className="font-mono">{formatMoney(ZER_YAPI_GUNLUK, 0)}/gün</span></div>
-                  <div className="flex justify-between"><span>{ORNEK_GUNLUK_KISI}×{ZER_YAPI_GUNLUK}</span><span className="font-mono">{formatMoney(analysisSummary.ornekGunlukKar, 0)}</span></div>
-                  <div className="flex justify-between font-black border-t pt-1"><span>Ort. günlük kâr</span><span className="font-mono">{formatMoney(analysisSummary.ortalamaGunlukKar, 0)}</span></div>
+                <div className="bg-white border border-rose-200 rounded-lg p-2 space-y-1">
+                  <span className="font-black uppercase text-rose-700 block">+{formatMoney(TABAN_FARK_TL, 0)}</span>
+                  <div className="flex justify-between"><span>Gün</span><span className="font-mono">{formatMoney(analysisSummary.senaryoGunToplam, 0)}</span></div>
+                  <div className="flex justify-between"><span>Mesai</span><span className="font-mono">{formatMoney(analysisSummary.senaryoMesaiToplam, 0)}</span></div>
+                  <div className="flex justify-between font-black border-t pt-1"><span>Toplam</span><span className="font-mono">{formatMoney(analysisSummary.senaryoToplamMasraf, 0)}</span></div>
                 </div>
                 <div className="bg-emerald-100 border border-emerald-400 rounded-lg p-2 space-y-1">
-                  <span className="font-black uppercase text-emerald-900 block">Dönem kârı</span>
-                  <div className="flex justify-between"><span>İş-günü</span><span className="font-mono">{totalPersonDays}</span></div>
-                  <div className="flex justify-between"><span>× {ZER_YAPI_GUNLUK}</span><span className="font-mono">{formatMoney(ZER_YAPI_GUNLUK, 0)}</span></div>
-                  <div className="flex justify-between font-black border-t pt-1 text-emerald-950"><span>Toplam</span><span className="font-mono">{formatMoney(analysisSummary.donemSirketKari, 0)}</span></div>
+                  <span className="font-black uppercase text-emerald-900 block">Şirket kârı</span>
+                  <div className="flex justify-between"><span>Gün</span><span className="font-mono">{formatMoney(analysisSummary.gunTasarrufu, 0)}</span></div>
+                  <div className="flex justify-between"><span>Mesai ✓</span><span className="font-mono">{formatMoney(analysisSummary.mesaiTasarrufu, 0)}</span></div>
+                  <div className="flex justify-between font-black border-t pt-1 text-emerald-950"><span>Aylık</span><span className="font-mono">{formatMoney(analysisSummary.aylikSirketKari, 0)}</span></div>
                 </div>
               </div>
+              <p className="text-[7px] text-emerald-700 font-mono">
+                Mesai payı: %{analysisSummary.mesaiPayiPct.toFixed(1)} · Formül: mesai = (taban÷{analysisSummary.days}÷7,5)×1,5×saat
+              </p>
             </div>
 
             <div className="bg-slate-50 border border-slate-200 p-4 rounded-xl space-y-3">
@@ -1185,7 +1218,7 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
 
             {analysisSummary.enCokEtkilenen.length > 0 && (
               <div className="bg-amber-50 border border-amber-200 p-4 rounded-xl space-y-2">
-                <span className="text-[9px] text-amber-800 font-black block uppercase tracking-wide">En yüksek dönem katkısı (ilk 5)</span>
+                <span className="text-[9px] text-amber-800 font-black block uppercase tracking-wide">En yüksek kâr katkısı (ilk 5)</span>
                 {analysisSummary.enCokEtkilenen.map((p) => (
                   <div key={p.adSoyad} className="flex justify-between text-[8px] text-amber-800 gap-2">
                     <span className="truncate">{p.adSoyad}</span>
@@ -1232,57 +1265,60 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
               <CorporateReportLayout orientation="landscape" docCode={`ZER-KAR-${donemKey}`}>
               <p className="rpt-antet-line">{CORPORATE_COMPANY.legalName}</p>
               <p className="text-[10px] text-slate-500 font-bold uppercase mb-2">
-                ZER YAPI · Günlük {formatMoney(ZER_YAPI_GUNLUK, 0)} Uygun Çalışma / Şirket Kârı · {donemLabel}
+                ZER YAPI · +{formatMoney(TABAN_FARK_TL, 0)} Taban Karşılaştırması / Aylık Şirket Kârı · {donemLabel}
               </p>
               <div className="rpt-header-title mb-4">
-                Personel Günlük {formatMoney(ZER_YAPI_GUNLUK, 0)} Daha Uygun Çalışıyor — Dönem Şirket Kârı
+                Şuanki Masraf vs +{formatMoney(TABAN_FARK_TL, 0)} Taban — Gün + Mesai Dahil Şirket Kârı
               </div>
 
               <div className="rpt-zarar-box">
-                <h4>Şirkete mesaj — ZER YAPI uygun çalışma avantajı</h4>
+                <h4>Kontrol sonucu — mesai dahil aylık şirket kârı</h4>
                 <p className="rpt-zarar-msg">
-                  Biz burada personelin günlük {formatMoney(ZER_YAPI_GUNLUK, 0)} daha uygun çalışmasının sebebiyiz.
-                  Ortalama {ORNEK_GUNLUK_KISI} kişi bile {formatMoney(ZER_YAPI_GUNLUK, 0)} az ücretle çalışsa şirket günlük{' '}
-                  {formatMoney(analysisSummary.ornekGunlukKar, 0)} kâr eder ({ORNEK_GUNLUK_KISI} × {ZER_YAPI_GUNLUK}).
+                  Taban maaşlar {formatMoney(TABAN_FARK_TL, 0)} fazla olsaydı mesai hakedişleri de artardı
+                  (mesai = taban ÷ {analysisSummary.days} ÷ 7,5 × 1,5 × saat). Bu indirim sayesinde şirket
+                  bu ay <strong>{formatMoney(analysisSummary.aylikSirketKari, 0)}</strong> kâr ediyor:
+                  gün tasarrufu {formatMoney(analysisSummary.gunTasarrufu, 0)} + mesai tasarrufu{' '}
+                  {formatMoney(analysisSummary.mesaiTasarrufu, 0)} (mesai payı %{analysisSummary.mesaiPayiPct.toFixed(1)}).
                 </p>
                 <p className="rpt-math-formula">
-                  Formül: Dönem şirket kârı = iş-günü × {formatMoney(ZER_YAPI_GUNLUK, 0)}
-                  {' '}= {totalPersonDays} × {ZER_YAPI_GUNLUK}
+                  Gün = (taban ÷ {analysisSummary.days}) × geldi · Mesai = (taban ÷ {analysisSummary.days} ÷ 7,5) × 1,5 × saat
+                  · Senaryo tabanı = mevcut + {formatMoney(TABAN_FARK_TL, 0)}
                 </p>
                 <div className="rpt-math-grid">
                   <div className="rpt-math-col rpt-math-col--now">
-                    <h5>1 · Dönem kapsamı</h5>
-                    <div className="rpt-math-row"><span>Giriş-çıkış personel</span><span>{activeStaffRows.length}</span></div>
-                    <div className="rpt-math-row"><span>Toplam iş-günü</span><span>{totalPersonDays}</span></div>
-                    <div className="rpt-math-row"><span>Ort. günlük mevcudiyet</span><span>{analysisSummary.ortalamaGunlukMevcudiyet.toLocaleString('tr-TR', { maximumFractionDigits: 1 })}</span></div>
-                    <div className="rpt-math-row"><span>Mesai saati</span><span>{totalMesaiSaat.toLocaleString('tr-TR', { maximumFractionDigits: 1 })}</span></div>
+                    <h5>1 · Şuanki hali</h5>
+                    <div className="rpt-math-row"><span>Ort. taban</span><span>{formatMoney(analysisSummary.ortalamaMevcutTaban, 0)}</span></div>
+                    <div className="rpt-math-row"><span>Gün kazancı</span><span>{formatMoney(totalGunKazanci, 0)}</span></div>
+                    <div className="rpt-math-row"><span>Mesai kazancı</span><span>{formatMoney(totalMesaiKazanci, 0)}</span></div>
+                    <div className="rpt-math-row"><span>Toplam masraf</span><span>{formatMoney(totalMaasKazanci, 0)}</span></div>
                   </div>
                   <div className="rpt-math-col rpt-math-col--plus">
-                    <h5>2 · Günlük avantaj</h5>
-                    <div className="rpt-math-row"><span>Birim uygunluk</span><span>{formatMoney(ZER_YAPI_GUNLUK, 0)} / gün</span></div>
-                    <div className="rpt-math-row"><span>Örnek {ORNEK_GUNLUK_KISI} kişi</span><span>{formatMoney(analysisSummary.ornekGunlukKar, 0)} / gün</span></div>
-                    <div className="rpt-math-row"><span>Bu dönem ort. günlük</span><span>{formatMoney(analysisSummary.ortalamaGunlukKar, 0)}</span></div>
-                    <div className="rpt-math-row"><span>Hesap</span><span>kişi × {ZER_YAPI_GUNLUK}</span></div>
+                    <h5>2 · +{formatMoney(TABAN_FARK_TL, 0)} hali</h5>
+                    <div className="rpt-math-row"><span>Ort. taban</span><span>{formatMoney(analysisSummary.ortalamaSenaryoTaban, 0)}</span></div>
+                    <div className="rpt-math-row"><span>Gün kazancı</span><span>{formatMoney(analysisSummary.senaryoGunToplam, 0)}</span></div>
+                    <div className="rpt-math-row"><span>Mesai kazancı</span><span>{formatMoney(analysisSummary.senaryoMesaiToplam, 0)}</span></div>
+                    <div className="rpt-math-row"><span>Toplam masraf</span><span>{formatMoney(analysisSummary.senaryoToplamMasraf, 0)}</span></div>
                   </div>
                   <div className="rpt-math-col rpt-math-col--delta">
-                    <h5>3 · Dönem şirket kârı</h5>
-                    <div className="rpt-math-row"><span>İş-günü</span><span>{totalPersonDays}</span></div>
-                    <div className="rpt-math-row"><span>× birim</span><span>{formatMoney(ZER_YAPI_GUNLUK, 0)}</span></div>
-                    <div className="rpt-math-row"><span>ZER YAPI hakediş</span><span>{formatMoney(totalZerYapiHakedis, 0)}</span></div>
-                    <div className="rpt-math-row"><span>Toplam kâr / avantaj</span><span>{formatMoney(analysisSummary.donemSirketKari, 0)}</span></div>
+                    <h5>3 · Aylık şirket kârı</h5>
+                    <div className="rpt-math-row"><span>Taban indirimi</span><span>+{formatMoney(TABAN_FARK_TL, 0)}/kişi</span></div>
+                    <div className="rpt-math-row"><span>Gün tasarrufu</span><span>{formatMoney(analysisSummary.gunTasarrufu, 0)}</span></div>
+                    <div className="rpt-math-row"><span>Mesai tasarrufu ✓</span><span>{formatMoney(analysisSummary.mesaiTasarrufu, 0)}</span></div>
+                    <div className="rpt-math-row"><span>Aylık kâr</span><span>{formatMoney(analysisSummary.aylikSirketKari, 0)}</span></div>
                   </div>
                 </div>
-                <div className="rpt-zarar-hero">{formatMoney(analysisSummary.donemSirketKari, 0)}</div>
+                <div className="rpt-zarar-hero">{formatMoney(analysisSummary.aylikSirketKari, 0)}</div>
                 <p className="rpt-zer-meta">
-                  {totalPersonDays} iş-günü × ₺{ZER_YAPI_GUNLUK} = {formatMoney(analysisSummary.donemSirketKari, 0)}
-                  {' '}· kişi başı ortalama katkı {formatMoney(analysisSummary.ortalamaKisiBasiKar, 0)}
+                  {activeStaffRows.length} personel · {totalPersonDays} iş-günü · {totalMesaiSaat.toLocaleString('tr-TR', { maximumFractionDigits: 1 })} sa mesai
+                  · kişi başı ortalama kâr {formatMoney(analysisSummary.ortalamaKisiMasrafArtisi, 0)}
+                  · mesai dahil doğrulandı
                 </p>
               </div>
 
               <section>
-                <p className="rpt-sec-title m-0">0 · Personel Bazında Uygun Çalışma Katkısı</p>
+                <p className="rpt-sec-title m-0">0 · Personel Bazında Şirket Kârı (Gün + Mesai)</p>
                 <p className="rpt-sec-sub">
-                  Her geldi gün = şirket için {formatMoney(ZER_YAPI_GUNLUK, 0)} avantaj (ZER YAPI hakediş)
+                  Her satır: mevcut taban → mevcut + {formatMoney(TABAN_FARK_TL, 0)} · aynı gün / aynı mesai · kâr = fark
                 </p>
                 <div className="rpt-table-wrap">
                   <table className="rpt-staff-table">
@@ -1290,11 +1326,13 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
                       <tr>
                         <th className="rpt-align-c">#</th>
                         <th className="rpt-align-l">Ad Soyad</th>
-                        <th className="rpt-align-l">Görev</th>
-                        <th className="rpt-align-c">Geldi Gün</th>
+                        <th className="rpt-align-r">Şuanki Taban</th>
+                        <th className="rpt-align-r">+{formatMoney(TABAN_FARK_TL, 0)}</th>
+                        <th className="rpt-align-c">Gün</th>
                         <th className="rpt-align-c">Mesai</th>
-                        <th className="rpt-align-r">₺/Gün</th>
-                        <th className="rpt-align-r">Dönem Katkısı</th>
+                        <th className="rpt-align-r">Şuanki Toplam</th>
+                        <th className="rpt-align-r">+{formatMoney(TABAN_FARK_TL, 0)} Toplam</th>
+                        <th className="rpt-align-r">Şirket Kârı</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1302,24 +1340,25 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
                         <tr key={`${p.adSoyad}-${idx}`}>
                           <td className="rpt-align-c rpt-mono">{idx + 1}</td>
                           <td className="rpt-name">{p.adSoyad}</td>
-                          <td className="rpt-align-l uppercase">{p.gorev}</td>
+                          <td className="rpt-td-num rpt-mono">{formatMoney(p.mevcutTaban, 0)}</td>
+                          <td className="rpt-td-num rpt-mono">{formatMoney(p.senaryoTaban, 0)}</td>
                           <td className="rpt-align-c rpt-mono">{p.geldiGun}</td>
                           <td className="rpt-align-c rpt-mono">{p.mesaiSaat}</td>
-                          <td className="rpt-td-num rpt-mono">{ZER_YAPI_GUNLUK}</td>
+                          <td className="rpt-td-num rpt-mono">{formatMoney(p.mevcutToplam, 0)}</td>
+                          <td className="rpt-td-num rpt-mono">{formatMoney(p.senaryoToplam, 0)}</td>
                           <td className="rpt-td-num rpt-mono" style={{ color: '#047857', fontWeight: 800 }}>
-                            {formatMoney(p.donemUygunluk, 0)}
+                            {formatMoney(p.sirketKari, 0)}
                           </td>
                         </tr>
                       ))}
                     </tbody>
                     <tfoot>
                       <tr className="rpt-foot">
-                        <td colSpan={3} className="rpt-align-r">TOPLAM DÖNEM ŞİRKET KÂRI</td>
-                        <td className="rpt-align-c rpt-mono">{totalPersonDays}</td>
-                        <td className="rpt-align-c rpt-mono">{totalMesaiSaat}</td>
-                        <td className="rpt-align-c rpt-mono">×{ZER_YAPI_GUNLUK}</td>
+                        <td colSpan={6} className="rpt-align-r">TOPLAM AYLIK ŞİRKET KÂRI (GÜN+MESAİ)</td>
+                        <td className="rpt-td-num rpt-mono">{formatMoney(totalMaasKazanci, 0)}</td>
+                        <td className="rpt-td-num rpt-mono">{formatMoney(analysisSummary.senaryoToplamMasraf, 0)}</td>
                         <td className="rpt-td-num rpt-mono" style={{ color: '#047857', fontWeight: 900 }}>
-                          {formatMoney(analysisSummary.donemSirketKari, 0)}
+                          {formatMoney(analysisSummary.aylikSirketKari, 0)}
                         </td>
                       </tr>
                     </tfoot>
@@ -1329,15 +1368,14 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
 
               {/* —— ZER YAPI Hakediş Özeti —— */}
               <div className="rpt-zer-box">
-                <h4>ZER YAPI Hakediş = Dönem Şirket Kârı / Avantajı</h4>
+                <h4>ZER YAPI Hakediş (ayrı kalem — ₺{ZER_YAPI_GUNLUK}/gün)</h4>
                 <p className="rpt-zer-formula">
-                  Formül: Toplam çalışma günü × ₺{ZER_YAPI_GUNLUK} günlük uygunluk
+                  Formül: Toplam çalışma günü × ₺{ZER_YAPI_GUNLUK}
                   &nbsp;|&nbsp; {totalPersonDays} gün × ₺{ZER_YAPI_GUNLUK} = {formatMoney(totalZerYapiHakedis, 0)}
                 </p>
                 <div className="rpt-zer-total">{formatMoney(totalZerYapiHakedis, 0)}</div>
                 <p className="rpt-zer-meta">
-                  {activeStaffRows.length} personel · {totalPersonDays} iş-günü · {donemLabel}
-                  — bu tutar şirketin ZER YAPI sayesinde elde ettiği dönem avantajıdır.
+                  Bu tutar +{formatMoney(TABAN_FARK_TL, 0)} taban kâr analizinden ayrıdır (hakediş kalemi).
                 </p>
               </div>
 
@@ -1572,16 +1610,17 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
               {/* —— Özet —— */}
               <div className="rpt-summary-grid">
                 <div className="rpt-summary-card rpt-summary-hakedis">
-                  <span>Dönem Şirket Kârı (gün × ₺{ZER_YAPI_GUNLUK})</span>
-                  <span className="rpt-summary-val">{formatMoney(analysisSummary.donemSirketKari, 0)}</span>
+                  <span>Aylık Şirket Kârı (+{formatMoney(TABAN_FARK_TL, 0)} indirim · gün+mesai)</span>
+                  <span className="rpt-summary-val">{formatMoney(analysisSummary.aylikSirketKari, 0)}</span>
                   <span className="rpt-summary-sub">
-                    Ort. günlük {formatMoney(analysisSummary.ortalamaGunlukKar, 0)} · Örnek {ORNEK_GUNLUK_KISI}×{ZER_YAPI_GUNLUK}={formatMoney(analysisSummary.ornekGunlukKar, 0)}/gün
+                    Gün {formatMoney(analysisSummary.gunTasarrufu, 0)} + Mesai {formatMoney(analysisSummary.mesaiTasarrufu, 0)}
+                    {' '}· mesai payı %{analysisSummary.mesaiPayiPct.toFixed(1)}
                   </span>
                 </div>
                 <div className="rpt-summary-card">
-                  <span>Toplam Maaş Kazancı (bilgi)</span>
-                  <span className="rpt-summary-val">{formatMoney(totalMaasKazanci)}</span>
-                  <span className="rpt-summary-sub">Gün + mesai — uygunluk hesabından ayrı</span>
+                  <span>ZER YAPI Hakediş (₺{ZER_YAPI_GUNLUK}/gün)</span>
+                  <span className="rpt-summary-val">{formatMoney(totalZerYapiHakedis, 0)}</span>
+                  <span className="rpt-summary-sub">{totalPersonDays} gün × ₺{ZER_YAPI_GUNLUK}</span>
                 </div>
               </div>
 
@@ -1589,10 +1628,13 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
                 <div className="rpt-compare-card">
                   <strong>Yan yana özet</strong>
                   <div style={{ marginTop: 6, fontSize: '7.5pt', color: '#4b5563' }}>
-                    {activeStaffRows.length} personel · {totalPersonDays} iş-günü · ₺{ZER_YAPI_GUNLUK}/gün
+                    Şuanki {formatMoney(totalMaasKazanci, 0)} · +{formatMoney(TABAN_FARK_TL, 0)} {formatMoney(analysisSummary.senaryoToplamMasraf, 0)}
                   </div>
                   <div style={{ marginTop: 4, fontSize: '9pt', color: '#047857', fontWeight: 900 }}>
-                    Dönem kârı: {formatMoney(analysisSummary.donemSirketKari, 0)}
+                    Aylık şirket kârı: {formatMoney(analysisSummary.aylikSirketKari, 0)}
+                  </div>
+                  <div style={{ marginTop: 4, fontSize: '7pt', color: '#047857' }}>
+                    Mesai dahil ✓ · {formatMoney(analysisSummary.mesaiTasarrufu, 0)}
                   </div>
                 </div>
                 <div className="rpt-compare-card">
