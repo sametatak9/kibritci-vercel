@@ -7,6 +7,7 @@ import { ilerlemeDurumuLabel, normalizeFaaliyetEtiketi } from './faaliyetEtiketU
 import { getFaaliyetFotolar } from './sahaFaaliyetUtils';
 import { saveDocument } from './firebase';
 import { getYoklamaDay, isIdariPersonel, isTaseronPersonel } from './yoklamaUtils';
+import { normalizeGorev } from './gorevUtils';
 
 function escapeHtml(value: string): string {
   return String(value || '')
@@ -35,18 +36,53 @@ function resolveEtiket(f: SahaFaaliyeti): string {
   return 'ETİKETSİZ';
 }
 
-function renderFotoStrip(fotolar: string[]): string {
-  if (fotolar.length === 0) {
-    return '<span style="color:#94a3b8;font-size:10px">—</span>';
+function countByGorev(personeller: Personel[]): Array<{ gorev: string; adet: number }> {
+  const map = new Map<string, number>();
+  for (const p of personeller) {
+    const g = normalizeGorev(p.gorev);
+    map.set(g, (map.get(g) || 0) + 1);
   }
-  const imgs = fotolar
-    .slice(0, 6)
+  return Array.from(map.entries())
+    .map(([gorev, adet]) => ({ gorev, adet }))
+    .sort((a, b) => b.adet - a.adet || a.gorev.localeCompare(b.gorev, 'tr'));
+}
+
+function renderGorevBreakdown(rows: Array<{ gorev: string; adet: number }>, title: string): string {
+  if (rows.length === 0) return '';
+  const chips = rows
     .map(
-      (url) =>
-        `<img src="${escapeHtml(url)}" alt="Foto" style="width:72px;height:54px;object-fit:cover;border-radius:6px;border:1px solid #cbd5e1;background:#f8fafc" />`
+      (r) =>
+        `<span style="display:inline-flex;align-items:center;gap:4px;margin:3px;padding:5px 10px;border-radius:999px;background:#fff;border:1px solid #99f6e4;font-size:11px;font-weight:800;color:#0f766e">
+          <span style="font-size:14px;font-weight:900;color:#065f46">${r.adet}</span>
+          ${escapeHtml(r.gorev)}
+        </span>`
     )
     .join('');
-  return `<div style="display:flex;flex-wrap:wrap;gap:4px;justify-content:center">${imgs}</div>`;
+  const line = rows.map((r) => `${r.adet} ${r.gorev}`).join(' · ');
+  return `<div style="margin:10px 0 4px;padding:10px 12px;background:#ecfdf5;border:1px solid #a7f3d0;border-radius:10px">
+    <div style="font-size:10px;font-weight:800;color:#047857;text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px">${escapeHtml(title)}</div>
+    <div>${chips}</div>
+    <p style="margin:8px 0 0;font-size:11px;color:#334155;font-weight:600">${escapeHtml(line)}</p>
+  </div>`;
+}
+
+function renderFotoStrip(fotolar: string[]): string {
+  if (fotolar.length === 0) {
+    return '<p style="margin:8px 0 0;font-size:11px;color:#94a3b8;font-style:italic">Fotoğraf yok</p>';
+  }
+  const imgs = fotolar
+    .slice(0, 8)
+    .map(
+      (url) =>
+        `<a href="${escapeHtml(url)}" target="_blank" rel="noopener" style="display:block;border:1px solid #94a3b8;border-radius:10px;overflow:hidden;background:#0f172a;box-shadow:0 2px 8px rgba(15,23,42,.12)">
+          <img src="${escapeHtml(url)}" alt="Faaliyet fotoğrafı" style="display:block;width:100%;height:180px;object-fit:cover" />
+        </a>`
+    )
+    .join('');
+  return `<div style="margin-top:10px">
+    <div style="font-size:10px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:#475569;margin-bottom:6px">Fotoğraflar (${fotolar.length})</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px">${imgs}</div>
+  </div>`;
 }
 
 function buildYoklamaSectionHtml(options: {
@@ -69,6 +105,7 @@ function buildYoklamaSectionHtml(options: {
     İzinli: [],
     Raporlu: [],
   };
+  const geldiPersoneller: Personel[] = [];
 
   for (const p of options.personeller || []) {
     if (isTaseronPersonel(p) || isIdariPersonel(p)) continue;
@@ -81,6 +118,7 @@ function buildYoklamaSectionHtml(options: {
     if (durum === 'Geldi') {
       counts.Geldi += 1;
       byDurum.Geldi.push(name);
+      geldiPersoneller.push(p);
     } else if (durum === 'Yok') {
       counts.Yok += 1;
       byDurum.Yok.push(name);
@@ -104,6 +142,13 @@ function buildYoklamaSectionHtml(options: {
     dk,
     options.yoklamalar
   );
+
+  const faaliyetliPersoneller = personelRapor.faaliyetliPersoneller
+    .map((row) => options.personeller.find((p) => p.id === row.id))
+    .filter((p): p is Personel => !!p);
+
+  const geldiByGorev = countByGorev(geldiPersoneller);
+  const faaliyetliByGorev = countByGorev(faaliyetliPersoneller);
 
   const listBlock = (title: string, names: string[], color: string) => {
     if (names.length === 0) return '';
@@ -145,6 +190,8 @@ function buildYoklamaSectionHtml(options: {
             <div style="font-size:18px;font-weight:900;color:#334155">${personelRapor.personelSayisi}</div>
           </div>
         </div>
+        ${renderGorevBreakdown(geldiByGorev, `Geldi — görev dağılımı (${counts.Geldi})`)}
+        ${renderGorevBreakdown(faaliyetliByGorev, `Faaliyetli — görev dağılımı (${personelRapor.personelSayisi})`)}
         ${listBlock('Yok olanlar', byDurum.Yok, '#fecdd3')}
         ${listBlock('İzinli', byDurum.İzinli, '#bae6fd')}
         ${listBlock('Raporlu', byDurum.Raporlu, '#ddd6fe')}
@@ -256,7 +303,7 @@ export function buildFaaliyetGunSonuReportHtml(options: {
     @media print {
       body { padding: 8px; }
       section, article { break-inside: avoid; }
-      img { max-height: 80px !important; }
+      img { max-height: 160px !important; height: auto !important; }
     }
   </style>
 </head>
