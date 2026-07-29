@@ -67,34 +67,69 @@ async function uploadOne(faaliyetId: string, dataUrl: string, index: number): Pr
   }
 }
 
+async function uploadFotoList(
+  faaliyetId: string,
+  urls: string[],
+  indexOffset: number
+): Promise<string[]> {
+  const uploaded: string[] = [];
+  for (let i = 0; i < urls.length; i++) {
+    const url = await uploadOne(faaliyetId, urls[i], indexOffset + i);
+    if (url) uploaded.push(url);
+  }
+  return uploaded;
+}
+
+function needsFotoUpload(urls: string[]): boolean {
+  return urls.some(
+    (u) => u.startsWith('data:') || (!/^https?:\/\//i.test(u) && !u.startsWith('blob:'))
+  );
+}
+
 /**
  * data: URL fotoğrafları Firebase Storage'a taşır (Firestore 1MB sınırı için).
- * http(s) URL'ler olduğu gibi bırakılır.
+ * Ana kayıt ve ilerleme aşama fotoğraflarını işler.
  */
 export async function ensureSahaFaaliyetFotolarPersisted(
   record: SahaFaaliyeti
 ): Promise<SahaFaaliyeti> {
   if (!record?.id) return record;
-  const fotos = getFaaliyetFotolar(record).slice(0, MAX_SAHA_FOTO_COUNT);
-  if (fotos.length === 0) return record;
 
-  const needsUpload = fotos.some(
-    (u) => u.startsWith('data:') || (!/^https?:\/\//i.test(u) && !u.startsWith('blob:'))
-  );
-  if (!needsUpload) return record;
+  let next: SahaFaaliyeti = { ...record };
+  let changed = false;
 
-  const uploaded: string[] = [];
-  for (let i = 0; i < fotos.length; i++) {
-    const url = await uploadOne(record.id, fotos[i], i);
-    if (url) uploaded.push(url);
+  const mainFotos = getFaaliyetFotolar(record).slice(0, MAX_SAHA_FOTO_COUNT);
+  if (mainFotos.length > 0 && needsFotoUpload(mainFotos)) {
+    const uploaded = await uploadFotoList(record.id, mainFotos, 0);
+    if (uploaded.length > 0) {
+      next = { ...next, fotoUrls: uploaded, fotoUrl: uploaded[0] };
+      changed = true;
+    }
   }
 
-  if (uploaded.length === 0) return record;
-  return {
-    ...record,
-    fotoUrls: uploaded,
-    fotoUrl: uploaded[0],
-  };
+  const kayitlar = record.ilerlemeKayitlari || [];
+  if (kayitlar.length > 0) {
+    const nextKayitlar = [];
+    for (let ki = 0; ki < kayitlar.length; ki++) {
+      const kayit = kayitlar[ki];
+      const urls = (kayit.fotoUrls || []).filter(Boolean);
+      if (urls.length > 0 && needsFotoUpload(urls)) {
+        const uploaded = await uploadFotoList(record.id, urls, 100 + ki * 10);
+        nextKayitlar.push({
+          ...kayit,
+          fotoUrls: uploaded.length ? uploaded : urls,
+        });
+        changed = true;
+      } else {
+        nextKayitlar.push(kayit);
+      }
+    }
+    if (changed) {
+      next = { ...next, ilerlemeKayitlari: nextKayitlar };
+    }
+  }
+
+  return changed ? next : record;
 }
 
 /**

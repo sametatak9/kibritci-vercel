@@ -34,6 +34,7 @@ import {
 import {
   formatMesaiFaaliyetLabel,
   getFaaliyetFotolar,
+  getFaaliyetTumFotolar,
   isMesaiSahaFaaliyet,
 } from '../lib/sahaFaaliyetUtils';
 import {
@@ -317,7 +318,7 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
 
   const personFotoSayisi = useMemo(
     () =>
-      personFaaliyetleri.reduce((n, f) => n + getFaaliyetFotolar(f).length, 0) +
+      personFaaliyetleri.reduce((n, f) => n + getFaaliyetTumFotolar(f).length, 0) +
       personKampFaaliyetleri.reduce((n, f) => n + getFaaliyetFotolar(f).length, 0),
     [personFaaliyetleri, personKampFaaliyetleri]
   );
@@ -945,6 +946,7 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
           yoklamalar={yoklamalar}
           sahaFaaliyetleri={sahaFaaliyetleri}
           setSahaFaaliyetleri={setSahaFaaliyetleri}
+          saveSahaFaaliyetNow={saveSahaFaaliyetNow}
           currentUser={currentUser}
           initialDate={selectedDate}
           focusPersonId={programFocusPersonId}
@@ -1335,7 +1337,7 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
                   </div>
                 ) : (
                   personFaaliyetFiltered.map((f) => {
-                    const fotolar = getFaaliyetFotolar(f);
+                    const fotolar = getFaaliyetTumFotolar(f);
                     const ekip = resolveFaaliyetEkip(f, personeller);
                     const mesaiLabel = isMesaiSahaFaaliyet(f)
                       ? formatMesaiFaaliyetLabel(f, personeller)
@@ -1468,7 +1470,7 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
                   </div>
                 ) : (
                   personKampFaaliyetleri.map((f) => {
-                    const fotolar = getFaaliyetFotolar(f);
+                    const fotolar = getFaaliyetTumFotolar(f);
                     const ekip = resolveFaaliyetEkip(f, personeller);
                     const calisan = kampFaaliyetCalisanSayisi(f, personeller);
                     return (
@@ -1762,7 +1764,7 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
                     {etiketFilter ? ` / ${daySahaFaaliyetleri.length}` : ''})
                   </h3>
                   {daySahaFiltered.map((f) => {
-                    const fotolar = getFaaliyetFotolar(f);
+                    const fotolar = getFaaliyetTumFotolar(f);
                     const ekip = resolveFaaliyetEkip(f, personeller);
                     const mesaiLabel = isMesaiSahaFaaliyet(f)
                       ? formatMesaiFaaliyetLabel(f, personeller)
@@ -1883,7 +1885,7 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
                     Kampçı faaliyetleri ({dayKampFaaliyetleri.length})
                   </h3>
                   {dayKampFaaliyetleri.map((f) => {
-                    const fotolar = getFaaliyetFotolar(f);
+                    const fotolar = getFaaliyetTumFotolar(f);
                     const ekip = resolveFaaliyetEkip(f, personeller);
                     const calisan = kampFaaliyetCalisanSayisi(f, personeller);
                     return (

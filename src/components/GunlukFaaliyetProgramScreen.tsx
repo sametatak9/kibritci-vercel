@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Calendar,
   Camera,
@@ -26,7 +26,8 @@ import {
 import { AylikYoklamaMap, Personel, SahaFaaliyeti } from '../types/erp';
 import { formatDateLabelTr, todayDateKey } from '../lib/dateKeyUtils';
 import { PARSEL_LIST, blokListForParsel, defaultBlokForParsel } from '../data/parselBlokMap';
-import { getFaaliyetFotolar } from '../lib/sahaFaaliyetUtils';
+import { getFaaliyetFotolar, getFaaliyetTumFotolar, MAX_SAHA_FOTO_COUNT } from '../lib/sahaFaaliyetUtils';
+import { compressImage } from '../lib/imageCompress';
 import {
   buildAtanmamisGeldiHavuzu,
   buildGunlukProgramCetveli,
@@ -43,6 +44,10 @@ interface GunlukFaaliyetProgramScreenProps {
   setSahaFaaliyetleri: (
     updater: SahaFaaliyeti[] | ((prev: SahaFaaliyeti[]) => SahaFaaliyeti[])
   ) => void;
+  saveSahaFaaliyetNow?: (
+    record: SahaFaaliyeti,
+    kaynak?: import('../lib/sahaFaaliyetPersistence').SahaFaaliyetSaveSource
+  ) => Promise<unknown>;
   currentUser?: { email?: string; uid?: string } | null;
   /** Dışarıdan tarih (faaliyetsiz listeden geçiş) */
   initialDate?: string;
@@ -64,6 +69,7 @@ export const GunlukFaaliyetProgramScreen: React.FC<GunlukFaaliyetProgramScreenPr
   yoklamalar,
   sahaFaaliyetleri,
   setSahaFaaliyetleri,
+  saveSahaFaaliyetNow,
   currentUser,
   initialDate,
   focusPersonId = null,
@@ -79,7 +85,9 @@ export const GunlukFaaliyetProgramScreen: React.FC<GunlukFaaliyetProgramScreenPr
   const [aciklama, setAciklama] = useState('');
   const [isEtiketi, setIsEtiketi] = useState('');
   const [draftStaff, setDraftStaff] = useState<string[]>([]);
+  const [draftFotos, setDraftFotos] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
+  const fotoInputRef = useRef<HTMLInputElement>(null);
 
   const [detailPersonId, setDetailPersonId] = useState<string | null>(null);
   const [lightbox, setLightbox] = useState<{ urls: string[]; index: number } | null>(null);
@@ -175,6 +183,7 @@ export const GunlukFaaliyetProgramScreen: React.FC<GunlukFaaliyetProgramScreenPr
     setAciklama('');
     setIsEtiketi('');
     setDraftStaff([]);
+    setDraftFotos([]);
   };
 
   const toggleHavuzSelect = (id: string) => {
@@ -205,7 +214,31 @@ export const GunlukFaaliyetProgramScreen: React.FC<GunlukFaaliyetProgramScreenPr
     setAciklama(sf.aciklama || '');
     setIsEtiketi(sf.isEtiketi || '');
     setDraftStaff(Array.isArray(sf.aktifPersonelListesi) ? [...sf.aktifPersonelListesi] : []);
+    setDraftFotos(getFaaliyetFotolar(sf));
     window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleDraftFotoPick = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []).slice(0, MAX_SAHA_FOTO_COUNT - draftFotos.length);
+    e.target.value = '';
+    if (!files.length) return;
+    const outs: string[] = [];
+    for (const file of files) {
+      try {
+        const rawBase64 = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = (ev) => resolve(String(ev.target?.result || ''));
+          reader.onerror = reject;
+          reader.readAsDataURL(file as File);
+        });
+        outs.push(await compressImage(rawBase64));
+      } catch {
+        /* skip */
+      }
+    }
+    if (outs.length) {
+      setDraftFotos((prev) => [...prev, ...outs].slice(0, MAX_SAHA_FOTO_COUNT));
+    }
   };
 
   const countUstaIsci = (ids: string[]) => {
@@ -216,7 +249,7 @@ export const GunlukFaaliyetProgramScreen: React.FC<GunlukFaaliyetProgramScreenPr
     return { usta, isci: Math.max(0, list.length - usta) };
   };
 
-  const handleSaveGorev = () => {
+  const handleSaveGorev = async () => {
     if (!isNiteligi.trim()) {
       alert('İş niteliği zorunludur.');
       return;
@@ -228,27 +261,36 @@ export const GunlukFaaliyetProgramScreen: React.FC<GunlukFaaliyetProgramScreenPr
     const counts = countUstaIsci(draftStaff);
     setSaving(true);
     try {
+      const fotoPayload =
+        draftFotos.length > 0
+          ? { fotoUrls: draftFotos, fotoUrl: draftFotos[0] }
+          : { fotoUrls: undefined, fotoUrl: undefined };
+
       if (editingGorevId) {
-        setSahaFaaliyetleri((prev) =>
-          prev.map((sf) =>
-            sf.id === editingGorevId
-              ? {
-                  ...sf,
-                  tarih: selectedDate,
-                  isNiteligi: isNiteligi.trim(),
-                  parsel,
-                  blok,
-                  aciklama: aciklama.trim(),
-                  isEtiketi: isEtiketi || undefined,
-                  aktifPersonelListesi: draftStaff,
-                  ustaSayisi: counts.usta,
-                  isciSayisi: counts.isci,
-                  kaynakEkran: sf.kaynakEkran || 'GUNLUK_PROGRAM',
-                  kaydeden: currentUser?.email || sf.kaydeden,
-                }
-              : sf
-          )
-        );
+        const existing = sahaFaaliyetleri.find((sf) => sf.id === editingGorevId);
+        const updated: SahaFaaliyeti = {
+          ...(existing || ({} as SahaFaaliyeti)),
+          id: editingGorevId,
+          tarih: selectedDate,
+          isNiteligi: isNiteligi.trim(),
+          parsel,
+          blok,
+          aciklama: aciklama.trim(),
+          isEtiketi: isEtiketi || undefined,
+          aktifPersonelListesi: draftStaff,
+          ustaSayisi: counts.usta,
+          isciSayisi: counts.isci,
+          kaynakEkran: existing?.kaynakEkran || 'GUNLUK_PROGRAM',
+          kaydeden: currentUser?.email || existing?.kaydeden,
+          ...fotoPayload,
+        };
+        if (saveSahaFaaliyetNow) {
+          await saveSahaFaaliyetNow(updated, 'idari_saha');
+        } else {
+          setSahaFaaliyetleri((prev) =>
+            prev.map((sf) => (sf.id === editingGorevId ? { ...sf, ...updated } : sf))
+          );
+        }
       } else {
         const id = `sf_prog_${Date.now()}`;
         const newLog: SahaFaaliyeti = {
@@ -271,10 +313,19 @@ export const GunlukFaaliyetProgramScreen: React.FC<GunlukFaaliyetProgramScreenPr
           programaGonderildi: true,
           programaGonderimTarihi: new Date().toISOString(),
           iceriAktarimDurumu: 'BEKLIYOR',
+          ...fotoPayload,
         };
-        setSahaFaaliyetleri((prev) => [newLog, ...prev]);
+        if (saveSahaFaaliyetNow) {
+          await saveSahaFaaliyetNow(newLog, 'idari_saha');
+        } else {
+          setSahaFaaliyetleri((prev) => [newLog, ...prev]);
+        }
       }
       resetGorevForm();
+    } catch (err: unknown) {
+      console.error(err);
+      const msg = err instanceof Error ? err.message : 'Görev kaydedilemedi.';
+      alert(msg);
     } finally {
       setSaving(false);
     }
@@ -697,6 +748,43 @@ export const GunlukFaaliyetProgramScreen: React.FC<GunlukFaaliyetProgramScreenPr
               )}
             </div>
 
+            <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50/80 p-2.5 space-y-2">
+              <p className="text-[9px] font-black uppercase text-slate-600 flex items-center gap-1">
+                <Camera size={11} />
+                Saha fotoğrafları ({draftFotos.length}/{MAX_SAHA_FOTO_COUNT})
+              </p>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  disabled={draftFotos.length >= MAX_SAHA_FOTO_COUNT || saving}
+                  onClick={() => fotoInputRef.current?.click()}
+                  className="inline-flex items-center gap-1 text-[9px] font-bold px-2.5 py-1.5 rounded-lg bg-white border border-slate-200 cursor-pointer disabled:opacity-40"
+                >
+                  <Camera size={12} />
+                  Foto ekle
+                </button>
+                <input
+                  ref={fotoInputRef}
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  className="hidden"
+                  onChange={(e) => void handleDraftFotoPick(e)}
+                />
+                {draftFotos.map((url, idx) => (
+                  <button
+                    key={`draft-foto-${idx}`}
+                    type="button"
+                    onClick={() => setDraftFotos((prev) => prev.filter((_, i) => i !== idx))}
+                    className="relative w-14 h-14 rounded-lg overflow-hidden border border-slate-200 cursor-pointer"
+                    title="Kaldırmak için tıkla"
+                  >
+                    <img src={url} alt="" className="w-full h-full object-cover" />
+                  </button>
+                ))}
+              </div>
+            </div>
+
             <button
               type="button"
               onClick={handleSaveGorev}
@@ -718,7 +806,7 @@ export const GunlukFaaliyetProgramScreen: React.FC<GunlukFaaliyetProgramScreenPr
               </div>
             ) : (
               dayGorevler.map((sf) => {
-                const fotolar = getFaaliyetFotolar(sf);
+                const fotolar = getFaaliyetTumFotolar(sf);
                 const ekip = (sf.aktifPersonelListesi || [])
                   .map((id) => {
                     const p = personeller.find((x) => x.id === id);
@@ -912,7 +1000,7 @@ export const GunlukFaaliyetProgramScreen: React.FC<GunlukFaaliyetProgramScreenPr
                 </div>
               ) : (
                 detailFaaliyetler.map((sf) => {
-                  const fotolar = getFaaliyetFotolar(sf);
+                  const fotolar = getFaaliyetTumFotolar(sf);
                   return (
                     <article
                       key={sf.id}

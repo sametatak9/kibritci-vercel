@@ -61,6 +61,40 @@ export function getFaaliyetFotolar(sf: FaaliyetFotoKaynak | null | undefined): s
   return single ? [single] : [];
 }
 
+/** İlerleme kayıtlarındaki aşama fotoğrafları */
+export function getFaaliyetIlerlemeFotolar(
+  sf: { ilerlemeKayitlari?: Array<{ fotoUrls?: string[] | null }> } | null | undefined
+): string[] {
+  if (!sf?.ilerlemeKayitlari?.length) return [];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const kayit of sf.ilerlemeKayitlari) {
+    for (const raw of kayit.fotoUrls || []) {
+      const url = coerceFotoUrl(raw);
+      if (url && !seen.has(url)) {
+        seen.add(url);
+        out.push(url);
+      }
+    }
+  }
+  return out;
+}
+
+/** Ana kayıt + ilerleme fotoğrafları (gösterim / rapor) */
+export function getFaaliyetTumFotolar(sf: FaaliyetFotoKaynak | null | undefined): string[] {
+  const main = getFaaliyetFotolar(sf);
+  const ilerleme = getFaaliyetIlerlemeFotolar(sf as { ilerlemeKayitlari?: Array<{ fotoUrls?: string[] }> });
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const url of [...main, ...ilerleme]) {
+    if (!seen.has(url)) {
+      seen.add(url);
+      out.push(url);
+    }
+  }
+  return out;
+}
+
 export function getFaaliyetFoto(sf: FaaliyetFotoKaynak | null | undefined): string {
   return getFaaliyetFotolar(sf)[0] || '';
 }
@@ -98,6 +132,8 @@ export function filterFormenDayFaaliyetleri(
       if (!isFaaliyetOnDate(f, targetDate)) return false;
       if (f.kaynakEkran === 'IDARI_SAHA') return false;
       if (f.kaynakEkran === 'FORMEN_MOBIL') return true;
+      // Yönetim günlük programından atanan görevler — tüm formenler görür
+      if (f.kaynakEkran === 'GUNLUK_PROGRAM' && f.programaGonderildi !== false) return true;
       return formenOwnsSahaRecord(f, formenEmail, formenUid);
     })
     .sort((a, b) => String(b.id).localeCompare(String(a.id), 'tr'));

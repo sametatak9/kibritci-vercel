@@ -4,7 +4,7 @@ import { formatDateLabelTr, normalizeDateKey } from './dateKeyUtils';
 import { kibritciReportHeaderHtml } from './kibritciBrand';
 import { buildDayPersonelRaporu, resolveFaaliyetEkip } from './faaliyetPersonelUtils';
 import { ilerlemeDurumuLabel, normalizeFaaliyetEtiketi } from './faaliyetEtiketUtils';
-import { getFaaliyetFotolar } from './sahaFaaliyetUtils';
+import { getFaaliyetTumFotolar } from './sahaFaaliyetUtils';
 import { saveDocument } from './firebase';
 import { getYoklamaDay, isIdariPersonel, isTaseronPersonel } from './yoklamaUtils';
 import { normalizeGorev } from './gorevUtils';
@@ -249,7 +249,7 @@ export function buildFaaliyetGunSonuReportHtml(options: {
             .map((u) => u.adSoyad)
             .join(', ');
           const yorum = sonIlerlemeYorum(f);
-          const fotolar = getFaaliyetFotolar(f);
+          const fotolar = getFaaliyetTumFotolar(f);
           return `
             <article style="border:1px solid #e2e8f0;border-top:none;padding:10px 12px;background:#fff;page-break-inside:avoid">
               <div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start">
