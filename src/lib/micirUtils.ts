@@ -64,3 +64,38 @@ export function formatMicirMiktarLabel(tonaj?: number | null, kiloKg?: number | 
   if (!kg && !ton) return '—';
   return `${kg.toLocaleString('tr-TR')} kg (${ton.toLocaleString('tr-TR')} ton)`;
 }
+
+/** SA kalem adı mıcır / stabilize mi? */
+export function satinAlmaKalemMatchesMicir(
+  urunAdi?: string | null,
+  tip?: MicirMalzemeTipi | string | null
+): boolean {
+  const u = normalizeFirmaUnvan(urunAdi);
+  if (!u) return false;
+  if (tip === 'STABILIZE') {
+    return u.includes('STABILIZE') || u.includes('STABILIZ') || u.includes('STABIL');
+  }
+  // MICIR veya tip belirtilmemiş
+  if (tip === 'MICIR' || !tip) {
+    return (
+      u.includes('MICIR') ||
+      u.includes('MICEIR') ||
+      u.includes('KIRMATA') ||
+      u.includes('AGREGA') ||
+      u.includes('BALAST')
+    );
+  }
+  return (
+    u.includes('MICIR') ||
+    u.includes('STABILIZE') ||
+    u.includes('STABILIZ') ||
+    u.includes('KIRMATA')
+  );
+}
+
+export function isOpenMicirSatinAlma(sa?: { onayDurumu?: string } | null): boolean {
+  if (!sa) return false;
+  const d = String(sa.onayDurumu || '').toLocaleUpperCase('tr-TR');
+  if (d.includes('RED') || d.includes('KAPAT')) return false;
+  return true;
+}

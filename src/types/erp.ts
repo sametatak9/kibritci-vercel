@@ -164,6 +164,9 @@ export interface MicirStabilizeFis {
   fisGorselUrl?: string;
   firmaUnvan: string;
   cariKartId?: string;
+  /** Eşleşen satın alma talebi — yönetici onayında irsaliye.saId */
+  saId?: string;
+  saKalemId?: string;
   irsaliyeId?: string;
   guvenlikEvrakId?: string;
   kapıLogId?: string;

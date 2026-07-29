@@ -8,7 +8,7 @@ import EvrakDuvariPanel, {
   type EvrakDuvariItem,
   isEvrakBekleyen,
 } from './EvrakDuvariPanel';
-import { Personel, Irsaliye, IrsaliyeItem, Fatura, MicirStabilizeFis, CariKart, StokKart } from '../types/erp';
+import { Personel, Irsaliye, IrsaliyeItem, Fatura, MicirStabilizeFis, CariKart, StokKart, SatinAlmaTalebi } from '../types/erp';
 import { db, cleanUndefined, ensureFirestoreAuth, withTimeout } from '../lib/firebase';
 import { compressImage } from '../lib/imageCompress';
 import { fetchApiJson } from '../lib/apiClient';
@@ -88,6 +88,7 @@ import {
 import {
   approveMicirFis,
   buildMicirKalemler,
+  findMatchingMicirSatinAlma,
   isMicirFisPending,
   rejectMicirFis,
 } from '../lib/micirOnayUtils';
@@ -101,6 +102,8 @@ interface GuvenlikScreenProps {
   userYetki?: string;
   isStandalone?: boolean;
   addNotification?: (mesaj: string, meta?: Record<string, unknown>) => void | Promise<void>;
+  satinAlmaTalepleri?: SatinAlmaTalebi[];
+  irsaliyeler?: Irsaliye[];
 }
 
 export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
@@ -109,7 +112,9 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
   onSignOut,
   userYetki,
   isStandalone = false,
-  addNotification
+  addNotification,
+  satinAlmaTalepleri: satinAlmaProp = [],
+  irsaliyeler: irsaliyelerProp = [],
 }) => {
   const [activeTab, setActiveTab] = useState<'irsaliye' | 'personel' | 'arac' | 'su_tankeri' | 'vidanjor' | 'petrol_tankeri' | 'mici_stabilize' | 'ziyaretci' | 'nobet_arsivi' | 'akvizyon_yoklama' | 'evrak_galerisi'>('irsaliye');
   const [viewMode, setViewMode] = useState<'web' | 'mobile'>('web');
@@ -1877,8 +1882,9 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
 
       await setDoc(doc(db, 'guvenlikTankerLoglari', logId), logData);
 
-      // Mıcır/Stabilize = ENTO MADEN kapı irsaliyesi → yönetici onayı sonrası irsaliye + cari
+      // Mıcır/Stabilize = ENTO MADEN kapı irsaliyesi → yönetici onayı sonrası irsaliye + cari (+ SA)
       if (isMicir && micirFisId && guvenlikEvrakId && irsaliyeId) {
+        const saMatch = findMatchingMicirSatinAlma(satinAlmaProp, irsaliyelerProp, malzeme, {});
         const fis: MicirStabilizeFis = {
           id: micirFisId,
           tarih: islemTarihi,
@@ -1892,12 +1898,15 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
           irsaliyeId,
           guvenlikEvrakId,
           kapıLogId: logId,
+          saId: saMatch?.sa.saId,
+          saKalemId: saMatch?.kalem.id,
           kaydeden: currentUser?.email || 'guvenlik_gate',
           durum: 'YONETICI_ONAYINDA',
           olusturulma: new Date().toISOString(),
           guncellenme: new Date().toISOString(),
         };
         await setDoc(doc(db, 'micirStabilizeFisleri', micirFisId), fis);
+        const saNotu = saMatch ? ` · SA ${saMatch.sa.saId}` : '';
         await setDoc(
           doc(db, 'guvenlikGelenEvraklar', guvenlikEvrakId),
           {
@@ -1911,17 +1920,22 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
             fileName: `micir_${fis.irsaliyeNo}.jpg`,
             fileType: 'image/jpeg',
             durum: 'BEKLEMEDE',
-            aciklama: `ENTO MADEN ${malzemeAdi} irsaliyesi · Plaka ${fis.plaka} · ${miktarLabel} — yönetici onayı bekliyor`,
+            aciklama: `ENTO MADEN ${malzemeAdi} irsaliyesi · Plaka ${fis.plaka} · ${miktarLabel}${saNotu} — yönetici onayı bekliyor`,
             kaydeden: currentUser?.email || 'guvenlik_gate',
             kaynak: 'MICIR_STABILIZE_FIS',
             micirFisId,
             kapıLogId: logId,
             irsaliyeId,
+            saId: saMatch?.sa.saId || null,
+            saKalemId: saMatch?.kalem.id || null,
             plaka: fis.plaka,
             tonaj: fis.tonaj,
             kiloKg: fis.kiloKg,
             malzemeTipi: fis.malzemeTipi,
-            kalemler: buildMicirKalemler(micirFisId, fis.tonaj, malzeme, fis.kiloKg),
+            kalemler: buildMicirKalemler(micirFisId, fis.tonaj, malzeme, fis.kiloKg).map((k) => ({
+              ...k,
+              saKalemId: saMatch?.kalem.id,
+            })),
             aiStatus: 'SKIPPED',
           },
           { merge: true }
@@ -2335,7 +2349,13 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
           showStatus('error', 'Bu fiş zaten işlenmiş.');
           return;
         }
-        await approveMicirFis({
+        const micirTip: MicirMalzemeTipi =
+          fis.malzemeTipi === 'STABILIZE' ? 'STABILIZE' : 'MICIR';
+        const saMatch = findMatchingMicirSatinAlma(satinAlmaProp, irsaliyelerProp, micirTip, {
+          preferredSaId: (fis as MicirStabilizeFis).saId,
+          preferredSaKalemId: (fis as MicirStabilizeFis).saKalemId,
+        });
+        const result = await approveMicirFis({
           fis: fis as MicirStabilizeFis,
           correction: {
             tarih: String(fis.tarih || islemTarihi).slice(0, 10),
@@ -2343,17 +2363,30 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
             plaka: String(fis.plaka || '').trim().toUpperCase(),
             tonaj: Number(fis.tonaj) || 0,
             kiloKg: resolveMicirKiloKg(fis),
-            malzemeTipi: fis.malzemeTipi === 'STABILIZE' ? 'STABILIZE' : 'MICIR',
+            malzemeTipi: micirTip,
             fisGorselUrl: fis.fisGorselUrl || '',
             firmaUnvan: fis.firmaUnvan || ENTO_MADEN_UNVAN,
             cariKartId: fis.cariKartId,
+            saId: (fis as MicirStabilizeFis).saId || saMatch?.sa.saId,
+            saKalemId: (fis as MicirStabilizeFis).saKalemId || saMatch?.kalem.id,
           },
           onaylayan,
           cariKartlar: cariKartlarLive,
           setCariKartlar: setCariKartlarLive,
+          satinAlmaTalepleri: satinAlmaProp,
+          irsaliyeler: irsaliyelerProp,
         });
-        showStatus('success', 'Mıcır / stabilize fişi onaylandı (irsaliye + cari işlendi).');
-        void addNotification?.(`Evrak Duvarı: mıcır fişi onaylandı (${fis.irsaliyeNo || fis.id})`);
+        showStatus(
+          'success',
+          result.saMatch
+            ? `Mıcır/stabilize onaylandı · SA ${result.saMatch.sa.saId} bağlandı`
+            : 'Mıcır / stabilize fişi onaylandı (irsaliye + cari; açık SA bulunamadı)'
+        );
+        void addNotification?.(
+          `Evrak Duvarı: mıcır fişi onaylandı (${fis.irsaliyeNo || fis.id})${
+            result.saMatch ? ` · SA ${result.saMatch.sa.saId}` : ''
+          }`
+        );
         return;
       }
 

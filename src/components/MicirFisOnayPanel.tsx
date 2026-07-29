@@ -3,7 +3,7 @@ import {
   Truck, Check, X, Pencil, RefreshCw, Camera, AlertTriangle
 } from 'lucide-react';
 import { collection, onSnapshot } from 'firebase/firestore';
-import { CariKart, CariKartIslem, Irsaliye, MicirStabilizeFis } from '../types/erp';
+import { CariKart, CariKartIslem, Irsaliye, MicirStabilizeFis, SatinAlmaTalebi } from '../types/erp';
 import { db } from '../lib/firebase';
 import { openBase64InNewTab } from '../lib/fileViewerUtils';
 import {
@@ -17,6 +17,7 @@ import {
 } from '../lib/micirUtils';
 import {
   approveMicirFis,
+  findMatchingMicirSatinAlma,
   isMicirFisPending,
   rejectMicirFis,
 } from '../lib/micirOnayUtils';
@@ -27,6 +28,8 @@ interface MicirFisOnayPanelProps {
   setCariKartlar?: React.Dispatch<React.SetStateAction<CariKart[]>>;
   setIrsaliyeler?: React.Dispatch<React.SetStateAction<Irsaliye[]>>;
   setCariIslemGecmisi?: React.Dispatch<React.SetStateAction<CariKartIslem[]>>;
+  satinAlmaTalepleri?: SatinAlmaTalebi[];
+  irsaliyeler?: Irsaliye[];
   addNotification?: (mesaj: string, meta?: Record<string, unknown>) => void | Promise<void>;
 }
 
@@ -36,6 +39,8 @@ export const MicirFisOnayPanel: React.FC<MicirFisOnayPanelProps> = ({
   setCariKartlar,
   setIrsaliyeler,
   setCariIslemGecmisi,
+  satinAlmaTalepleri = [],
+  irsaliyeler = [],
   addNotification,
 }) => {
   const [fisler, setFisler] = useState<MicirStabilizeFis[]>([]);
@@ -61,6 +66,14 @@ export const MicirFisOnayPanel: React.FC<MicirFisOnayPanelProps> = ({
 
   const pending = useMemo(() => fisler.filter((f) => isMicirFisPending(f)), [fisler]);
 
+  const editingSaMatch = useMemo(() => {
+    if (!editing) return null;
+    return findMatchingMicirSatinAlma(satinAlmaTalepleri, irsaliyeler, malzemeTipi, {
+      preferredSaId: editing.saId,
+      preferredSaKalemId: editing.saKalemId,
+    });
+  }, [editing, satinAlmaTalepleri, irsaliyeler, malzemeTipi]);
+
   const openEdit = (f: MicirStabilizeFis) => {
     setEditing(f);
     setTarih(f.tarih);
@@ -80,7 +93,11 @@ export const MicirFisOnayPanel: React.FC<MicirFisOnayPanelProps> = ({
     }
     if (
       !window.confirm(
-        `Onaylanınca:\n1) İrsaliyeler sekmesine kayıt\n2) ${ENTO_MADEN_UNVAN} cari kart altına irsaliye geçmişi\n\noluşacak. Devam?`
+        `Onaylanınca:\n1) İrsaliyeler sekmesine kayıt\n2) ${ENTO_MADEN_UNVAN} cari kart altına irsaliye geçmişi${
+          editingSaMatch
+            ? `\n3) Satın alma ${editingSaMatch.sa.saId} ile bağlanır (${editingSaMatch.kalem.urunAdi})`
+            : '\n3) Eşleşen açık SA bulunamazsa irsaliye SA’sız oluşur'
+        }\n\noluşacak. Devam?`
       )
     ) {
       return;
@@ -101,26 +118,37 @@ export const MicirFisOnayPanel: React.FC<MicirFisOnayPanelProps> = ({
           fisGorselUrl: editing.fisGorselUrl,
           firmaUnvan: entoCari?.unvan || editing.firmaUnvan || ENTO_MADEN_UNVAN,
           cariKartId: entoCari?.id || editing.cariKartId,
+          saId: editing.saId || editingSaMatch?.sa.saId,
+          saKalemId: editing.saKalemId || editingSaMatch?.kalem.id,
         },
         onaylayan: currentUser?.email || 'yonetici',
         cariKartlar,
         setCariKartlar,
         setIrsaliyeler,
         setCariIslemGecmisi,
+        satinAlmaTalepleri,
+        irsaliyeler,
       });
 
       await addNotification?.(
-        `ENTO MADEN irsaliyesi onaylandı: ${result.fis.irsaliyeNo} · ${formatMicirMiktarLabel(result.fis.tonaj, result.fis.kiloKg)}`,
+        `ENTO MADEN irsaliyesi onaylandı: ${result.fis.irsaliyeNo} · ${formatMicirMiktarLabel(result.fis.tonaj, result.fis.kiloKg)}${
+          result.saMatch ? ` · SA ${result.saMatch.sa.saId}` : ''
+        }`,
         {
           tip: 'MICIR_FIS_ONAYLANDI',
           micirFisId: result.fis.id,
           irsaliyeId: result.irsaliye.id,
           cariKartId: result.cariIslem.cariKartId,
+          saId: result.saMatch?.sa.saId,
         }
       );
 
       alert(
-        `Onaylandı.\n\nİrsaliye: ${result.irsaliye.irsaliyeNo}\nCari: ${result.fis.firmaUnvan}\nMiktar: ${formatMicirMiktarLabel(result.fis.tonaj, result.fis.kiloKg)}`
+        `Onaylandı.\n\nİrsaliye: ${result.irsaliye.irsaliyeNo}\nCari: ${result.fis.firmaUnvan}\nMiktar: ${formatMicirMiktarLabel(result.fis.tonaj, result.fis.kiloKg)}${
+          result.saMatch
+            ? `\nSatın alma: ${result.saMatch.sa.saId} (${result.saMatch.kalem.urunAdi})`
+            : '\nSatın alma: bağlanamadı (açık mıcır/stabilize SA yok)'
+        }`
       );
       setEditing(null);
     } catch (err: any) {
@@ -338,6 +366,18 @@ export const MicirFisOnayPanel: React.FC<MicirFisOnayPanelProps> = ({
                 <p className="text-[10px] text-slate-600 bg-[#E3F2EE] border border-[#B9DBD2] rounded-xl px-3 py-2">
                   Kaydet → <strong>İrsaliye</strong> + <strong>{entoCari?.unvan || ENTO_MADEN_UNVAN}</strong>{' '}
                   cari kart altına irsaliye geçmişi oluşur.
+                  {editingSaMatch ? (
+                    <span className="block mt-1 text-emerald-800 font-bold">
+                      Satın alma bağlanacak: {editingSaMatch.sa.saId} · {editingSaMatch.kalem.urunAdi}
+                      {editingSaMatch.kalan > 0
+                        ? ` · kalan ${editingSaMatch.kalan.toLocaleString('tr-TR')}`
+                        : ''}
+                    </span>
+                  ) : (
+                    <span className="block mt-1 text-amber-800 font-semibold">
+                      Açık mıcır/stabilize satın alma bulunamadı — irsaliye SA’sız oluşur.
+                    </span>
+                  )}
                 </p>
                 <div className="flex gap-2 pt-1">
                   <button

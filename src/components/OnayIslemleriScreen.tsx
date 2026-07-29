@@ -2138,6 +2138,8 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
               setCariKartlar={setCariKartlar}
               setIrsaliyeler={setIrsaliyeler}
               setCariIslemGecmisi={setCariIslemGecmisi}
+              satinAlmaTalepleri={satinAlmaTalepleri}
+              irsaliyeler={irsaliyeler}
               addNotification={addNotification}
             />
             <GuvenlikEvrakOnayHavuzu

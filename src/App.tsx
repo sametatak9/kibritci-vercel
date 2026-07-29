@@ -2640,6 +2640,8 @@ export default function App() {
           userYetki={matchedU?.yetki}
           isStandalone={true}
           addNotification={addNotification}
+          satinAlmaTalepleri={satinAlmaTalepleri}
+          irsaliyeler={irsaliyeler}
         />
       );
     }
@@ -2763,6 +2765,8 @@ export default function App() {
           userYetki={matchedU?.yetki}
           isStandalone={true}
           addNotification={addNotification}
+          satinAlmaTalepleri={satinAlmaTalepleri}
+          irsaliyeler={irsaliyeler}
         />
       );
     }
@@ -3370,6 +3374,8 @@ export default function App() {
                     onSignOut={handleSignOut}
                     userYetki={matchedU?.yetki}
                     addNotification={addNotification}
+                    satinAlmaTalepleri={satinAlmaTalepleri}
+                    irsaliyeler={irsaliyeler}
                   />
                 ) : renderAccessDenied()
               )}
