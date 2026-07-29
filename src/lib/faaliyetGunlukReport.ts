@@ -115,14 +115,15 @@ function renderFotoBlock(fotolar: string[]): string {
   }
   const imgs = fotolar
     .map(
-      (url) =>
-        `<figure style="margin:0;border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;background:#f8fafc;page-break-inside:avoid;">
-          <img src="${escapeHtml(url)}" alt="Faaliyet fotoğrafı" style="display:block;width:100%;max-height:320px;object-fit:contain;" />
-        </figure>`
+      (url, idx) =>
+        `<button type="button" class="foto-thumb" data-foto-url="${escapeHtml(url)}" title="Büyütmek için tıklayın" style="display:block;width:100%;padding:0;border:2px solid #64748b;border-radius:10px;overflow:hidden;background:#0f172a;cursor:zoom-in;box-shadow:0 2px 8px rgba(15,23,42,.12)">
+          <img src="${escapeHtml(url)}" alt="Faaliyet fotoğrafı ${idx + 1}" style="display:block;width:100%;height:200px;object-fit:cover;pointer-events:none" />
+          <span style="display:block;padding:4px;font-size:9px;font-weight:800;color:#e2e8f0;background:#1e293b;text-align:center">🔍 Büyüt</span>
+        </button>`
     )
     .join('');
   return `<div style="margin-top:12px;">
-    <div style="font-size:10px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:#64748b;margin-bottom:8px;">Saha / Kamp fotoğrafları (${fotolar.length})</div>
+    <div style="font-size:10px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:#64748b;margin-bottom:8px;">Saha / Kamp fotoğrafları (${fotolar.length}) — tıklayınca büyür</div>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;">${imgs}</div>
   </div>`;
 }
@@ -344,23 +345,52 @@ export function buildFaaliyetGunlukReportHtml(options: {
     .page { max-width: 900px; margin: 0 auto; }
     .meta { margin: 16px 0 20px; padding: 12px 16px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; font-size: 11px; color: #475569; }
     .meta p { margin: 2px 0; }
+    .toolbar { position: sticky; top: 0; z-index: 40; display:flex; gap:8px; justify-content:flex-end; padding:0 0 12px; background:linear-gradient(#fff,#fff 80%,transparent); }
+    .toolbar button { border:0; border-radius:10px; padding:8px 14px; font-size:12px; font-weight:800; cursor:pointer; background:#1e3a5f; color:#fff; }
+    #foto-lightbox { display:none; position:fixed; inset:0; z-index:9999; background:rgba(15,23,42,.92); align-items:center; justify-content:center; padding:24px; cursor:zoom-out; }
+    #foto-lightbox.open { display:flex; }
+    #foto-lightbox img { max-width:min(96vw,1100px); max-height:90vh; object-fit:contain; border-radius:12px; background:#111; cursor:default; }
+    #foto-lightbox .lb-close { position:absolute; top:16px; right:16px; border:0; background:#fff; color:#0f172a; font-weight:900; font-size:14px; border-radius:999px; padding:8px 14px; cursor:pointer; }
     @media print {
       body { padding: 12px; }
       article { break-inside: avoid; }
       .personel-page { page-break-before: always; }
+      .toolbar, #foto-lightbox, .foto-thumb span { display: none !important; }
     }
   </style>
 </head>
 <body>
   <div class="page">
+    <div class="toolbar"><button type="button" onclick="window.print()">🖨 Yazdır / PDF</button></div>
     ${kibritciReportHeaderHtml(title, subtitle)}
-    <div class="meta">${meta.map((m) => `<p>${escapeHtml(m)}</p>`).join('')}</div>
+    <div class="meta">${meta.map((m) => `<p>${escapeHtml(m)}</p>`).join('')}<p style="margin-top:6px;font-weight:700;color:#1e3a5f">Fotoğrafa tıklayınca büyür.</p></div>
     ${bodyParts.join('')}
     ${personelPage}
     <footer style="margin-top:24px;padding-top:12px;border-top:1px solid #e2e8f0;font-size:10px;color:#94a3b8;text-align:center;">
       Kibritçi İnşaat ERP · Faaliyeti Olan Personeller
     </footer>
   </div>
+  <div id="foto-lightbox" role="dialog" aria-modal="true">
+    <button type="button" class="lb-close" id="foto-lightbox-close">Kapat ✕</button>
+    <img id="foto-lightbox-img" alt="Büyük fotoğraf" />
+  </div>
+  <script>
+    (function () {
+      var lb = document.getElementById('foto-lightbox');
+      var img = document.getElementById('foto-lightbox-img');
+      var closeBtn = document.getElementById('foto-lightbox-close');
+      function openLb(url) { if (!url||!lb||!img) return; img.src=url; lb.classList.add('open'); }
+      function closeLb() { if (!lb||!img) return; lb.classList.remove('open'); img.removeAttribute('src'); }
+      document.addEventListener('click', function (e) {
+        var t = e.target; if (!t) return;
+        var btn = t.closest ? t.closest('.foto-thumb') : null;
+        if (btn) { e.preventDefault(); openLb(btn.getAttribute('data-foto-url')); return; }
+        if (t === lb || t === closeBtn) closeLb();
+      });
+      document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeLb(); });
+      if (img) img.addEventListener('click', function (e) { e.stopPropagation(); });
+    })();
+  </script>
 </body>
 </html>`;
 }
@@ -375,7 +405,6 @@ export function openFaaliyetGunlukReportPdf(html: string, title: string): void {
   w.document.write(html);
   w.document.close();
   w.document.title = title;
-  setTimeout(() => w.print(), 500);
 }
 
 export async function exportFaaliyetGunlukExcel(options: {

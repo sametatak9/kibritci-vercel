@@ -73,14 +73,15 @@ function renderFotoStrip(fotolar: string[]): string {
   const imgs = fotolar
     .slice(0, 8)
     .map(
-      (url) =>
-        `<a href="${escapeHtml(url)}" target="_blank" rel="noopener" style="display:block;border:1px solid #94a3b8;border-radius:10px;overflow:hidden;background:#0f172a;box-shadow:0 2px 8px rgba(15,23,42,.12)">
-          <img src="${escapeHtml(url)}" alt="Faaliyet fotoğrafı" style="display:block;width:100%;height:180px;object-fit:cover" />
-        </a>`
+      (url, idx) =>
+        `<button type="button" class="foto-thumb" data-foto-url="${escapeHtml(url)}" data-foto-index="${idx}" title="Büyütmek için tıklayın" style="display:block;width:100%;padding:0;border:2px solid #64748b;border-radius:10px;overflow:hidden;background:#0f172a;cursor:zoom-in;box-shadow:0 2px 8px rgba(15,23,42,.15)">
+          <img src="${escapeHtml(url)}" alt="Faaliyet fotoğrafı ${idx + 1}" style="display:block;width:100%;height:180px;object-fit:cover;pointer-events:none" />
+          <span style="display:block;padding:4px;font-size:9px;font-weight:800;color:#e2e8f0;background:#1e293b;text-align:center">🔍 Büyüt</span>
+        </button>`
     )
     .join('');
   return `<div style="margin-top:10px">
-    <div style="font-size:10px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:#475569;margin-bottom:6px">Fotoğraflar (${fotolar.length})</div>
+    <div style="font-size:10px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:#475569;margin-bottom:6px">Fotoğraflar (${fotolar.length}) — tıklayınca büyür</div>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px">${imgs}</div>
   </div>`;
 }
@@ -300,20 +301,49 @@ export function buildFaaliyetGunSonuReportHtml(options: {
   <style>
     body { font-family: 'Segoe UI', system-ui, sans-serif; margin: 0; padding: 20px; color: #0f172a; }
     .page { max-width: 960px; margin: 0 auto; }
+    .toolbar { position: sticky; top: 0; z-index: 40; display:flex; gap:8px; justify-content:flex-end; padding:8px 0 12px; background:linear-gradient(#fff,#fff 80%,transparent); }
+    .toolbar button { border:0; border-radius:10px; padding:8px 14px; font-size:12px; font-weight:800; cursor:pointer; }
+    .btn-print { background:#1e3a5f; color:#fff; }
+    .btn-close-hint { background:#f1f5f9; color:#334155; }
+    #foto-lightbox {
+      display:none; position:fixed; inset:0; z-index:9999; background:rgba(15,23,42,.92);
+      align-items:center; justify-content:center; padding:24px; cursor:zoom-out;
+    }
+    #foto-lightbox.open { display:flex; }
+    #foto-lightbox img {
+      max-width:min(96vw,1100px); max-height:90vh; object-fit:contain;
+      border-radius:12px; box-shadow:0 20px 50px rgba(0,0,0,.45); background:#111; cursor:default;
+    }
+    #foto-lightbox .lb-close {
+      position:absolute; top:16px; right:16px; border:0; background:#fff; color:#0f172a;
+      font-weight:900; font-size:14px; border-radius:999px; padding:8px 14px; cursor:pointer;
+    }
+    #foto-lightbox .lb-caption {
+      position:absolute; bottom:18px; left:50%; transform:translateX(-50%);
+      color:#e2e8f0; font-size:12px; font-weight:700; background:rgba(15,23,42,.7);
+      padding:6px 12px; border-radius:999px;
+    }
     @media print {
       body { padding: 8px; }
+      .toolbar, #foto-lightbox { display:none !important; }
       section, article { break-inside: avoid; }
       img { max-height: 160px !important; height: auto !important; }
+      .foto-thumb span { display:none !important; }
     }
   </style>
 </head>
 <body>
   <div class="page">
+    <div class="toolbar print:hidden">
+      <button type="button" class="btn-close-hint" onclick="window.close()">Pencereyi kapat</button>
+      <button type="button" class="btn-print" onclick="window.print()">🖨 Yazdır / PDF</button>
+    </div>
     ${kibritciReportHeaderHtml(title, subtitle)}
     <div style="margin:12px 0 16px;padding:10px 14px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;font-size:11px;color:#475569">
       <p style="margin:2px 0">Toplam kayıt: <strong>${sorted.length}</strong> · Grup: <strong>${groups.size}</strong></p>
       <p style="margin:2px 0">Oluşturan: ${escapeHtml(options.olusturan || '—')}</p>
       <p style="margin:2px 0">Basım: ${new Date().toLocaleString('tr-TR')}</p>
+      <p style="margin:6px 0 0;font-weight:700;color:#1e3a5f">İpucu: Fotoğraflara tıklayınca büyür. Yazdır için üstteki butonu kullanın.</p>
     </div>
     ${
       notlar
@@ -333,6 +363,48 @@ export function buildFaaliyetGunSonuReportHtml(options: {
       Kibritçi ERP · Saha Gün Sonu Faaliyet Raporu
     </footer>
   </div>
+
+  <div id="foto-lightbox" role="dialog" aria-modal="true" aria-label="Fotoğraf büyütme">
+    <button type="button" class="lb-close" id="foto-lightbox-close">Kapat ✕</button>
+    <img id="foto-lightbox-img" alt="Büyük fotoğraf" />
+    <div class="lb-caption" id="foto-lightbox-caption"></div>
+  </div>
+
+  <script>
+    (function () {
+      var lb = document.getElementById('foto-lightbox');
+      var img = document.getElementById('foto-lightbox-img');
+      var cap = document.getElementById('foto-lightbox-caption');
+      var closeBtn = document.getElementById('foto-lightbox-close');
+      function openLb(url, label) {
+        if (!url || !lb || !img) return;
+        img.src = url;
+        if (cap) cap.textContent = label || 'Fotoğraf';
+        lb.classList.add('open');
+      }
+      function closeLb() {
+        if (!lb || !img) return;
+        lb.classList.remove('open');
+        img.removeAttribute('src');
+      }
+      document.addEventListener('click', function (e) {
+        var t = e.target;
+        if (!t) return;
+        var btn = t.closest ? t.closest('.foto-thumb') : null;
+        if (btn) {
+          e.preventDefault();
+          e.stopPropagation();
+          openLb(btn.getAttribute('data-foto-url'), 'Faaliyet fotoğrafı');
+          return;
+        }
+        if (t === lb || t === closeBtn) closeLb();
+      });
+      document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape') closeLb();
+      });
+      if (img) img.addEventListener('click', function (e) { e.stopPropagation(); });
+    })();
+  </script>
 </body>
 </html>`;
 }
@@ -346,7 +418,7 @@ export function openFaaliyetGunSonuReport(html: string, title: string): void {
   w.document.write(html);
   w.document.close();
   w.document.title = title;
-  setTimeout(() => w.print(), 700);
+  // Otomatik yazdırma lightbox'ı engelliyordu — kullanıcı Yazdır butonuna basar
 }
 
 /** Arşiv + yönetim akış kuyruğuna yazar */
