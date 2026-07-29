@@ -99,6 +99,7 @@ import {
 } from './lib/productionDataGuard';
 import {
   normalizeYetki,
+  isSoforYetki,
   getRoleHomeTab,
   isMobileRole,
   isStandaloneMobileRole,
@@ -590,6 +591,12 @@ export default function App() {
             fetchCollection<PersonelIslemGecmisi>('personelIslemGecmisi').then(setPersonelIslemGecmisi),
             fetchCollection<CariKartIslem>('cariIslemGecmisi').then(setCariIslemGecmisi),
             fetchCollection<StokKartIslem>('stokIslemGecmisi').then(setStokIslemGecmisi),
+            // Eski demo kasa seed'leri (k1/k2) canlıda silinince yeniden oluşmasın / kalsın
+            ...INITIAL_KASA.map((seed) =>
+              removeDocument('kasaHareketleri', seed.id).catch((err) =>
+                console.warn('[kasa] demo seed silinemedi:', seed.id, err)
+              )
+            ),
           ]).then((results) => {
             results.forEach((result, index) => {
               if (result.status === 'rejected') {
@@ -656,7 +663,7 @@ export default function App() {
           safeLoad(seedCollectionIfEmpty('faturalar', INITIAL_FATURA), [], 'faturalar'),
           safeLoad(seedCollectionIfEmpty('evrakBaglantiGruplari', []), [], 'evrakBaglantiGruplari'),
           safeLoad(seedCollectionIfEmpty('onayliAnalizRaporlari', []), [], 'onayliAnalizRaporlari'),
-          safeLoad(seedCollectionIfEmpty('kasaHareketleri', INITIAL_KASA), [], 'kasaHareketleri'),
+          safeLoad(seedCollectionIfEmpty('kasaHareketleri', allowDemoSeed ? INITIAL_KASA : []), [], 'kasaHareketleri'),
           safeLoad(seedCollectionIfEmpty('araclar', INITIAL_ARAC), [], 'araclar'),
           safeLoad(seedCollectionIfEmpty('demirbaslar', []), [], 'demirbaslar'),
           safeLoad((async () => { await seedCollectionIfEmpty('kampOdalari', []); return await fetchCollection<KampOdasi>('kampOdalari'); })(), [], 'kampOdalari'),
@@ -1159,8 +1166,8 @@ export default function App() {
 
     const unsubKasaHareketleri = onSnapshot(collection(db, 'kasaHareketleri'), (snapshot) => {
       const list: KasaHareketi[] = [];
-      snapshot.forEach((doc) => {
-        list.push({ id: doc.id, ...doc.data() } as any);
+      snapshot.forEach((docSnap) => {
+        list.push({ ...docSnap.data(), id: docSnap.id } as KasaHareketi);
       });
       setKasaHareketleri(list);
     });
@@ -2004,6 +2011,11 @@ export default function App() {
     });
   };
 
+  const deleteKasaHareketi = async (id: string) => {
+    await removeDocument('kasaHareketleri', id);
+    setKasaHareketleri((prev) => prev.filter((k) => k.id !== id));
+  };
+
   const setAraclarWithSync = (updater: AracBakim[] | ((a: AracBakim[]) => AracBakim[])) => {
     setAraclar(prev => {
       const next = typeof updater === 'function' ? updater(prev) : updater;
@@ -2579,7 +2591,8 @@ export default function App() {
   const isAllowedKampci = userYetki === 'KAMPÇI' || isYonetici;
   const isAllowedTesisatci = userYetki === 'TESİSATÇI' || isYonetici;
   const isAllowedMermerci = userYetki === 'MERMERCİ' || isYonetici;
-  const isAllowedLojistik = userYetki === 'LOJİSTİK' || isYonetici;
+  /** Şöför Mobil: yalnızca ŞÖFÖR/LOJİSTİK yetkisi (yönetici önizleme) */
+  const isAllowedLojistik = isSoforYetki(userYetki) || isYonetici;
   const isAllowedDepocu = userYetki === 'DEPOCU' || isYonetici;
   const isTabRestricted = isPrivilegedAdmin
     ? false
@@ -2689,7 +2702,7 @@ export default function App() {
         />
       );
     }
-    if (userYetki === 'LOJİSTİK') {
+    if (isSoforYetki(userYetki)) {
       return (
         <LojistikScreen
           irsaliyeler={irsaliyeler}
@@ -2828,7 +2841,7 @@ export default function App() {
         />
       );
     }
-    if (role === 'LOJİSTİK') {
+    if (isSoforYetki(role)) {
       return (
         <LojistikScreen
           irsaliyeler={irsaliyeler}
@@ -3262,6 +3275,7 @@ export default function App() {
                 <KasaScreen 
                   kasaHareketleri={kasaHareketleri}
                   setKasaHareketleri={setKasaHareketleriWithSync}
+                  deleteKasaHareketi={deleteKasaHareketi}
                 />
               )}
 

@@ -43,8 +43,11 @@ export function normalizeClaimRole(yetki?: string | null): string {
     GUVENLIK: 'GÜVENLİK',
     LOJISTIK: 'LOJİSTİK',
     DEPO: 'DEPOCU',
+    ŞÖFÖR: 'LOJİSTİK',
     ŞOFÖR: 'LOJİSTİK',
+    SOFÖR: 'LOJİSTİK',
     SOFOR: 'LOJİSTİK',
+    DRIVER: 'LOJİSTİK',
   };
   return aliases[v] ?? v;
 }

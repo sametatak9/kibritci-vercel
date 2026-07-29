@@ -58,8 +58,12 @@ const YETKI_ALIASES: Record<string, string> = {
   GUVENLIK: 'GÜVENLİK',
   LOJISTIK: 'LOJİSTİK',
   DEPO: 'DEPOCU',
+  /** Personel/görev kataloğu ve üyelik formları “ŞÖFÖR” yazar; mobil rol LOJİSTİK */
+  ŞÖFÖR: 'LOJİSTİK',
   ŞOFÖR: 'LOJİSTİK',
+  SOFÖR: 'LOJİSTİK',
   SOFOR: 'LOJİSTİK',
+  DRIVER: 'LOJİSTİK',
   TESISATCI: 'TESİSATÇI',
   TESİSATCI: 'TESİSATÇI',
   MERMERCI: 'MERMERCİ',
@@ -68,6 +72,11 @@ const YETKI_ALIASES: Record<string, string> = {
   IDARI_ISLER: 'İDARİ_İŞLER',
   IDARI: 'İDARİ_İŞLER',
 };
+
+/** Şöför Mobil Paneli — kayıtlı yetki ŞÖFÖR / LOJİSTİK */
+export function isSoforYetki(yetki?: string | null): boolean {
+  return normalizeYetki(yetki) === 'LOJİSTİK';
+}
 
 export function normalizeYetki(yetki?: string | null): string {
   if (!yetki) return "";

@@ -7,16 +7,19 @@ import { KasaHareketi } from '../types/erp';
 import { CorporateReportLayout } from './CorporateReportLayout';
 import { exportKasaExcel } from '../lib/kasaExcelExport';
 import { compressImage } from '../lib/imageCompress';
+import { removeDocument } from '../lib/firebase';
 
 interface KasaScreenProps {
   kasaHareketleri: KasaHareketi[];
   setKasaHareketleri: React.Dispatch<React.SetStateAction<KasaHareketi[]>>;
+  deleteKasaHareketi?: (id: string) => Promise<void>;
 }
 
 
 export const KasaScreen: React.FC<KasaScreenProps> = ({ 
   kasaHareketleri, 
-  setKasaHareketleri 
+  setKasaHareketleri,
+  deleteKasaHareketi,
 }) => {
   // Exact layout filters matching top of table in the screenshot
   const [startDate, setStartDate] = useState("2026-06-01");
@@ -216,13 +219,28 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
     setUploadedFileBase64(null);
   };
 
-  const handleDeleteKasaHareketi = (id: string, e: React.MouseEvent) => {
+  const handleDeleteKasaHareketi = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (window.confirm("Bu kasa hareketini silmek istediğinize emin misiniz?")) {
-      setKasaHareketleri(prev => prev.filter(k => k.id !== id));
+    if (!id) {
+      alert('Bu kaydın kimliği eksik; silinemiyor. Sayfayı yenileyip tekrar deneyin.');
+      return;
+    }
+    if (!window.confirm('Bu kasa hareketini silmek istediğinize emin misiniz?')) return;
+
+    try {
+      if (deleteKasaHareketi) {
+        await deleteKasaHareketi(id);
+      } else {
+        await removeDocument('kasaHareketleri', id);
+        setKasaHareketleri((list) => list.filter((k) => k.id !== id));
+      }
       if (editingId === id) {
         handleCancelEdit();
       }
+    } catch (err) {
+      console.error('[kasa] silme hatası:', id, err);
+      const msg = err instanceof Error ? err.message : String(err);
+      alert(`Kasa hareketi silinemedi: ${msg}`);
     }
   };
 
