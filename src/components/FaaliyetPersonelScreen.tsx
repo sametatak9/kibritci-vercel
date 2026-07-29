@@ -381,7 +381,7 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
     }
     if (
       !window.confirm(
-        `${dayLabel} için ${daySahaFaaliyetleri.length} saha kaydı yönetime gönderilsin mi?`
+        `${dayLabel} için ${daySahaFaaliyetleri.length} saha kaydı + yoklama özeti yönetime gönderilsin mi?`
       )
     ) {
       return;
@@ -391,18 +391,34 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
       const { submitFaaliyetGunSonuRapor, openFaaliyetGunSonuReport } = await import(
         '../lib/faaliyetGunSonuRapor'
       );
+      const { getYoklamaDay, isIdariPersonel, isTaseronPersonel } = await import(
+        '../lib/yoklamaUtils'
+      );
+      const parts = selectedDate.split('-').map(Number);
+      let geldi = 0;
+      let yok = 0;
+      let izinli = 0;
+      let raporlu = 0;
+      for (const p of personeller) {
+        if (isTaseronPersonel(p) || isIdariPersonel(p)) continue;
+        const aktif = p.durum === true || String(p.durum).toLowerCase() === 'true';
+        if (!aktif || String(p.istenCikisTarihi || '').trim()) continue;
+        const day = getYoklamaDay(yoklamalar[p.id], parts[0], parts[1], parts[2]);
+        const d = String(day?.durum || '');
+        if (d === 'Geldi') geldi += 1;
+        else if (d === 'Yok') yok += 1;
+        else if (d === 'İzinli') izinli += 1;
+        else if (d === 'Raporlu') raporlu += 1;
+      }
       const { html } = await submitFaaliyetGunSonuRapor({
         dateKey: selectedDate,
         sahaFaaliyetleri: daySahaFaaliyetleri,
         personeller,
         genelNotlar: gunSonuNot,
         olusturanEmail: currentUser?.email || 'yonetim',
-        yoklamaOzet: {
-          gelen: dayOzet.personelSayisi,
-          yok: dayOzet.yokSayisi,
-          izinli: 0,
-          raporlu: 0,
-        },
+        yoklamalar,
+        kampFaaliyetleri: dayKampFaaliyetleri,
+        yoklamaOzet: { gelen: geldi, yok, izinli, raporlu },
       });
       openFaaliyetGunSonuReport(html, `Gün Sonu — ${dayLabel}`);
       alert('Gün sonu raporu arşive ve onay kuyruğuna yazıldı.');
@@ -531,7 +547,12 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
     }
     if (
       !window.confirm(
-        `${dayLabel} kamp kayıtlarında ekibi yalnızca KAMPÇI görevine indirgesin mi? (Düz işçi / usta / formen çıkarılır)`
+        `KAMP PERSONEL LİSTESİNİ DÜZELT\n\n` +
+          `${dayLabel} tarihli kamp faaliyetlerinde:\n` +
+          `• Faaliyet kaydı SİLİNMEZ\n` +
+          `• Fotoğraf / açıklama DEĞİŞMEZ\n` +
+          `• Sadece personel listesinden KAMPÇI olmayanlar (düz işçi, usta, formen vb.) çıkarılır\n\n` +
+          `Devam edilsin mi?`
       )
     ) {
       return;
@@ -552,8 +573,8 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
       }
       alert(
         fixed > 0
-          ? `${fixed} kamp kaydının personel etiketi düzeltildi.`
-          : 'Düzeltilecek fazla etiket bulunamadı (zaten yalnızca kampçı).'
+          ? `${fixed} kamp kaydında fazla personel etiketi temizlendi. Kayıtlar ve fotoğraflar duruyor.`
+          : 'Düzeltilecek fazla etiket yok (listeler zaten yalnızca kampçı).'
       );
     } catch (err: any) {
       console.error(err);
@@ -1548,10 +1569,10 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
                   type="button"
                   onClick={() => void handleRepairKampEtiket()}
                   className="inline-flex items-center gap-1.5 bg-teal-700 hover:bg-teal-800 text-white text-[10px] font-black px-3 py-2 rounded-xl cursor-pointer"
-                  title="Eski kamp kayıtlarından düz işçi/usta etiketlerini temizle"
+                  title="Kayıt silmez. Sadece kamp faaliyetlerindeki yanlış personel etiketlerini (düz işçi/usta) temizler."
                 >
                   <Tent size={13} />
-                  Kamp etiket düzelt
+                  Kamp personel listesini düzelt
                 </button>
               )}
             </div>

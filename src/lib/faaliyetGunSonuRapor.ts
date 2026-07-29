@@ -1,11 +1,12 @@
-/** Gün sonu saha faaliyet raporu — parsel / blok / etiket / personel */
-import { Personel, SahaFaaliyeti, SahaGunRaporArsiv } from '../types/erp';
+/** Gün sonu saha faaliyet raporu — parsel / blok / etiket / personel + foto + yoklama */
+import { AylikYoklamaMap, KampFaaliyet, Personel, SahaFaaliyeti, SahaGunRaporArsiv } from '../types/erp';
 import { formatDateLabelTr, normalizeDateKey } from './dateKeyUtils';
 import { kibritciReportHeaderHtml } from './kibritciBrand';
-import { resolveFaaliyetEkip } from './faaliyetPersonelUtils';
+import { buildDayPersonelRaporu, resolveFaaliyetEkip } from './faaliyetPersonelUtils';
 import { ilerlemeDurumuLabel, normalizeFaaliyetEtiketi } from './faaliyetEtiketUtils';
 import { getFaaliyetFotolar } from './sahaFaaliyetUtils';
 import { saveDocument } from './firebase';
+import { getYoklamaDay, isIdariPersonel, isTaseronPersonel } from './yoklamaUtils';
 
 function escapeHtml(value: string): string {
   return String(value || '')
@@ -22,12 +23,143 @@ function sonIlerlemeYorum(f: SahaFaaliyeti): string {
   return String(last?.yorum || '').trim();
 }
 
+/** İş etiketi yoksa kaynak ekrandan varsayılan etiket */
+function resolveEtiket(f: SahaFaaliyeti): string {
+  const explicit = normalizeFaaliyetEtiketi(f.isEtiketi);
+  if (explicit) return explicit;
+  const k = String(f.kaynakEkran || '').toUpperCase();
+  if (k.includes('TESISAT')) return 'TESİSAT';
+  if (k.includes('MERMER')) return 'DİĞER';
+  if (k.includes('KAMP')) return 'KAMP';
+  if (k.includes('FORMEN') || k.includes('GUNLUK')) return 'KABA İNŞAAT';
+  return 'ETİKETSİZ';
+}
+
+function renderFotoStrip(fotolar: string[]): string {
+  if (fotolar.length === 0) {
+    return '<span style="color:#94a3b8;font-size:10px">—</span>';
+  }
+  const imgs = fotolar
+    .slice(0, 6)
+    .map(
+      (url) =>
+        `<img src="${escapeHtml(url)}" alt="Foto" style="width:72px;height:54px;object-fit:cover;border-radius:6px;border:1px solid #cbd5e1;background:#f8fafc" />`
+    )
+    .join('');
+  return `<div style="display:flex;flex-wrap:wrap;gap:4px;justify-content:center">${imgs}</div>`;
+}
+
+function buildYoklamaSectionHtml(options: {
+  dateKey: string;
+  personeller: Personel[];
+  yoklamalar: AylikYoklamaMap;
+  sahaFaaliyetleri: SahaFaaliyeti[];
+  kampFaaliyetleri: KampFaaliyet[];
+}): string {
+  const dk = normalizeDateKey(options.dateKey) || options.dateKey;
+  const parts = dk.split('-').map(Number);
+  const y = parts[0];
+  const m = parts[1];
+  const d = parts[2];
+
+  const counts = { Geldi: 0, Yok: 0, İzinli: 0, Raporlu: 0, Girilmedi: 0, Diger: 0 };
+  const byDurum: Record<string, string[]> = {
+    Geldi: [],
+    Yok: [],
+    İzinli: [],
+    Raporlu: [],
+  };
+
+  for (const p of options.personeller || []) {
+    if (isTaseronPersonel(p) || isIdariPersonel(p)) continue;
+    const aktif = p.durum === true || String(p.durum).toLowerCase() === 'true';
+    if (!aktif) continue;
+    if (String(p.istenCikisTarihi || '').trim()) continue;
+    const day = getYoklamaDay(options.yoklamalar[p.id], y, m, d);
+    const durum = String(day?.durum || 'Girilmedi');
+    const name = `${p.ad} ${p.soyad}`.trim();
+    if (durum === 'Geldi') {
+      counts.Geldi += 1;
+      byDurum.Geldi.push(name);
+    } else if (durum === 'Yok') {
+      counts.Yok += 1;
+      byDurum.Yok.push(name);
+    } else if (durum === 'İzinli') {
+      counts.İzinli += 1;
+      byDurum.İzinli.push(name);
+    } else if (durum === 'Raporlu') {
+      counts.Raporlu += 1;
+      byDurum.Raporlu.push(name);
+    } else if (durum === 'Girilmedi' || !day?.durum) {
+      counts.Girilmedi += 1;
+    } else {
+      counts.Diger += 1;
+    }
+  }
+
+  const personelRapor = buildDayPersonelRaporu(
+    options.sahaFaaliyetleri,
+    options.kampFaaliyetleri,
+    options.personeller,
+    dk,
+    options.yoklamalar
+  );
+
+  const listBlock = (title: string, names: string[], color: string) => {
+    if (names.length === 0) return '';
+    const chips = names
+      .sort((a, b) => a.localeCompare(b, 'tr'))
+      .map(
+        (n) =>
+          `<span style="display:inline-block;margin:2px;padding:2px 7px;border-radius:999px;background:#fff;border:1px solid ${color};font-size:10px;font-weight:600">${escapeHtml(n)}</span>`
+      )
+      .join('');
+    return `<div style="margin-top:8px"><div style="font-size:10px;font-weight:800;color:#334155;margin-bottom:4px">${escapeHtml(title)} (${names.length})</div><div>${chips}</div></div>`;
+  };
+
+  return `
+    <section style="margin:0 0 20px;border:1px solid #cbd5e1;border-radius:12px;overflow:hidden;page-break-inside:avoid">
+      <div style="background:#0f766e;color:#fff;padding:8px 12px;font-size:12px;font-weight:800">
+        Günlük yoklama özeti
+      </div>
+      <div style="padding:12px 14px;background:#f0fdfa">
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(90px,1fr));gap:8px;margin-bottom:10px">
+          <div style="background:#fff;border:1px solid #a7f3d0;border-radius:8px;padding:8px;text-align:center">
+            <div style="font-size:9px;font-weight:800;color:#047857;text-transform:uppercase">Geldi</div>
+            <div style="font-size:18px;font-weight:900;color:#065f46">${counts.Geldi}</div>
+          </div>
+          <div style="background:#fff;border:1px solid #fecdd3;border-radius:8px;padding:8px;text-align:center">
+            <div style="font-size:9px;font-weight:800;color:#be123c;text-transform:uppercase">Yok</div>
+            <div style="font-size:18px;font-weight:900;color:#9f1239">${counts.Yok}</div>
+          </div>
+          <div style="background:#fff;border:1px solid #bae6fd;border-radius:8px;padding:8px;text-align:center">
+            <div style="font-size:9px;font-weight:800;color:#0369a1;text-transform:uppercase">İzinli</div>
+            <div style="font-size:18px;font-weight:900;color:#075985">${counts.İzinli}</div>
+          </div>
+          <div style="background:#fff;border:1px solid #ddd6fe;border-radius:8px;padding:8px;text-align:center">
+            <div style="font-size:9px;font-weight:800;color:#6d28d9;text-transform:uppercase">Raporlu</div>
+            <div style="font-size:18px;font-weight:900;color:#5b21b6">${counts.Raporlu}</div>
+          </div>
+          <div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:8px;text-align:center">
+            <div style="font-size:9px;font-weight:800;color:#64748b;text-transform:uppercase">Faaliyetli</div>
+            <div style="font-size:18px;font-weight:900;color:#334155">${personelRapor.personelSayisi}</div>
+          </div>
+        </div>
+        ${listBlock('Yok olanlar', byDurum.Yok, '#fecdd3')}
+        ${listBlock('İzinli', byDurum.İzinli, '#bae6fd')}
+        ${listBlock('Raporlu', byDurum.Raporlu, '#ddd6fe')}
+      </div>
+    </section>`;
+}
+
 export function buildFaaliyetGunSonuReportHtml(options: {
   dateKey: string;
   sahaFaaliyetleri: SahaFaaliyeti[];
   personeller: Personel[];
   genelNotlar?: string;
   olusturan?: string;
+  yoklamalar?: AylikYoklamaMap;
+  kampFaaliyetleri?: KampFaaliyet[];
 }): string {
   const dk = normalizeDateKey(options.dateKey) || options.dateKey;
   const dayLabel = formatDateLabelTr(dk);
@@ -37,10 +169,7 @@ export function buildFaaliyetGunSonuReportHtml(options: {
       'tr'
     );
     if (pa !== 0) return pa;
-    const ea = normalizeFaaliyetEtiketi(a.isEtiketi).localeCompare(
-      normalizeFaaliyetEtiketi(b.isEtiketi),
-      'tr'
-    );
+    const ea = resolveEtiket(a).localeCompare(resolveEtiket(b), 'tr');
     if (ea !== 0) return ea;
     return String(a.isNiteligi || '').localeCompare(String(b.isNiteligi || ''), 'tr');
   });
@@ -56,7 +185,7 @@ export function buildFaaliyetGunSonuReportHtml(options: {
   for (const f of sorted) {
     const parsel = f.parsel || '—';
     const blok = f.blok || '—';
-    const etiket = normalizeFaaliyetEtiketi(f.isEtiketi) || 'ETİKETSİZ';
+    const etiket = resolveEtiket(f);
     const key = `${parsel}||${blok}||${etiket}`;
     if (!groups.has(key)) {
       groups.set(key, { key, parsel, blok, etiket, items: [] });
@@ -66,21 +195,27 @@ export function buildFaaliyetGunSonuReportHtml(options: {
 
   const groupHtml = Array.from(groups.values())
     .map((g) => {
-      const rows = g.items
+      const cards = g.items
         .map((f, i) => {
           const ekip = resolveFaaliyetEkip(f, options.personeller)
             .map((u) => u.adSoyad)
             .join(', ');
           const yorum = sonIlerlemeYorum(f);
-          const fotoN = getFaaliyetFotolar(f).length;
-          return `<tr>
-            <td style="padding:6px 8px;border:1px solid #e2e8f0;text-align:center">${i + 1}</td>
-            <td style="padding:6px 8px;border:1px solid #e2e8f0;font-weight:700">${escapeHtml(f.isNiteligi || '—')}</td>
-            <td style="padding:6px 8px;border:1px solid #e2e8f0">${escapeHtml(ekip || '—')}</td>
-            <td style="padding:6px 8px;border:1px solid #e2e8f0;font-size:11px">${escapeHtml(ilerlemeDurumuLabel(f.ilerlemeDurumu))}</td>
-            <td style="padding:6px 8px;border:1px solid #e2e8f0;font-size:11px">${escapeHtml(yorum || f.aciklama || '—')}</td>
-            <td style="padding:6px 8px;border:1px solid #e2e8f0;text-align:center">${fotoN}</td>
-          </tr>`;
+          const fotolar = getFaaliyetFotolar(f);
+          return `
+            <article style="border:1px solid #e2e8f0;border-top:none;padding:10px 12px;background:#fff;page-break-inside:avoid">
+              <div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start">
+                <div>
+                  <div style="font-size:10px;color:#64748b;font-weight:700">#${i + 1}</div>
+                  <div style="font-size:13px;font-weight:800;color:#0f172a">${escapeHtml(f.isNiteligi || '—')}</div>
+                  <div style="font-size:11px;color:#334155;margin-top:4px"><strong>Personel:</strong> ${escapeHtml(ekip || '—')}</div>
+                  <div style="font-size:10px;color:#64748b;margin-top:2px">İlerleme: ${escapeHtml(ilerlemeDurumuLabel(f.ilerlemeDurumu))}</div>
+                </div>
+                <span style="font-size:9px;font-weight:800;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:999px;padding:3px 8px;white-space:nowrap">${fotolar.length} foto</span>
+              </div>
+              <p style="margin:8px 0 0;font-size:12px;line-height:1.5;color:#1e293b;white-space:pre-wrap">${escapeHtml(yorum || f.aciklama || '—')}</p>
+              <div style="margin-top:8px">${renderFotoStrip(fotolar)}</div>
+            </article>`;
         })
         .join('');
 
@@ -90,26 +225,25 @@ export function buildFaaliyetGunSonuReportHtml(options: {
             Parsel ${escapeHtml(g.parsel)} · Blok ${escapeHtml(g.blok)} · ${escapeHtml(g.etiket)}
             <span style="float:right;opacity:.9">${g.items.length} kayıt</span>
           </div>
-          <table style="width:100%;border-collapse:collapse;font-size:12px">
-            <thead>
-              <tr style="background:#f1f5f9">
-                <th style="padding:6px;border:1px solid #cbd5e1;width:36px">#</th>
-                <th style="padding:6px;border:1px solid #cbd5e1;text-align:left">İş</th>
-                <th style="padding:6px;border:1px solid #cbd5e1;text-align:left">Personel</th>
-                <th style="padding:6px;border:1px solid #cbd5e1;text-align:left">İlerleme</th>
-                <th style="padding:6px;border:1px solid #cbd5e1;text-align:left">Yorum / Açıklama</th>
-                <th style="padding:6px;border:1px solid #cbd5e1;width:48px">Foto</th>
-              </tr>
-            </thead>
-            <tbody>${rows}</tbody>
-          </table>
+          ${cards}
         </section>`;
     })
     .join('');
 
   const notlar = String(options.genelNotlar || '').trim();
   const title = 'SAHA GÜN SONU FAALİYET RAPORU';
-  const subtitle = `${dayLabel} · parsel / blok / etiket / personel`;
+  const subtitle = `${dayLabel} · parsel / blok / etiket / personel · fotoğraflı`;
+
+  const yoklamaHtml =
+    options.yoklamalar
+      ? buildYoklamaSectionHtml({
+          dateKey: dk,
+          personeller: options.personeller,
+          yoklamalar: options.yoklamalar,
+          sahaFaaliyetleri: options.sahaFaaliyetleri,
+          kampFaaliyetleri: options.kampFaaliyetleri || [],
+        })
+      : '';
 
   return `<!DOCTYPE html>
 <html lang="tr">
@@ -119,7 +253,11 @@ export function buildFaaliyetGunSonuReportHtml(options: {
   <style>
     body { font-family: 'Segoe UI', system-ui, sans-serif; margin: 0; padding: 20px; color: #0f172a; }
     .page { max-width: 960px; margin: 0 auto; }
-    @media print { body { padding: 8px; } section { break-inside: avoid; } }
+    @media print {
+      body { padding: 8px; }
+      section, article { break-inside: avoid; }
+      img { max-height: 80px !important; }
+    }
   </style>
 </head>
 <body>
@@ -138,6 +276,7 @@ export function buildFaaliyetGunSonuReportHtml(options: {
           </div>`
         : ''
     }
+    ${yoklamaHtml}
     ${
       sorted.length === 0
         ? '<p style="color:#64748b;font-style:italic">Bu gün için saha faaliyet kaydı yok.</p>'
@@ -160,7 +299,7 @@ export function openFaaliyetGunSonuReport(html: string, title: string): void {
   w.document.write(html);
   w.document.close();
   w.document.title = title;
-  setTimeout(() => w.print(), 500);
+  setTimeout(() => w.print(), 700);
 }
 
 /** Arşiv + yönetim akış kuyruğuna yazar */
@@ -171,6 +310,8 @@ export async function submitFaaliyetGunSonuRapor(options: {
   genelNotlar: string;
   olusturanEmail: string;
   yoklamaOzet?: SahaGunRaporArsiv['yoklamaOzet'];
+  yoklamalar?: AylikYoklamaMap;
+  kampFaaliyetleri?: KampFaaliyet[];
 }): Promise<{ arsivId: string; akisId: string; html: string }> {
   const dk = normalizeDateKey(options.dateKey) || options.dateKey;
   const html = buildFaaliyetGunSonuReportHtml({
@@ -179,6 +320,8 @@ export async function submitFaaliyetGunSonuRapor(options: {
     personeller: options.personeller,
     genelNotlar: options.genelNotlar,
     olusturan: options.olusturanEmail,
+    yoklamalar: options.yoklamalar,
+    kampFaaliyetleri: options.kampFaaliyetleri,
   });
 
   const ids = options.sahaFaaliyetleri.map((f) => f.id);
@@ -209,13 +352,16 @@ export async function submitFaaliyetGunSonuRapor(options: {
     `Gönderen: ${options.olusturanEmail}`,
     `Saha faaliyet: ${ids.length}`,
     `Formen kaynaklı: ${formenAdet}`,
+    options.yoklamaOzet
+      ? `Yoklama — Geldi/Faaliyetli: ${options.yoklamaOzet.gelen} · Yok: ${options.yoklamaOzet.yok} · İzin: ${options.yoklamaOzet.izinli} · Rapor: ${options.yoklamaOzet.raporlu}`
+      : '',
     options.genelNotlar ? `Görüş: ${options.genelNotlar}` : '',
     '',
     ...options.sahaFaaliyetleri.slice(0, 12).map((f) => {
       const ekip = resolveFaaliyetEkip(f, options.personeller)
         .map((u) => u.adSoyad)
         .join(', ');
-      return `• ${f.parsel || '?'}/${f.blok || '?'} · ${f.isEtiketi || '—'} · ${f.isNiteligi || '—'} · ${ekip || '—'}`;
+      return `• ${f.parsel || '?'}/${f.blok || '?'} · ${resolveEtiket(f)} · ${f.isNiteligi || '—'} · ${ekip || '—'}`;
     }),
   ]
     .filter(Boolean)
