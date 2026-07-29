@@ -222,7 +222,7 @@ export const TesisatciYildirimTab: React.FC<TesisatciYildirimTabProps> = ({
           fileName: `yildirim_${fis.fisNo}.jpg`,
           fileType: 'image/jpeg',
           durum: 'BEKLEMEDE',
-          aciklama: `Tesisatçı Yıldırım Tanker irsaliyesi · İçme ${fis.icmeSuyuAdet} · Sanayi ${fis.sanayiSuyuAdet} · Damaca ${fis.damacaAdet || 0} — yönetici onayı bekliyor`,
+          aciklama: `Tesisatçı Yıldırım Tanker irsaliyesi · İçme ${fis.icmeSuyuAdet} ton · Sanayi ${fis.sanayiSuyuAdet} ton · Damacana ${fis.damacaAdet || 0} adet — yönetici onayı bekliyor`,
           kaydeden: currentUser?.email || 'tesisatci',
           kaynak: 'YILDIRIM_TANKER_FIS',
           yildirimTankerFisId: id,
@@ -301,7 +301,7 @@ export const TesisatciYildirimTab: React.FC<TesisatciYildirimTabProps> = ({
 
   const handleRaporIndir = () => {
     const rows = [
-      ['Tarih', 'Fiş No', 'İçme Suyu', 'Sanayi Suyu', 'Damaca', 'Toplam', 'Durum', 'Firma', 'Kaydeden'],
+      ['Tarih', 'Fiş No', 'İçme Suyu (Ton)', 'Sanayi Suyu (Ton)', 'Damacana (Adet)', 'Toplam', 'Durum', 'Firma', 'Kaydeden'],
       ...aylikFisler.map((f) => [
         f.tarih,
         f.fisNo,
@@ -405,11 +405,11 @@ export const TesisatciYildirimTab: React.FC<TesisatciYildirimTabProps> = ({
             </label>
           </div>
           <div className="space-y-1">
-            <label className="text-[9px] font-black text-slate-500 uppercase">Tanker İçme Suyu Adet</label>
+            <label className="text-[9px] font-black text-slate-500 uppercase">Tanker İçme Suyu (Ton)</label>
             <input
               type="number"
               min={0}
-              step={1}
+              step={0.01}
               value={icmeSuyuAdet}
               onChange={(e) => setIcmeSuyuAdet(e.target.value)}
               placeholder="0"
@@ -417,11 +417,11 @@ export const TesisatciYildirimTab: React.FC<TesisatciYildirimTabProps> = ({
             />
           </div>
           <div className="space-y-1">
-            <label className="text-[9px] font-black text-slate-500 uppercase">Tanker Sanayi Suyu Adet</label>
+            <label className="text-[9px] font-black text-slate-500 uppercase">Tanker Sanayi Suyu (Ton)</label>
             <input
               type="number"
               min={0}
-              step={1}
+              step={0.01}
               value={sanayiSuyuAdet}
               onChange={(e) => setSanayiSuyuAdet(e.target.value)}
               placeholder="0"
@@ -429,7 +429,7 @@ export const TesisatciYildirimTab: React.FC<TesisatciYildirimTabProps> = ({
             />
           </div>
           <div className="space-y-1 sm:col-span-2">
-            <label className="text-[9px] font-black text-slate-500 uppercase">Damaca Adet</label>
+            <label className="text-[9px] font-black text-slate-500 uppercase">Damacana (Adet)</label>
             <input
               type="number"
               min={0}
@@ -521,8 +521,8 @@ export const TesisatciYildirimTab: React.FC<TesisatciYildirimTabProps> = ({
                       {f.fisNo} {durumBadge(f.durum)}
                     </p>
                     <p className="text-[9px] text-slate-500">
-                      İçme: <strong>{f.icmeSuyuAdet}</strong> · Sanayi: <strong>{f.sanayiSuyuAdet}</strong> ·
-                      Damaca: <strong>{f.damacaAdet || 0}</strong>
+                      İçme: <strong>{f.icmeSuyuAdet} ton</strong> · Sanayi: <strong>{f.sanayiSuyuAdet} ton</strong> ·
+                      Damacana: <strong>{f.damacaAdet || 0} adet</strong>
                     </p>
                   </div>
                 </div>
@@ -643,15 +643,15 @@ export const TesisatciYildirimTab: React.FC<TesisatciYildirimTabProps> = ({
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center text-[11px]">
           <div className="bg-slate-50 border rounded-xl p-2">
-            <span className="text-[9px] text-slate-500 block uppercase">İçme</span>
+            <span className="text-[9px] text-slate-500 block uppercase">İçme (Ton)</span>
             <strong className="text-slate-900 text-sm">{aylikToplam.icme}</strong>
           </div>
           <div className="bg-slate-50 border rounded-xl p-2">
-            <span className="text-[9px] text-slate-500 block uppercase">Sanayi</span>
+            <span className="text-[9px] text-slate-500 block uppercase">Sanayi (Ton)</span>
             <strong className="text-slate-900 text-sm">{aylikToplam.sanayi}</strong>
           </div>
           <div className="bg-slate-50 border rounded-xl p-2">
-            <span className="text-[9px] text-slate-500 block uppercase">Damaca</span>
+            <span className="text-[9px] text-slate-500 block uppercase">Damacana (Adet)</span>
             <strong className="text-slate-900 text-sm">{aylikToplam.damaca}</strong>
           </div>
           <div className="bg-slate-50 border rounded-xl p-2">
@@ -666,8 +666,8 @@ export const TesisatciYildirimTab: React.FC<TesisatciYildirimTabProps> = ({
               <div key={f.id} className="text-[10px] flex justify-between gap-2 border-b border-slate-100 py-1.5 items-center">
                 <span className="font-mono text-slate-600">{f.tarih}</span>
                 <span className="font-bold text-slate-800 truncate">{f.fisNo}</span>
-                <span>İ:{f.icmeSuyuAdet}</span>
-                <span>S:{f.sanayiSuyuAdet}</span>
+                <span>İ:{f.icmeSuyuAdet}t</span>
+                <span>S:{f.sanayiSuyuAdet}t</span>
                 <span>D:{f.damacaAdet || 0}</span>
                 {durumBadge(f.durum)}
               </div>

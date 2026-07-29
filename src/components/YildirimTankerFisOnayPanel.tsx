@@ -218,8 +218,8 @@ export const YildirimTankerFisOnayPanel: React.FC<YildirimTankerFisOnayPanelProp
                 <div className="min-w-0 flex-1">
                   <p className="text-xs font-black text-slate-900 truncate">{f.fisNo}</p>
                   <p className="text-[10px] text-slate-500 mt-0.5">
-                    {f.tarih} · İçme: <strong>{f.icmeSuyuAdet}</strong> · Sanayi:{' '}
-                    <strong>{f.sanayiSuyuAdet}</strong> · Damaca: <strong>{f.damacaAdet || 0}</strong>
+                    {f.tarih} · İçme: <strong>{f.icmeSuyuAdet} ton</strong> · Sanayi:{' '}
+                    <strong>{f.sanayiSuyuAdet} ton</strong> · Damacana: <strong>{f.damacaAdet || 0} adet</strong>
                   </p>
                   <p className="text-[9px] text-slate-400 truncate">{f.firmaUnvan}</p>
                   <p className="text-[9px] text-slate-400">Kaydeden: {f.kaydeden || '—'}</p>
@@ -294,29 +294,29 @@ export const YildirimTankerFisOnayPanel: React.FC<YildirimTankerFisOnayPanelProp
                     />
                   </div>
                   <div className="space-y-1">
-                    <label className="text-[9px] font-black text-slate-500 uppercase">İçme Suyu</label>
+                    <label className="text-[9px] font-black text-slate-500 uppercase">İçme Suyu (Ton)</label>
                     <input
                       type="number"
                       min={0}
-                      step={1}
+                      step={0.01}
                       value={icmeSuyuAdet}
                       onChange={(e) => setIcmeSuyuAdet(e.target.value)}
                       className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-bold"
                     />
                   </div>
                   <div className="space-y-1">
-                    <label className="text-[9px] font-black text-slate-500 uppercase">Sanayi Suyu</label>
+                    <label className="text-[9px] font-black text-slate-500 uppercase">Sanayi Suyu (Ton)</label>
                     <input
                       type="number"
                       min={0}
-                      step={1}
+                      step={0.01}
                       value={sanayiSuyuAdet}
                       onChange={(e) => setSanayiSuyuAdet(e.target.value)}
                       className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-bold"
                     />
                   </div>
                   <div className="space-y-1 sm:col-span-2">
-                    <label className="text-[9px] font-black text-slate-500 uppercase">Damaca</label>
+                    <label className="text-[9px] font-black text-slate-500 uppercase">Damacana (Adet)</label>
                     <input
                       type="number"
                       min={0}

@@ -155,7 +155,7 @@ export async function approveYildirimTankerFis(options: {
     fileName: `yildirim_${updatedFis.fisNo}.jpg`,
     fileType: 'image/jpeg',
     durum: 'ONAYLANDI',
-    aciklama: `Yıldırım Tanker irsaliyesi onaylandı · İçme ${updatedFis.icmeSuyuAdet} · Sanayi ${updatedFis.sanayiSuyuAdet} · Damaca ${updatedFis.damacaAdet || 0}`,
+    aciklama: `Yıldırım Tanker irsaliyesi onaylandı · İçme ${updatedFis.icmeSuyuAdet} ton · Sanayi ${updatedFis.sanayiSuyuAdet} ton · Damacana ${updatedFis.damacaAdet || 0} adet`,
     kaynak: 'YILDIRIM_TANKER_FIS',
     yildirimTankerFisId: fis.id,
     irsaliyeId,
