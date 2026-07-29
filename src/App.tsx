@@ -2752,24 +2752,8 @@ export default function App() {
 
   if (isMobileMode && currentUser) {
     const role = userYetki;
-    if (role === 'FORMEN') {
-      return (
-        <FormenScreen
-          personeller={personeller}
-          yoklamalar={yoklamalar}
-          setYoklamalar={setYoklamalarWithSync}
-          saveYoklamalarNow={saveYoklamalarNow}
-          sahaFaaliyetleri={sahaFaaliyetleri}
-          setSahaFaaliyetleri={setSahaFaaliyetleriWithSync}
-          saveSahaFaaliyetNow={saveSahaFaaliyetNow}
-          removeSahaFaaliyetNow={removeSahaFaaliyetNow}
-          currentUser={currentUser}
-          onSignOut={handleSignOut}
-          isStandalone={true}
-          kullanicilar={kullanicilar}
-        />
-      );
-    }
+    // FORMEN çok sekmeli (Mobil + Faaliyeti Olan Personeller + …) — tam ekran kilitlenmez;
+    // normal kabuk + sidebar ile faaliyet_personel vb. görünür.
     if (role === 'GÜVENLİK') {
       return (
         <GuvenlikScreen
