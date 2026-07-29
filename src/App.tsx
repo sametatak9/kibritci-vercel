@@ -3131,6 +3131,7 @@ export default function App() {
                   sahaFaaliyetleri={sahaFaaliyetleri}
                   setSahaFaaliyetleri={setSahaFaaliyetleriWithSync}
                   saveSahaFaaliyetNow={saveSahaFaaliyetNow}
+                  removeSahaFaaliyetNow={removeSahaFaaliyetNow}
                   currentUser={currentUser}
                   canAssignProgram={isAllowedFormen}
                 />

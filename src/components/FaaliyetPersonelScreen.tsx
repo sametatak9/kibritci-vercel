@@ -24,6 +24,9 @@ import {
   UserX,
   Send,
   Tag,
+  Trash2,
+  Pencil,
+  Save,
 } from 'lucide-react';
 import { AylikYoklamaMap, KampFaaliyet, MermerciFaaliyet, Personel, SahaFaaliyeti, TesisatciFaaliyet } from '../types/erp';
 import { FaaliyetEtiketIlerlemePanel } from './FaaliyetEtiketIlerlemePanel';
@@ -62,6 +65,11 @@ import { db } from '../lib/firebase';
 import { collection, onSnapshot } from 'firebase/firestore';
 import { tesisatciToSaha, mermerciToSaha } from '../lib/mobilFaaliyetAdapter';
 import { GunlukFaaliyetProgramScreen } from './GunlukFaaliyetProgramScreen';
+import {
+  PARSEL_LIST,
+  blokListForParsel,
+  defaultBlokForParsel,
+} from '../data/parselBlokMap';
 
 type ViewMode = 'personel' | 'gun' | 'faaliyetsiz' | 'program';
 
@@ -76,6 +84,7 @@ interface FaaliyetPersonelScreenProps {
     record: SahaFaaliyeti,
     kaynak?: import('../lib/sahaFaaliyetPersistence').SahaFaaliyetSaveSource
   ) => Promise<unknown>;
+  removeSahaFaaliyetNow?: (record: SahaFaaliyeti) => Promise<unknown>;
   currentUser?: { email?: string; uid?: string } | null;
   canAssignProgram?: boolean;
 }
@@ -115,6 +124,7 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
   sahaFaaliyetleri = [],
   setSahaFaaliyetleri,
   saveSahaFaaliyetNow,
+  removeSahaFaaliyetNow,
   currentUser,
   canAssignProgram = false,
 }) => {
@@ -135,6 +145,9 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
   const [gunSonuNot, setGunSonuNot] = useState('');
   const [gunSonuBusy, setGunSonuBusy] = useState(false);
   const [patchBusyId, setPatchBusyId] = useState<string | null>(null);
+  const [editDraft, setEditDraft] = useState<SahaFaaliyeti | null>(null);
+  const [editSaving, setEditSaving] = useState(false);
+  const [deleteBusyId, setDeleteBusyId] = useState<string | null>(null);
 
   useEffect(() => {
     const unsub = onSnapshot(collection(db, 'kampGunlukFaaliyetleri'), (snap) => {
@@ -381,6 +394,85 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
     } finally {
       setPatchBusyId(null);
     }
+  };
+
+  const handleDeleteSahaFaaliyet = async (f: SahaFaaliyeti) => {
+    if (!editableSahaIds.has(f.id)) {
+      alert('Bu kayıt burada silinemez (saha koleksiyonunda değil).');
+      return;
+    }
+    if (
+      !window.confirm(
+        `"${f.isNiteligi || 'Saha faaliyeti'}" kaydı silinsin mi?\n\nBu işlem geri alınamaz.`
+      )
+    ) {
+      return;
+    }
+    setDeleteBusyId(f.id);
+    try {
+      if (removeSahaFaaliyetNow) {
+        await removeSahaFaaliyetNow(f);
+      } else {
+        setSahaFaaliyetleri((prev) => prev.filter((x) => x.id !== f.id));
+      }
+      if (editDraft?.id === f.id) setEditDraft(null);
+    } catch (err: any) {
+      console.error(err);
+      alert(err?.message || 'Kayıt silinemedi.');
+    } finally {
+      setDeleteBusyId(null);
+    }
+  };
+
+  const handleSaveEditDraft = async () => {
+    if (!editDraft) return;
+    if (!String(editDraft.isNiteligi || '').trim()) {
+      alert('İş niteliği zorunludur.');
+      return;
+    }
+    setEditSaving(true);
+    try {
+      if (saveSahaFaaliyetNow) {
+        await saveSahaFaaliyetNow(editDraft, 'idari_saha');
+      } else {
+        setSahaFaaliyetleri((prev) =>
+          prev.map((f) => (f.id === editDraft.id ? editDraft : f))
+        );
+      }
+      setEditDraft(null);
+    } catch (err: any) {
+      console.error(err);
+      alert(err?.message || 'Faaliyet güncellenemedi.');
+    } finally {
+      setEditSaving(false);
+    }
+  };
+
+  const renderSahaKayitActions = (f: SahaFaaliyeti, canEdit: boolean) => {
+    if (!canEdit) return null;
+    const busy = deleteBusyId === f.id || patchBusyId === f.id;
+    return (
+      <div className="flex flex-wrap gap-2 pt-1">
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => setEditDraft({ ...f })}
+          className="inline-flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wide px-3 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-900 border border-amber-600/30 cursor-pointer disabled:opacity-50"
+        >
+          <Pencil size={12} />
+          Güncelle
+        </button>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => void handleDeleteSahaFaaliyet(f)}
+          className="inline-flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wide px-3 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-800 border border-rose-200 cursor-pointer disabled:opacity-50"
+        >
+          {deleteBusyId === f.id ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
+          Kayıt Sil
+        </button>
+      </div>
+    );
   };
 
   const handleGunSonuGonder = async () => {
@@ -1500,6 +1592,8 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
                             ) : null
                           )}
 
+                          {renderSahaKayitActions(f, canEdit)}
+
                           {renderEkipChips(f.id, ekip, selectedPerson?.id)}
 
                           {isMesaiSahaFaaliyet(f) && (
@@ -1918,6 +2012,8 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
                             />
                           ) : null}
 
+                          {renderSahaKayitActions(f, canEdit)}
+
                           {renderEkipChips(f.id, ekip) || (
                             <p className="text-[11px] text-slate-400 italic flex items-center gap-1.5">
                               <UserRound size={12} />
@@ -2004,6 +2100,142 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
           )}
         </div>
       </section>
+      )}
+
+      {editDraft && (
+        <div className="fixed inset-0 z-[70] bg-slate-950/60 flex items-end sm:items-center justify-center p-3 sm:p-6">
+          <div className="bg-white w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden max-h-[92vh] flex flex-col">
+            <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between gap-2 bg-slate-50">
+              <div>
+                <p className="text-[9px] font-black uppercase tracking-wider text-amber-700">
+                  Saha faaliyeti
+                </p>
+                <h3 className="text-sm font-black text-slate-900">Kaydı Güncelle</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => !editSaving && setEditDraft(null)}
+                className="p-2 rounded-xl hover:bg-slate-200 cursor-pointer text-slate-500"
+                aria-label="Kapat"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <div className="p-4 space-y-3 overflow-y-auto text-xs">
+              <div>
+                <label className="text-[9px] font-black uppercase text-slate-400">İş niteliği *</label>
+                <input
+                  value={editDraft.isNiteligi || ''}
+                  onChange={(e) =>
+                    setEditDraft((prev) => (prev ? { ...prev, isNiteligi: e.target.value } : prev))
+                  }
+                  className="mt-1 w-full px-3 py-2 rounded-xl border border-slate-200 font-semibold outline-none focus:border-amber-400"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-[9px] font-black uppercase text-slate-400">Parsel</label>
+                  <select
+                    value={editDraft.parsel || PARSEL_LIST[0]}
+                    onChange={(e) => {
+                      const nextParsel = e.target.value;
+                      setEditDraft((prev) =>
+                        prev
+                          ? {
+                              ...prev,
+                              parsel: nextParsel,
+                              blok: defaultBlokForParsel(nextParsel),
+                            }
+                          : prev
+                      );
+                    }}
+                    className="mt-1 w-full px-3 py-2 rounded-xl border border-slate-200 font-semibold"
+                  >
+                    {PARSEL_LIST.map((p) => (
+                      <option key={p} value={p}>
+                        {p}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-[9px] font-black uppercase text-slate-400">Blok</label>
+                  <select
+                    value={editDraft.blok || defaultBlokForParsel(editDraft.parsel || '')}
+                    onChange={(e) =>
+                      setEditDraft((prev) => (prev ? { ...prev, blok: e.target.value } : prev))
+                    }
+                    className="mt-1 w-full px-3 py-2 rounded-xl border border-slate-200 font-semibold"
+                  >
+                    {(blokListForParsel(editDraft.parsel || '') || ['GENEL SAHA']).map((b) => (
+                      <option key={b} value={b}>
+                        {b}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label className="text-[9px] font-black uppercase text-slate-400">İş etiketi</label>
+                <select
+                  value={normalizeFaaliyetEtiketi(editDraft.isEtiketi) || ''}
+                  onChange={(e) =>
+                    setEditDraft((prev) =>
+                      prev ? { ...prev, isEtiketi: normalizeFaaliyetEtiketi(e.target.value) } : prev
+                    )
+                  }
+                  className="mt-1 w-full px-3 py-2 rounded-xl border border-slate-200 font-semibold"
+                >
+                  <option value="">— Seçin —</option>
+                  {FAALIYET_ETIKET_ONSETLERI.map((e) => (
+                    <option key={e} value={e}>
+                      {e}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-[9px] font-black uppercase text-slate-400">Açıklama</label>
+                <textarea
+                  value={editDraft.aciklama || ''}
+                  onChange={(e) =>
+                    setEditDraft((prev) => (prev ? { ...prev, aciklama: e.target.value } : prev))
+                  }
+                  rows={4}
+                  className="mt-1 w-full px-3 py-2 rounded-xl border border-slate-200 font-medium outline-none focus:border-amber-400 resize-y"
+                />
+              </div>
+            </div>
+            <div className="p-4 border-t border-slate-100 flex flex-col sm:flex-row gap-2 bg-slate-50">
+              <button
+                type="button"
+                disabled={editSaving}
+                onClick={() => void handleSaveEditDraft()}
+                className="flex-1 inline-flex items-center justify-center gap-1.5 bg-amber-500 hover:bg-amber-400 text-slate-900 font-black text-xs py-2.5 rounded-xl cursor-pointer disabled:opacity-50"
+              >
+                {editSaving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+                Güncelle
+              </button>
+              <button
+                type="button"
+                disabled={editSaving}
+                onClick={() => void handleDeleteSahaFaaliyet(editDraft)}
+                className="flex-1 inline-flex items-center justify-center gap-1.5 bg-rose-50 hover:bg-rose-100 text-rose-800 border border-rose-200 font-black text-xs py-2.5 rounded-xl cursor-pointer disabled:opacity-50"
+              >
+                <Trash2 size={14} />
+                Kayıt Sil
+              </button>
+              <button
+                type="button"
+                disabled={editSaving}
+                onClick={() => setEditDraft(null)}
+                className="sm:w-28 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 font-bold text-xs py-2.5 rounded-xl cursor-pointer"
+              >
+                Vazgeç
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {lightbox && (
