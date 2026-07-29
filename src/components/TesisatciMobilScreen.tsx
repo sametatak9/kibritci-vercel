@@ -13,6 +13,7 @@ import { todayDateKey, formatDateLabelTr, normalizeDateKey } from '../lib/dateKe
 import { applySahaMesaiToYoklama, normalizeMesaiHours } from '../lib/sahaFaaliyetUtils';
 import { ensureSahaFaaliyetFotolarPersisted } from '../lib/sahaFaaliyetFotoStorage';
 import { isTesisatciGorev } from '../lib/yoklamaUtils';
+import { resolveGeldiRolPersonelIds } from '../lib/mobilRolEtiketUtils';
 import { vibrateYildirimAlert } from '../lib/yildirimTankerUtils';
 import {
   buildMobilGunlukFaaliyetReportHtml,
@@ -285,14 +286,16 @@ export const TesisatciMobilScreen: React.FC<TesisatciMobilScreenProps> = ({
       if (mesaiMap && Object.keys(mesaiMap).length > 0) {
         aktifPersonelListesi = Object.keys(mesaiMap);
       } else {
-        const self = tesisatciPersoneller.find(
-          (p) => String(p.eposta || '').trim().toLowerCase() === kaydedenEmail
+        // NORMAL: o gün Geldi olan tüm tesisatçılar (+ kaydeden self)
+        aktifPersonelListesi = resolveGeldiRolPersonelIds(
+          personeller,
+          yoklamalar,
+          normalizeDateKey(faaliyetTarih),
+          'TESISATCI',
+          { ensureEmail: kaydedenEmail }
         );
-        if (self?.id) aktifPersonelListesi = [self.id];
-        else if (existing?.aktifPersonelListesi?.length) {
+        if (aktifPersonelListesi.length === 0 && existing?.aktifPersonelListesi?.length) {
           aktifPersonelListesi = [...existing.aktifPersonelListesi];
-        } else if (tesisatciPersoneller.length === 1) {
-          aktifPersonelListesi = [tesisatciPersoneller[0].id];
         }
       }
 

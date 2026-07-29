@@ -523,6 +523,44 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
     }
   };
 
+  /** Eski kamp kayıtlarında yanlış etiketlenen düz işçi/usta vb. temizle */
+  const handleRepairKampEtiket = async () => {
+    if (dayKampFaaliyetleri.length === 0) {
+      alert('Bu gün için kamp faaliyeti yok.');
+      return;
+    }
+    if (
+      !window.confirm(
+        `${dayLabel} kamp kayıtlarında ekibi yalnızca KAMPÇI görevine indirgesin mi? (Düz işçi / usta / formen çıkarılır)`
+      )
+    ) {
+      return;
+    }
+    try {
+      const { filterIdsToKampciOnly } = await import('../lib/mobilRolEtiketUtils');
+      const { doc, updateDoc } = await import('firebase/firestore');
+      let fixed = 0;
+      for (const f of dayKampFaaliyetleri) {
+        const before = f.aktifPersonelListesi || [];
+        const after = filterIdsToKampciOnly(before, personeller);
+        if (after.length === before.length && after.every((id, i) => id === before[i])) continue;
+        await updateDoc(doc(db, 'kampGunlukFaaliyetleri', f.id), {
+          aktifPersonelListesi: after,
+          personelId: after[0] || f.personelId || null,
+        });
+        fixed += 1;
+      }
+      alert(
+        fixed > 0
+          ? `${fixed} kamp kaydının personel etiketi düzeltildi.`
+          : 'Düzeltilecek fazla etiket bulunamadı (zaten yalnızca kampçı).'
+      );
+    } catch (err: any) {
+      console.error(err);
+      alert(err?.message || 'Kamp etiket onarımı başarısız.');
+    }
+  };
+
   const renderFotoGrid = (id: string, fotolar: string[], emptyHint = 'Bu kayıtta saha fotoğrafı yok') =>
     fotolar.length > 0 ? (
       <div className="space-y-2">
@@ -1505,6 +1543,17 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
                 {gunSonuBusy ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
                 Günü yönetime gönder
               </button>
+              {dayKampFaaliyetleri.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => void handleRepairKampEtiket()}
+                  className="inline-flex items-center gap-1.5 bg-teal-700 hover:bg-teal-800 text-white text-[10px] font-black px-3 py-2 rounded-xl cursor-pointer"
+                  title="Eski kamp kayıtlarından düz işçi/usta etiketlerini temizle"
+                >
+                  <Tent size={13} />
+                  Kamp etiket düzelt
+                </button>
+              )}
             </div>
             <div className="w-full max-w-md space-y-1.5">
               <textarea

@@ -10,6 +10,7 @@ import { todayDateKey, formatDateLabelTr, normalizeDateKey } from '../lib/dateKe
 import { applySahaMesaiToYoklama, normalizeMesaiHours } from '../lib/sahaFaaliyetUtils';
 import { ensureSahaFaaliyetFotolarPersisted } from '../lib/sahaFaaliyetFotoStorage';
 import { isMermerciGorev } from '../lib/yoklamaUtils';
+import { resolveGeldiRolPersonelIds } from '../lib/mobilRolEtiketUtils';
 import { PARSEL_BLOK_MAP, PARSEL_LIST, defaultBlokForParsel } from '../data/parselBlokMap';
 import {
   buildMobilGunlukFaaliyetReportHtml,
@@ -195,14 +196,15 @@ export const MermerciMobilScreen: React.FC<MermerciMobilScreenProps> = ({
       if (mesaiMap && Object.keys(mesaiMap).length > 0) {
         aktifPersonelListesi = Object.keys(mesaiMap);
       } else {
-        const self = mermerciPersoneller.find(
-          (p) => String(p.eposta || '').trim().toLowerCase() === kaydedenEmail
+        aktifPersonelListesi = resolveGeldiRolPersonelIds(
+          personeller,
+          yoklamalar,
+          normalizeDateKey(faaliyetTarih),
+          'MERMERCI',
+          { ensureEmail: kaydedenEmail }
         );
-        if (self?.id) aktifPersonelListesi = [self.id];
-        else if (existing?.aktifPersonelListesi?.length) {
+        if (aktifPersonelListesi.length === 0 && existing?.aktifPersonelListesi?.length) {
           aktifPersonelListesi = [...existing.aktifPersonelListesi];
-        } else if (mermerciPersoneller.length === 1) {
-          aktifPersonelListesi = [mermerciPersoneller[0].id];
         }
       }
 

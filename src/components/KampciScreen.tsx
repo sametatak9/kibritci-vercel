@@ -19,13 +19,12 @@ import { applySahaMesaiToYoklama, normalizeMesaiHours } from '../lib/sahaFaaliye
 import {
   CANONICAL_ANA_FIRMA_ADI,
   canonicalizeAnaFirmaAdi,
-  getYoklamaDay,
-  isKampciTesisatciMermerci,
   isTaseronPersonel,
 } from '../lib/yoklamaUtils';
 import { firmaEslesir } from '../lib/taseronUtils';
 import { validateTC } from '../lib/personelOdemeUtils';
 import { vibrateVidanjorAlert } from '../lib/vidanjorUtils';
+import { resolveGeldiRolPersonelIds } from '../lib/mobilRolEtiketUtils';
 interface KampciScreenProps {
   kampOdalari: KampOdasi[];
   setKampOdalari: React.Dispatch<React.SetStateAction<KampOdasi[]>>;
@@ -1099,14 +1098,6 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
     try {
       const actId = `act_${Date.now()}`;
       const bugunTarih = new Date().toISOString().slice(0, 10);
-      const [yy, mm, dd] = bugunTarih.split('-').map(Number);
-
-      const kampHavuz = personeller.filter(
-        (p) =>
-          isKampciTesisatciMermerci(p.gorev) ||
-          isTaseronPersonel(p) ||
-          kampKayitlari.some((k) => k.personelId === p.id && k.durum === 'AKTIF')
-      );
 
       let aktifPersonelListesi: string[] = [];
       if (faaliyetGrubu === 'MESAI') {
@@ -1114,33 +1105,14 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
           .filter(([, hrs]) => Number(hrs) > 0)
           .map(([pid]) => pid);
       } else {
-        // NORMAL: o gün yoklamada Geldi olan kampçı/tesisatçı/mermerci + aktif yerleşim
-        const geldiIds = kampHavuz
-          .filter((p) => {
-            if (
-              !isKampciTesisatciMermerci(p.gorev) &&
-              !kampKayitlari.some((k) => k.personelId === p.id && k.durum === 'AKTIF')
-            ) {
-              return false;
-            }
-            const day = getYoklamaDay(yoklamalar[p.id], yy, mm, dd);
-            const durum = String(day?.durum || '').toLowerCase();
-            // Yoklama yoksa aktif yerleşimli kampçıları yine de bağla
-            if (!day || !day.durum || day.durum === 'Girilmedi') {
-              return (
-                isKampciTesisatciMermerci(p.gorev) ||
-                kampKayitlari.some((k) => k.personelId === p.id && k.durum === 'AKTIF')
-              );
-            }
-            return (
-              durum.includes('geldi') ||
-              durum === 'var' ||
-              durum === 'çalıştı' ||
-              durum === 'calisti'
-            );
-          })
-          .map((p) => p.id);
-        aktifPersonelListesi = geldiIds;
+        // NORMAL: yalnızca yoklamada Geldi olan kampçılar (düz işçi / usta / formen / yerleşim yok)
+        aktifPersonelListesi = resolveGeldiRolPersonelIds(
+          personeller,
+          yoklamalar,
+          bugunTarih,
+          'KAMPCI',
+          { ensureEmail: currentUser?.email }
+        );
       }
 
       const persistedFoto = faaliyetFoto
