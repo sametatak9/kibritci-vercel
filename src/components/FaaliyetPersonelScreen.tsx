@@ -234,8 +234,15 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
 
   const atanmamisGeldiGun = useMemo(
     () =>
-      buildAtanmamisGeldiHavuzu(personeller, yoklamalar, tumSahaFaaliyetleri, selectedDate),
-    [personeller, yoklamalar, tumSahaFaaliyetleri, selectedDate]
+      buildAtanmamisGeldiHavuzu(
+        personeller,
+        yoklamalar,
+        tumSahaFaaliyetleri,
+        selectedDate,
+        undefined,
+        kampFaaliyetleri
+      ),
+    [personeller, yoklamalar, tumSahaFaaliyetleri, selectedDate, kampFaaliyetleri]
   );
 
   const periodOzet = useMemo(

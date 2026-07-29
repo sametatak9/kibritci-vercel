@@ -591,7 +591,39 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
       }
 
       const docRef = doc(db, type === 'sayim' ? 'kampDepoSayimlari' : 'kampGunlukFaaliyetleri', id);
-      const updateData = buildSingleApprovalUpdate(currentUser?.email || 'yonetici@kibritci.com', role);
+      const updateData: Record<string, unknown> = buildSingleApprovalUpdate(
+        currentUser?.email || 'yonetici@kibritci.com',
+        role
+      );
+
+      // Faaliyet onayında personel listesi boşsa → o gün Geldi kampçıları bağla
+      if (type === 'faaliyet') {
+        try {
+          const { getDoc, getDocs: getAll } = await import('firebase/firestore');
+          const snap = await getDoc(docRef);
+          const raw = snap.exists() ? (snap.data() as any) : null;
+          const existingList: string[] = Array.isArray(raw?.aktifPersonelListesi)
+            ? raw.aktifPersonelListesi.filter(Boolean)
+            : [];
+          if (existingList.length === 0) {
+            const { resolveGeldiRolPersonelIds } = await import('../lib/mobilRolEtiketUtils');
+            const { fetchYoklamaMap } = await import('../lib/yoklamaPersistence');
+            const persSnap = await getAll(collection(db, 'personeller'));
+            const personeller = persSnap.docs.map((d) => ({ id: d.id, ...d.data() })) as any[];
+            const yoklamalar = await fetchYoklamaMap();
+            const tarih = String(raw?.tarih || new Date().toISOString().slice(0, 10));
+            const ids = resolveGeldiRolPersonelIds(personeller, yoklamalar, tarih, 'KAMPCI', {
+              ensureEmail: raw?.kaydedenKampci || null,
+            });
+            if (ids.length > 0) {
+              updateData.aktifPersonelListesi = ids;
+              updateData.personelId = ids[0];
+            }
+          }
+        } catch (repairErr) {
+          console.warn('[kamp-onay] personel listesi onarımı atlandı:', repairErr);
+        }
+      }
 
       await updateDoc(docRef, updateData);
       alert(`Kamp ${type === 'sayim' ? 'depo sayımı' : 'günlük faaliyeti'} onaylandı ve ana programa aktarıldı.`);

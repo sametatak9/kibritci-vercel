@@ -28,7 +28,15 @@ export function isMermerciGorev(gorev?: string): boolean {
 }
 
 export function isKampciGorev(gorev?: string): boolean {
-  return normalizeGorevKey(gorev).includes('KAMPCI');
+  const g = normalizeGorevKey(gorev);
+  // KAMPÇI / Kampçı / KAMP GÖREVLİSİ / KAMP PERSONEL
+  return (
+    g.includes('KAMPCI') ||
+    g.includes('KAMP GOREV') ||
+    g === 'KAMP PERSONEL' ||
+    g === 'KAMP PERSONELI' ||
+    (g.includes('KAMP') && (g.includes('PERSONEL') || g.includes('GOREV')))
+  );
 }
 
 export function isFormenGorev(gorev?: string): boolean {

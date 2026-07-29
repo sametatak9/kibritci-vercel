@@ -22,6 +22,8 @@ export type FaaliyetPersonelKaynak = {
   kaydeden?: string;
   kaydedenFormen?: string;
   kaynakEkran?: string;
+  durum?: string | null;
+  onaylayan?: string | null;
 };
 
 function findPersonelByEmail(
@@ -154,6 +156,25 @@ export function isFaaliyetInPeriod(
   return y === year && m === month;
 }
 
+/** Yönetici onaylı kamp faaliyeti — faaliyetsiz listeden düşürmek için */
+export function isKampFaaliyetOnayli(f?: {
+  durum?: string | null;
+  onaylayan?: string | null;
+} | null): boolean {
+  if (!f) return false;
+  const d = String(f.durum || '').toLocaleUpperCase('tr-TR');
+  if (d.includes('RED')) return false;
+  if (d.includes('ONAYLANDI') || d.includes('ONAYLI') || d.includes('AKTARILDI')) return true;
+  return Boolean(String(f.onaylayan || '').trim());
+}
+
+/** Faaliyetsiz / atanmamış hesaplarında sayılacak kamp kayıtları (onaylı) */
+export function filterOnayliKampFaaliyetleri<
+  T extends { durum?: string | null; onaylayan?: string | null }
+>(list: T[] | null | undefined): T[] {
+  return (list || []).filter((f) => isKampFaaliyetOnayli(f));
+}
+
 export function isFaaliyetOnDateKey(f: { tarih?: string }, dateKey: string): boolean {
   const dk = normalizeDateKey(f.tarih);
   const target = normalizeDateKey(dateKey);
@@ -262,17 +283,37 @@ export function buildFaaliyetsizPersoneller(
   kampFaaliyetleri: Array<KampFaaliyet | FaaliyetPersonelKaynak> = [],
   yoklamalar: AylikYoklamaMap = {}
 ): Personel[] {
+  // Kampçılar: yönetici onayından sonra faaliyetli sayılır (bekleyen kayıt düşürmez)
+  const onayliKamp = filterOnayliKampFaaliyetleri(kampFaaliyetleri);
   const faaliyetli = buildFaaliyetPersoneller(
     sahaFaaliyetleri,
     personeller,
     year,
     month,
-    kampFaaliyetleri
+    onayliKamp
   );
   const faaliyetliIds = new Set(faaliyetli.map((p) => p.id));
   const faaliyetliNames = new Set(
     faaliyetli.map((p) => normalizeTurkishName(`${p.ad} ${p.soyad}`))
   );
+
+  // Onaylı kamp kaydı var ama aktifPersonelListesi boşsa → o gün Geldi kampçıları faaliyetli say
+  for (const kf of onayliKamp) {
+    if (!isFaaliyetInPeriod(kf, year, month)) continue;
+    const tagged = (kf.aktifPersonelListesi || []).filter(Boolean);
+    if (tagged.length > 0) continue;
+    const dk = normalizeDateKey(kf.tarih);
+    if (!dk) continue;
+    const [y, m, d] = dk.split('-').map(Number);
+    for (const p of personeller) {
+      if (!shouldIncludeFaaliyetPersonel(p)) continue;
+      if (!isKampciGorev(p.gorev)) continue;
+      const cell = getYoklamaDay(yoklamalar[p.id], y, m, d);
+      if (String(cell?.durum || '') !== 'Geldi') continue;
+      faaliyetliIds.add(p.id);
+      faaliyetliNames.add(normalizeTurkishName(`${p.ad} ${p.soyad}`));
+    }
+  }
 
   const byName = new Map<string, Personel>();
   for (const p of personeller) {
