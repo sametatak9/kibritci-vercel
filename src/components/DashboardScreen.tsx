@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState, startTransition } from 'react';
 import { 
   Users, Wallet, ShoppingCart, Truck, RefreshCw, 
   FileText, BarChart, ArrowUpRight, ArrowDownRight, Compass, Settings,
-  Search, ClipboardList, Briefcase, CalendarCheck2, ChevronRight, UserCheck, AlertTriangle, Tent,
+  Search, ClipboardList, Briefcase, CalendarCheck2, ChevronRight, AlertTriangle, Tent,
   MapPin, Sun, HelpCircle, Activity, ArrowRight, BookOpen, Plus, TrendingUp, CreditCard, Link2
 } from 'lucide-react';
 import { Personel, KasaHareketi, SatinAlmaTalebi, AracBakim, AylikYoklamaMap, KampOdasi, KampKaydi } from '../types/erp';
@@ -16,7 +16,7 @@ import { isPersonelActiveOnDate } from '../lib/guvenlikHelpers';
 import { getYoklamaDay, isTaseronPersonel } from '../lib/yoklamaUtils';
 import { buildOperasyonOzeti } from '../lib/operasyonUyarilari';
 import { EKSIK_HALKA_LABEL, listEksikHalka, summarizeEksikHalka } from '../lib/eksikHalkaUtils';
-import { countTaseronMevcudiyetBugun } from '../lib/taseronMevcudiyetUtils';
+import { summarizeTaseronKadro } from '../lib/taseronMevcudiyetUtils';
 import type { Fatura, Irsaliye } from '../types/erp';
 
 interface DashboardScreenProps {
@@ -143,21 +143,12 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
     [panelsReady, satinAlmaTalepleri, irsaliyeler, faturalar]
   );
   const eksikHalkaOzet = useMemo(() => summarizeEksikHalka(eksikHalkaRows), [eksikHalkaRows]);
-  const taseronMevcudiyet = useMemo(
+  const taseronKadro = useMemo(
     () =>
       panelsReady
-        ? countTaseronMevcudiyetBugun(personeller, yoklamalar, bugun)
-        : {
-            tarih: bugun,
-            aktifKadro: 0,
-            geldi: 0,
-            yok: 0,
-            izinli: 0,
-            raporlu: 0,
-            girilmedi: 0,
-            byFirma: [],
-          },
-    [panelsReady, personeller, yoklamalar, bugun]
+        ? summarizeTaseronKadro(personeller, bugun)
+        : { aktifKadro: 0, firmaSayisi: 0, byFirma: [] },
+    [panelsReady, personeller, bugun]
   );
   const pendingSatinAlmaCount = operasyonOzeti.bekleyenSatinAlma;
   const totalPendingApprovals = operasyonOzeti.bekleyenOnay;
@@ -562,83 +553,46 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
         )}
       </div>
 
-      {/* Taşeron günlük mevcudiyet — salt okunur */}
-      <div className="bg-white border border-slate-200 rounded-3xl p-5 shadow-sm space-y-3">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div className="flex items-start gap-3">
-            <div className="p-2.5 rounded-2xl bg-amber-50 border border-amber-100 text-amber-800 shrink-0">
-              <UserCheck size={18} className="stroke-[2.5]" />
-            </div>
-            <div>
-              <h4 className="text-xs font-black text-slate-900 uppercase tracking-wider">
-                Taşeron Günlük Mevcudiyet
-              </h4>
-              <p className="text-[11px] text-slate-500 mt-0.5">
-                Bugün ({taseronMevcudiyet.tarih}) aktif taşeron kadrosunun yoklama özeti — yazma yok.
-              </p>
-            </div>
+      {/* Taşeron kadro — günlük yoklama alınmaz; firma listesi aralıklı güncellenir */}
+      <div className="bg-white border border-slate-200 rounded-2xl px-4 py-3 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="flex items-start gap-3 min-w-0">
+          <div className="p-2 rounded-xl bg-amber-50 border border-amber-100 text-amber-800 shrink-0">
+            <Briefcase size={16} className="stroke-[2.5]" />
           </div>
-          <button
-            type="button"
-            onClick={() => onNavigate('yoklama')}
-            className="text-[10px] font-bold px-3 py-1.5 rounded-xl bg-slate-900 text-white hover:bg-slate-800 cursor-pointer"
-          >
-            Yoklamaya git
-          </button>
-        </div>
-        <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-2">
-          {[
-            ['Aktif kadro', taseronMevcudiyet.aktifKadro, 'text-slate-900'],
-            ['Geldi', taseronMevcudiyet.geldi, 'text-emerald-700'],
-            ['Yok', taseronMevcudiyet.yok, 'text-rose-700'],
-            ['İzinli', taseronMevcudiyet.izinli, 'text-sky-700'],
-            ['Raporlu', taseronMevcudiyet.raporlu, 'text-amber-700'],
-            ['Girilmedi', taseronMevcudiyet.girilmedi, 'text-slate-500'],
-          ].map(([label, val, color]) => (
-            <div key={String(label)} className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
-              <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400 block">
-                {label}
+          <div className="min-w-0">
+            <h4 className="text-[11px] font-black text-slate-900 uppercase tracking-wider">
+              Taşeron personel listesi
+            </h4>
+            <p className="text-[11px] text-slate-500 mt-0.5">
+              Günlük yoklama alınmaz. Firmalardan gelen listeyi aralıklı güncelleyin —{' '}
+              <span className="font-bold text-slate-700 tabular-nums">
+                {taseronKadro.aktifKadro} kişi
               </span>
-              <span className={`text-lg font-black tabular-nums ${color}`}>{val as number}</span>
-            </div>
-          ))}
-        </div>
-        {taseronMevcudiyet.byFirma.length > 0 ? (
-          <div className="overflow-x-auto max-h-[200px] rounded-2xl border border-slate-100">
-            <table className="w-full text-left text-[11px]">
-              <thead className="bg-slate-50 text-slate-500 uppercase text-[9px] font-bold sticky top-0">
-                <tr>
-                  <th className="px-3 py-2">Firma</th>
-                  <th className="px-3 py-2 text-right">Kadro</th>
-                  <th className="px-3 py-2 text-right">Geldi</th>
-                  <th className="px-3 py-2 text-right">Yok</th>
-                  <th className="px-3 py-2 text-right">İzin/Rap.</th>
-                  <th className="px-3 py-2 text-right">Girilmedi</th>
-                </tr>
-              </thead>
-              <tbody>
-                {taseronMevcudiyet.byFirma.slice(0, 25).map((f) => (
-                  <tr key={f.firma} className="border-t border-slate-100">
-                    <td className="px-3 py-2 font-bold text-slate-900">{f.firma}</td>
-                    <td className="px-3 py-2 text-right tabular-nums">{f.aktifKadro}</td>
-                    <td className="px-3 py-2 text-right tabular-nums text-emerald-700 font-bold">
-                      {f.geldi}
-                    </td>
-                    <td className="px-3 py-2 text-right tabular-nums text-rose-700">{f.yok}</td>
-                    <td className="px-3 py-2 text-right tabular-nums text-slate-600">
-                      {f.izinli + f.raporlu}
-                    </td>
-                    <td className="px-3 py-2 text-right tabular-nums text-slate-500">{f.girilmedi}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+              {' · '}
+              <span className="font-bold text-slate-700 tabular-nums">
+                {taseronKadro.firmaSayisi} firma
+              </span>
+            </p>
+            {taseronKadro.byFirma.length > 0 && (
+              <p className="text-[10px] text-slate-400 mt-1 truncate">
+                {taseronKadro.byFirma
+                  .slice(0, 8)
+                  .map((f) => `${f.firma} (${f.aktifKadro})`)
+                  .join(' · ')}
+                {taseronKadro.byFirma.length > 8
+                  ? ` · +${taseronKadro.byFirma.length - 8} firma`
+                  : ''}
+              </p>
+            )}
           </div>
-        ) : (
-          <p className="text-[11px] text-slate-500 bg-slate-50 border border-slate-100 rounded-xl px-3 py-2">
-            Aktif taşeron personeli bulunamadı.
-          </p>
-        )}
+        </div>
+        <button
+          type="button"
+          onClick={() => onNavigate('personel')}
+          className="text-[10px] font-bold px-3 py-1.5 rounded-xl bg-slate-900 text-white hover:bg-slate-800 cursor-pointer shrink-0"
+        >
+          Listeyi güncelle
+        </button>
       </div>
 
       {/* Ödeme Engeli Paneli — maaş günü öncesi */}
