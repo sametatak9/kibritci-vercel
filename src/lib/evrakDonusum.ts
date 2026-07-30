@@ -416,14 +416,20 @@ export function describeEvrakZinciri(
   irsaliyeler: Irsaliye[],
   faturalar: Fatura[]
 ): { siparis: boolean; sevk: number; fatura: number; tamamlandi: boolean } {
-  const sevk = sa ? findIrsaliyelerForSa(sa, irsaliyeler).length : 0;
   const relatedIrs = sa ? findIrsaliyelerForSa(sa, irsaliyeler) : [];
-  const faturaCount = relatedIrs.reduce(
-    (n, ir) => n + findFaturalarForIrsaliye(ir, faturalar).length,
-    0
-  );
-  const linkedFt = faturalar.filter((ft) => ft.saId && sa && ft.saId === sa.saId).length;
-  const fatura = Math.max(faturaCount, linkedFt);
+  const sevk = relatedIrs.length;
+  const ftIds = new Set<string>();
+  for (const ir of relatedIrs) {
+    for (const ft of findFaturalarForIrsaliye(ir, faturalar)) {
+      ftIds.add(ft.id);
+    }
+  }
+  if (sa?.saId) {
+    for (const ft of faturalar) {
+      if (ft.saId === sa.saId) ftIds.add(ft.id);
+    }
+  }
+  const fatura = ftIds.size;
   return {
     siparis: Boolean(sa),
     sevk,
