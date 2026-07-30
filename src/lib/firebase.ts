@@ -252,6 +252,7 @@ export async function saveYoklamaDocument(
  */
 const PERSONEL_MEDIA_KEYS = ['fotografUrl', 'sigortaEvrakUrl'] as const;
 const MAX_PERSONEL_SYNC_INLINE = 120_000;
+const MAX_KASA_FIS_INLINE = 700_000;
 
 /** Personel sync: değişmeyen büyük data URL’leri yazma (timeout/rollback engeli) */
 function leanPersonelSyncPayload<T extends { id: string }>(item: T, oldItem?: T): T {
@@ -266,6 +267,22 @@ function leanPersonelSyncPayload<T extends { id: string }>(item: T, oldItem?: T)
     } else {
       delete out[key];
     }
+  }
+  return out as T;
+}
+
+/** Kasa: aşırı büyük inline fiş Firestore yazımını düşürüp tüm kaydı rollback ettirmesin */
+function leanKasaSyncPayload<T extends { id: string }>(item: T, oldItem?: T): T {
+  const out: Record<string, unknown> = { ...(item as Record<string, unknown>) };
+  const nextVal = String(out.fisEvrakUrl || '');
+  if (!nextVal.startsWith('data:') || nextVal.length <= MAX_KASA_FIS_INLINE) {
+    return out as T;
+  }
+  const prevVal = String((oldItem as Record<string, unknown> | undefined)?.fisEvrakUrl || '');
+  if (prevVal && !prevVal.startsWith('data:')) {
+    out.fisEvrakUrl = prevVal;
+  } else {
+    delete out.fisEvrakUrl;
   }
   return out as T;
 }
@@ -323,6 +340,8 @@ export async function syncArrayToFirestore<T extends { id: string }>(
         // personeller: büyük foto/PDF’yi değişmediyse tekrar yazma (timeout → rollback)
         if (collectionName === 'personeller') {
           promises.push(saveDocument(collectionName, leanPersonelSyncPayload(item, oldItem)));
+        } else if (collectionName === 'kasaHareketleri') {
+          promises.push(saveDocument(collectionName, leanKasaSyncPayload(item, oldItem)));
         } else {
           promises.push(saveDocument(collectionName, item));
         }

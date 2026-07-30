@@ -67,6 +67,7 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
   const [soforIadeStart, setSoforIadeStart] = useState(week0.start);
   const [soforIadeEnd, setSoforIadeEnd] = useState(week0.end);
   const [soforIadeFiltre, setSoforIadeFiltre] = useState('');
+  const [savingKasa, setSavingKasa] = useState(false);
 
   const buildSoforReportBundle = async () => {
     const {
@@ -245,59 +246,94 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
   };
 
   // Safe validation & submit
-  const handleSaveKasaHareketi = (e: React.FormEvent) => {
+  const handleSaveKasaHareketi = async (e: React.FormEvent) => {
     e.preventDefault();
     const amountFloat = parseFloat(newAmount) || 0;
     if (amountFloat <= 0) {
-      alert("Lütfen geçerli bir tutar yazın.");
+      alert('Lütfen geçerli bir tutar yazın.');
       return;
     }
     if (!newDesc) {
-      alert("Lütfen açıklama girin.");
+      alert('Lütfen açıklama girin.');
       return;
     }
+    if (savingKasa) return;
 
-    if (editingId) {
-      // Editing Mode
-      setKasaHareketleri(prev => prev.map(item => {
-        if (item.id === editingId) {
-          return {
-            ...item,
-            tarih: newDate,
-            hareketTipi: newType,
-            tutar: amountFloat,
-            aciklama: newDesc,
-            referansTipi: newRefType,
-            referansId: newRefId || undefined,
-            fisEvrakUrl: uploadedFileBase64 || item.fisEvrakUrl
-          };
+    setSavingKasa(true);
+    try {
+      const id = editingId || `kh_${Date.now()}`;
+      let fisUrl = String(uploadedFileBase64 || '').trim();
+      if (fisUrl.startsWith('data:')) {
+        const { ensureKasaFisFotoPersisted } = await import('../lib/sahaFaaliyetFotoStorage');
+        fisUrl = await ensureKasaFisFotoPersisted(id, fisUrl);
+        if (!fisUrl) {
+          const keep = window.confirm(
+            'Fiş görseli yüklenemedi (çok büyük veya ağ hatası).\nKayıt görselsiz kaydedilsin mi?'
+          );
+          if (!keep) return;
         }
-        return item;
-      }));
-      setEditingId(null);
-      alert("Kasa hareketi başarıyla güncellendi.");
-    } else {
-      // Create Mode
-      const newHareketi: KasaHareketi = {
-        id: `kh_${Date.now()}`,
+      }
+
+      const existing = editingId
+        ? kasaHareketleri.find((x) => x.id === editingId)
+        : undefined;
+
+      const record: KasaHareketi = {
+        ...(existing || {}),
+        id,
         tarih: newDate,
         hareketTipi: newType,
         tutar: amountFloat,
         aciklama: newDesc,
         referansTipi: newRefType,
         referansId: newRefId || undefined,
-        fisEvrakUrl: uploadedFileBase64 || undefined
+        fisEvrakUrl: fisUrl || existing?.fisEvrakUrl || undefined,
       };
-      setKasaHareketleri(prev => [newHareketi, ...prev]);
-      alert("Kasa hareketi ve fatura/fiş görseli başarıyla arşivlendi.");
-    }
 
-    // Clear Form fields
-    setNewAmount("");
-    setNewDesc("");
-    setNewRefId("");
-    setUploadedFileName(null);
-    setUploadedFileBase64(null);
+      const { saveDocument } = await import('../lib/firebase');
+      await saveDocument('kasaHareketleri', record);
+
+      setKasaHareketleri((prev) => {
+        if (editingId) {
+          return prev.map((item) => (item.id === editingId ? { ...item, ...record } : item));
+        }
+        if (prev.some((x) => x.id === id)) {
+          return prev.map((item) => (item.id === id ? { ...item, ...record } : item));
+        }
+        return [record, ...prev];
+      });
+
+      // Liste filtresi kaydı gizlemesin
+      if (newDate < appliedStartDate) {
+        setAppliedStartDate(newDate);
+        setStartDate(newDate);
+        setSoforIadeStart(newDate);
+      }
+      if (newDate > appliedEndDate) {
+        setAppliedEndDate(newDate);
+        setEndDate(newDate);
+        setSoforIadeEnd(newDate);
+      }
+
+      setEditingId(null);
+      setNewAmount('');
+      setNewDesc('');
+      setNewRefId('');
+      setUploadedFileName(null);
+      setUploadedFileBase64(null);
+      setNewDate(todayDateKey());
+      alert(
+        editingId
+          ? 'Kasa hareketi güncellendi.'
+          : 'Kasa hareketi kaydedildi.'
+      );
+    } catch (err) {
+      console.error('[kasa] kayıt hatası:', err);
+      const msg = err instanceof Error ? err.message : String(err);
+      alert(`Kasa hareketi kaydedilemedi: ${msg}`);
+    } finally {
+      setSavingKasa(false);
+    }
   };
 
   const handleStartEdit = (kh: KasaHareketi) => {
@@ -543,11 +579,16 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
             {/* Submit movement to secure database */}
             <button 
               type="submit"
-              className={`w-full text-white font-bold py-2.5 rounded-xl transition shadow-md cursor-pointer text-xs uppercase ${
+              disabled={savingKasa}
+              className={`w-full text-white font-bold py-2.5 rounded-xl transition shadow-md cursor-pointer text-xs uppercase disabled:opacity-60 disabled:cursor-wait ${
                 editingId ? 'bg-amber-600 hover:bg-amber-700' : 'bg-emerald-600 hover:bg-emerald-700'
               }`}
             >
-              {editingId ? "KAYDI GÜNCELLE VE VUR" : "Hareketi Veritabanına İşle"}
+              {savingKasa
+                ? 'Kaydediliyor…'
+                : editingId
+                  ? 'KAYDI GÜNCELLE'
+                  : 'Hareketi Kaydet'}
             </button>
           </form>
         </div>
