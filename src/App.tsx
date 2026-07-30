@@ -3498,7 +3498,6 @@ export default function App() {
               )}
 
               {activeTab === "kibar_hakedis" && (
-                isPrivilegedAdmin || emailLower === 'santiye@kibritci.com' ? (
                   <KibarHakedisScreen
                     personeller={personeller}
                     yoklamalar={yoklamalar}
@@ -3506,7 +3505,6 @@ export default function App() {
                     programliFaaliyetler={programliFaaliyetler}
                     currentUser={currentUser}
                   />
-                ) : renderAccessDenied()
               )}
 
               {activeTab === "operator" && (

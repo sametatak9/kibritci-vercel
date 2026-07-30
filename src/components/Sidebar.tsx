@@ -138,11 +138,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
           }
         }
 
-        if (item.key === 'kibar_hakedis') {
-          const emailLower = currentUser?.email?.toLowerCase();
-          return emailLower === 'sametatak9@gmail.com' || emailLower === 'santiye@kibritci.com';
-        }
-
         if (item.key === 'admin') {
           return canSeeUyelikAdmin;
         }
