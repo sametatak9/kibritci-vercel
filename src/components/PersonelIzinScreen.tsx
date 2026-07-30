@@ -729,23 +729,26 @@ export const PersonelIzinScreen: React.FC<PersonelIzinScreenProps> = ({
 
                 {/* Sub signatures — yalnızca ıslak imza; dijital e-imza yok */}
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 sm:gap-4 pt-10 pb-6 border-t text-xs mt-6">
-                  <div className="text-center space-y-3">
-                    <p className="font-bold text-slate-500 border-b pb-1 uppercase">İzin Talep Eden Personel</p>
-                    <p className="text-slate-400 pt-6">Soyadı, Adı ve İmzası için Islak Alan</p>
-                    <div className="h-0.5 bg-slate-200 w-28 mx-auto mt-2"></div>
-                    <span className="text-[9px] font-bold text-slate-400 uppercase">PERSONEL GÖREV İMZASI</span>
+                  <div className="text-center space-y-2">
+                    <div className="h-14" aria-hidden />
+                    <div className="h-0.5 bg-slate-300 w-36 mx-auto" />
+                    <span className="text-[9px] font-bold text-slate-600 tracking-wide">
+                      İZNİ ALANIN İMZASI
+                    </span>
                   </div>
-                  <div className="text-center space-y-3">
-                    <p className="font-bold text-slate-500 border-b pb-1 uppercase">Kısım Şefi Onay Makamı</p>
-                    <p className="text-slate-400 pt-6">Soyadı, Adı ve İmzası için Islak Alan</p>
-                    <div className="h-0.5 bg-slate-200 w-28 mx-auto mt-2"></div>
-                    <span className="text-[9px] font-bold text-slate-500 uppercase">KISIM ŞEFİ</span>
+                  <div className="text-center space-y-2">
+                    <div className="h-14" aria-hidden />
+                    <div className="h-0.5 bg-slate-300 w-36 mx-auto" />
+                    <span className="text-[9px] font-bold text-slate-600 tracking-wide">
+                      KISIM ŞEFİ ONAY
+                    </span>
                   </div>
-                  <div className="text-center space-y-3">
-                    <p className="font-bold text-slate-500 border-b pb-1 uppercase">Şantiye Şefi Onay Makamı</p>
-                    <p className="text-slate-400 pt-6">Soyadı, Adı ve İmzası için Islak Alan</p>
-                    <div className="h-0.5 bg-slate-200 w-28 mx-auto mt-2"></div>
-                    <span className="text-[9px] font-bold text-slate-500 uppercase">ŞANTİYE ŞEFİ</span>
+                  <div className="text-center space-y-2">
+                    <div className="h-14" aria-hidden />
+                    <div className="h-0.5 bg-slate-300 w-36 mx-auto" />
+                    <span className="text-[9px] font-bold text-slate-600 tracking-wide">
+                      ŞANTİYE ŞEFİ ONAY
+                    </span>
                   </div>
                 </div>
 
