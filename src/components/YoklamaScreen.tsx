@@ -485,9 +485,10 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
         personeller,
         selectedYear,
         selectedMonth,
-        kampFaaliyetleri
+        kampFaaliyetleri,
+        draftYoklamalar
       ).length,
-    [sahaFaaliyetleri, kampFaaliyetleri, personeller, selectedYear, selectedMonth]
+    [sahaFaaliyetleri, kampFaaliyetleri, personeller, selectedYear, selectedMonth, draftYoklamalar]
   );
 
   const sahaPreviewFaaliyetleri = useMemo(() => {

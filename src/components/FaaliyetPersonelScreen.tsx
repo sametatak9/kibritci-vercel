@@ -202,9 +202,10 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
         personeller,
         selectedYear,
         selectedMonth,
-        kampFaaliyetleri
+        kampFaaliyetleri,
+        yoklamalar
       ),
-    [tumSahaFaaliyetleri, kampFaaliyetleri, personeller, selectedYear, selectedMonth]
+    [tumSahaFaaliyetleri, kampFaaliyetleri, personeller, selectedYear, selectedMonth, yoklamalar]
   );
 
   const faaliyetsizPersoneller = useMemo(
@@ -266,9 +267,10 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
         personeller,
         selectedYear,
         selectedMonth,
-        kampFaaliyetleri
+        kampFaaliyetleri,
+        yoklamalar
       ),
-    [tumSahaFaaliyetleri, kampFaaliyetleri, personeller, selectedYear, selectedMonth]
+    [tumSahaFaaliyetleri, kampFaaliyetleri, personeller, selectedYear, selectedMonth, yoklamalar]
   );
 
   const filteredList = useMemo(() => {
@@ -331,10 +333,11 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
             selectedPerson,
             kampFaaliyetleri,
             selectedYear,
-            selectedMonth
+            selectedMonth,
+            yoklamalar
           )
         : [],
-    [selectedPerson, kampFaaliyetleri, selectedYear, selectedMonth]
+    [selectedPerson, kampFaaliyetleri, selectedYear, selectedMonth, yoklamalar]
   );
 
   const personFotoSayisi = useMemo(
@@ -1263,14 +1266,16 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
                   p,
                   kampFaaliyetleri,
                   selectedYear,
-                  selectedMonth
+                  selectedMonth,
+                  yoklamalar
                 ).length;
                 const fotoCount = countPersonFaaliyetFotolar(
                   p,
                   tumSahaFaaliyetleri,
                   selectedYear,
                   selectedMonth,
-                  kampFaaliyetleri
+                  kampFaaliyetleri,
+                  yoklamalar
                 );
                 const active = p.id === selectedPersonId;
                 const isKampci = isKampciGorev(p.gorev);

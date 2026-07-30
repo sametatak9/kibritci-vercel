@@ -249,7 +249,8 @@ export function buildFaaliyetPersoneller(
   personeller: Personel[],
   year: number,
   month: number,
-  kampFaaliyetleri: Array<KampFaaliyet | FaaliyetPersonelKaynak> = []
+  kampFaaliyetleri: Array<KampFaaliyet | FaaliyetPersonelKaynak> = [],
+  yoklamalar: AylikYoklamaMap = {}
 ): Personel[] {
   const period = filterFaaliyetlerByPeriod(sahaFaaliyetleri, year, month);
   const kampPeriod = (kampFaaliyetleri || []).filter((f) => isFaaliyetInPeriod(f, year, month));
@@ -257,6 +258,21 @@ export function buildFaaliyetPersoneller(
 
   for (const f of period) absorbFaaliyetPersonel(f, personeller, matched);
   for (const f of kampPeriod) absorbFaaliyetPersonel(f, personeller, matched);
+
+  // Yönetici onaylı kamp: o gün yoklamada Geldi tüm kampçılar faaliyetli
+  // (aktifPersonelListesi eksik/kısmi olsa bile — KAMPÇI / Kampçı fark etmez)
+  for (const kf of filterOnayliKampFaaliyetleri(kampPeriod)) {
+    const dk = normalizeDateKey(kf.tarih);
+    if (!dk) continue;
+    const [y, m, d] = dk.split('-').map(Number);
+    for (const p of personeller) {
+      if (!shouldIncludeFaaliyetPersonel(p)) continue;
+      if (!isKampciGorev(p.gorev)) continue;
+      const cell = getYoklamaDay(yoklamalar[p.id], y, m, d);
+      if (String(cell?.durum || '') !== 'Geldi') continue;
+      matched.set(p.id, p);
+    }
+  }
 
   const byName = new Map<string, Personel>();
   for (const p of matched.values()) {
@@ -290,29 +306,13 @@ export function buildFaaliyetsizPersoneller(
     personeller,
     year,
     month,
-    onayliKamp
+    onayliKamp,
+    yoklamalar
   );
   const faaliyetliIds = new Set(faaliyetli.map((p) => p.id));
   const faaliyetliNames = new Set(
     faaliyetli.map((p) => normalizeTurkishName(`${p.ad} ${p.soyad}`))
   );
-
-  // Onaylı kamp kaydı olan her gün → o gün Geldi tüm kampçılar faaliyetli
-  // (liste boş/kısmi fark etmez; KAMPÇI / Kampçı aynı kabul)
-  for (const kf of onayliKamp) {
-    if (!isFaaliyetInPeriod(kf, year, month)) continue;
-    const dk = normalizeDateKey(kf.tarih);
-    if (!dk) continue;
-    const [y, m, d] = dk.split('-').map(Number);
-    for (const p of personeller) {
-      if (!shouldIncludeFaaliyetPersonel(p)) continue;
-      if (!isKampciGorev(p.gorev)) continue;
-      const cell = getYoklamaDay(yoklamalar[p.id], y, m, d);
-      if (String(cell?.durum || '') !== 'Geldi') continue;
-      faaliyetliIds.add(p.id);
-      faaliyetliNames.add(normalizeTurkishName(`${p.ad} ${p.soyad}`));
-    }
-  }
 
   const byName = new Map<string, Personel>();
   for (const p of personeller) {
@@ -348,10 +348,21 @@ export function getPersonKampFaaliyetleriInPeriod(
   person: Personel,
   kampFaaliyetleri: KampFaaliyet[],
   year: number,
-  month: number
+  month: number,
+  yoklamalar: AylikYoklamaMap = {}
 ): KampFaaliyet[] {
   return (kampFaaliyetleri || [])
-    .filter((f) => isFaaliyetInPeriod(f, year, month) && personMatchesKampFaaliyet(person, f))
+    .filter((f) => {
+      if (!isFaaliyetInPeriod(f, year, month)) return false;
+      if (personMatchesKampFaaliyet(person, f)) return true;
+      // Onaylı kamp + o gün Geldi kampçı → faaliyette say (liste eksik olsa bile)
+      if (!isKampFaaliyetOnayli(f) || !isKampciGorev(person.gorev)) return false;
+      const dk = normalizeDateKey(f.tarih);
+      if (!dk) return false;
+      const [y, m, d] = dk.split('-').map(Number);
+      const cell = getYoklamaDay(yoklamalar[person.id], y, m, d);
+      return String(cell?.durum || '') === 'Geldi';
+    })
     .sort((a, b) => String(b.tarih || '').localeCompare(String(a.tarih || ''), 'tr'));
 }
 
@@ -525,6 +536,7 @@ export function buildDayPersonelRaporu(
 ): DayPersonelRaporu {
   const saha = filterFaaliyetlerByDate(sahaFaaliyetleri, dateKey);
   const kamp = filterFaaliyetlerByDate(kampFaaliyetleri, dateKey);
+  const onayliKamp = kamp.filter((f) => isKampFaaliyetOnayli(f));
   const matched = new Map<string, Personel>();
   for (const f of saha) absorbFaaliyetPersonel(f, personeller, matched);
   for (const f of kamp) absorbFaaliyetPersonel(f, personeller, matched);
@@ -532,12 +544,37 @@ export function buildDayPersonelRaporu(
   const dk = normalizeDateKey(dateKey);
   const [y, m, d] = dk ? dk.split('-').map(Number) : [0, 0, 0];
 
+  // Onaylı kamp faaliyeti varsa o gün Geldi tüm kampçılar faaliyetli
+  if (onayliKamp.length > 0 && y && m && d) {
+    for (const p of personeller) {
+      if (!shouldIncludeFaaliyetPersonel(p)) continue;
+      if (!isKampciGorev(p.gorev)) continue;
+      const cell = getYoklamaDay(yoklamalar[p.id], y, m, d);
+      if (String(cell?.durum || '') !== 'Geldi') continue;
+      matched.set(p.id, p);
+    }
+  }
+
   const faaliyetliPersoneller: DayFaaliyetPersonelSatir[] = Array.from(matched.values())
     .filter((p) => shouldIncludeFaaliyetPersonel(p))
     .map((p) => {
       const pSaha = saha.filter((f) => personMatchesFaaliyet(p, f));
-      const pKamp = kamp.filter((f) => personMatchesKampFaaliyet(p, f));
+      let pKamp = kamp.filter((f) => personMatchesKampFaaliyet(p, f));
       const cell = y && m && d ? getYoklamaDay(yoklamalar[p.id], y, m, d) : undefined;
+      // Listeye gömülmemiş olsa bile onaylı kamp + Geldi kampçı → kamp faaliyeti say
+      if (
+        isKampciGorev(p.gorev) &&
+        String(cell?.durum || '') === 'Geldi' &&
+        onayliKamp.length > 0
+      ) {
+        const seen = new Set(pKamp.map((f) => f.id));
+        for (const f of onayliKamp) {
+          if (!seen.has(f.id)) {
+            pKamp = [...pKamp, f];
+            seen.add(f.id);
+          }
+        }
+      }
       return {
         id: p.id,
         adSoyad: `${p.ad} ${p.soyad}`.trim(),
@@ -620,16 +657,20 @@ export function countPersonFaaliyetFotolar(
   sahaFaaliyetleri: SahaFaaliyeti[],
   year: number,
   month: number,
-  kampFaaliyetleri: KampFaaliyet[] = []
+  kampFaaliyetleri: KampFaaliyet[] = [],
+  yoklamalar: AylikYoklamaMap = {}
 ): number {
   const saha = getPersonFaaliyetleriInPeriod(person, sahaFaaliyetleri, year, month).reduce(
     (sum, f) => sum + getFaaliyetFotolar(f).length,
     0
   );
-  const kamp = getPersonKampFaaliyetleriInPeriod(person, kampFaaliyetleri, year, month).reduce(
-    (sum, f) => sum + getFaaliyetFotolar(f).length,
-    0
-  );
+  const kamp = getPersonKampFaaliyetleriInPeriod(
+    person,
+    kampFaaliyetleri,
+    year,
+    month,
+    yoklamalar
+  ).reduce((sum, f) => sum + getFaaliyetFotolar(f).length, 0);
   return saha + kamp;
 }
 
@@ -638,7 +679,8 @@ export function buildPeriodFaaliyetOzeti(
   personeller: Personel[],
   year: number,
   month: number,
-  kampFaaliyetleri: KampFaaliyet[] = []
+  kampFaaliyetleri: KampFaaliyet[] = [],
+  yoklamalar: AylikYoklamaMap = {}
 ): {
   personelSayisi: number;
   faaliyetSayisi: number;
@@ -660,7 +702,8 @@ export function buildPeriodFaaliyetOzeti(
     personeller,
     year,
     month,
-    kampFaaliyetleri
+    kampFaaliyetleri,
+    yoklamalar
   );
   const kampCalisanSayisi = kampPeriod.reduce(
     (n, f) => n + kampFaaliyetCalisanSayisi(f, personeller),
