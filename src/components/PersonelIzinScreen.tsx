@@ -712,8 +712,12 @@ export const PersonelIzinScreen: React.FC<PersonelIzinScreenProps> = ({
                         <td className="p-3 font-extrabold text-[#10b981]">{selectedIzinForPdf.izinTipi.replace('_', ' ')}</td>
                       </tr>
                       <tr className="border-b">
-                        <td className="p-3 font-bold text-slate-500">Başlangıç ve Bitiş:</td>
-                        <td className="p-3 font-bold text-slate-800">{selectedIzinForPdf.baslangicTarihi} ile {selectedIzinForPdf.bitisTarihi} Tarihleri Arası</td>
+                        <td className="p-3 font-bold text-slate-500">Başlangıç:</td>
+                        <td className="p-3 font-bold text-slate-800">{selectedIzinForPdf.baslangicTarihi}</td>
+                      </tr>
+                      <tr className="border-b">
+                        <td className="p-3 font-bold text-slate-500">Bitiş:</td>
+                        <td className="p-3 font-bold text-slate-800">{selectedIzinForPdf.bitisTarihi}</td>
                       </tr>
                       <tr className="bg-slate-50 border-b">
                         <td className="p-3 font-bold text-slate-500">Toplam İzin Süresi:</td>
