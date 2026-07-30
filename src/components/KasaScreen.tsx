@@ -1,13 +1,15 @@
-import React, { useState, useRef } from 'react';
+import React, { useMemo, useState, useRef } from 'react';
 import { 
   Wallet, Plus, Trash2, ArrowUpRight, ArrowDownRight, Printer, Edit3,
-  Calendar, FileText, Search, CreditCard, ChevronRight, Eye, Image as ImageIcon, CheckCircle, AlertCircle
+  Calendar, FileText, Search, CreditCard, ChevronRight, Eye, Image as ImageIcon, CheckCircle, AlertCircle, Mail
 } from 'lucide-react';
 import { KasaHareketi } from '../types/erp';
 import { CorporateReportLayout } from './CorporateReportLayout';
 import { exportKasaExcel } from '../lib/kasaExcelExport';
 import { compressImage } from '../lib/imageCompress';
 import { removeDocument } from '../lib/firebase';
+import { todayDateKey } from '../lib/dateKeyUtils';
+import { isSoforKasaHareketi } from '../lib/yolHarcamaUtils';
 
 interface KasaScreenProps {
   kasaHareketleri: KasaHareketi[];
@@ -15,17 +17,27 @@ interface KasaScreenProps {
   deleteKasaHareketi?: (id: string) => Promise<void>;
 }
 
+function defaultWeekRange(): { start: string; end: string } {
+  const end = todayDateKey();
+  const d = new Date(`${end}T12:00:00`);
+  d.setDate(d.getDate() - 6);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return { start: `${y}-${m}-${day}`, end };
+}
 
 export const KasaScreen: React.FC<KasaScreenProps> = ({ 
   kasaHareketleri, 
   setKasaHareketleri,
   deleteKasaHareketi,
 }) => {
+  const week0 = defaultWeekRange();
   // Exact layout filters matching top of table in the screenshot
-  const [startDate, setStartDate] = useState("2026-06-01");
-  const [endDate, setEndDate] = useState("2026-06-30");
-  const [appliedStartDate, setAppliedStartDate] = useState("2026-06-01");
-  const [appliedEndDate, setAppliedEndDate] = useState("2026-06-30");
+  const [startDate, setStartDate] = useState(week0.start);
+  const [endDate, setEndDate] = useState(week0.end);
+  const [appliedStartDate, setAppliedStartDate] = useState(week0.start);
+  const [appliedEndDate, setAppliedEndDate] = useState(week0.end);
   const [searchKeyword, setSearchKeyword] = useState("");
 
   // Editing State
@@ -33,7 +45,7 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
 
   // Form Fields
-  const [newDate, setNewDate] = useState("2026-06-19");
+  const [newDate, setNewDate] = useState(todayDateKey());
   const [newType, setNewType] = useState<'GİRİŞ' | 'ÇIKIŞ'>("GİRİŞ");
   const [newAmount, setNewAmount] = useState("");
   const [newDesc, setNewDesc] = useState("");
@@ -52,29 +64,31 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
 
   // Weekly Cash Report Print Modal Toggle
   const [showWeeklyReportModal, setShowWeeklyReportModal] = useState(false);
-  const [soforIadeStart, setSoforIadeStart] = useState(startDate);
-  const [soforIadeEnd, setSoforIadeEnd] = useState(endDate);
+  const [soforIadeStart, setSoforIadeStart] = useState(week0.start);
+  const [soforIadeEnd, setSoforIadeEnd] = useState(week0.end);
   const [soforIadeFiltre, setSoforIadeFiltre] = useState('');
 
-  const handleSoforMasrafIadeRaporu = async () => {
+  const buildSoforReportBundle = async () => {
     const {
       filterSoforKasaHareketleri,
       buildSoforMasrafIadeReportHtml,
-      openSoforMasrafIadeReport,
     } = await import('../lib/yolHarcamaUtils');
+    const start = soforIadeStart || appliedStartDate;
+    const end = soforIadeEnd || appliedEndDate;
     const rows = filterSoforKasaHareketleri(
       kasaHareketleri,
-      soforIadeStart || appliedStartDate,
-      soforIadeEnd || appliedEndDate,
+      start,
+      end,
       soforIadeFiltre || undefined
     );
     if (rows.length === 0) {
-      alert('Seçili aralıkta şoför masraf kasa kaydı yok.');
-      return;
+      alert('Seçili aralıkta şoför masraf kasa çıkışı yok.\n\nŞoför fişi yönetici onayından sonra burada ÇIKIŞ olarak görünür.');
+      return null;
     }
+    const toplam = rows.reduce((s, r) => s + (Number(r.tutar) || 0), 0);
     const html = buildSoforMasrafIadeReportHtml({
-      startDate: soforIadeStart || appliedStartDate,
-      endDate: soforIadeEnd || appliedEndDate,
+      startDate: start,
+      endDate: end,
       items: rows.map((r) => ({
         id: r.id,
         tarih: r.tarih,
@@ -87,16 +101,104 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
       surucuFiltre: soforIadeFiltre || undefined,
       olusturan: 'Haftalık Kasa',
     });
-    openSoforMasrafIadeReport(html, 'Şoför Masraf İade Raporu');
+    return { html, start, end, toplam };
   };
 
-  // Totals calculations based on currently loaded state
-  const totalIn = kasaHareketleri
-    .filter(k => k.hareketTipi === 'GİRİŞ')
+  const handleSoforMasrafIadeRaporu = async () => {
+    const {
+      openSoforMasrafIadeReport,
+    } = await import('../lib/yolHarcamaUtils');
+    const bundle = await buildSoforReportBundle();
+    if (!bundle) return;
+    openSoforMasrafIadeReport(bundle.html, 'Şoför Masraf İade Raporu');
+  };
+
+  const handleSoforMasrafMerkezeEmail = async () => {
+    const { emailSoforMasrafIadeReport } = await import('../lib/yolHarcamaUtils');
+    const bundle = await buildSoforReportBundle();
+    if (!bundle) return;
+    emailSoforMasrafIadeReport({
+      html: bundle.html,
+      startDate: bundle.start,
+      endDate: bundle.end,
+      toplam: bundle.toplam,
+    });
+  };
+
+  const buildAralikHarcamaBundle = async () => {
+    const {
+      filterKasaCikisHareketleri,
+      buildKasaHarcamaAralikReportHtml,
+    } = await import('../lib/yolHarcamaUtils');
+    const start = appliedStartDate;
+    const end = appliedEndDate;
+    const rows = filterKasaCikisHareketleri(kasaHareketleri, start, end);
+    if (rows.length === 0) {
+      alert('Seçili aralıkta kasa çıkışı / harcama kaydı yok. Önce tarih aralığını filtreleyin.');
+      return null;
+    }
+    const toplam = rows.reduce((s, r) => s + (Number(r.tutar) || 0), 0);
+    const html = buildKasaHarcamaAralikReportHtml({
+      startDate: start,
+      endDate: end,
+      items: rows,
+      olusturan: 'Haftalık Kasa',
+    });
+    return { html, start, end, toplam };
+  };
+
+  const handleAralikHarcamaRaporu = async () => {
+    const { openSoforMasrafIadeReport } = await import('../lib/yolHarcamaUtils');
+    const bundle = await buildAralikHarcamaBundle();
+    if (!bundle) return;
+    openSoforMasrafIadeReport(bundle.html, 'Kasa Harcama Raporu');
+  };
+
+  const handleAralikHarcamaMerkezeEmail = async () => {
+    const { emailKasaHarcamaAralikReport } = await import('../lib/yolHarcamaUtils');
+    const bundle = await buildAralikHarcamaBundle();
+    if (!bundle) return;
+    emailKasaHarcamaAralikReport({
+      html: bundle.html,
+      startDate: bundle.start,
+      endDate: bundle.end,
+      toplam: bundle.toplam,
+    });
+  };
+
+  // Filter records in range and search text keyword match
+  const filteredHareketler = useMemo(
+    () =>
+      kasaHareketleri.filter((kh) => {
+        const isWithinDate = kh.tarih >= appliedStartDate && kh.tarih <= appliedEndDate;
+        if (!isWithinDate) return false;
+
+        if (searchKeyword.trim()) {
+          const kw = searchKeyword.toLowerCase();
+          const matchDesc = kh.aciklama.toLowerCase().includes(kw);
+          const matchType = kh.referansTipi.toLowerCase().includes(kw);
+          const matchId = (kh.referansId || '').toLowerCase().includes(kw);
+          const matchSurucu = String(kh.surucu || '')
+            .toLowerCase()
+            .includes(kw);
+          return matchDesc || matchType || matchId || matchSurucu;
+        }
+        return true;
+      }),
+    [kasaHareketleri, appliedStartDate, appliedEndDate, searchKeyword]
+  );
+
+  // KPI: seçili aralık (filtre) üzerinden — şoför onaylı çıkışlar eksi bakiyeye yansır
+  const totalIn = filteredHareketler
+    .filter((k) => k.hareketTipi === 'GİRİŞ')
     .reduce((sum, current) => sum + current.tutar, 0);
 
-  const totalOut = kasaHareketleri
-    .filter(k => k.hareketTipi === 'ÇIKIŞ')
+  const totalOut = filteredHareketler
+    .filter((k) => k.hareketTipi === 'ÇIKIŞ')
+    .reduce((sum, current) => sum + current.tutar, 0);
+
+  const soforOut = filteredHareketler
+    .filter((k) => k.hareketTipi === 'ÇIKIŞ' && isSoforKasaHareketi(k))
     .reduce((sum, current) => sum + current.tutar, 0);
 
   // Handle Drag & Drop Events
@@ -247,22 +349,9 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
   const handleFilterSubmit = () => {
     setAppliedStartDate(startDate);
     setAppliedEndDate(endDate);
+    setSoforIadeStart(startDate);
+    setSoforIadeEnd(endDate);
   };
-
-  // Filter records in range and search text keyword match
-  const filteredHareketler = kasaHareketleri.filter(kh => {
-    const isWithinDate = kh.tarih >= appliedStartDate && kh.tarih <= appliedEndDate;
-    if (!isWithinDate) return false;
-
-    if (searchKeyword.trim()) {
-      const kw = searchKeyword.toLowerCase();
-      const matchDesc = kh.aciklama.toLowerCase().includes(kw);
-      const matchType = kh.referansTipi.toLowerCase().includes(kw);
-      const matchId = (kh.referansId || "").toLowerCase().includes(kw);
-      return matchDesc || matchType || matchId;
-    }
-    return true;
-  });
 
   return (
     <div className="flex-grow p-3 sm:p-4 lg:p-6 h-full flex flex-col font-sans gap-4 lg:gap-6 select-none bg-slate-50">
@@ -274,7 +363,7 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
             <span>Haftalık Kasa</span>
           </h1>
           <p className="text-[#64748b] text-xs font-semibold mt-0.5">
-            Fiş yüklemeli kasa hareketleri, düzenleme ve döküm yönetimi
+            Şoför fişleri yönetici onayından sonra ÇIKIŞ (eksi bakiye) olarak düşer · Aralık seçip merkeze rapor gönderin
           </p>
         </div>
         
@@ -283,12 +372,13 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
         </span>
       </div>
 
-      {/* Financial statistics dashboard grid */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 shrink-0">
+      {/* Financial statistics dashboard grid — seçili aralık */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 shrink-0">
         {[
-          { title: "Toplam Giriş", value: `₺${totalIn.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}`, color: "border-emerald-100 bg-emerald-50/70 text-emerald-800", icon: ArrowUpRight },
-          { title: "Toplam Çıkış", value: `₺${totalOut.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}`, color: "border-rose-100 bg-rose-50/70 text-rose-800", icon: ArrowDownRight },
-          { title: "Net Kasa Bakiyesi", value: `₺${(totalIn - totalOut).toLocaleString('tr-TR', { minimumFractionDigits: 2 })}`, color: "border-amber-150 bg-amber-50/70 text-amber-800 font-bold", icon: Wallet }
+          { title: "Giriş (aralık)", value: `₺${totalIn.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}`, color: "border-emerald-100 bg-emerald-50/70 text-emerald-800", icon: ArrowUpRight },
+          { title: "Çıkış (aralık)", value: `₺${totalOut.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}`, color: "border-rose-100 bg-rose-50/70 text-rose-800", icon: ArrowDownRight },
+          { title: "Şoför çıkış", value: `₺${soforOut.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}`, color: "border-indigo-100 bg-indigo-50/70 text-indigo-800", icon: CreditCard },
+          { title: "Net bakiye", value: `₺${(totalIn - totalOut).toLocaleString('tr-TR', { minimumFractionDigits: 2 })}`, color: "border-amber-150 bg-amber-50/70 text-amber-800 font-bold", icon: Wallet }
         ].map((item, idx) => {
           const Icon = item.icon;
           return (
@@ -539,11 +629,17 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
               </div>
             ) : (
               <div className="divide-y divide-slate-100 divide-dashed overflow-y-auto">
-                {filteredHareketler.map(kh => (
+                {filteredHareketler.map(kh => {
+                  const sofor = isSoforKasaHareketi(kh);
+                  return (
                   <div 
                     key={kh.id} 
                     className={`grid grid-cols-5 min-w-[720px] items-center py-2.5 px-4 text-xs transition cursor-default group ${
-                      editingId === kh.id ? 'bg-amber-50' : 'hover:bg-amber-500/5'
+                      editingId === kh.id
+                        ? 'bg-amber-50'
+                        : sofor
+                          ? 'bg-indigo-50/40 hover:bg-indigo-50/70'
+                          : 'hover:bg-amber-500/5'
                     }`}
                   >
                     {/* Tarih Column */}
@@ -553,12 +649,17 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
                     </div>
 
                     {/* Tip Column */}
-                    <div>
+                    <div className="flex flex-wrap gap-1">
                       <span className={`inline-block py-0.5 px-2 rounded-full text-[10px] font-extrabold ${
                         kh.hareketTipi === 'GİRİŞ' ? 'bg-emerald-50 text-emerald-700 border border-emerald-100' : 'bg-rose-50 text-rose-700 border border-rose-100'
                       }`}>
                         {kh.hareketTipi}
                       </span>
+                      {sofor && (
+                        <span className="inline-block py-0.5 px-2 rounded-full text-[9px] font-extrabold bg-indigo-100 text-indigo-800 border border-indigo-200">
+                          ŞOFÖR FİŞ
+                        </span>
+                      )}
                     </div>
 
                     {/* Tutar Column */}
@@ -574,6 +675,7 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
                         <h5 className="font-bold text-slate-800 truncate leading-tight" title={kh.aciklama}>{kh.aciklama}</h5>
                         <p className="text-[9px] text-[#64748b] font-semibold uppercase tracking-wider mt-0.5 truncate">
                           {kh.referansTipi} {kh.referansId && `[ No: ${kh.referansId} ]`}
+                          {kh.surucu ? ` · ${kh.surucu}` : ''}
                         </p>
                       </div>
 
@@ -610,7 +712,8 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
                       </div>
                     </div>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
@@ -652,10 +755,36 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
                 className="bg-indigo-600 hover:bg-indigo-700 border border-indigo-700 text-white text-[11px] font-bold py-1.5 px-3 rounded-lg flex items-center space-x-1.5 transition cursor-pointer"
               >
                 <Printer size={12} />
-                <span>Şoför Masraf İade (A4)</span>
+                <span>Şoför Masraf Raporu</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleSoforMasrafMerkezeEmail()}
+                className="bg-sky-600 hover:bg-sky-700 border border-sky-700 text-white text-[11px] font-bold py-1.5 px-3 rounded-lg flex items-center space-x-1.5 transition cursor-pointer"
+                title="yonetim@kibritci.com"
+              >
+                <Mail size={12} />
+                <span>Şoför → Merkeze E-posta</span>
               </button>
             </div>
-            <div className="flex justify-end gap-2">
+            <div className="flex flex-wrap justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => void handleAralikHarcamaRaporu()}
+              className="bg-rose-600 hover:bg-rose-700 border border-rose-700 text-white text-[11px] font-bold py-1.5 px-3 rounded-lg flex items-center space-x-1.5 transition cursor-pointer"
+              title="Filtredeki aralığın tüm kasa çıkışları"
+            >
+              <Printer size={12} />
+              <span>Aralık Harcama Raporu</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleAralikHarcamaMerkezeEmail()}
+              className="bg-sky-700 hover:bg-sky-800 border border-sky-800 text-white text-[11px] font-bold py-1.5 px-3 rounded-lg flex items-center space-x-1.5 transition cursor-pointer"
+            >
+              <Mail size={12} />
+              <span>Harcama → Merkeze E-posta</span>
+            </button>
             <button 
               onClick={() => {
                 exportKasaExcel(filteredHareketler, appliedStartDate, appliedEndDate);
@@ -663,14 +792,14 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
               className="bg-emerald-600 hover:bg-emerald-700 border border-emerald-700 text-white text-[11px] font-bold py-1.5 px-3 rounded-lg flex items-center space-x-1.5 transition cursor-pointer text-left"
             >
               <FileText size={12} />
-              <span>📥 Kasa Excel Raporu Al</span>
+              <span>Kasa Excel</span>
             </button>
             <button 
               onClick={() => setShowWeeklyReportModal(true)}
               className="bg-amber-500 hover:bg-amber-600 border border-amber-600 text-white text-[11px] font-bold py-1.5 px-3 rounded-lg flex items-center space-x-1.5 transition cursor-pointer text-left"
             >
               <Printer size={12} />
-              <span>📊 Haftalık Kasa PDF Raporu Al</span>
+              <span>Haftalık Kasa PDF</span>
             </button>
             </div>
           </div>
@@ -742,9 +871,10 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
                     void import('../lib/reportEmail').then(({ openReportEmailComposer }) => {
                       openReportEmailComposer({
                         subject: 'Kibritçi — Haftalık Kasa Raporu',
-                        body: 'Haftalık kasa mutabakat raporu bilginize sunulmuştur.',
+                        body: 'Haftalık kasa mutabakat raporu merkeze bilginize sunulmuştur.',
                         html,
                         fileName: 'Kibritci_Haftalik_Kasa.html',
+                        defaultTo: 'yonetim@kibritci.com',
                       });
                     });
                   }}

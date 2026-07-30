@@ -287,30 +287,20 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
   };
 
   const handleApproveYolHarcamasi = async (item: any) => {
-    if (!window.confirm(`${item.tutar} TL tutarındaki yol harcamasını onaylıyor musunuz?`)) return;
+    if (!window.confirm(`${item.tutar} TL tutarındaki yol harcamasını onaylıyor musunuz?\n\nOnay sonrası tutar Haftalık Kasa'ya ÇIKIŞ (eksi bakiye) olarak düşer.`)) return;
     try {
+      const { buildYolHarcamaKasaCikisPayload, yolHarcamaKasaDocId } = await import('../lib/yolHarcamaUtils');
       await updateDoc(doc(db, 'yolHarcamalari', item.id), {
         durum: 'ONAYLANDI',
         onaylayanYonetici: currentUser?.email || 'Sistem Yöneticisi',
         onayTarihi: new Date().toISOString()
       });
 
-      const kasaRef = doc(db, 'kasaHareketleri', `kh_yol_${item.id}`);
-      await setDoc(kasaRef, {
-        id: `kh_yol_${item.id}`,
-        tarih: item.tarih || new Date().toISOString().split('T')[0],
-        hareketTipi: 'ÇIKIŞ',
-        tutar: parseFloat(item.tutar) || 0,
-        aciklama: `Şoför Yol Harcaması (Fiş: ${item.fisNo || '—'} · ${item.surucu || 'Bilinmeyen'}) - ${item.aciklama || ''}`,
-        referansTipi: 'DİĞER',
-        referansId: item.id,
-        fisEvrakUrl: item.faturaFotoUrl || '',
-        soforOdemesi: true,
-        surucu: item.surucu || 'Bilinmeyen',
-        fisNo: item.fisNo || '',
-      });
+      const payload = buildYolHarcamaKasaCikisPayload(item);
+      const kasaRef = doc(db, 'kasaHareketleri', yolHarcamaKasaDocId(item.id));
+      await setDoc(kasaRef, payload);
 
-      alert("🎉 Yol harcaması onaylandı ve Haftalık Kasa'ya işlendi (şöföre ödemeler listesine notlandı).");
+      alert("Yol harcaması onaylandı. Tutar Haftalık Kasa'ya ÇIKIŞ (eksi bakiye) olarak işlendi.");
     } catch (err) {
       console.error(err);
       alert("Hata oluştu.");
@@ -320,11 +310,19 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
   const handleRejectYolHarcamasi = async (item: any) => {
     if (!window.confirm("Bu yol harcamasını reddetmek istediğinize emin misiniz?")) return;
     try {
+      const { yolHarcamaKasaDocId } = await import('../lib/yolHarcamaUtils');
+      const { deleteDoc } = await import('firebase/firestore');
       await updateDoc(doc(db, 'yolHarcamalari', item.id), {
         durum: 'REDDEDİLDİ',
         onaylayanYonetici: currentUser?.email || 'Sistem Yöneticisi',
         onayTarihi: new Date().toISOString()
       });
+      // Daha önce onaylanıp kasaya düşmüşse çıkışı geri al
+      try {
+        await deleteDoc(doc(db, 'kasaHareketleri', yolHarcamaKasaDocId(item.id)));
+      } catch {
+        /* yoksa sorun değil */
+      }
       alert("Harcama reddedildi.");
     } catch (err) {
       console.error(err);
