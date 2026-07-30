@@ -330,7 +330,7 @@ export function buildFaturaFromSatinAlma(
   };
 }
 
-/** İrsaliyeleri faturaya bağladıktan sonra irsaliye kayıtlarını güncelle */
+/** İrsaliyeleri faturaya bağladıktan sonra irsaliye kayıtlarını güncelle (yumuşak bağ — kilit yok) */
 export function linkIrsaliyelerToFatura(
   irsaliyeler: Irsaliye[],
   fatura: Fatura
@@ -345,6 +345,70 @@ export function linkIrsaliyelerToFatura(
       cariKartId: ir.cariKartId || fatura.cariKartId || undefined,
     };
   });
+}
+
+/** Fatura–irsaliye bağını kaldır (düzenleme / hata düzeltme) */
+export function unlinkIrsaliyeFromFatura(
+  irsaliyeler: Irsaliye[],
+  fatura: Fatura,
+  irsaliyeIdOrNo: string
+): Irsaliye[] {
+  return irsaliyeler.map((ir) => {
+    if (ir.id !== irsaliyeIdOrNo && ir.irsaliyeNo !== irsaliyeIdOrNo) return ir;
+    if (ir.faturaNo && ir.faturaNo !== fatura.faturaNo) return ir;
+    return { ...ir, faturaNo: undefined };
+  });
+}
+
+/** Faturanın bagliIrsaliyeler listesini güncelle; çıkarılan irsaliyelerin faturaNo'sunu temizle */
+export function syncFaturaIrsaliyeBaglari(
+  fatura: Fatura,
+  nextBagliIds: string[],
+  irsaliyeler: Irsaliye[]
+): { fatura: Fatura; irsaliyeler: Irsaliye[] } {
+  const prev = new Set(fatura.bagliIrsaliyeler || []);
+  const next = new Set(nextBagliIds);
+  const removed = [...prev].filter((id) => !next.has(id));
+  const added = [...next].filter((id) => !prev.has(id));
+
+  let nextIrs = irsaliyeler;
+  for (const id of removed) {
+    nextIrs = unlinkIrsaliyeFromFatura(nextIrs, fatura, id);
+  }
+  const patchedFatura: Fatura = { ...fatura, bagliIrsaliyeler: nextBagliIds };
+  if (added.length) {
+    nextIrs = linkIrsaliyelerToFatura(nextIrs, patchedFatura);
+  }
+  return { fatura: patchedFatura, irsaliyeler: nextIrs };
+}
+
+/** Seçilen irsaliyelerin aynı cariye ait olup olmadığını kontrol et */
+export function assertSameCariIrsaliyeler(irsaliyeler: Irsaliye[]): {
+  ok: boolean;
+  message?: string;
+  cariKartId?: string;
+  firma?: string;
+} {
+  if (!irsaliyeler.length) {
+    return { ok: false, message: 'En az bir irsaliye seçin.' };
+  }
+  const cariIds = new Set(
+    irsaliyeler.map((ir) => String(ir.cariKartId || '').trim()).filter(Boolean)
+  );
+  const firmas = new Set(
+    irsaliyeler.map((ir) => String(ir.firma || '').trim().toLocaleLowerCase('tr-TR')).filter(Boolean)
+  );
+  if (cariIds.size > 1) {
+    return { ok: false, message: 'Seçilen irsaliyeler farklı cari kartlara ait; tek faturaya bağlanamaz.' };
+  }
+  if (cariIds.size === 0 && firmas.size > 1) {
+    return { ok: false, message: 'Seçilen irsaliyeler farklı firmalara ait; tek faturaya bağlanamaz.' };
+  }
+  return {
+    ok: true,
+    cariKartId: cariIds.size === 1 ? [...cariIds][0] : undefined,
+    firma: irsaliyeler[0]?.firma,
+  };
 }
 
 export function describeEvrakZinciri(

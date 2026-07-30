@@ -25,6 +25,7 @@ import {
   describeEvrakZinciri,
   findIrsaliyelerForSa,
 } from '../lib/evrakDonusum';
+import { openEvrakZincirRaporu } from '../lib/evrakZincirRapor';
 import {
   buildNDeliveryTemplates,
   createIrsaliyelerFromSatinAlma,
@@ -1200,6 +1201,20 @@ ${kalemOzet || '—'}${more}`,
                       title="Her TIR/sevk için ayrı irsaliye üret (çoklu)"
                     >
                       İrsaliye(ler) Oluştur
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        openEvrakZincirRaporu({
+                          sa,
+                          irsaliyeler,
+                          faturalar,
+                        })
+                      }
+                      className="bg-violet-50 hover:bg-violet-100 text-violet-900 border border-violet-200 px-3 py-1.5 rounded-xl font-bold transition flex items-center gap-1 cursor-pointer"
+                      title="SA → İrsaliye → Fatura zincir raporu"
+                    >
+                      Zincir Raporu
                     </button>
                     <button
                       onClick={() =>

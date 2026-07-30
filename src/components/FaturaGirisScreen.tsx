@@ -20,6 +20,8 @@ import {
   resolveCariKartId,
 } from '../lib/evrakCariStokSync';
 import { findStokMatch } from '../lib/evrakBatchImportUtils';
+import { syncFaturaIrsaliyeBaglari } from '../lib/evrakDonusum';
+import { openEvrakZincirRaporu } from '../lib/evrakZincirRapor';
 import { EvrakZincirBanner } from './EvrakZincirBanner';
 import {
   EvrakAiDropzone,
@@ -70,6 +72,8 @@ export const FaturaGirisScreen: React.FC<FaturaGirisScreenProps> = ({
   const [ftAttachmentUrl, setFtAttachmentUrl] = useState<string | null>(null);
   const [ftSignedAttachmentUrl, setFtSignedAttachmentUrl] = useState<string | null>(null);
   const [editingFtId, setEditingFtId] = useState<string | null>(null);
+  const [editBagliIrsaliyeIds, setEditBagliIrsaliyeIds] = useState<string[]>([]);
+  const [addBagliIrId, setAddBagliIrId] = useState('');
 
   // AI Parser states
   const [isFtParsing, setIsFtParsing] = useState(false);
@@ -277,27 +281,34 @@ export const FaturaGirisScreen: React.FC<FaturaGirisScreenProps> = ({
 
     if (editingFtId) {
       const existing = faturalar.find((f) => f.id === editingFtId);
-      setFaturalar(prev => prev.map(ft => {
-        if (ft.id === editingFtId) {
-          return {
-            ...ft,
-            faturaNo: ftNo,
-            tarih: ftDate,
-            cariUnvan: ftSupplier,
-            cariKartId: cariResolved.cariKartId || ft.cariKartId || "",
-            saId: existing?.saId,
-            toplamTutar: calculatedSub,
-            kdvTutar: calculatedKdv,
-            genelToplam: calculatedGrand,
-            kalemler: linkedItems,
-            evrakUrl: ftAttachmentUrl || undefined,
-            imzaliEvrakUrl: ftSignedAttachmentUrl || undefined,
-            bagliIrsaliyeler: existing?.bagliIrsaliyeler || [],
-          };
-        }
-        return ft;
-      }));
+      const baseUpdated: Fatura = {
+        ...(existing as Fatura),
+        id: editingFtId,
+        faturaNo: ftNo,
+        tarih: ftDate,
+        cariUnvan: ftSupplier,
+        cariKartId: cariResolved.cariKartId || existing?.cariKartId || "",
+        saId: existing?.saId,
+        toplamTutar: calculatedSub,
+        kdvTutar: calculatedKdv,
+        genelToplam: calculatedGrand,
+        kalemler: linkedItems,
+        evrakUrl: ftAttachmentUrl || undefined,
+        imzaliEvrakUrl: ftSignedAttachmentUrl || undefined,
+        bagliIrsaliyeler: editBagliIrsaliyeIds,
+      };
+      if (setIrsaliyeler && existing) {
+        const synced = syncFaturaIrsaliyeBaglari(existing, editBagliIrsaliyeIds, irsaliyeler);
+        setIrsaliyeler(() => synced.irsaliyeler);
+        setFaturalar((prev) =>
+          prev.map((ft) => (ft.id === editingFtId ? { ...synced.fatura, ...baseUpdated, bagliIrsaliyeler: editBagliIrsaliyeIds } : ft))
+        );
+      } else {
+        setFaturalar((prev) => prev.map((ft) => (ft.id === editingFtId ? baseUpdated : ft)));
+      }
       setEditingFtId(null);
+      setEditBagliIrsaliyeIds([]);
+      setAddBagliIrId('');
     } else {
       const newFt: Fatura = {
         id: recordId,
@@ -656,7 +667,90 @@ export const FaturaGirisScreen: React.FC<FaturaGirisScreenProps> = ({
 
               <p className="text-[10px] text-slate-800 bg-slate-50 border border-slate-200 rounded-xl p-2.5">
                 Fatura kalemlerini girin; belge görselini AI ile okutabilirsiniz.
+                {editingFtId
+                  ? ' Düzenleme: bağlı irsaliyeleri aşağıdan ekleyip çıkarabilirsiniz (kilit yok).'
+                  : ''}
               </p>
+
+              {editingFtId && (
+                <div className="bg-violet-50/60 border border-violet-100 rounded-2xl p-3 space-y-2">
+                  <span className="text-[9px] font-bold text-violet-700 uppercase tracking-widest block">
+                    Bağlı irsaliyeler (düzenlenebilir)
+                  </span>
+                  {editBagliIrsaliyeIds.length === 0 ? (
+                    <p className="text-[10px] text-slate-500">Bağlı irsaliye yok.</p>
+                  ) : (
+                    <div className="flex flex-wrap gap-1.5">
+                      {editBagliIrsaliyeIds.map((id) => {
+                        const ir = irsaliyeler.find((x) => x.id === id || x.irsaliyeNo === id);
+                        const label = ir?.irsaliyeNo || id;
+                        return (
+                          <span
+                            key={id}
+                            className="inline-flex items-center gap-1 text-[10px] font-bold bg-white border border-violet-200 text-violet-900 px-2 py-1 rounded-lg"
+                          >
+                            {label}
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setEditBagliIrsaliyeIds((prev) => prev.filter((x) => x !== id))
+                              }
+                              className="text-rose-600 hover:text-rose-800 cursor-pointer"
+                              title="Bağı kaldır"
+                            >
+                              ×
+                            </button>
+                          </span>
+                        );
+                      })}
+                    </div>
+                  )}
+                  <div className="flex gap-2 items-center">
+                    <select
+                      value={addBagliIrId}
+                      onChange={(e) => setAddBagliIrId(e.target.value)}
+                      className="flex-1 text-[10px] font-semibold p-1.5 bg-white border border-violet-200 rounded-lg"
+                    >
+                      <option value="">İrsaliye ekle…</option>
+                      {irsaliyeler
+                        .filter((ir) => {
+                          if (editBagliIrsaliyeIds.includes(ir.id) || editBagliIrsaliyeIds.includes(ir.irsaliyeNo)) {
+                            return false;
+                          }
+                          if (!ftSupplier) return true;
+                          return (
+                            String(ir.firma || '')
+                              .toLocaleLowerCase('tr-TR')
+                              .includes(ftSupplier.toLocaleLowerCase('tr-TR')) ||
+                            String(ftSupplier || '')
+                              .toLocaleLowerCase('tr-TR')
+                              .includes(String(ir.firma || '').toLocaleLowerCase('tr-TR'))
+                          );
+                        })
+                        .slice(0, 80)
+                        .map((ir) => (
+                          <option key={ir.id} value={ir.id}>
+                            {ir.irsaliyeNo} · {ir.tarih} · {ir.firma}
+                          </option>
+                        ))}
+                    </select>
+                    <button
+                      type="button"
+                      disabled={!addBagliIrId}
+                      onClick={() => {
+                        if (!addBagliIrId) return;
+                        setEditBagliIrsaliyeIds((prev) =>
+                          prev.includes(addBagliIrId) ? prev : [...prev, addBagliIrId]
+                        );
+                        setAddBagliIrId('');
+                      }}
+                      className="text-[10px] font-bold px-2.5 py-1.5 rounded-lg bg-violet-700 text-white cursor-pointer disabled:opacity-40"
+                    >
+                      Ekle
+                    </button>
+                  </div>
+                </div>
+              )}
 
               {/* Add items */}
               <div className="bg-slate-550/5 p-3 rounded-2xl border border-slate-100 space-y-2">
@@ -760,6 +854,8 @@ export const FaturaGirisScreen: React.FC<FaturaGirisScreenProps> = ({
                   setFtAttachmentUrl(null);
                   setFtSignedAttachmentUrl(null);
                   setEditingFtId(null);
+                  setEditBagliIrsaliyeIds([]);
+                  setAddBagliIrId('');
                 }}
                 className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-2 rounded-xl text-center cursor-pointer transition text-xs"
               >
@@ -883,10 +979,29 @@ export const FaturaGirisScreen: React.FC<FaturaGirisScreenProps> = ({
                                   setFtItems(ft.kalemler || []);
                                   setFtAttachmentUrl(ft.evrakUrl || null);
                                   setFtSignedAttachmentUrl(ft.imzaliEvrakUrl || null);
+                                  setEditBagliIrsaliyeIds([...(ft.bagliIrsaliyeler || [])]);
+                                  setAddBagliIrId('');
                                 }}
                                 className="text-[10px] bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded px-2 py-1 font-bold cursor-pointer"
                               >
                                 Düzenle
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const sa = ft.saId
+                                    ? satinAlmaTalepleri.find((s) => s.saId === ft.saId)
+                                    : undefined;
+                                  openEvrakZincirRaporu({
+                                    sa,
+                                    irsaliyeler,
+                                    faturalar,
+                                    focusIrsaliyeIds: ft.bagliIrsaliyeler,
+                                  });
+                                }}
+                                className="text-[10px] bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 rounded px-2 py-1 font-bold cursor-pointer"
+                              >
+                                Zincir
                               </button>
                               <button
                                 type="button"

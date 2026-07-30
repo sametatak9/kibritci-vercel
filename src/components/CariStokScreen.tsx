@@ -29,6 +29,13 @@ import {
   stokIslemleriForCariStoklar,
   stoklarForCariKart,
 } from '../lib/cariStokTopluYazdir';
+import {
+  assertSameCariIrsaliyeler,
+  buildFaturaFromIrsaliyeler,
+  linkIrsaliyelerToFatura,
+} from '../lib/evrakDonusum';
+import { appendCariIslemOnce, buildCariEvrakHistory } from '../lib/evrakCariStokSync';
+import { openEvrakZincirRaporu } from '../lib/evrakZincirRapor';
 
 interface CariStokScreenProps {
   cariKartlar: CariKart[];
@@ -39,6 +46,9 @@ interface CariStokScreenProps {
   setStokIslemGecmisi?: React.Dispatch<React.SetStateAction<StokKartIslem[]>>;
   faturalar?: Fatura[];
   setFaturalar?: React.Dispatch<React.SetStateAction<Fatura[]>>;
+  irsaliyeler?: Irsaliye[];
+  setIrsaliyeler?: React.Dispatch<React.SetStateAction<Irsaliye[]>>;
+  satinAlmaTalepleri?: SatinAlmaTalebi[];
   cariIslemGecmisi?: CariKartIslem[];
   setCariIslemGecmisi?: React.Dispatch<React.SetStateAction<CariKartIslem[]>>;
   personeller?: Personel[];
@@ -102,6 +112,9 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
   setStokIslemGecmisi,
   faturalar = [],
   setFaturalar,
+  irsaliyeler = [],
+  setIrsaliyeler,
+  satinAlmaTalepleri = [],
   cariIslemGecmisi = [],
   setCariIslemGecmisi,
   personeller = [],
@@ -139,6 +152,7 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyList, setHistoryList] = useState<HistoryLog[]>([]);
   const [historyFilter, setHistoryFilter] = useState('ALL');
+  const [selectedIrsaliyeIds, setSelectedIrsaliyeIds] = useState<Set<string>>(new Set());
   const [detayPayload, setDetayPayload] = useState<EvrakDetayPayload | null>(null);
   const [genericDetail, setGenericDetail] = useState<GenericDetail | null>(null);
   const [detailLoadingId, setDetailLoadingId] = useState<string | null>(null);
@@ -233,6 +247,7 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
     setHistoryLoading(true);
     setHistoryList([]);
     setHistoryFilter('ALL');
+    setSelectedIrsaliyeIds(new Set());
     try {
       const logs: HistoryLog[] = [];
       // Belge kalemlerini rapora taşımak için normalize eder
@@ -625,6 +640,122 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
     for (const h of historyList) map[h.type] = (map[h.type] || 0) + 1;
     return map;
   }, [historyList]);
+
+  const toggleIrsaliyeSelection = (id: string) => {
+    setSelectedIrsaliyeIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const handleBagSelectedIrsaliyelerToFatura = () => {
+    if (!setFaturalar || !setIrsaliyeler) {
+      alert('Fatura / irsaliye kaydı için sistem bağlantısı yok.');
+      return;
+    }
+    const selected = irsaliyeler.filter((ir) => selectedIrsaliyeIds.has(ir.id));
+    const withKalem = selected.filter((ir) => (ir.kalemler || []).length > 0);
+    if (!withKalem.length) {
+      alert('Seçili irsaliyelerde faturalanacak kalem yok.');
+      return;
+    }
+    const sameCari = assertSameCariIrsaliyeler(withKalem);
+    if (!sameCari.ok) {
+      alert(sameCari.message);
+      return;
+    }
+
+    const { fatura, alreadyExists, warning } = buildFaturaFromIrsaliyeler(withKalem, {
+      faturalar,
+      cariKartlar,
+      stokKartlar,
+    });
+
+    const nos = withKalem.map((ir) => ir.irsaliyeNo).join(', ');
+    if (alreadyExists.length > 0) {
+      const ok = window.confirm(
+        `${warning || 'Seçili irsaliyeler için fatura bağı zaten var.'}\n\nMevcut: ${alreadyExists
+          .map((x) => x.faturaNo)
+          .join(', ')}\n\nYine de yeni taslak fatura oluşturulsun mu?\n(Evraklar kilitlenmez; bağ sonradan düzeltilebilir.)`
+      );
+      if (!ok) return;
+    } else if (
+      !window.confirm(
+        `${withKalem.length} irsaliye tek taslak faturaya bağlansın mı?\n\n${nos}\n\nNot: Birim fiyatlar 0 gelebilir — Fatura sekmesinde düzenleyin.\nEvraklar kilitlenmez; bağ çıkarılabilir.`
+      )
+    ) {
+      return;
+    }
+
+    setFaturalar((prev) => [fatura, ...prev]);
+    setIrsaliyeler((prev) => linkIrsaliyelerToFatura(prev, fatura));
+
+    if (fatura.cariKartId) {
+      appendCariIslemOnce(
+        setCariIslemGecmisi,
+        buildCariEvrakHistory({
+          cariKartId: fatura.cariKartId,
+          islemTipi: 'FATURA',
+          islemId: fatura.id,
+          islemBaslik: 'İrsaliyelerden Taslak Fatura',
+          islemDetay: `${withKalem.length} irsaliye → ${fatura.faturaNo} · ${fatura.cariUnvan}`,
+          tarih: fatura.tarih,
+          belgeNo: fatura.faturaNo,
+          tutar: fatura.genelToplam,
+        })
+      );
+    }
+
+    setSelectedIrsaliyeIds(new Set());
+    const openRapor = window.confirm(
+      `Taslak fatura bağlandı.\nNo: ${fatura.faturaNo}\nİrsaliye: ${withKalem.length}\n\nEvraklar düzenlenebilir kaldı.\n\nZincir raporunu açmak ister misiniz?`
+    );
+    if (openRapor) {
+      const saId = fatura.saId || withKalem.find((ir) => ir.saId)?.saId;
+      const sa = saId ? satinAlmaTalepleri.find((s) => s.saId === saId) : undefined;
+      openEvrakZincirRaporu({
+        sa,
+        irsaliyeler,
+        faturalar: [fatura, ...faturalar],
+        focusIrsaliyeIds: withKalem.map((ir) => ir.id),
+      });
+    }
+  };
+
+  const handleOpenZincirRaporuFromCari = () => {
+    const selected = irsaliyeler.filter((ir) => selectedIrsaliyeIds.has(ir.id));
+    const focusIds = selected.length
+      ? selected.map((ir) => ir.id)
+      : historyList
+          .filter((h) => h.collection === 'irsaliyeler')
+          .map((h) => h.id);
+    const saId =
+      selected.find((ir) => ir.saId)?.saId ||
+      irsaliyeler.find((ir) => focusIds.includes(ir.id) && ir.saId)?.saId;
+    let sa = saId ? satinAlmaTalepleri.find((s) => s.saId === saId) : undefined;
+    if (!sa && selectedCariId) {
+      const cariSa = satinAlmaTalepleri
+        .filter(
+          (s) =>
+            s.cariKartId === selectedCariId ||
+            firmaEslesir(s.cariFirma || '', selectedCari?.unvan || '')
+        )
+        .sort((a, b) => String(b.tarih || '').localeCompare(String(a.tarih || '')));
+      sa = cariSa[0];
+    }
+    if (!sa && !focusIds.length) {
+      alert('Zincir raporu için bir satın alma veya irsaliye bulunamadı.');
+      return;
+    }
+    openEvrakZincirRaporu({
+      sa,
+      irsaliyeler,
+      faturalar,
+      focusIrsaliyeIds: focusIds.length ? focusIds : undefined,
+    });
+  };
 
   const resetCariForm = () => {
     setEditingCariId(null);
@@ -1643,6 +1774,33 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
                   </p>
                 </div>
                 <div className="flex flex-wrap gap-2">
+                  {selectedIrsaliyeIds.size > 0 && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={handleBagSelectedIrsaliyelerToFatura}
+                        className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-[10px] font-bold bg-violet-700 text-white cursor-pointer"
+                        title="Seçili irsaliyeleri tek taslak faturaya bağla (kilitlenmez)"
+                      >
+                        <Receipt size={12} /> Seçilenleri Faturaya Bağla ({selectedIrsaliyeIds.size})
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedIrsaliyeIds(new Set())}
+                        className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-[10px] font-bold bg-white text-slate-600 border border-slate-200 cursor-pointer"
+                      >
+                        Seçimi temizle
+                      </button>
+                    </>
+                  )}
+                  <button
+                    type="button"
+                    onClick={handleOpenZincirRaporuFromCari}
+                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-[10px] font-bold bg-amber-600 text-white cursor-pointer"
+                    title="SA → İrsaliye → Fatura zincir raporu"
+                  >
+                    <ClipboardList size={12} /> Zincir Raporu
+                  </button>
                   <button
                     type="button"
                     onClick={() => exportLogs('csv')}
@@ -1703,6 +1861,17 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
                       key={`${log.id}-${idx}`}
                       className="flex gap-3 p-3.5 rounded-xl border border-slate-100 bg-slate-50/80 hover:border-slate-300 transition"
                     >
+                      {log.collection === 'irsaliyeler' && (
+                        <label className="shrink-0 self-center flex items-center cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={selectedIrsaliyeIds.has(log.id)}
+                            onChange={() => toggleIrsaliyeSelection(log.id)}
+                            className="w-4 h-4 rounded border-slate-300 text-violet-700 cursor-pointer"
+                            title="Faturaya bağlamak için seç"
+                          />
+                        </label>
+                      )}
                       <div className="shrink-0 w-9 h-9 rounded-xl bg-white border border-slate-200 flex items-center justify-center text-slate-600">
                         {TYPE_ICON[log.type] || <ClipboardList size={14} />}
                       </div>
