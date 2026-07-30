@@ -499,6 +499,7 @@ export const LojistikScreen: React.FC<LojistikScreenProps> = ({
   // TAB 5: YOL HARCAMASI (FİŞ / FATURA YÜKLE)
   // ==========================================
   const [harcamaTutar, setHarcamaTutar] = useState('');
+  const [harcamaMasrafTipi, setHarcamaMasrafTipi] = useState<'KENDI' | 'KASA' | ''>('');
   const [harcamaAciklama, setHarcamaAciklama] = useState('');
   const [harcamaFisNo, setHarcamaFisNo] = useState('');
   const [harcamaTarih, setHarcamaTarih] = useState(new Date().toISOString().split('T')[0]);
@@ -546,6 +547,10 @@ export const LojistikScreen: React.FC<LojistikScreenProps> = ({
       alert('Fiş numarası zorunludur.');
       return;
     }
+    if (harcamaMasrafTipi !== 'KENDI' && harcamaMasrafTipi !== 'KASA') {
+      alert('Evrak tipi seçin: Kendi harcamanız mı, yoksa kasa harcaması mı?');
+      return;
+    }
 
     try {
       const hId = `harcama_${Date.now()}`;
@@ -567,13 +572,20 @@ export const LojistikScreen: React.FC<LojistikScreenProps> = ({
         faturaFotoUrl: fotoUrl,
         durum: 'ONAY BEKLİYOR',
         surucu: currentChauffeurName,
+        masrafTipi: harcamaMasrafTipi,
         olusturulma: new Date().toISOString(),
       });
 
-      showStatus('success', 'Yol harcaması ve evrak görseli başarıyla yöneticilere gönderildi!');
+      showStatus(
+        'success',
+        harcamaMasrafTipi === 'KENDI'
+          ? 'Kendi harcamanız yönetici onayına gönderildi (onay sonrası size ödenir).'
+          : 'Kasa harcaması yönetici onayına gönderildi (şirket kasasına işlenir).'
+      );
       setHarcamaTutar('');
       setHarcamaAciklama('');
       setHarcamaFisNo('');
+      setHarcamaMasrafTipi('');
       setFaturaFotoBase64(null);
     } catch (err) {
       console.error(err);
@@ -597,6 +609,7 @@ export const LojistikScreen: React.FC<LojistikScreenProps> = ({
       tutar: Number(x.tutar) || 0,
       surucu: x.surucu,
       fotoUrl: x.faturaFotoUrl,
+      masrafTipi: x.nihaiMasrafTipi || x.masrafTipi || 'KENDI',
     }));
     if (items.length === 0) {
       alert('Seçili aralıkta masraf kaydı yok.');
@@ -1251,10 +1264,47 @@ export const LojistikScreen: React.FC<LojistikScreenProps> = ({
                   <h2 className="text-sm font-bold text-slate-800 flex items-center space-x-1.5">
                     <span>💳 Yol Harcaması (Fiş / Fatura) Girişi</span>
                   </h2>
-                  <p className="text-[10px] text-slate-500">Yaptığınız yol harcamalarını (yakıt, otoban vs.) fiş görseli ile yükleyin, onay sonrası şöför ödemelerinize işlensin.</p>
+                  <p className="text-[10px] text-slate-500">
+                    Evrak gönderirken tipi seçin: <strong>kendi harcamanızı</strong> size öderiz;
+                    <strong> kasa harcamasını</strong> şirket kasasına işleriz. Nihai ayrımı yönetici onayında yapar.
+                  </p>
                 </div>
 
                 <form onSubmit={handleSaveYolHarcamasi} className="space-y-4">
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold text-slate-500 uppercase">Evrak tipi *</label>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setHarcamaMasrafTipi('KENDI')}
+                        className={`text-left rounded-xl border px-3 py-2.5 transition cursor-pointer ${
+                          harcamaMasrafTipi === 'KENDI'
+                            ? 'border-rose-400 bg-rose-50 ring-2 ring-rose-200'
+                            : 'border-slate-200 bg-white hover:bg-slate-50'
+                        }`}
+                      >
+                        <span className="block text-[11px] font-black text-slate-900">Kendi harcamam</span>
+                        <span className="block text-[9px] text-slate-500 mt-0.5">
+                          Cebimden ödedim — onay sonrası bana iade edilir
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setHarcamaMasrafTipi('KASA')}
+                        className={`text-left rounded-xl border px-3 py-2.5 transition cursor-pointer ${
+                          harcamaMasrafTipi === 'KASA'
+                            ? 'border-sky-400 bg-sky-50 ring-2 ring-sky-200'
+                            : 'border-slate-200 bg-white hover:bg-slate-50'
+                        }`}
+                      >
+                        <span className="block text-[11px] font-black text-slate-900">Kasa harcaması</span>
+                        <span className="block text-[9px] text-slate-500 mt-0.5">
+                          Şirket kasası / şirket hesabı — kasaya işlenir, bana ödenmez
+                        </span>
+                      </button>
+                    </div>
+                  </div>
+
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div className="space-y-1">
                       <label className="text-[10px] font-bold text-slate-500 uppercase">Fiş No *</label>
@@ -1402,6 +1452,7 @@ export const LojistikScreen: React.FC<LojistikScreenProps> = ({
                             <th className="px-2 py-1.5">Tarih</th>
                             <th className="px-2 py-1.5">Fiş No</th>
                             <th className="px-2 py-1.5">Açıklama</th>
+                            <th className="px-2 py-1.5">Tip</th>
                             <th className="px-2 py-1.5">Durum</th>
                             <th className="px-2 py-1.5 text-right">Tutar</th>
                           </tr>
@@ -1412,6 +1463,13 @@ export const LojistikScreen: React.FC<LojistikScreenProps> = ({
                               <td className="px-2 py-1.5 font-mono">{exp.tarih}</td>
                               <td className="px-2 py-1.5 font-bold">{exp.fisNo || '—'}</td>
                               <td className="px-2 py-1.5">{exp.aciklama}</td>
+                              <td className="px-2 py-1.5 font-bold text-[9px] uppercase">
+                                {exp.nihaiMasrafTipi === 'KASA' || exp.masrafTipi === 'KASA'
+                                  ? 'Kasa'
+                                  : exp.masrafTipi === 'KENDI' || exp.nihaiMasrafTipi === 'KENDI'
+                                    ? 'Kendi'
+                                    : '—'}
+                              </td>
                               <td className="px-2 py-1.5">{exp.durum}</td>
                               <td className="px-2 py-1.5 text-right font-mono font-bold">
                                 {Number(exp.tutar || 0).toLocaleString('tr-TR')} ₺

@@ -307,11 +307,18 @@ export interface KasaHareketi {
   referansTipi: 'DİĞER' | 'FATURA' | 'İRSALİYE' | 'MAAS' | 'SATIN ALMA';
   referansId?: string;
   fisEvrakUrl?: string;
-  /** Şoför yol harcaması onayından gelen kayıt */
+  /** Şoför kendi cebinden → iade / ödeme (eksi bakiye + şoföre ödenir) */
   soforOdemesi?: boolean;
+  /** Şoför üzerinden şirket kasası harcaması (şoföre iade yok) */
+  soforKasaHarcamasi?: boolean;
+  /** Nihai masraf tipi (KENDI | KASA) */
+  masrafTipi?: SoforMasrafTipi;
   surucu?: string;
   fisNo?: string;
 }
+
+/** Şoför evrak beyanı / yönetici nihai ayrımı */
+export type SoforMasrafTipi = 'KENDI' | 'KASA';
 
 /** Şoför — yol / masraf fişi (onay sonrası Haftalık Kasa) */
 export interface YolHarcamasi {
@@ -323,6 +330,10 @@ export interface YolHarcamasi {
   faturaFotoUrl?: string;
   durum: 'ONAY BEKLİYOR' | 'ONAYLANDI' | 'REDDEDİLDİ' | string;
   surucu?: string;
+  /** Şoförün gönderirken seçtiği: kendi harcaması mı, kasa mı */
+  masrafTipi?: SoforMasrafTipi;
+  /** Yönetici onayında nihai ayrım (yoksa masrafTipi) */
+  nihaiMasrafTipi?: SoforMasrafTipi;
   onaylayanYonetici?: string;
   onayTarihi?: string;
   olusturulma?: string;

@@ -286,24 +286,50 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
     }
   };
 
-  const handleApproveYolHarcamasi = async (item: any) => {
-    if (!window.confirm(`${item.tutar} TL tutarındaki yol harcamasını onaylıyor musunuz?\n\nOnay sonrası tutar Haftalık Kasa'ya ÇIKIŞ (eksi bakiye) olarak düşer.`)) return;
+  const handleApproveYolHarcamasi = async (
+    item: any,
+    nihaiMasrafTipi: 'KENDI' | 'KASA'
+  ) => {
+    const tipLabel =
+      nihaiMasrafTipi === 'KENDI'
+        ? 'ŞOFÖR KENDİ HARCAMASI (şoföre ödenecek)'
+        : 'KASA HARCAMASI (şirket kasasına işlenecek)';
+    if (
+      !window.confirm(
+        `${item.tutar} TL · ${tipLabel}\n\nOnaylıyor musunuz?\n(Şoför beyanı: ${
+          item.masrafTipi === 'KASA' ? 'Kasa' : item.masrafTipi === 'KENDI' ? 'Kendi' : 'Belirtilmemiş'
+        })`
+      )
+    ) {
+      return;
+    }
     try {
-      const { buildYolHarcamaKasaCikisPayload, yolHarcamaKasaDocId } = await import('../lib/yolHarcamaUtils');
+      const { buildYolHarcamaKasaCikisPayload, yolHarcamaKasaDocId } = await import(
+        '../lib/yolHarcamaUtils'
+      );
       await updateDoc(doc(db, 'yolHarcamalari', item.id), {
         durum: 'ONAYLANDI',
+        nihaiMasrafTipi,
+        masrafTipi: item.masrafTipi || nihaiMasrafTipi,
         onaylayanYonetici: currentUser?.email || 'Sistem Yöneticisi',
-        onayTarihi: new Date().toISOString()
+        onayTarihi: new Date().toISOString(),
       });
 
-      const payload = buildYolHarcamaKasaCikisPayload(item);
+      const payload = buildYolHarcamaKasaCikisPayload(
+        { ...item, nihaiMasrafTipi },
+        nihaiMasrafTipi
+      );
       const kasaRef = doc(db, 'kasaHareketleri', yolHarcamaKasaDocId(item.id));
       await setDoc(kasaRef, payload);
 
-      alert("Yol harcaması onaylandı. Tutar Haftalık Kasa'ya ÇIKIŞ (eksi bakiye) olarak işlendi.");
+      alert(
+        nihaiMasrafTipi === 'KENDI'
+          ? 'Onaylandı: Şoföre iade olarak Haftalık Kasa çıkışına işlendi.'
+          : 'Onaylandı: Kasa harcaması olarak Haftalık Kasa çıkışına işlendi (şoföre ödeme yok).'
+      );
     } catch (err) {
       console.error(err);
-      alert("Hata oluştu.");
+      alert('Hata oluştu.');
     }
   };
 
@@ -3561,6 +3587,32 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
                                 Fiş No: {item.fisNo}
                               </p>
                             )}
+                            <p className="text-[10px] pt-1">
+                              <span className="text-[8px] font-bold text-slate-400 uppercase">Şoför beyanı: </span>
+                              <span
+                                className={`font-black ${
+                                  item.masrafTipi === 'KASA' ? 'text-sky-700' : 'text-rose-700'
+                                }`}
+                              >
+                                {item.masrafTipi === 'KASA'
+                                  ? 'Kasa harcaması'
+                                  : item.masrafTipi === 'KENDI'
+                                    ? 'Kendi harcaması'
+                                    : 'Belirtilmemiş'}
+                              </span>
+                            </p>
+                            {item.nihaiMasrafTipi && (
+                              <p className="text-[10px]">
+                                <span className="text-[8px] font-bold text-slate-400 uppercase">
+                                  Yönetici nihai:{' '}
+                                </span>
+                                <span className="font-black text-slate-800">
+                                  {item.nihaiMasrafTipi === 'KASA'
+                                    ? 'Kasa harcaması'
+                                    : 'Şoför kendi / iade'}
+                                </span>
+                              </p>
+                            )}
                           </div>
 
                           {item.faturaFotoUrl && (
@@ -3577,19 +3629,35 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
 
                         <div className="space-y-2 mt-3">
                           {item.durum === 'ONAY BEKLİYOR' && (
-                            <div className="flex space-x-2 pt-2 border-t">
-                              <button
-                                onClick={() => handleApproveYolHarcamasi(item)}
-                                className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-1.5 rounded-xl text-[10px] transition cursor-pointer"
-                              >
-                                Onayla & Kasaya Aktar
-                              </button>
-                              <button
-                                onClick={() => handleRejectYolHarcamasi(item)}
-                                className="bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-100 font-bold py-1.5 px-3 rounded-xl text-[10px] transition cursor-pointer"
-                              >
-                                Reddet
-                              </button>
+                            <div className="pt-2 border-t space-y-2">
+                              <p className="text-[9px] font-bold text-slate-500 uppercase tracking-wide">
+                                Nihai ayrım (yönetici)
+                              </p>
+                              <div className="flex flex-col sm:flex-row gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => handleApproveYolHarcamasi(item, 'KENDI')}
+                                  className="flex-1 bg-rose-600 hover:bg-rose-700 text-white font-bold py-2 rounded-xl text-[10px] transition cursor-pointer"
+                                  title="Şoföre iade / ödeme"
+                                >
+                                  Şoföre öde (Kendi)
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleApproveYolHarcamasi(item, 'KASA')}
+                                  className="flex-1 bg-sky-600 hover:bg-sky-700 text-white font-bold py-2 rounded-xl text-[10px] transition cursor-pointer"
+                                  title="Şirket kasası harcaması"
+                                >
+                                  Kasaya işle (Kasa)
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleRejectYolHarcamasi(item)}
+                                  className="bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-100 font-bold py-2 px-3 rounded-xl text-[10px] transition cursor-pointer"
+                                >
+                                  Reddet
+                                </button>
+                              </div>
                             </div>
                           )}
                           {item.durum !== 'ONAY BEKLİYOR' && (

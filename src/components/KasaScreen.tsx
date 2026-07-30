@@ -9,7 +9,11 @@ import { exportKasaExcel } from '../lib/kasaExcelExport';
 import { compressImage } from '../lib/imageCompress';
 import { removeDocument } from '../lib/firebase';
 import { todayDateKey } from '../lib/dateKeyUtils';
-import { isSoforKasaHareketi } from '../lib/yolHarcamaUtils';
+import {
+  isSoforIadeKasaHareketi,
+  isSoforKaynakliKasaHareketi,
+  isSoforUzerindenKasaGideri,
+} from '../lib/yolHarcamaUtils';
 
 interface KasaScreenProps {
   kasaHareketleri: KasaHareketi[];
@@ -98,6 +102,7 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
         tutar: Number(r.tutar) || 0,
         surucu: r.surucu,
         fotoUrl: r.fisEvrakUrl,
+        masrafTipi: isSoforUzerindenKasaGideri(r) ? 'KASA' : 'KENDI',
       })),
       surucuFiltre: soforIadeFiltre || undefined,
       olusturan: 'Haftalık Kasa',
@@ -198,8 +203,11 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
     .filter((k) => k.hareketTipi === 'ÇIKIŞ')
     .reduce((sum, current) => sum + current.tutar, 0);
 
-  const soforOut = filteredHareketler
-    .filter((k) => k.hareketTipi === 'ÇIKIŞ' && isSoforKasaHareketi(k))
+  const soforIadeOut = filteredHareketler
+    .filter((k) => k.hareketTipi === 'ÇIKIŞ' && isSoforIadeKasaHareketi(k))
+    .reduce((sum, current) => sum + current.tutar, 0);
+  const soforKasaOut = filteredHareketler
+    .filter((k) => k.hareketTipi === 'ÇIKIŞ' && isSoforUzerindenKasaGideri(k))
     .reduce((sum, current) => sum + current.tutar, 0);
 
   // Handle Drag & Drop Events
@@ -409,11 +417,12 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
       </div>
 
       {/* Financial statistics dashboard grid — seçili aralık */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 shrink-0">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 shrink-0">
         {[
           { title: "Giriş (aralık)", value: `₺${totalIn.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}`, color: "border-emerald-100 bg-emerald-50/70 text-emerald-800", icon: ArrowUpRight },
           { title: "Çıkış (aralık)", value: `₺${totalOut.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}`, color: "border-rose-100 bg-rose-50/70 text-rose-800", icon: ArrowDownRight },
-          { title: "Şoför çıkış", value: `₺${soforOut.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}`, color: "border-indigo-100 bg-indigo-50/70 text-indigo-800", icon: CreditCard },
+          { title: "Şoföre iade", value: `₺${soforIadeOut.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}`, color: "border-rose-100 bg-rose-50/50 text-rose-900", icon: CreditCard },
+          { title: "Şoför→Kasa", value: `₺${soforKasaOut.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}`, color: "border-sky-100 bg-sky-50/70 text-sky-800", icon: CreditCard },
           { title: "Net bakiye", value: `₺${(totalIn - totalOut).toLocaleString('tr-TR', { minimumFractionDigits: 2 })}`, color: "border-amber-150 bg-amber-50/70 text-amber-800 font-bold", icon: Wallet }
         ].map((item, idx) => {
           const Icon = item.icon;
@@ -671,14 +680,20 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
             ) : (
               <div className="divide-y divide-slate-100 divide-dashed overflow-y-auto">
                 {filteredHareketler.map(kh => {
-                  const sofor = isSoforKasaHareketi(kh);
+                  const sofor = isSoforKaynakliKasaHareketi(kh);
+                  const soforIade = isSoforIadeKasaHareketi(kh);
+                  const soforKasa = isSoforUzerindenKasaGideri(kh);
                   return (
                   <div 
                     key={kh.id} 
                     className={`grid grid-cols-5 min-w-[720px] items-center py-2.5 px-4 text-xs transition cursor-default group ${
                       editingId === kh.id
                         ? 'bg-amber-50'
-                        : sofor
+                        : soforKasa
+                          ? 'bg-sky-50/50 hover:bg-sky-50/80'
+                          : soforIade
+                          ? 'bg-rose-50/40 hover:bg-rose-50/70'
+                          : sofor
                           ? 'bg-indigo-50/40 hover:bg-indigo-50/70'
                           : 'hover:bg-amber-500/5'
                     }`}
@@ -696,7 +711,17 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
                       }`}>
                         {kh.hareketTipi}
                       </span>
-                      {sofor && (
+                      {soforIade && (
+                        <span className="inline-block py-0.5 px-2 rounded-full text-[9px] font-extrabold bg-rose-100 text-rose-800 border border-rose-200">
+                          ŞOFÖR İADE
+                        </span>
+                      )}
+                      {soforKasa && (
+                        <span className="inline-block py-0.5 px-2 rounded-full text-[9px] font-extrabold bg-sky-100 text-sky-800 border border-sky-200">
+                          KASA (ŞOFÖR)
+                        </span>
+                      )}
+                      {sofor && !soforIade && !soforKasa && (
                         <span className="inline-block py-0.5 px-2 rounded-full text-[9px] font-extrabold bg-indigo-100 text-indigo-800 border border-indigo-200">
                           ŞOFÖR FİŞ
                         </span>
