@@ -613,6 +613,8 @@ export const LojistikScreen: React.FC<LojistikScreenProps> = ({
       surucu: x.surucu,
       fotoUrl: x.faturaFotoUrl,
       masrafTipi: x.nihaiMasrafTipi || x.masrafTipi || 'KENDI',
+      odemeDurumu:
+        (x.nihaiMasrafTipi || x.masrafTipi) === 'KASA' ? 'KASA_ODEDI' : 'BORC',
     }));
     if (items.length === 0) {
       alert('Seçili aralıkta masraf kaydı yok.');
