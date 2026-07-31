@@ -1,5 +1,5 @@
 /** Şoför yol / masraf fişi yardımcıları — onay sonrası Haftalık Kasa çıkışı */
-import { KasaHareketi, SoforMasrafTipi, YolHarcamasi } from '../types/erp';
+import { KasaHareketi, KasaOdemeDurumu, SoforMasrafTipi, YolHarcamasi } from '../types/erp';
 import { kibritciReportHeaderHtml } from './kibritciBrand';
 import { formatDateLabelTr, normalizeDateKey, todayDateKey } from './dateKeyUtils';
 import {
@@ -55,8 +55,51 @@ export function isSoforKasaHareketi(
 }
 
 /**
- * Yönetici ödeme durumu / harcama kaynağı — rapor ve özet için nihai ayrım.
- * KASA → şirket kasası; KENDI → şoför/personel (ödeme veya borç).
+ * Yönetici / kayıt ödeme durumu — kasaya yazılan her çıkış için.
+ * BORC = kasanın ödemesi gereken borç (personel/şoföre).
+ */
+export function resolveKasaOdemeDurumu(
+  k?: Pick<
+    KasaHareketi,
+    | 'hareketTipi'
+    | 'odemeDurumu'
+    | 'harcamaKaynagi'
+    | 'soforOdemesi'
+    | 'soforKasaHarcamasi'
+    | 'masrafTipi'
+    | 'id'
+  > | null
+): KasaOdemeDurumu | null {
+  if (!k || k.hareketTipi === 'GİRİŞ') return null;
+  if (k.odemeDurumu === 'BORC' || k.odemeDurumu === 'PERSONEL_ODEDI' || k.odemeDurumu === 'KASA_ODEDI') {
+    return k.odemeDurumu;
+  }
+  if (k.harcamaKaynagi === 'KASA_HARCAMA') return 'KASA_ODEDI';
+  if (k.harcamaKaynagi === 'PERSONEL_HARCAMA') return 'PERSONEL_ODEDI';
+
+  if (isSoforKaynakliKasaHareketi(k)) {
+    if (k.soforKasaHarcamasi || normalizeSoforMasrafTipi(k.masrafTipi) === 'KASA') {
+      return 'KASA_ODEDI';
+    }
+    // Şoför kendi cebinden → kasanın borcu (ödenmeli)
+    if (k.soforOdemesi || String(k.id || '').startsWith('kh_yol_')) return 'BORC';
+  }
+
+  if (normalizeSoforMasrafTipi(k.masrafTipi) === 'KASA') return 'KASA_ODEDI';
+  if (k.hareketTipi === 'ÇIKIŞ') return 'KASA_ODEDI';
+  return null;
+}
+
+export function kasaOdemeDurumuLabel(d?: KasaOdemeDurumu | null): string {
+  if (d === 'BORC') return 'Kasa borcu (ödenmeli)';
+  if (d === 'PERSONEL_ODEDI') return 'Personel ödedi';
+  if (d === 'KASA_ODEDI') return 'Kasa ödedi';
+  return '';
+}
+
+/**
+ * Rapor / eski KASA|KENDI ayrımı.
+ * KASA_ODEDI → KASA; BORC ve PERSONEL_ODEDI → KENDI (şoför/personel tarafı).
  */
 export function resolveKasaRaporMasrafTipi(
   k?: Pick<
@@ -70,42 +113,27 @@ export function resolveKasaRaporMasrafTipi(
     | 'id'
   > | null
 ): SoforMasrafTipi | null {
-  if (!k || k.hareketTipi === 'GİRİŞ') return null;
-
-  if (k.odemeDurumu === 'KASA_ODEDI') return 'KASA';
-  if (k.odemeDurumu === 'BORC' || k.odemeDurumu === 'PERSONEL_ODEDI') return 'KENDI';
-
-  if (k.harcamaKaynagi === 'KASA_HARCAMA') return 'KASA';
-  if (k.harcamaKaynagi === 'PERSONEL_HARCAMA') return 'KENDI';
-
-  // Soför fişi bayrakları (yönetici override yoksa)
-  if (isSoforKaynakliKasaHareketi(k)) {
-    if (k.soforKasaHarcamasi) return 'KASA';
-    if (normalizeSoforMasrafTipi(k.masrafTipi) === 'KASA') return 'KASA';
-    if (k.soforOdemesi || String(k.id || '').startsWith('kh_yol_')) return 'KENDI';
-  }
-
-  if (normalizeSoforMasrafTipi(k.masrafTipi) === 'KASA') return 'KASA';
-  // İşaretsiz çıkış → şirket kasası
-  if (k.hareketTipi === 'ÇIKIŞ') return 'KASA';
+  const d = resolveKasaOdemeDurumu(k);
+  if (d === 'KASA_ODEDI') return 'KASA';
+  if (d === 'BORC' || d === 'PERSONEL_ODEDI') return 'KENDI';
   return null;
 }
 
-/** Şoföre iade edilecek (kendi cebinden) — yönetici KASA işaretlediyse false */
+/** Şoföre iade / kasa borcu — yönetici KASA veya Personel ödedi ise false */
 export function isSoforIadeKasaHareketi(k?: KasaHareketi | null): boolean {
   if (!k || !isSoforKaynakliKasaHareketi(k)) return false;
-  const resolved = resolveKasaRaporMasrafTipi(k);
-  if (resolved === 'KASA') return false;
-  if (resolved === 'KENDI') return true;
+  const d = resolveKasaOdemeDurumu(k);
+  if (d === 'KASA_ODEDI' || d === 'PERSONEL_ODEDI') return false;
+  if (d === 'BORC') return true;
   if (k.soforKasaHarcamasi) return false;
   if (normalizeSoforMasrafTipi(k.masrafTipi) === 'KASA') return false;
   return Boolean(k.soforOdemesi) || String(k.id || '').startsWith('kh_yol_');
 }
 
-/** Şirket kasası harcaması (şoför üzerinden veya yönetici KASA) */
+/** Şirket kasasından ödenen (şoför üzerinden veya yönetici KASA ÖDEDİ) */
 export function isSoforUzerindenKasaGideri(k?: KasaHareketi | null): boolean {
   if (!k || !isSoforKaynakliKasaHareketi(k)) return false;
-  return resolveKasaRaporMasrafTipi(k) === 'KASA';
+  return resolveKasaOdemeDurumu(k) === 'KASA_ODEDI';
 }
 
 export function yolHarcamaKasaDocId(yolHarcamaId: string): string {
@@ -147,7 +175,7 @@ export function buildYolHarcamaKasaCikisPayload(
     hareketTipi: 'ÇIKIŞ',
     tutar: Math.abs(parseFloat(String(item.tutar)) || 0),
     aciklama: isKendi
-      ? `Şoför kendi harcaması — iade (Fiş: ${fisNo || '—'} · ${surucu})${
+      ? `Şoför kendi harcaması — kasa borcu / iade (Fiş: ${fisNo || '—'} · ${surucu})${
           aciklamaExtra ? ` — ${aciklamaExtra}` : ''
         }`
       : `Şoför üzerinden KASA harcaması (Fiş: ${fisNo || '—'} · ${surucu})${
@@ -159,6 +187,10 @@ export function buildYolHarcamaKasaCikisPayload(
     soforOdemesi: isKendi,
     soforKasaHarcamasi: !isKendi,
     masrafTipi: tip,
+    /** Kendi cebinden → kasanın ödemesi gereken borç; kasa tipi → kasa ödedi */
+    odemeDurumu: isKendi ? 'BORC' : 'KASA_ODEDI',
+    harcamaKaynagi: isKendi ? 'PERSONEL_HARCAMA' : 'KASA_HARCAMA',
+    personelAdi: isKendi ? surucu : undefined,
     surucu,
     fisNo,
   };
@@ -255,30 +287,44 @@ type RaporKalem = {
   fotoUrl?: string;
   tipEtiket?: string;
   masrafTipi?: SoforMasrafTipi | string;
+  odemeDurumu?: KasaOdemeDurumu | null;
 };
+
+function raporKalemOdemeDurumu(r: RaporKalem): KasaOdemeDurumu {
+  if (r.odemeDurumu === 'BORC' || r.odemeDurumu === 'PERSONEL_ODEDI' || r.odemeDurumu === 'KASA_ODEDI') {
+    return r.odemeDurumu;
+  }
+  return normalizeSoforMasrafTipi(r.masrafTipi) === 'KASA' ? 'KASA_ODEDI' : 'BORC';
+}
 
 function buildMasrafTableHtml(rows: RaporKalem[], toplam: number): string {
   const tableRows = rows
     .map(
-      (r, i) => `<tr>
+      (r, i) => {
+        const durum = raporKalemOdemeDurumu(r);
+        const tipColor =
+          durum === 'KASA_ODEDI' ? '#1d4ed8' : durum === 'BORC' ? '#b45309' : '#6d28d9';
+        return `<tr>
       <td style="padding:6px 8px;border:1px solid #cbd5e1;text-align:center">${i + 1}</td>
       <td style="padding:6px 8px;border:1px solid #cbd5e1;font-family:ui-monospace,monospace">${escapeHtml(r.tarih)}</td>
       <td style="padding:6px 8px;border:1px solid #cbd5e1;font-weight:700">${escapeHtml(r.fisNo || '—')}</td>
-      <td style="padding:6px 8px;border:1px solid #cbd5e1;font-size:10px;font-weight:800;color:${
-        normalizeSoforMasrafTipi(r.masrafTipi) === 'KASA' ? '#1d4ed8' : '#9f1239'
-      }">${escapeHtml(soforMasrafTipiLabel(r.masrafTipi))}</td>
+      <td style="padding:6px 8px;border:1px solid #cbd5e1;font-size:10px;font-weight:800;color:${tipColor}">${escapeHtml(kasaOdemeDurumuLabel(durum))}</td>
       <td style="padding:6px 8px;border:1px solid #cbd5e1">${escapeHtml(r.tipEtiket || '')}${escapeHtml(r.aciklama || '—')}</td>
       <td style="padding:6px 8px;border:1px solid #cbd5e1">${escapeHtml(r.surucu || '—')}</td>
       <td style="padding:6px 8px;border:1px solid #cbd5e1;text-align:right;font-weight:800;color:#b91c1c">−${Number(r.tutar || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺</td>
-    </tr>`
+    </tr>`;
+      }
     )
     .join('');
 
-  const kendiToplam = rows
-    .filter((r) => normalizeSoforMasrafTipi(r.masrafTipi) === 'KENDI')
+  const borcToplam = rows
+    .filter((r) => raporKalemOdemeDurumu(r) === 'BORC')
+    .reduce((s, r) => s + (Number(r.tutar) || 0), 0);
+  const personelToplam = rows
+    .filter((r) => raporKalemOdemeDurumu(r) === 'PERSONEL_ODEDI')
     .reduce((s, r) => s + (Number(r.tutar) || 0), 0);
   const kasaToplam = rows
-    .filter((r) => normalizeSoforMasrafTipi(r.masrafTipi) === 'KASA')
+    .filter((r) => raporKalemOdemeDurumu(r) === 'KASA_ODEDI')
     .reduce((s, r) => s + (Number(r.tutar) || 0), 0);
 
   return `<table style="width:100%;border-collapse:collapse;font-size:11px;margin-bottom:18px">
@@ -287,9 +333,9 @@ function buildMasrafTableHtml(rows: RaporKalem[], toplam: number): string {
           <th style="padding:7px;border:1px solid #1e3a5f">#</th>
           <th style="padding:7px;border:1px solid #1e3a5f;text-align:left">Tarih</th>
           <th style="padding:7px;border:1px solid #1e3a5f;text-align:left">Fiş No</th>
-          <th style="padding:7px;border:1px solid #1e3a5f;text-align:left">Tip</th>
+          <th style="padding:7px;border:1px solid #1e3a5f;text-align:left">Ödeme durumu</th>
           <th style="padding:7px;border:1px solid #1e3a5f;text-align:left">Açıklama</th>
-          <th style="padding:7px;border:1px solid #1e3a5f;text-align:left">Şoför</th>
+          <th style="padding:7px;border:1px solid #1e3a5f;text-align:left">Şoför / Personel</th>
           <th style="padding:7px;border:1px solid #1e3a5f;text-align:right">Çıkış (−)</th>
         </tr>
       </thead>
@@ -297,12 +343,16 @@ function buildMasrafTableHtml(rows: RaporKalem[], toplam: number): string {
         ${tableRows || '<tr><td colspan="7" style="padding:12px;text-align:center;color:#94a3b8">Kayıt yok</td></tr>'}
       </tbody>
       <tfoot>
-        <tr style="background:#fff1f2;font-weight:700">
-          <td colspan="6" style="padding:6px 8px;border:1px solid #cbd5e1;text-align:right">Şoföre ödenecek (kendi)</td>
-          <td style="padding:6px 8px;border:1px solid #cbd5e1;text-align:right;color:#9f1239">−${kendiToplam.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺</td>
+        <tr style="background:#fffbeb;font-weight:700">
+          <td colspan="6" style="padding:6px 8px;border:1px solid #cbd5e1;text-align:right">Kasa borcu (ödenmesi gereken)</td>
+          <td style="padding:6px 8px;border:1px solid #cbd5e1;text-align:right;color:#b45309">−${borcToplam.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺</td>
+        </tr>
+        <tr style="background:#f5f3ff;font-weight:700">
+          <td colspan="6" style="padding:6px 8px;border:1px solid #cbd5e1;text-align:right">Personel ödedi</td>
+          <td style="padding:6px 8px;border:1px solid #cbd5e1;text-align:right;color:#6d28d9">−${personelToplam.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺</td>
         </tr>
         <tr style="background:#eff6ff;font-weight:700">
-          <td colspan="6" style="padding:6px 8px;border:1px solid #cbd5e1;text-align:right">Kasa harcaması</td>
+          <td colspan="6" style="padding:6px 8px;border:1px solid #cbd5e1;text-align:right">Kasa ödedi</td>
           <td style="padding:6px 8px;border:1px solid #cbd5e1;text-align:right;color:#1d4ed8">−${kasaToplam.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺</td>
         </tr>
         <tr style="background:#f1f5f9;font-weight:800">
@@ -369,7 +419,7 @@ export function buildSoforMasrafIadeReportHtml(options: {
     <div style="margin:12px 0;padding:10px 12px;background:#fff1f2;border:1px solid #fecdd3;border-radius:8px;font-size:11px;color:#9f1239">
       <p style="margin:2px 0">Kalem: <strong>${rows.length}</strong> · Toplam: <strong>−${toplam.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺</strong></p>
       <p style="margin:2px 0">Oluşturan: ${escapeHtml(options.olusturan || '—')} · ${new Date().toLocaleString('tr-TR')}</p>
-      <p style="margin:2px 0;font-style:italic">Şoför beyanı yönetici onayında nihai ayrılır: <strong>kendi harcaması → şoföre ödeme</strong>, <strong>kasa harcaması → şirket kasası</strong>.</p>
+      <p style="margin:2px 0;font-style:italic">Kasaya yazılır: <strong>BORÇ</strong> = kasanın ödemesi gereken, <strong>Personel ödedi</strong>, <strong>Kasa ödedi</strong>.</p>
     </div>
     ${buildMasrafTableHtml(rows, toplam)}
     ${buildFotoGridHtml(rows)}
@@ -402,6 +452,7 @@ export function buildKasaHarcamaAralikReportHtml(options: {
       fotoUrl: r.fisEvrakUrl,
       tipEtiket: isSoforKaynakliKasaHareketi(r) ? '[Şoför] ' : '',
       masrafTipi: resolveKasaRaporMasrafTipi(r) || r.masrafTipi || 'KASA',
+      odemeDurumu: resolveKasaOdemeDurumu(r),
     }));
   const toplam = rows.reduce((s, r) => s + (Number(r.tutar) || 0), 0);
   const soforToplam = options.items

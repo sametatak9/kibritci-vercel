@@ -315,9 +315,9 @@ export interface KasaHareketi {
   referansTipi: 'DİĞER' | 'FATURA' | 'İRSALİYE' | 'MAAS' | 'SATIN ALMA';
   referansId?: string;
   fisEvrakUrl?: string;
-  /**
-   * Çıkış ödeme durumu:
-   * BORC = borç kaydı (henüz kapatılmadı)
+/**
+   * Çıkış ödeme durumu (kasaya yazılır):
+   * BORC = kasanın personele/şoföre ödemesi gereken borç (henüz kasa ödemedi)
    * PERSONEL_ODEDI = personel cebinden ödedi
    * KASA_ODEDI = şirket kasasından ödendi
    */

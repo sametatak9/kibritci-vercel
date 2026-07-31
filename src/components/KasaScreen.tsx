@@ -14,6 +14,7 @@ import {
   isSoforIadeKasaHareketi,
   isSoforKaynakliKasaHareketi,
   isSoforUzerindenKasaGideri,
+  resolveKasaOdemeDurumu,
   resolveKasaRaporMasrafTipi,
 } from '../lib/yolHarcamaUtils';
 
@@ -24,13 +25,13 @@ const ODEME_OPTIONS: { id: KasaOdemeDurumu; label: string; short: string; hint: 
     id: 'BORC',
     label: 'BORÇ',
     short: 'Borç',
-    hint: 'Henüz kapatılmayan borç kaydı — personel seçilir',
+    hint: 'Kasaya yazılır — kasanın personele ödemesi gereken borç',
   },
   {
     id: 'PERSONEL_ODEDI',
     label: 'PERSONEL ÖDEDİ',
     short: 'Personel',
-    hint: 'Personel cebinden ödedi',
+    hint: 'Personel cebinden ödedi (kasa ödemedi)',
   },
   {
     id: 'KASA_ODEDI',
@@ -41,7 +42,7 @@ const ODEME_OPTIONS: { id: KasaOdemeDurumu; label: string; short: string; hint: 
 ];
 
 function odemeDurumuLabel(d?: KasaOdemeDurumu | null): string {
-  if (d === 'BORC') return 'BORÇ';
+  if (d === 'BORC') return 'KASA BORCU';
   if (d === 'PERSONEL_ODEDI') return 'PERSONEL ÖDEDİ';
   if (d === 'KASA_ODEDI') return 'KASA ÖDEDİ';
   return '';
@@ -49,14 +50,7 @@ function odemeDurumuLabel(d?: KasaOdemeDurumu | null): string {
 
 /** Eski kayıtlardan ödeme durumunu çıkar */
 function resolveOdemeDurumu(kh: KasaHareketi): KasaOdemeDurumu | null {
-  if (kh.odemeDurumu === 'BORC' || kh.odemeDurumu === 'PERSONEL_ODEDI' || kh.odemeDurumu === 'KASA_ODEDI') {
-    return kh.odemeDurumu;
-  }
-  if (kh.harcamaKaynagi === 'KASA_HARCAMA' || isSoforUzerindenKasaGideri(kh)) return 'KASA_ODEDI';
-  if (isSoforIadeKasaHareketi(kh)) return 'BORC';
-  if (kh.harcamaKaynagi === 'PERSONEL_HARCAMA') return 'PERSONEL_ODEDI';
-  if (kh.hareketTipi === 'ÇIKIŞ') return 'KASA_ODEDI';
-  return null;
+  return resolveKasaOdemeDurumu(kh);
 }
 
 function harcamaKaynagiFromOdeme(d: KasaOdemeDurumu): HarcamaKaynagi {
@@ -176,6 +170,7 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
         surucu: r.surucu,
         fotoUrl: r.fisEvrakUrl,
         masrafTipi: resolveKasaRaporMasrafTipi(r) || (isSoforUzerindenKasaGideri(r) ? 'KASA' : 'KENDI'),
+        odemeDurumu: resolveKasaOdemeDurumu(r),
       })),
       surucuFiltre: soforIadeFiltre || undefined,
       olusturan: 'Haftalık Kasa',
@@ -318,12 +313,21 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
         add('kasa-odedi', 'KASA ÖDEDİ', 'KASA_ODEDI', tutar);
         continue;
       }
+      if (durum === 'BORC') {
+        const name = String(kh.personelAdi || kh.surucu || 'Personel (adsız)').trim();
+        add(
+          `borc:${kh.personelId || name}`,
+          `KASA BORCU · ${name}`,
+          'BORC',
+          tutar
+        );
+        continue;
+      }
       const name = String(kh.personelAdi || kh.surucu || 'Personel (adsız)').trim();
-      const prefix = durum === 'BORC' ? 'borc' : 'podedi';
       add(
-        `${prefix}:${kh.personelId || name}`,
-        `${name} · ${odemeDurumuLabel(durum)}`,
-        durum,
+        `podedi:${kh.personelId || name}`,
+        `${name} · PERSONEL ÖDEDİ`,
+        'PERSONEL_ODEDI',
         tutar
       );
     }
@@ -722,12 +726,12 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
               Ödeme durumu özeti (seçili aralık)
             </h3>
             <p className="text-[10px] text-slate-500 mt-0.5">
-              BORÇ · Personel ödedi · Kasa ödedi · Listeden hızlı değiştirilebilir
+              BORÇ = kasanın ödemesi gereken · Personel ödedi · Kasa ödedi
             </p>
           </div>
           <div className="flex flex-wrap gap-1.5 text-[10px] font-mono font-bold">
             <span className="bg-amber-50 border border-amber-200 text-amber-900 px-2 py-1 rounded-lg">
-              Borç ₺{odemeBazliOzet.totals.BORC.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
+              Kasa borcu ₺{odemeBazliOzet.totals.BORC.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
             </span>
             <span className="bg-violet-50 border border-violet-200 text-violet-900 px-2 py-1 rounded-lg">
               Personel ₺{odemeBazliOzet.totals.PERSONEL_ODEDI.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
@@ -1135,7 +1139,7 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
                       )}
                       {odeme === 'BORC' && (
                         <span className="inline-block py-0.5 px-2 rounded-full text-[9px] font-extrabold bg-amber-100 text-amber-900 border border-amber-200">
-                          BORÇ
+                          KASA BORCU
                         </span>
                       )}
                       {odeme === 'PERSONEL_ODEDI' && (
