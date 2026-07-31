@@ -3418,6 +3418,7 @@ export default function App() {
                   kasaHareketleri={kasaHareketleri}
                   setKasaHareketleri={setKasaHareketleriWithSync}
                   deleteKasaHareketi={deleteKasaHareketi}
+                  personeller={personeller}
                 />
               )}
 

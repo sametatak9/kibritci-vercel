@@ -313,6 +313,11 @@ export interface KasaHareketi {
   referansTipi: 'DİĞER' | 'FATURA' | 'İRSALİYE' | 'MAAS' | 'SATIN ALMA';
   referansId?: string;
   fisEvrakUrl?: string;
+  /** Çıkış: kasa harcaması mı, personel harcaması mı */
+  harcamaKaynagi?: 'KASA_HARCAMA' | 'PERSONEL_HARCAMA';
+  /** Personel harcaması ise harcayan personel */
+  personelId?: string;
+  personelAdi?: string;
   /** Şoför kendi cebinden → iade / ödeme (eksi bakiye + şoföre ödenir) */
   soforOdemesi?: boolean;
   /** Şoför üzerinden şirket kasası harcaması (şoföre iade yok) */

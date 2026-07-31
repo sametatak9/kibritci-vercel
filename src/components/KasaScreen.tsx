@@ -3,7 +3,7 @@ import {
   Wallet, Plus, Trash2, ArrowUpRight, ArrowDownRight, Printer, Edit3,
   Calendar, FileText, Search, CreditCard, ChevronRight, Eye, Image as ImageIcon, CheckCircle, AlertCircle, Mail
 } from 'lucide-react';
-import { KasaHareketi } from '../types/erp';
+import { KasaHareketi, Personel } from '../types/erp';
 import { CorporateReportLayout } from './CorporateReportLayout';
 import { exportKasaExcel } from '../lib/kasaExcelExport';
 import { compressImage } from '../lib/imageCompress';
@@ -15,10 +15,13 @@ import {
   isSoforUzerindenKasaGideri,
 } from '../lib/yolHarcamaUtils';
 
+type HarcamaKaynagi = 'KASA_HARCAMA' | 'PERSONEL_HARCAMA';
+
 interface KasaScreenProps {
   kasaHareketleri: KasaHareketi[];
   setKasaHareketleri: React.Dispatch<React.SetStateAction<KasaHareketi[]>>;
   deleteKasaHareketi?: (id: string) => Promise<void>;
+  personeller?: Personel[];
 }
 
 function defaultWeekRange(): { start: string; end: string } {
@@ -35,6 +38,7 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
   kasaHareketleri, 
   setKasaHareketleri,
   deleteKasaHareketi,
+  personeller = [],
 }) => {
   const week0 = defaultWeekRange();
   // Exact layout filters matching top of table in the screenshot
@@ -55,6 +59,9 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
   const [newDesc, setNewDesc] = useState("");
   const [newRefType, setNewRefType] = useState<'DİĞER' | 'FATURA' | 'İRSALİYE' | 'MAAS' | 'SATIN ALMA'>("DİĞER");
   const [newRefId, setNewRefId] = useState("");
+  const [newHarcamaKaynagi, setNewHarcamaKaynagi] = useState<HarcamaKaynagi | ''>('');
+  const [newPersonelId, setNewPersonelId] = useState('');
+  const [personelArama, setPersonelArama] = useState('');
   
   // File Upload State
   const [uploadedFileName, setUploadedFileName] = useState<string | null>(null);
@@ -210,6 +217,33 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
     .filter((k) => k.hareketTipi === 'ÇIKIŞ' && isSoforUzerindenKasaGideri(k))
     .reduce((sum, current) => sum + current.tutar, 0);
 
+  const personelSecenekleri = useMemo(() => {
+    const q = personelArama.trim().toLocaleLowerCase('tr-TR');
+    const list = (personeller || [])
+      .filter((p) => {
+        const durum = String(p.durum || '').toLocaleUpperCase('tr-TR');
+        if (durum.includes('ÇIKIŞ') || durum.includes('PASIF') || durum.includes('PASİF')) return false;
+        return true;
+      })
+      .map((p) => ({
+        id: p.id,
+        label: `${p.ad || ''} ${p.soyad || ''}`.trim() || p.tcNo || p.id,
+        gorev: p.gorev || '',
+      }))
+      .sort((a, b) => a.label.localeCompare(b.label, 'tr'));
+    if (!q) return list.slice(0, 200);
+    return list
+      .filter((p) => p.label.toLocaleLowerCase('tr-TR').includes(q) || p.gorev.toLocaleLowerCase('tr-TR').includes(q))
+      .slice(0, 200);
+  }, [personeller, personelArama]);
+
+  const selectedPersonelLabel = useMemo(() => {
+    if (!newPersonelId) return '';
+    const p = (personeller || []).find((x) => x.id === newPersonelId);
+    if (!p) return '';
+    return `${p.ad || ''} ${p.soyad || ''}`.trim() || p.tcNo || p.id;
+  }, [personeller, newPersonelId]);
+
   // Handle Drag & Drop Events
   const handleDrag = (e: React.DragEvent) => {
     e.preventDefault();
@@ -261,9 +295,19 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
       alert('Lütfen geçerli bir tutar yazın.');
       return;
     }
-    if (!newDesc) {
+    if (!newDesc.trim()) {
       alert('Lütfen açıklama girin.');
       return;
+    }
+    if (newType === 'ÇIKIŞ') {
+      if (!newHarcamaKaynagi) {
+        alert('Çıkış kaydı için harcama tipi seçin:\n• Kasa Harcama\n• Personel Harcama');
+        return;
+      }
+      if (newHarcamaKaynagi === 'PERSONEL_HARCAMA' && !newPersonelId) {
+        alert('Personel Harcama seçildi. Harcayan personeli seçmeden kayıt yapılamaz.');
+        return;
+      }
     }
     if (savingKasa) return;
 
@@ -286,27 +330,47 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
         ? kasaHareketleri.find((x) => x.id === editingId)
         : undefined;
 
+      const isPersonelHarcama = newType === 'ÇIKIŞ' && newHarcamaKaynagi === 'PERSONEL_HARCAMA';
+
       const record: KasaHareketi = {
         ...(existing || {}),
         id,
         tarih: newDate,
         hareketTipi: newType,
         tutar: amountFloat,
-        aciklama: newDesc,
+        aciklama: newDesc.trim(),
         referansTipi: newRefType,
         referansId: newRefId || undefined,
         fisEvrakUrl: fisUrl || existing?.fisEvrakUrl || undefined,
       };
 
+      if (newType === 'ÇIKIŞ' && newHarcamaKaynagi) {
+        record.harcamaKaynagi = newHarcamaKaynagi;
+      } else {
+        delete record.harcamaKaynagi;
+      }
+      if (isPersonelHarcama) {
+        record.personelId = newPersonelId;
+        record.personelAdi = selectedPersonelLabel || undefined;
+      } else {
+        delete record.personelId;
+        delete record.personelAdi;
+      }
+
       const { saveDocument } = await import('../lib/firebase');
-      await saveDocument('kasaHareketleri', record);
+      await saveDocument('kasaHareketleri', {
+        ...record,
+        harcamaKaynagi: record.harcamaKaynagi ?? null,
+        personelId: record.personelId ?? null,
+        personelAdi: record.personelAdi ?? null,
+      } as KasaHareketi);
 
       setKasaHareketleri((prev) => {
         if (editingId) {
-          return prev.map((item) => (item.id === editingId ? { ...item, ...record } : item));
+          return prev.map((item) => (item.id === editingId ? record : item));
         }
         if (prev.some((x) => x.id === id)) {
-          return prev.map((item) => (item.id === id ? { ...item, ...record } : item));
+          return prev.map((item) => (item.id === id ? record : item));
         }
         return [record, ...prev];
       });
@@ -327,6 +391,9 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
       setNewAmount('');
       setNewDesc('');
       setNewRefId('');
+      setNewHarcamaKaynagi('');
+      setNewPersonelId('');
+      setPersonelArama('');
       setUploadedFileName(null);
       setUploadedFileBase64(null);
       setNewDate(todayDateKey());
@@ -352,6 +419,13 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
     setNewDesc(kh.aciklama);
     setNewRefType(kh.referansTipi);
     setNewRefId(kh.referansId || "");
+    setNewHarcamaKaynagi(
+      kh.hareketTipi === 'ÇIKIŞ'
+        ? (kh.harcamaKaynagi || (kh.personelId ? 'PERSONEL_HARCAMA' : 'KASA_HARCAMA'))
+        : ''
+    );
+    setNewPersonelId(kh.personelId || '');
+    setPersonelArama(kh.personelAdi || '');
     setUploadedFileName(kh.fisEvrakUrl ? "Kayıtlı Fiş Görseli Mevcut" : null);
     setUploadedFileBase64(kh.fisEvrakUrl || null);
   };
@@ -361,6 +435,9 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
     setNewAmount("");
     setNewDesc("");
     setNewRefId("");
+    setNewHarcamaKaynagi('');
+    setNewPersonelId('');
+    setPersonelArama('');
     setUploadedFileName(null);
     setUploadedFileBase64(null);
   };
@@ -492,12 +569,95 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
               <select 
                 className="w-full text-xs font-bold p-2 bg-slate-55 border border-slate-200 rounded-xl max-h-10 cursor-pointer outline-none"
                 value={newType}
-                onChange={(e) => setNewType(e.target.value as any)}
+                onChange={(e) => {
+                  const next = e.target.value as 'GİRİŞ' | 'ÇIKIŞ';
+                  setNewType(next);
+                  if (next === 'GİRİŞ') {
+                    setNewHarcamaKaynagi('');
+                    setNewPersonelId('');
+                    setPersonelArama('');
+                  } else if (!newHarcamaKaynagi) {
+                    setNewHarcamaKaynagi('KASA_HARCAMA');
+                  }
+                }}
               >
                 <option value="GİRİŞ">📈 GİRİŞ</option>
                 <option value="ÇIKIŞ">📉 ÇIKIŞ</option>
               </select>
             </div>
+
+            {newType === 'ÇIKIŞ' && (
+              <div className="space-y-2 rounded-xl border border-rose-100 bg-rose-50/40 p-3">
+                <label className="text-[10px] font-bold text-rose-800 uppercase block">
+                  Harcama Tipi <span className="text-rose-600">*</span>
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setNewHarcamaKaynagi('KASA_HARCAMA');
+                      setNewPersonelId('');
+                      setPersonelArama('');
+                    }}
+                    className={`text-[10px] font-black uppercase py-2 px-2 rounded-xl border cursor-pointer transition ${
+                      newHarcamaKaynagi === 'KASA_HARCAMA'
+                        ? 'bg-slate-900 text-white border-slate-900'
+                        : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                    }`}
+                  >
+                    Kasa Harcama
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setNewHarcamaKaynagi('PERSONEL_HARCAMA')}
+                    className={`text-[10px] font-black uppercase py-2 px-2 rounded-xl border cursor-pointer transition ${
+                      newHarcamaKaynagi === 'PERSONEL_HARCAMA'
+                        ? 'bg-violet-700 text-white border-violet-700'
+                        : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                    }`}
+                  >
+                    Personel Harcama
+                  </button>
+                </div>
+
+                {newHarcamaKaynagi === 'PERSONEL_HARCAMA' && (
+                  <div className="space-y-1.5 pt-1">
+                    <label className="text-[10px] font-bold text-violet-900 uppercase block">
+                      Harcayan Personel <span className="text-rose-600">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={personelArama}
+                      onChange={(e) => setPersonelArama(e.target.value)}
+                      placeholder="Ad / soyad ara…"
+                      className="w-full text-xs font-semibold p-2 bg-white border border-violet-200 rounded-xl outline-none"
+                    />
+                    <select
+                      required
+                      value={newPersonelId}
+                      onChange={(e) => setNewPersonelId(e.target.value)}
+                      className="w-full text-xs font-bold p-2 bg-white border border-violet-200 rounded-xl cursor-pointer outline-none"
+                    >
+                      <option value="">Personel seçin…</option>
+                      {personelSecenekleri.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.label}{p.gorev ? ` · ${p.gorev}` : ''}
+                        </option>
+                      ))}
+                    </select>
+                    {newPersonelId ? (
+                      <p className="text-[10px] text-violet-800 font-semibold">
+                        Seçilen: {selectedPersonelLabel}
+                      </p>
+                    ) : (
+                      <p className="text-[10px] text-rose-700 font-semibold">
+                        Personel seçilmeden kayıt yapılamaz.
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Tutar Row */}
             <div className="space-y-1">
@@ -726,6 +886,16 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
                           ŞOFÖR FİŞ
                         </span>
                       )}
+                      {kh.harcamaKaynagi === 'KASA_HARCAMA' && (
+                        <span className="inline-block py-0.5 px-2 rounded-full text-[9px] font-extrabold bg-slate-100 text-slate-700 border border-slate-200">
+                          KASA HARCAMA
+                        </span>
+                      )}
+                      {kh.harcamaKaynagi === 'PERSONEL_HARCAMA' && (
+                        <span className="inline-block py-0.5 px-2 rounded-full text-[9px] font-extrabold bg-violet-100 text-violet-800 border border-violet-200">
+                          PERSONEL HARCAMA
+                        </span>
+                      )}
                     </div>
 
                     {/* Tutar Column */}
@@ -741,6 +911,7 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
                         <h5 className="font-bold text-slate-800 truncate leading-tight" title={kh.aciklama}>{kh.aciklama}</h5>
                         <p className="text-[9px] text-[#64748b] font-semibold uppercase tracking-wider mt-0.5 truncate">
                           {kh.referansTipi} {kh.referansId && `[ No: ${kh.referansId} ]`}
+                          {kh.personelAdi ? ` · Personel: ${kh.personelAdi}` : ''}
                           {kh.surucu ? ` · ${kh.surucu}` : ''}
                         </p>
                       </div>
