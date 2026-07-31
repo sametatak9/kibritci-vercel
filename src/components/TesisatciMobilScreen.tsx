@@ -5,7 +5,7 @@ import {
 } from 'lucide-react';
 import { collection, deleteDoc, doc, onSnapshot, setDoc } from 'firebase/firestore';
 import {
-  AylikYoklamaMap, CariKart, CariKartIslem, Fatura, KampYerleske, Personel, SahaFaaliyeti, TesisatciFaaliyet
+  AylikYoklamaMap, CariKart, CariKartIslem, Fatura, Irsaliye, KampYerleske, Personel, SahaFaaliyeti, TesisatciFaaliyet
 } from '../types/erp';
 import { db, cleanUndefined } from '../lib/firebase';
 import { compressImage } from '../lib/imageCompress';
@@ -30,6 +30,9 @@ interface TesisatciMobilScreenProps {
   saveYoklamalarNow?: (next: AylikYoklamaMap) => Promise<void>;
   cariKartlar?: CariKart[];
   faturalar?: Fatura[];
+  setFaturalar?: React.Dispatch<React.SetStateAction<Fatura[]>>;
+  irsaliyeler?: Irsaliye[];
+  setIrsaliyeler?: React.Dispatch<React.SetStateAction<Irsaliye[]>>;
   kampYerleskeleri?: KampYerleske[];
   setCariKartlar?: (updater: CariKart[] | ((prev: CariKart[]) => CariKart[])) => void;
   setCariIslemGecmisi?: React.Dispatch<React.SetStateAction<CariKartIslem[]>>;
@@ -56,6 +59,9 @@ export const TesisatciMobilScreen: React.FC<TesisatciMobilScreenProps> = ({
   saveYoklamalarNow,
   cariKartlar = [],
   faturalar = [],
+  setFaturalar,
+  irsaliyeler = [],
+  setIrsaliyeler,
   kampYerleskeleri = [],
   setCariKartlar,
   setCariIslemGecmisi,
@@ -793,6 +799,10 @@ export const TesisatciMobilScreen: React.FC<TesisatciMobilScreenProps> = ({
         <TesisatciYildirimTab
           cariKartlar={cariKartlar}
           faturalar={faturalar}
+          setFaturalar={setFaturalar}
+          irsaliyeler={irsaliyeler}
+          setIrsaliyeler={setIrsaliyeler}
+          setCariIslemGecmisi={setCariIslemGecmisi}
           currentUser={currentUser}
           addNotification={addNotification}
           showStatus={showStatus}

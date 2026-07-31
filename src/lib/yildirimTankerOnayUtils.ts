@@ -1,4 +1,4 @@
-import { CariKart, CariKartIslem, Irsaliye, YildirimTankerFis } from '../types/erp';
+import { CariKart, CariKartIslem, Irsaliye, SatinAlmaTalebi, YildirimTankerFis } from '../types/erp';
 import { saveDocument } from './firebase';
 import {
   YILDIRIM_TANKER_UNVAN,
@@ -6,6 +6,7 @@ import {
   ensureYildirimTankerCari,
   isYildirimTankerFirma,
 } from './yildirimTankerUtils';
+import { findMatchingYildirimSatinAlma, type TankerSaMatch } from './tankerEvrakDonusum';
 
 export type YildirimFisOnayDurum = 'YONETICI_ONAYINDA' | 'ONAYLANDI' | 'REDDEDILDI';
 
@@ -18,6 +19,8 @@ export type YildirimFisCorrection = {
   fisGorselUrl?: string;
   firmaUnvan: string;
   cariKartId?: string;
+  saId?: string;
+  saKalemId?: string;
 };
 
 /** Yalnızca açıkça yönetici onayına gönderilmiş fişler (eski otomatik onaylı kayıtlar hariç) */
@@ -54,9 +57,9 @@ export function buildYildirimKalemler(
 }
 
 /**
- * Yönetici onayında (Şeker Vidanjör ile aynı mantık):
+ * Yönetici onayında (Şeker Vidanjör / MICIR ile aynı mantık):
  * 1) yildirimTankerFisleri → ONAYLANDI
- * 2) irsaliyeler'e Yıldırım Tanker irsaliyesi
+ * 2) irsaliyeler'e Yıldırım Tanker irsaliyesi (+ SA soft bağ)
  * 3) cariIslemGecmisi
  * 4) guvenlikGelenEvraklar → ONAYLANDI
  */
@@ -65,12 +68,19 @@ export async function approveYildirimTankerFis(options: {
   correction: YildirimFisCorrection;
   onaylayan: string;
   cariKartlar: CariKart[];
+  satinAlmaTalepleri?: SatinAlmaTalebi[];
+  irsaliyeler?: Irsaliye[];
   setCariKartlar?: (updater: CariKart[] | ((prev: CariKart[]) => CariKart[])) => void;
   setIrsaliyeler?: (updater: Irsaliye[] | ((prev: Irsaliye[]) => Irsaliye[])) => void;
   setCariIslemGecmisi?: (
     updater: CariKartIslem[] | ((prev: CariKartIslem[]) => CariKartIslem[])
   ) => void;
-}): Promise<{ irsaliye: Irsaliye; fis: YildirimTankerFis; cariIslem: CariKartIslem }> {
+}): Promise<{
+  irsaliye: Irsaliye;
+  fis: YildirimTankerFis;
+  cariIslem: CariKartIslem;
+  saMatch: TankerSaMatch | null;
+}> {
   const { fis, correction, onaylayan } = options;
   const now = new Date().toISOString();
 
@@ -83,6 +93,27 @@ export async function approveYildirimTankerFis(options: {
     firmaUnvan = cari.unvan || YILDIRIM_TANKER_UNVAN;
   }
 
+  const tipHint: 'ICME' | 'SANAYI' | 'DAMACA' | null =
+    correction.icmeSuyuAdet > 0
+      ? 'ICME'
+      : correction.sanayiSuyuAdet > 0
+        ? 'SANAYI'
+        : correction.damacaAdet > 0
+          ? 'DAMACA'
+          : null;
+
+  const saMatch = findMatchingYildirimSatinAlma(
+    options.satinAlmaTalepleri,
+    options.irsaliyeler,
+    tipHint,
+    {
+      preferredSaId: correction.saId || fis.saId,
+      preferredSaKalemId: correction.saKalemId || fis.saKalemId,
+    }
+  );
+  const saId = saMatch?.sa.saId || correction.saId || fis.saId;
+  const saKalemId = saMatch?.kalem.id || correction.saKalemId || fis.saKalemId;
+
   const irsaliyeId = fis.irsaliyeId || `IR-YT-${fis.id}`;
   const guvenlikEvrakId = fis.guvenlikEvrakId || `EVR-YT-${fis.id}`;
   const kalemler = buildYildirimKalemler(
@@ -90,7 +121,7 @@ export async function approveYildirimTankerFis(options: {
     correction.icmeSuyuAdet,
     correction.sanayiSuyuAdet,
     correction.damacaAdet
-  );
+  ).map((k) => ({ ...k, saKalemId: saKalemId || undefined }));
 
   const updatedFis: YildirimTankerFis = {
     ...fis,
@@ -102,6 +133,8 @@ export async function approveYildirimTankerFis(options: {
     fisGorselUrl: correction.fisGorselUrl || fis.fisGorselUrl || '',
     firmaUnvan,
     cariKartId,
+    saId,
+    saKalemId,
     irsaliyeId,
     guvenlikEvrakId,
     durum: 'ONAYLANDI',
@@ -116,6 +149,7 @@ export async function approveYildirimTankerFis(options: {
     irsaliyeNo: updatedFis.fisNo,
     firma: firmaUnvan,
     cariKartId,
+    saId,
     tarih: updatedFis.tarih,
     onayDurumu: 'ONAYLANDI' as Irsaliye['onayDurumu'],
     fisEvrakUrl: updatedFis.fisGorselUrl || '',
@@ -141,6 +175,7 @@ export async function approveYildirimTankerFis(options: {
     sanayi: updatedFis.sanayiSuyuAdet,
     damaca: updatedFis.damacaAdet || 0,
   });
+  cariIslem.islemDetay = `${cariIslem.islemDetay}${saId ? ` · SA ${saId}` : ''}`;
 
   await saveDocument('yildirimTankerFisleri', updatedFis);
   await saveDocument('irsaliyeler', irsaliye);
@@ -155,11 +190,15 @@ export async function approveYildirimTankerFis(options: {
     fileName: `yildirim_${updatedFis.fisNo}.jpg`,
     fileType: 'image/jpeg',
     durum: 'ONAYLANDI',
-    aciklama: `Yıldırım Tanker irsaliyesi onaylandı · İçme ${updatedFis.icmeSuyuAdet} ton · Sanayi ${updatedFis.sanayiSuyuAdet} ton · Damacana ${updatedFis.damacaAdet || 0} adet`,
+    aciklama: `Yıldırım Tanker irsaliyesi onaylandı · İçme ${updatedFis.icmeSuyuAdet} ton · Sanayi ${updatedFis.sanayiSuyuAdet} ton · Damacana ${updatedFis.damacaAdet || 0} adet${
+      saId ? ` · SA ${saId}` : ''
+    }`,
     kaynak: 'YILDIRIM_TANKER_FIS',
     yildirimTankerFisId: fis.id,
     irsaliyeId,
     cariKartId,
+    saId,
+    saKalemId,
     icmeSuyuAdet: updatedFis.icmeSuyuAdet,
     sanayiSuyuAdet: updatedFis.sanayiSuyuAdet,
     damacaAdet: updatedFis.damacaAdet || 0,
@@ -179,7 +218,7 @@ export async function approveYildirimTankerFis(options: {
     return [cariIslem, ...others];
   });
 
-  return { irsaliye, fis: updatedFis, cariIslem };
+  return { irsaliye, fis: updatedFis, cariIslem, saMatch };
 }
 
 export async function rejectYildirimTankerFis(options: {

@@ -1,10 +1,11 @@
-import { CariKart, CariKartIslem, Irsaliye, VidanjorFis } from '../types/erp';
+import { CariKart, CariKartIslem, Irsaliye, SatinAlmaTalebi, VidanjorFis } from '../types/erp';
 import { saveDocument } from './firebase';
 import {
   SEKER_VIDANJOR_UNVAN,
   findSekerVidanjorCari,
   isSekerVidanjorFirma,
 } from './vidanjorUtils';
+import { findMatchingVidanjorSatinAlma, type TankerSaMatch } from './tankerEvrakDonusum';
 
 export type VidanjorFisOnayDurum = 'YONETICI_ONAYINDA' | 'ONAYLANDI' | 'REDDEDILDI';
 
@@ -16,6 +17,8 @@ export type VidanjorFisCorrection = {
   fisGorselUrl?: string;
   firmaUnvan: string;
   cariKartId?: string;
+  saId?: string;
+  saKalemId?: string;
 };
 
 export function isVidanjorFisPending(f?: Pick<VidanjorFis, 'durum'> | null): boolean {
@@ -64,7 +67,7 @@ export async function ensureSekerVidanjorCari(
 /**
  * Yönetici onayında:
  * 1) vidanjorFisleri güncellenir (ONAYLANDI)
- * 2) irsaliyeler sekmesine irsaliye yazılır
+ * 2) irsaliyeler sekmesine irsaliye yazılır (+ SA soft bağ)
  * 3) cariIslemGecmisi ile cari kart altına bağlanır
  * 4) guvenlikGelenEvraklar ONAYLANDI yapılır
  */
@@ -73,12 +76,19 @@ export async function approveVidanjorFis(options: {
   correction: VidanjorFisCorrection;
   onaylayan: string;
   cariKartlar: CariKart[];
+  satinAlmaTalepleri?: SatinAlmaTalebi[];
+  irsaliyeler?: Irsaliye[];
   setCariKartlar?: (updater: CariKart[] | ((prev: CariKart[]) => CariKart[])) => void;
   setIrsaliyeler?: (updater: Irsaliye[] | ((prev: Irsaliye[]) => Irsaliye[])) => void;
   setCariIslemGecmisi?: (
     updater: CariKartIslem[] | ((prev: CariKartIslem[]) => CariKartIslem[])
   ) => void;
-}): Promise<{ irsaliye: Irsaliye; fis: VidanjorFis; cariIslem: CariKartIslem }> {
+}): Promise<{
+  irsaliye: Irsaliye;
+  fis: VidanjorFis;
+  cariIslem: CariKartIslem;
+  saMatch: TankerSaMatch | null;
+}> {
   const { fis, correction, onaylayan } = options;
   const now = new Date().toISOString();
 
@@ -91,9 +101,23 @@ export async function approveVidanjorFis(options: {
     firmaUnvan = cari.unvan || SEKER_VIDANJOR_UNVAN;
   }
 
+  const saMatch = findMatchingVidanjorSatinAlma(
+    options.satinAlmaTalepleri,
+    options.irsaliyeler,
+    {
+      preferredSaId: correction.saId || fis.saId,
+      preferredSaKalemId: correction.saKalemId || fis.saKalemId,
+    }
+  );
+  const saId = saMatch?.sa.saId || correction.saId || fis.saId;
+  const saKalemId = saMatch?.kalem.id || correction.saKalemId || fis.saKalemId;
+
   const irsaliyeId = fis.irsaliyeId || `IR-VID-${fis.id}`;
   const guvenlikEvrakId = fis.guvenlikEvrakId || `EVR-VID-${fis.id}`;
-  const kalemler = buildVidanjorKalemler(fis.id, correction.cekimAdedi);
+  const kalemler = buildVidanjorKalemler(fis.id, correction.cekimAdedi).map((k) => ({
+    ...k,
+    saKalemId: saKalemId || undefined,
+  }));
 
   const updatedFis: VidanjorFis = {
     ...fis,
@@ -104,6 +128,8 @@ export async function approveVidanjorFis(options: {
     fisGorselUrl: correction.fisGorselUrl || fis.fisGorselUrl || '',
     firmaUnvan,
     cariKartId,
+    saId,
+    saKalemId,
     irsaliyeId,
     guvenlikEvrakId,
     durum: 'ONAYLANDI',
@@ -118,6 +144,7 @@ export async function approveVidanjorFis(options: {
     irsaliyeNo: updatedFis.fisNo,
     firma: firmaUnvan,
     cariKartId,
+    saId,
     tarih: updatedFis.tarih,
     onayDurumu: 'ONAYLANDI' as Irsaliye['onayDurumu'],
     fisEvrakUrl: updatedFis.fisGorselUrl || '',
@@ -138,7 +165,9 @@ export async function approveVidanjorFis(options: {
     islemTipi: 'IRSALIYE',
     islemId: irsaliyeId,
     islemBaslik: 'Vidanjör İrsaliyesi',
-    islemDetay: `${updatedFis.fisNo} · ${updatedFis.plaka} · ${updatedFis.cekimAdedi} çekim`,
+    islemDetay: `${updatedFis.fisNo} · ${updatedFis.plaka} · ${updatedFis.cekimAdedi} çekim${
+      saId ? ` · SA ${saId}` : ''
+    }`,
     tarih: updatedFis.tarih,
     belgeNo: updatedFis.fisNo,
   };
@@ -156,11 +185,15 @@ export async function approveVidanjorFis(options: {
     fileName: `vidanjor_${updatedFis.fisNo}.jpg`,
     fileType: 'image/jpeg',
     durum: 'ONAYLANDI',
-    aciklama: `Kampçı vidanjör fişi onaylandı · Plaka ${updatedFis.plaka} · ${updatedFis.cekimAdedi} çekim`,
+    aciklama: `Kampçı vidanjör fişi onaylandı · Plaka ${updatedFis.plaka} · ${updatedFis.cekimAdedi} çekim${
+      saId ? ` · SA ${saId}` : ''
+    }`,
     kaynak: 'VIDANJOR_FIS',
     vidanjorFisId: fis.id,
     irsaliyeId,
     cariKartId,
+    saId,
+    saKalemId,
     plaka: updatedFis.plaka,
     cekimAdedi: updatedFis.cekimAdedi,
     kalemler,
@@ -179,7 +212,7 @@ export async function approveVidanjorFis(options: {
     return [cariIslem, ...others];
   });
 
-  return { irsaliye, fis: updatedFis, cariIslem };
+  return { irsaliye, fis: updatedFis, cariIslem, saMatch };
 }
 
 export async function rejectVidanjorFis(options: {

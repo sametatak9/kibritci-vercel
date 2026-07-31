@@ -3,7 +3,7 @@ import {
   Calendar, Camera, Check, Pencil, Trash2, RefreshCw, AlertTriangle, Truck
 } from 'lucide-react';
 import { collection, deleteDoc, doc, onSnapshot, setDoc } from 'firebase/firestore';
-import { CariKart, Fatura, VidanjorFis } from '../types/erp';
+import { CariKart, CariKartIslem, Fatura, Irsaliye, VidanjorFis } from '../types/erp';
 import { db } from '../lib/firebase';
 import { compressImage } from '../lib/imageCompress';
 import { todayDateKey, formatDateLabelTr } from '../lib/dateKeyUtils';
@@ -12,11 +12,18 @@ import {
   compareCekimFatura,
   findSekerVidanjorCari,
   isSekerVidanjorFirma,
+  filterFislerByMonth,
 } from '../lib/vidanjorUtils';
+import { softBindIrsaliyelerToDraftFatura } from '../lib/tankerEvrakDonusum';
+import { openEvrakZincirRaporu } from '../lib/evrakZincirRapor';
 
 interface KampVidanjorTabProps {
   cariKartlar?: CariKart[];
   faturalar?: Fatura[];
+  setFaturalar?: React.Dispatch<React.SetStateAction<Fatura[]>>;
+  irsaliyeler?: Irsaliye[];
+  setIrsaliyeler?: React.Dispatch<React.SetStateAction<Irsaliye[]>>;
+  setCariIslemGecmisi?: React.Dispatch<React.SetStateAction<CariKartIslem[]>>;
   currentUser: any;
   addNotification?: (mesaj: string, meta?: Record<string, unknown>) => void | Promise<void>;
   showStatus?: (type: 'success' | 'error' | 'info', text: string) => void;
@@ -25,6 +32,10 @@ interface KampVidanjorTabProps {
 export const KampVidanjorTab: React.FC<KampVidanjorTabProps> = ({
   cariKartlar = [],
   faturalar = [],
+  setFaturalar,
+  irsaliyeler = [],
+  setIrsaliyeler,
+  setCariIslemGecmisi,
   currentUser,
   addNotification,
   showStatus,
@@ -63,6 +74,74 @@ export const KampVidanjorTab: React.FC<KampVidanjorTabProps> = ({
     () => compareCekimFatura(fisler, faturalar, eslesmeYil, eslesmeAy, firmaUnvan),
     [fisler, faturalar, eslesmeYil, eslesmeAy, firmaUnvan]
   );
+
+  const ayOnayliFisler = useMemo(
+    () => filterFislerByMonth(fisler, eslesmeYil, eslesmeAy).filter((f) => f.durum === 'ONAYLANDI'),
+    [fisler, eslesmeYil, eslesmeAy]
+  );
+
+  const ayFaturasizIrsaliyeler = useMemo(() => {
+    const ids = new Set(
+      ayOnayliFisler.map((f) => f.irsaliyeId).filter(Boolean) as string[]
+    );
+    return irsaliyeler.filter((ir) => {
+      const linked =
+        ids.has(ir.id) ||
+        (ir.irsaliyeId ? ids.has(ir.irsaliyeId) : false) ||
+        (ir.kaynak === 'VIDANJOR_FIS' &&
+          String(ir.tarih || '').startsWith(`${eslesmeYil}-${String(eslesmeAy).padStart(2, '0')}`));
+      return linked && !ir.faturaNo && (ir.kalemler || []).length > 0;
+    });
+  }, [ayOnayliFisler, irsaliyeler, eslesmeYil, eslesmeAy]);
+
+  const handleAyFaturayaBagla = () => {
+    if (!setFaturalar || !setIrsaliyeler) {
+      showStatus?.('error', 'Fatura kaydı için sistem bağlantısı yok.');
+      return;
+    }
+    if (!ayFaturasizIrsaliyeler.length) {
+      showStatus?.('info', 'Bu ayda faturasız onaylı vidanjör irsaliyesi yok.');
+      return;
+    }
+    if (
+      !window.confirm(
+        `${ayFaturasizIrsaliyeler.length} onaylı vidanjör irsaliyesi tek taslak faturaya bağlansın mı?\n(Evraklar kilitlenmez.)`
+      )
+    ) {
+      return;
+    }
+    try {
+      const { fatura } = softBindIrsaliyelerToDraftFatura({
+        irsaliyeler: ayFaturasizIrsaliyeler,
+        faturalar,
+        cariKartlar,
+        setFaturalar,
+        setIrsaliyeler,
+        setCariIslemGecmisi,
+        baslik: 'Vidanjör Aylık Taslak Fatura',
+      });
+      showStatus?.(
+        'success',
+        `Taslak fatura: ${fatura.faturaNo} · ${ayFaturasizIrsaliyeler.length} irsaliye bağlandı`
+      );
+      void addNotification?.(
+        `Vidanjör aylık fatura taslağı: ${fatura.faturaNo}`,
+        { tip: 'VIDANJOR_FATURA_TASLAK', faturaNo: fatura.faturaNo }
+      );
+      if (window.confirm('Zincir raporunu açmak ister misiniz?')) {
+        openEvrakZincirRaporu({
+          irsaliyeler: ayFaturasizIrsaliyeler.map((ir) => ({
+            ...ir,
+            faturaNo: fatura.faturaNo,
+          })),
+          faturalar: [fatura, ...faturalar],
+          focusIrsaliyeIds: ayFaturasizIrsaliyeler.map((ir) => ir.id),
+        });
+      }
+    } catch (err: any) {
+      showStatus?.('error', err?.message || 'Fatura bağlanamadı');
+    }
+  };
 
   const resetForm = () => {
     setFisNo('');
@@ -482,6 +561,15 @@ export const KampVidanjorTab: React.FC<KampVidanjorTabProps> = ({
             <AlertTriangle size={14} className="shrink-0 mt-0.5" />
             Sorun: Fatura çekim miktarı ile biriken fiş çekim toplamı aynı değil. Kontrol edin.
           </p>
+        )}
+        {ayFaturasizIrsaliyeler.length > 0 && (
+          <button
+            type="button"
+            onClick={handleAyFaturayaBagla}
+            className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl bg-violet-600 hover:bg-violet-700 text-white text-[11px] font-black uppercase tracking-wide cursor-pointer"
+          >
+            Bu ayın {ayFaturasizIrsaliyeler.length} irsaliyesini taslak faturaya bağla
+          </button>
         )}
       </div>
 

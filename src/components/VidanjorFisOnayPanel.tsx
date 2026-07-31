@@ -3,7 +3,7 @@ import {
   Truck, Check, X, Pencil, RefreshCw, Camera, AlertTriangle
 } from 'lucide-react';
 import { collection, onSnapshot } from 'firebase/firestore';
-import { CariKart, CariKartIslem, Irsaliye, VidanjorFis } from '../types/erp';
+import { CariKart, CariKartIslem, Fatura, Irsaliye, SatinAlmaTalebi, VidanjorFis } from '../types/erp';
 import { db } from '../lib/firebase';
 import { openBase64InNewTab } from '../lib/fileViewerUtils';
 import { SEKER_VIDANJOR_UNVAN, findSekerVidanjorCari } from '../lib/vidanjorUtils';
@@ -12,6 +12,7 @@ import {
   isVidanjorFisPending,
   rejectVidanjorFis,
 } from '../lib/vidanjorOnayUtils';
+import { findMatchingVidanjorSatinAlma, softBindIrsaliyelerToDraftFatura } from '../lib/tankerEvrakDonusum';
 
 interface VidanjorFisOnayPanelProps {
   currentUser: any;
@@ -19,6 +20,10 @@ interface VidanjorFisOnayPanelProps {
   setCariKartlar?: React.Dispatch<React.SetStateAction<CariKart[]>>;
   setIrsaliyeler?: React.Dispatch<React.SetStateAction<Irsaliye[]>>;
   setCariIslemGecmisi?: React.Dispatch<React.SetStateAction<CariKartIslem[]>>;
+  faturalar?: Fatura[];
+  setFaturalar?: React.Dispatch<React.SetStateAction<Fatura[]>>;
+  satinAlmaTalepleri?: SatinAlmaTalebi[];
+  irsaliyeler?: Irsaliye[];
   addNotification?: (mesaj: string, meta?: Record<string, unknown>) => void | Promise<void>;
 }
 
@@ -28,6 +33,10 @@ export const VidanjorFisOnayPanel: React.FC<VidanjorFisOnayPanelProps> = ({
   setCariKartlar,
   setIrsaliyeler,
   setCariIslemGecmisi,
+  faturalar = [],
+  setFaturalar,
+  satinAlmaTalepleri = [],
+  irsaliyeler = [],
   addNotification,
 }) => {
   const [fisler, setFisler] = useState<VidanjorFis[]>([]);
@@ -68,12 +77,20 @@ export const VidanjorFisOnayPanel: React.FC<VidanjorFisOnayPanelProps> = ({
       alert('Tarih, fiş no, plaka ve çekim adedi zorunlu.');
       return;
     }
-    if (!window.confirm('Onaylanınca irsaliye sekmesine ve cari kart altına kayıt oluşacak. Devam?')) {
+    if (
+      !window.confirm(
+        'Onaylanınca irsaliye + cari kaydı oluşur (MICIR/güvenlik döngüsü). Satın alma varsa soft bağlanır. Devam?'
+      )
+    ) {
       return;
     }
 
     setSaving(true);
     try {
+      const previewSa = findMatchingVidanjorSatinAlma(satinAlmaTalepleri, irsaliyeler, {
+        preferredSaId: editing.saId,
+        preferredSaKalemId: editing.saKalemId,
+      });
       const result = await approveVidanjorFis({
         fis: editing,
         correction: {
@@ -84,26 +101,56 @@ export const VidanjorFisOnayPanel: React.FC<VidanjorFisOnayPanelProps> = ({
           fisGorselUrl: editing.fisGorselUrl,
           firmaUnvan: sekerCari?.unvan || editing.firmaUnvan || SEKER_VIDANJOR_UNVAN,
           cariKartId: sekerCari?.id || editing.cariKartId,
+          saId: previewSa?.sa.saId || editing.saId,
+          saKalemId: previewSa?.kalem.id || editing.saKalemId,
         },
         onaylayan: currentUser?.email || 'yonetici',
         cariKartlar,
+        satinAlmaTalepleri,
+        irsaliyeler,
         setCariKartlar,
         setIrsaliyeler,
         setCariIslemGecmisi,
       });
 
+      let faturaNo = '';
+      if (
+        setFaturalar &&
+        setIrsaliyeler &&
+        window.confirm(
+          `İrsaliye oluştu: ${result.irsaliye.irsaliyeNo}${
+            result.saMatch ? `\nSA bağlandı: ${result.saMatch.sa.saId}` : '\n(Eşleşen SA bulunamadı)'
+          }\n\nTaslak fatura da oluşturulsun mu?\n(Evraklar kilitlenmez; fiyat sonra doldurulur.)`
+        )
+      ) {
+        const bound = softBindIrsaliyelerToDraftFatura({
+          irsaliyeler: [result.irsaliye],
+          faturalar,
+          cariKartlar,
+          setFaturalar,
+          setIrsaliyeler,
+          setCariIslemGecmisi,
+          baslik: 'Vidanjör İrsaliyesinden Taslak Fatura',
+        });
+        faturaNo = bound.fatura.faturaNo;
+      }
+
       await addNotification?.(
-        `Vidanjör fişi onaylandı: ${result.fis.fisNo} · irsaliye + cari kaydı oluşturuldu`,
+        `Vidanjör fişi onaylandı: ${result.fis.fisNo} · irsaliye${faturaNo ? ` + fatura ${faturaNo}` : ''}`,
         {
           tip: 'VIDANJOR_FIS_ONAYLANDI',
           vidanjorFisId: result.fis.id,
           irsaliyeId: result.irsaliye.id,
           cariKartId: result.cariIslem.cariKartId,
+          saId: result.saMatch?.sa.saId,
+          faturaNo: faturaNo || undefined,
         }
       );
 
       alert(
-        `Onaylandı.\n\n1) İrsaliye: ${result.irsaliye.irsaliyeNo}\n2) Cari: ${result.fis.firmaUnvan}`
+        `Onaylandı.\n\n1) İrsaliye: ${result.irsaliye.irsaliyeNo}\n2) Cari: ${result.fis.firmaUnvan}${
+          result.saMatch ? `\n3) SA: ${result.saMatch.sa.saId}` : ''
+        }${faturaNo ? `\n4) Taslak fatura: ${faturaNo}` : ''}`
       );
       setEditing(null);
     } catch (err: any) {
@@ -142,8 +189,9 @@ export const VidanjorFisOnayPanel: React.FC<VidanjorFisOnayPanelProps> = ({
               <Truck size={13} /> Kampçı Vidanjör Fiş Onayı
             </span>
             <p className="text-indigo-100/80 leading-relaxed text-[11px]">
-              Kampçı kaydı buraya düşer. Düzeltme yapıp kaydederseniz <strong>2 kayıt</strong> oluşur:
-              irsaliye sekmesinde bir evrak + cari kartın altında irsaliye geçmişi.
+              Kampçı kaydı buraya düşer. Onayda <strong>irsaliye + cari</strong> oluşur; satın alma
+              varsa soft bağlanır. İsterseniz aynı anda <strong>taslak fatura</strong> da
+              oluşturulabilir (kilit yok).
             </p>
           </div>
           <span className="shrink-0 text-[10px] font-black bg-amber-400 text-slate-950 px-2.5 py-1 rounded-full">

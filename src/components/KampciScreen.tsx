@@ -3,7 +3,7 @@ import {
   Tent, Plus, Trash2, Camera, Check, RefreshCw, Eye, 
   Search, UserPlus, ClipboardList, Package, Layers, MapPin, Sparkles, CheckCircle, Clock, X, ArrowRight, ShieldCheck, DoorOpen, LogOut, Image as ImageIcon, MessageSquare, Calendar, Truck, AlertTriangle
 } from 'lucide-react';
-import { KampOdasi, KampKaydi, Personel, StokKart, KampYerleske, KampKat, CariKart, AylikYoklamaMap, Fatura } from '../types/erp';
+import { KampOdasi, KampKaydi, Personel, StokKart, KampYerleske, KampKat, CariKart, CariKartIslem, AylikYoklamaMap, Fatura, Irsaliye } from '../types/erp';
 import { db, saveDocument } from '../lib/firebase';
 import { compressImage } from '../lib/imageCompress';
 import { ensureKampFaaliyetFotoPersisted } from '../lib/sahaFaaliyetFotoStorage';
@@ -42,6 +42,10 @@ interface KampciScreenProps {
   saveYoklamalarNow?: (next: AylikYoklamaMap) => Promise<void>;
   stokKartlar?: StokKart[];
   faturalar?: Fatura[];
+  setFaturalar?: React.Dispatch<React.SetStateAction<Fatura[]>>;
+  irsaliyeler?: Irsaliye[];
+  setIrsaliyeler?: React.Dispatch<React.SetStateAction<Irsaliye[]>>;
+  setCariIslemGecmisi?: React.Dispatch<React.SetStateAction<CariKartIslem[]>>;
   currentUser: any;
   onSignOut?: () => void;
   isStandalone?: boolean;
@@ -65,6 +69,10 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
   saveYoklamalarNow,
   stokKartlar = [],
   faturalar = [],
+  setFaturalar,
+  irsaliyeler = [],
+  setIrsaliyeler,
+  setCariIslemGecmisi,
   currentUser,
   onSignOut,
   isStandalone = false,
@@ -2892,6 +2900,10 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
         <KampVidanjorTab
           cariKartlar={cariKartlar}
           faturalar={faturalar}
+          setFaturalar={setFaturalar}
+          irsaliyeler={irsaliyeler}
+          setIrsaliyeler={setIrsaliyeler}
+          setCariIslemGecmisi={setCariIslemGecmisi}
           currentUser={currentUser}
           addNotification={addNotification}
           showStatus={showStatus}

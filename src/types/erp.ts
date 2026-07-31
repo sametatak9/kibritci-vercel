@@ -137,6 +137,9 @@ export interface VidanjorFis {
   fisGorselUrl?: string;
   firmaUnvan: string;
   cariKartId?: string;
+  /** Eşleşen satın alma — onayda irsaliye.saId */
+  saId?: string;
+  saKalemId?: string;
   irsaliyeId?: string;
   /** Güvenlik sekmesi o günün gelen evrak listesindeki kayıt id */
   guvenlikEvrakId?: string;
@@ -191,6 +194,9 @@ export interface YildirimTankerFis {
   fisGorselUrl?: string;
   firmaUnvan: string;
   cariKartId?: string;
+  /** Eşleşen satın alma — onayda irsaliye.saId */
+  saId?: string;
+  saKalemId?: string;
   irsaliyeId?: string;
   guvenlikEvrakId?: string;
   kapıLogId?: string;

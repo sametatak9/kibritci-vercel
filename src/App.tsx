@@ -2700,6 +2700,10 @@ export default function App() {
           saveYoklamalarNow={saveYoklamalarNow}
           stokKartlar={stokKartlar}
           faturalar={faturalar}
+          setFaturalar={setFaturalarWithSync}
+          irsaliyeler={irsaliyeler}
+          setIrsaliyeler={setIrsaliyelerWithSync}
+          setCariIslemGecmisi={setCariIslemGecmisiWithSync}
           currentUser={currentUser}
           onSignOut={handleSignOut}
           isStandalone={true}
@@ -2716,6 +2720,9 @@ export default function App() {
           saveYoklamalarNow={saveYoklamalarNow}
           cariKartlar={cariKartlar}
           faturalar={faturalar}
+          setFaturalar={setFaturalarWithSync}
+          irsaliyeler={irsaliyeler}
+          setIrsaliyeler={setIrsaliyelerWithSync}
           kampYerleskeleri={kampYerleskeleri}
           setCariKartlar={setCariKartlarWithSync}
           setCariIslemGecmisi={setCariIslemGecmisiWithSync}
@@ -2825,6 +2832,10 @@ export default function App() {
           saveYoklamalarNow={saveYoklamalarNow}
           stokKartlar={stokKartlar}
           faturalar={faturalar}
+          setFaturalar={setFaturalarWithSync}
+          irsaliyeler={irsaliyeler}
+          setIrsaliyeler={setIrsaliyelerWithSync}
+          setCariIslemGecmisi={setCariIslemGecmisiWithSync}
           currentUser={currentUser}
           onSignOut={handleSignOut}
           isStandalone={true}
@@ -2841,6 +2852,9 @@ export default function App() {
           saveYoklamalarNow={saveYoklamalarNow}
           cariKartlar={cariKartlar}
           faturalar={faturalar}
+          setFaturalar={setFaturalarWithSync}
+          irsaliyeler={irsaliyeler}
+          setIrsaliyeler={setIrsaliyelerWithSync}
           kampYerleskeleri={kampYerleskeleri}
           setCariKartlar={setCariKartlarWithSync}
           setCariIslemGecmisi={setCariIslemGecmisiWithSync}
@@ -3455,6 +3469,10 @@ export default function App() {
                     saveYoklamalarNow={saveYoklamalarNow}
                     stokKartlar={stokKartlar}
                     faturalar={faturalar}
+                    setFaturalar={setFaturalarWithSync}
+                    irsaliyeler={irsaliyeler}
+                    setIrsaliyeler={setIrsaliyelerWithSync}
+                    setCariIslemGecmisi={setCariIslemGecmisiWithSync}
                     currentUser={currentUser}
                     onSignOut={handleSignOut}
                     addNotification={addNotification}
@@ -3471,6 +3489,9 @@ export default function App() {
                     saveYoklamalarNow={saveYoklamalarNow}
                     cariKartlar={cariKartlar}
                     faturalar={faturalar}
+                    setFaturalar={setFaturalarWithSync}
+                    irsaliyeler={irsaliyeler}
+                    setIrsaliyeler={setIrsaliyelerWithSync}
                     kampYerleskeleri={kampYerleskeleri}
                     setCariKartlar={setCariKartlarWithSync}
                     setCariIslemGecmisi={setCariIslemGecmisiWithSync}

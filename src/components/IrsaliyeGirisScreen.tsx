@@ -1072,7 +1072,7 @@ export const IrsaliyeGirisScreen: React.FC<IrsaliyeGirisScreenProps> = ({
                               <span className={`text-[8px] font-black uppercase px-1.5 py-0.5 rounded w-fit ${stokLink.total > 0 && stokLink.linked === stokLink.total ? 'bg-sky-50 text-sky-700' : 'bg-slate-100 text-slate-600'}`}>
                                 Stok {stokLink.linked}/{stokLink.total}
                               </span>
-                              {ir.kaynak !== 'VIDANJOR_FIS' && ir.kaynak !== 'MICIR_STABILIZE_FIS' ? (
+                              {ir.kaynak !== 'MICIR_STABILIZE_FIS' ? (
                                 faturasizIds.has(ir.id) ? (
                                   <span className="text-[8px] font-black uppercase px-1.5 py-0.5 rounded w-fit bg-rose-50 text-rose-700">
                                     Faturasız

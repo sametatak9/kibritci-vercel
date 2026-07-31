@@ -27,7 +27,7 @@ function isSaAktif(sa: SatinAlmaTalebi): boolean {
 }
 
 function isIrsaliyeAktif(ir: Irsaliye): boolean {
-  if (ir.kaynak === 'VIDANJOR_FIS' || ir.kaynak === 'MICIR_STABILIZE_FIS') return false;
+  if (ir.kaynak === 'MICIR_STABILIZE_FIS') return false;
   if (isReddedilmis(ir.onayDurumu)) return false;
   return true;
 }

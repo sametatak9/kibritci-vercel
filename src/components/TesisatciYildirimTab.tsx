@@ -3,7 +3,7 @@ import {
   Calendar, Camera, Check, Pencil, Trash2, RefreshCw, Truck, Download, ZoomIn, X
 } from 'lucide-react';
 import { collection, deleteDoc, doc, onSnapshot, setDoc } from 'firebase/firestore';
-import { CariKart, Fatura, YildirimTankerFis } from '../types/erp';
+import { CariKart, CariKartIslem, Fatura, Irsaliye, YildirimTankerFis } from '../types/erp';
 import { db } from '../lib/firebase';
 import { compressImage } from '../lib/imageCompress';
 import { todayDateKey, formatDateLabelTr } from '../lib/dateKeyUtils';
@@ -17,10 +17,16 @@ import {
   compareYildirimFatura,
 } from '../lib/yildirimTankerUtils';
 import { buildYildirimKalemler } from '../lib/yildirimTankerOnayUtils';
+import { softBindIrsaliyelerToDraftFatura } from '../lib/tankerEvrakDonusum';
+import { openEvrakZincirRaporu } from '../lib/evrakZincirRapor';
 
 interface TesisatciYildirimTabProps {
   cariKartlar?: CariKart[];
   faturalar?: Fatura[];
+  setFaturalar?: React.Dispatch<React.SetStateAction<Fatura[]>>;
+  irsaliyeler?: Irsaliye[];
+  setIrsaliyeler?: React.Dispatch<React.SetStateAction<Irsaliye[]>>;
+  setCariIslemGecmisi?: React.Dispatch<React.SetStateAction<CariKartIslem[]>>;
   currentUser: any;
   addNotification?: (mesaj: string, meta?: Record<string, unknown>) => void | Promise<void>;
   showStatus?: (type: 'success' | 'error' | 'info', text: string) => void;
@@ -58,6 +64,10 @@ function durumBadge(durum?: YildirimTankerFis['durum']) {
 export const TesisatciYildirimTab: React.FC<TesisatciYildirimTabProps> = ({
   cariKartlar = [],
   faturalar = [],
+  setFaturalar,
+  irsaliyeler = [],
+  setIrsaliyeler,
+  setCariIslemGecmisi,
   currentUser,
   addNotification,
   showStatus,
@@ -109,6 +119,74 @@ export const TesisatciYildirimTab: React.FC<TesisatciYildirimTabProps> = ({
     () => compareYildirimFatura(fisler, faturalar, raporYil, raporAy, firmaUnvan),
     [fisler, faturalar, raporYil, raporAy, firmaUnvan]
   );
+
+  const ayOnayliFisler = useMemo(
+    () => filterYildirimFislerByMonth(fisler, raporYil, raporAy).filter((f) => f.durum === 'ONAYLANDI'),
+    [fisler, raporYil, raporAy]
+  );
+
+  const ayFaturasizIrsaliyeler = useMemo(() => {
+    const ids = new Set(
+      ayOnayliFisler.map((f) => f.irsaliyeId).filter(Boolean) as string[]
+    );
+    return irsaliyeler.filter((ir) => {
+      const linked =
+        ids.has(ir.id) ||
+        (ir.irsaliyeId ? ids.has(ir.irsaliyeId) : false) ||
+        (ir.kaynak === 'YILDIRIM_TANKER_FIS' &&
+          String(ir.tarih || '').startsWith(`${raporYil}-${String(raporAy).padStart(2, '0')}`));
+      return linked && !ir.faturaNo && (ir.kalemler || []).length > 0;
+    });
+  }, [ayOnayliFisler, irsaliyeler, raporYil, raporAy]);
+
+  const handleAyFaturayaBagla = () => {
+    if (!setFaturalar || !setIrsaliyeler) {
+      showStatus?.('error', 'Fatura kaydı için sistem bağlantısı yok.');
+      return;
+    }
+    if (!ayFaturasizIrsaliyeler.length) {
+      showStatus?.('info', 'Bu ayda faturasız onaylı Yıldırım irsaliyesi yok.');
+      return;
+    }
+    if (
+      !window.confirm(
+        `${ayFaturasizIrsaliyeler.length} onaylı Yıldırım irsaliyesi tek taslak faturaya bağlansın mı?\n(Evraklar kilitlenmez.)`
+      )
+    ) {
+      return;
+    }
+    try {
+      const { fatura } = softBindIrsaliyelerToDraftFatura({
+        irsaliyeler: ayFaturasizIrsaliyeler,
+        faturalar,
+        cariKartlar,
+        setFaturalar,
+        setIrsaliyeler,
+        setCariIslemGecmisi,
+        baslik: 'Yıldırım Tanker Aylık Taslak Fatura',
+      });
+      showStatus?.(
+        'success',
+        `Taslak fatura: ${fatura.faturaNo} · ${ayFaturasizIrsaliyeler.length} irsaliye bağlandı`
+      );
+      void addNotification?.(
+        `Yıldırım aylık fatura taslağı: ${fatura.faturaNo}`,
+        { tip: 'YILDIRIM_FATURA_TASLAK', faturaNo: fatura.faturaNo }
+      );
+      if (window.confirm('Zincir raporunu açmak ister misiniz?')) {
+        openEvrakZincirRaporu({
+          irsaliyeler: ayFaturasizIrsaliyeler.map((ir) => ({
+            ...ir,
+            faturaNo: fatura.faturaNo,
+          })),
+          faturalar: [fatura, ...faturalar],
+          focusIrsaliyeIds: ayFaturasizIrsaliyeler.map((ir) => ir.id),
+        });
+      }
+    } catch (err: any) {
+      showStatus?.('error', err?.message || 'Fatura bağlanamadı');
+    }
+  };
 
   const openFoto = (url?: string) => {
     if (!url) return;
@@ -601,6 +679,15 @@ export const TesisatciYildirimTab: React.FC<TesisatciYildirimTabProps> = ({
           <p className="text-[10px] text-rose-700 font-semibold">
             Onaylı irsaliye adetleri ile fatura kalem toplamı uyuşmuyor — fatura geldiğinde kontrol edin.
           </p>
+        )}
+        {ayFaturasizIrsaliyeler.length > 0 && (
+          <button
+            type="button"
+            onClick={handleAyFaturayaBagla}
+            className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl bg-violet-600 hover:bg-violet-700 text-white text-[11px] font-black uppercase tracking-wide cursor-pointer"
+          >
+            Bu ayın {ayFaturasizIrsaliyeler.length} irsaliyesini taslak faturaya bağla
+          </button>
         )}
       </div>
 

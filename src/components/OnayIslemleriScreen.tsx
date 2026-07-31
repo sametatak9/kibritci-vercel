@@ -2243,6 +2243,10 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
                 setCariKartlar={setCariKartlar}
                 setIrsaliyeler={setIrsaliyeler}
                 setCariIslemGecmisi={setCariIslemGecmisi}
+                faturalar={faturalar}
+                setFaturalar={setFaturalar}
+                satinAlmaTalepleri={satinAlmaTalepleri}
+                irsaliyeler={irsaliyeler}
                 addNotification={addNotification}
               />
 
@@ -2444,6 +2448,10 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
                 setCariKartlar={setCariKartlar}
                 setIrsaliyeler={setIrsaliyeler}
                 setCariIslemGecmisi={setCariIslemGecmisi}
+                faturalar={faturalar}
+                setFaturalar={setFaturalar}
+                satinAlmaTalepleri={satinAlmaTalepleri}
+                irsaliyeler={irsaliyeler}
                 addNotification={addNotification}
               />
 
