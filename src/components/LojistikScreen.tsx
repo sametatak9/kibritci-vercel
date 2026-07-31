@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { 
   Truck, Plus, Trash2, Camera, CheckCircle, Search, AlertCircle, 
-  FileText, Calendar, Printer, Phone, MapPin, Wallet, ClipboardList, Clock, Check, X
+  FileText, Calendar, Printer, Phone, MapPin, Wallet, ClipboardList, Clock, Check, X, Image as ImageIcon
 } from 'lucide-react';
 import { AracBakim, Personel } from '../types/erp';
 import { compressImage } from '../lib/imageCompress';
@@ -511,10 +511,13 @@ export const LojistikScreen: React.FC<LojistikScreenProps> = ({
     return d.toISOString().split('T')[0];
   });
   const [iadeRaporEnd, setIadeRaporEnd] = useState(new Date().toISOString().split('T')[0]);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
+  const galleryInputRef = useRef<HTMLInputElement>(null);
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    // Aynı fotoğrafı tekrar seçebilmek / kamera yeniden açılabilsin
+    e.target.value = '';
     if (!file) return;
 
     setCompressing(true);
@@ -1351,27 +1354,44 @@ export const LojistikScreen: React.FC<LojistikScreenProps> = ({
                     />
                   </div>
 
-                  {/* Receipt Upload */}
+                  {/* Receipt Upload — kamera ve galeri ayrı (mobilde capture şart) */}
                   <div className="space-y-2">
                     <label className="text-[10px] font-bold text-slate-500 uppercase flex items-center space-x-1.5">
-                      <span>📷 Fiş / Fatura Görseli Yükle (Kamera veya Dosya)</span>
+                      <span>📷 Fiş / Fatura Görseli</span>
                     </label>
                     
-                    <div className="flex items-center space-x-3">
+                    <div className="flex flex-wrap items-center gap-2">
                       <button
                         type="button"
-                        onClick={() => fileInputRef.current?.click()}
-                        className="bg-slate-100 hover:bg-slate-250 border border-slate-200 text-slate-700 font-bold py-2 px-4 rounded-xl text-xs transition flex items-center space-x-1.5 shrink-0 cursor-pointer"
+                        onClick={() => cameraInputRef.current?.click()}
+                        className="bg-slate-900 hover:bg-black text-white font-bold py-2 px-3.5 rounded-xl text-xs transition flex items-center space-x-1.5 shrink-0 cursor-pointer disabled:opacity-50"
                         disabled={compressing}
                       >
                         <Camera className="h-4 w-4" />
-                        <span>{compressing ? 'Sıkıştırılıyor...' : 'Görsel Seç / Foto Çek'}</span>
+                        <span>{compressing ? 'Sıkıştırılıyor...' : 'Kameradan Çek'}</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => galleryInputRef.current?.click()}
+                        className="bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-700 font-bold py-2 px-3.5 rounded-xl text-xs transition flex items-center space-x-1.5 shrink-0 cursor-pointer disabled:opacity-50"
+                        disabled={compressing}
+                      >
+                        <ImageIcon className="h-4 w-4" />
+                        <span>Galeriden Seç</span>
                       </button>
                       
                       <input 
                         type="file" 
-                        ref={fileInputRef}
-                        accept="image/*" 
+                        ref={cameraInputRef}
+                        accept="image/*"
+                        capture="environment"
+                        onChange={handleImageUpload} 
+                        className="hidden"
+                      />
+                      <input 
+                        type="file" 
+                        ref={galleryInputRef}
+                        accept="image/*"
                         onChange={handleImageUpload} 
                         className="hidden"
                       />
@@ -1389,6 +1409,9 @@ export const LojistikScreen: React.FC<LojistikScreenProps> = ({
                         </div>
                       )}
                     </div>
+                    <p className="text-[9px] text-slate-400">
+                      Telefonda «Kameradan Çek» arka kamerayı açar; «Galeriden Seç» albümü açar.
+                    </p>
 
                     {faturaFotoBase64 && (
                       <div className="border border-slate-200 p-2.5 rounded-2xl bg-slate-50 flex items-center justify-center max-w-sm">
