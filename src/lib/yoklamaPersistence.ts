@@ -42,6 +42,8 @@ export interface YoklamaSaveResult {
   blocked?: boolean;
   personCount?: number;
   filledDayCount?: number;
+  /** Sunucuya yazılan birleşik harita (yerel state bununla güncellenmeli) */
+  map?: AylikYoklamaMap;
 }
 
 export interface YoklamaArchiveEntry {
@@ -229,6 +231,7 @@ export async function persistYoklamaDocument(
     await writeYoklamaMap(payload);
     return {
       ok: true,
+      map: payload,
       personCount: countYoklamaPersons(payload),
       filledDayCount: countYoklamaFilledDays(payload),
     };

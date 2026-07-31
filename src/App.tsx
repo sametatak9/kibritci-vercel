@@ -2396,7 +2396,7 @@ export default function App() {
       notifyYoklamaSaveFailure(result.error || 'Bilinmeyen hata');
       throw new Error(result.error || 'Yoklama kaydedilemedi');
     }
-    setYoklamalar(next);
+    setYoklamalar(result.map || next);
     return result;
   };
 
