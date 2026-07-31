@@ -304,6 +304,8 @@ export interface Fatura {
   eImzalar?: string[];
 }
 
+export type KasaOdemeDurumu = 'BORC' | 'PERSONEL_ODEDI' | 'KASA_ODEDI';
+
 export interface KasaHareketi {
   id: string;
   tarih: string;
@@ -313,9 +315,16 @@ export interface KasaHareketi {
   referansTipi: 'DİĞER' | 'FATURA' | 'İRSALİYE' | 'MAAS' | 'SATIN ALMA';
   referansId?: string;
   fisEvrakUrl?: string;
-  /** Çıkış: kasa harcaması mı, personel harcaması mı */
+  /**
+   * Çıkış ödeme durumu:
+   * BORC = borç kaydı (henüz kapatılmadı)
+   * PERSONEL_ODEDI = personel cebinden ödedi
+   * KASA_ODEDI = şirket kasasından ödendi
+   */
+  odemeDurumu?: KasaOdemeDurumu;
+  /** @deprecated — odemeDurumu tercih edilir; eski kayıt uyumu */
   harcamaKaynagi?: 'KASA_HARCAMA' | 'PERSONEL_HARCAMA';
-  /** Personel harcaması ise harcayan personel */
+  /** Personel / borç sahibi */
   personelId?: string;
   personelAdi?: string;
   /** Şoför kendi cebinden → iade / ödeme (eksi bakiye + şoföre ödenir) */

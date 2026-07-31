@@ -3,7 +3,7 @@ import {
   Wallet, Plus, Trash2, ArrowUpRight, ArrowDownRight, Printer, Edit3,
   Calendar, FileText, Search, CreditCard, ChevronRight, Eye, Image as ImageIcon, CheckCircle, AlertCircle, Mail
 } from 'lucide-react';
-import { KasaHareketi, Personel } from '../types/erp';
+import { KasaHareketi, KasaOdemeDurumu, Personel } from '../types/erp';
 import { CorporateReportLayout } from './CorporateReportLayout';
 import { exportKasaExcel } from '../lib/kasaExcelExport';
 import { compressImage } from '../lib/imageCompress';
@@ -17,6 +17,54 @@ import {
 } from '../lib/yolHarcamaUtils';
 
 type HarcamaKaynagi = 'KASA_HARCAMA' | 'PERSONEL_HARCAMA';
+
+const ODEME_OPTIONS: { id: KasaOdemeDurumu; label: string; short: string; hint: string }[] = [
+  {
+    id: 'BORC',
+    label: 'BORÇ',
+    short: 'Borç',
+    hint: 'Henüz kapatılmayan borç kaydı — personel seçilir',
+  },
+  {
+    id: 'PERSONEL_ODEDI',
+    label: 'PERSONEL ÖDEDİ',
+    short: 'Personel',
+    hint: 'Personel cebinden ödedi',
+  },
+  {
+    id: 'KASA_ODEDI',
+    label: 'KASA ÖDEDİ',
+    short: 'Kasa',
+    hint: 'Şirket kasasından ödendi',
+  },
+];
+
+function odemeDurumuLabel(d?: KasaOdemeDurumu | null): string {
+  if (d === 'BORC') return 'BORÇ';
+  if (d === 'PERSONEL_ODEDI') return 'PERSONEL ÖDEDİ';
+  if (d === 'KASA_ODEDI') return 'KASA ÖDEDİ';
+  return '';
+}
+
+/** Eski kayıtlardan ödeme durumunu çıkar */
+function resolveOdemeDurumu(kh: KasaHareketi): KasaOdemeDurumu | null {
+  if (kh.odemeDurumu === 'BORC' || kh.odemeDurumu === 'PERSONEL_ODEDI' || kh.odemeDurumu === 'KASA_ODEDI') {
+    return kh.odemeDurumu;
+  }
+  if (kh.harcamaKaynagi === 'KASA_HARCAMA' || isSoforUzerindenKasaGideri(kh)) return 'KASA_ODEDI';
+  if (isSoforIadeKasaHareketi(kh)) return 'BORC';
+  if (kh.harcamaKaynagi === 'PERSONEL_HARCAMA') return 'PERSONEL_ODEDI';
+  if (kh.hareketTipi === 'ÇIKIŞ') return 'KASA_ODEDI';
+  return null;
+}
+
+function harcamaKaynagiFromOdeme(d: KasaOdemeDurumu): HarcamaKaynagi {
+  return d === 'KASA_ODEDI' ? 'KASA_HARCAMA' : 'PERSONEL_HARCAMA';
+}
+
+function personelZorunluMu(d: KasaOdemeDurumu | ''): boolean {
+  return d === 'BORC' || d === 'PERSONEL_ODEDI';
+}
 
 function formatKasaSaveError(err: unknown): string {
   const msg = err instanceof Error ? err.message : String(err);
@@ -76,7 +124,7 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
   const [newDesc, setNewDesc] = useState("");
   const [newRefType, setNewRefType] = useState<'DİĞER' | 'FATURA' | 'İRSALİYE' | 'MAAS' | 'SATIN ALMA'>("DİĞER");
   const [newRefId, setNewRefId] = useState("");
-  const [newHarcamaKaynagi, setNewHarcamaKaynagi] = useState<HarcamaKaynagi | ''>('');
+  const [newOdemeDurumu, setNewOdemeDurumu] = useState<KasaOdemeDurumu | ''>('');
   const [newPersonelId, setNewPersonelId] = useState('');
   const [personelArama, setPersonelArama] = useState('');
   
@@ -237,49 +285,55 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
     .filter((k) => k.hareketTipi === 'ÇIKIŞ' && isSoforUzerindenKasaGideri(k))
     .reduce((sum, current) => sum + current.tutar, 0);
 
-  /** Seçili aralık — kasa / personel bazlı harcama özeti */
-  const harcamaBazliOzet = useMemo(() => {
-    const buckets = new Map<string, { key: string; label: string; tutar: number; tip: 'KASA' | 'PERSONEL' }>();
+  /** Seçili aralık — BORÇ / Personel Ödedi / Kasa Ödedi + kişi kırılımı */
+  const odemeBazliOzet = useMemo(() => {
+    type Row = {
+      key: string;
+      label: string;
+      tutar: number;
+      durum: KasaOdemeDurumu;
+    };
+    const buckets = new Map<string, Row>();
+    const totals: Record<KasaOdemeDurumu, number> = {
+      BORC: 0,
+      PERSONEL_ODEDI: 0,
+      KASA_ODEDI: 0,
+    };
 
-    const add = (key: string, label: string, tip: 'KASA' | 'PERSONEL', tutar: number) => {
+    const add = (key: string, label: string, durum: KasaOdemeDurumu, tutar: number) => {
+      totals[durum] += tutar;
       const prev = buckets.get(key);
       if (prev) prev.tutar += tutar;
-      else buckets.set(key, { key, label, tip, tutar });
+      else buckets.set(key, { key, label, tutar, durum });
     };
 
     for (const kh of filteredHareketler) {
       if (kh.hareketTipi !== 'ÇIKIŞ') continue;
       const tutar = Number(kh.tutar) || 0;
       if (tutar <= 0) continue;
+      const durum = resolveOdemeDurumu(kh) || 'KASA_ODEDI';
 
-      if (kh.harcamaKaynagi === 'PERSONEL_HARCAMA') {
-        const name = String(kh.personelAdi || kh.surucu || 'Personel (adsız)').trim();
-        add(`p:${kh.personelId || name}`, name, 'PERSONEL', tutar);
+      if (durum === 'KASA_ODEDI') {
+        add('kasa-odedi', 'KASA ÖDEDİ', 'KASA_ODEDI', tutar);
         continue;
       }
-      if (kh.harcamaKaynagi === 'KASA_HARCAMA') {
-        add('kasa', 'KASA', 'KASA', tutar);
-        continue;
-      }
-      // Şoför kendi cebinden → kişi adı
-      if (isSoforIadeKasaHareketi(kh)) {
-        const name = String(kh.surucu || 'Şoför').trim();
-        add(`sofor:${name}`, name, 'PERSONEL', tutar);
-        continue;
-      }
-      // Şoför üzerinden şirket kasası
-      if (isSoforUzerindenKasaGideri(kh)) {
-        add('kasa', 'KASA', 'KASA', tutar);
-        continue;
-      }
-      // İşaretsiz eski çıkışlar → KASA
-      add('kasa', 'KASA', 'KASA', tutar);
+      const name = String(kh.personelAdi || kh.surucu || 'Personel (adsız)').trim();
+      const prefix = durum === 'BORC' ? 'borc' : 'podedi';
+      add(
+        `${prefix}:${kh.personelId || name}`,
+        `${name} · ${odemeDurumuLabel(durum)}`,
+        durum,
+        tutar
+      );
     }
 
-    return [...buckets.values()].sort((a, b) => {
-      if (a.tip !== b.tip) return a.tip === 'KASA' ? -1 : 1;
+    const satirlar = [...buckets.values()].sort((a, b) => {
+      const order = { BORC: 0, PERSONEL_ODEDI: 1, KASA_ODEDI: 2 };
+      if (order[a.durum] !== order[b.durum]) return order[a.durum] - order[b.durum];
       return b.tutar - a.tutar || a.label.localeCompare(b.label, 'tr');
     });
+
+    return { satirlar, totals };
   }, [filteredHareketler]);
 
   const personelSecenekleri = useMemo(() => {
@@ -365,12 +419,12 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
       return;
     }
     if (newType === 'ÇIKIŞ') {
-      if (!newHarcamaKaynagi) {
-        alert('Çıkış kaydı için harcama tipi seçin:\n• Kasa Harcama\n• Personel Harcama');
+      if (!newOdemeDurumu) {
+        alert('Çıkış kaydı için ödeme durumu seçin:\n• BORÇ\n• PERSONEL ÖDEDİ\n• KASA ÖDEDİ');
         return;
       }
-      if (newHarcamaKaynagi === 'PERSONEL_HARCAMA' && !newPersonelId) {
-        alert('Personel Harcama seçildi. Harcayan personeli seçmeden kayıt yapılamaz.');
+      if (personelZorunluMu(newOdemeDurumu) && !newPersonelId) {
+        alert('Bu durum için personel seçmeden kayıt yapılamaz.');
         return;
       }
     }
@@ -409,7 +463,7 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
         fisUrl = String(existing?.fisEvrakUrl || '').trim();
       }
 
-      const isPersonelHarcama = newType === 'ÇIKIŞ' && newHarcamaKaynagi === 'PERSONEL_HARCAMA';
+      const needsPersonel = newType === 'ÇIKIŞ' && personelZorunluMu(newOdemeDurumu);
 
       const record: KasaHareketi = {
         ...(existing || {}),
@@ -423,12 +477,14 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
         fisEvrakUrl: fisUrl || undefined,
       };
 
-      if (newType === 'ÇIKIŞ' && newHarcamaKaynagi) {
-        record.harcamaKaynagi = newHarcamaKaynagi;
+      if (newType === 'ÇIKIŞ' && newOdemeDurumu) {
+        record.odemeDurumu = newOdemeDurumu;
+        record.harcamaKaynagi = harcamaKaynagiFromOdeme(newOdemeDurumu);
       } else {
+        delete record.odemeDurumu;
         delete record.harcamaKaynagi;
       }
-      if (isPersonelHarcama) {
+      if (needsPersonel) {
         record.personelId = newPersonelId;
         record.personelAdi = selectedPersonelLabel || undefined;
       } else {
@@ -438,6 +494,7 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
 
       await saveDocument('kasaHareketleri', {
         ...record,
+        odemeDurumu: record.odemeDurumu ?? null,
         harcamaKaynagi: record.harcamaKaynagi ?? null,
         personelId: record.personelId ?? null,
         personelAdi: record.personelAdi ?? null,
@@ -469,7 +526,7 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
       setNewAmount('');
       setNewDesc('');
       setNewRefId('');
-      setNewHarcamaKaynagi('');
+      setNewOdemeDurumu('');
       setNewPersonelId('');
       setPersonelArama('');
       setUploadedFileName(null);
@@ -496,11 +553,7 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
     setNewDesc(kh.aciklama);
     setNewRefType(kh.referansTipi);
     setNewRefId(kh.referansId || "");
-    setNewHarcamaKaynagi(
-      kh.hareketTipi === 'ÇIKIŞ'
-        ? (kh.harcamaKaynagi || (kh.personelId ? 'PERSONEL_HARCAMA' : 'KASA_HARCAMA'))
-        : ''
-    );
+    setNewOdemeDurumu(kh.hareketTipi === 'ÇIKIŞ' ? resolveOdemeDurumu(kh) || 'KASA_ODEDI' : '');
     setNewPersonelId(kh.personelId || '');
     setPersonelArama(kh.personelAdi || '');
     setUploadedFileName(kh.fisEvrakUrl ? "Kayıtlı Fiş Görseli Mevcut" : null);
@@ -512,7 +565,7 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
     setNewAmount("");
     setNewDesc("");
     setNewRefId("");
-    setNewHarcamaKaynagi('');
+    setNewOdemeDurumu('');
     setNewPersonelId('');
     setPersonelArama('');
     setUploadedFileName(null);
@@ -551,19 +604,19 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
     setSoforIadeEnd(endDate);
   };
 
-  /** Yönetici: kayıt üzerinde harcama tipini hızlı değiştir */
-  const handleQuickHarcamaKaynagi = async (
+  /** Yönetici: kayıt üzerinde ödeme durumunu hızlı değiştir */
+  const handleQuickOdemeDurumu = async (
     kh: KasaHareketi,
-    tip: HarcamaKaynagi
+    durum: KasaOdemeDurumu
   ) => {
     if (kh.hareketTipi !== 'ÇIKIŞ') {
-      alert('Harcama tipi yalnızca ÇIKIŞ kayıtlarında değiştirilir.');
+      alert('Ödeme durumu yalnızca ÇIKIŞ kayıtlarında değiştirilir.');
       return;
     }
-    if (tip === 'PERSONEL_HARCAMA' && !kh.personelId && !kh.personelAdi) {
+    if (personelZorunluMu(durum) && !kh.personelId && !kh.personelAdi) {
       handleStartEdit(kh);
-      setNewHarcamaKaynagi('PERSONEL_HARCAMA');
-      alert('Personel Harcama için soldaki formdan harcayan personeli seçip kaydı güncelleyin.');
+      setNewOdemeDurumu(durum);
+      alert(`${odemeDurumuLabel(durum)} için soldaki formdan personeli seçip kaydı güncelleyin.`);
       return;
     }
     if (savingKasa) return;
@@ -571,21 +624,23 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
     try {
       const next: KasaHareketi = {
         ...kh,
-        harcamaKaynagi: tip,
+        odemeDurumu: durum,
+        harcamaKaynagi: harcamaKaynagiFromOdeme(durum),
       };
-      if (tip === 'KASA_HARCAMA') {
+      if (!personelZorunluMu(durum)) {
         delete next.personelId;
         delete next.personelAdi;
       }
       await saveDocument('kasaHareketleri', {
         ...next,
-        harcamaKaynagi: tip,
-        personelId: tip === 'PERSONEL_HARCAMA' ? next.personelId || null : null,
-        personelAdi: tip === 'PERSONEL_HARCAMA' ? next.personelAdi || null : null,
+        odemeDurumu: durum,
+        harcamaKaynagi: next.harcamaKaynagi,
+        personelId: personelZorunluMu(durum) ? next.personelId || null : null,
+        personelAdi: personelZorunluMu(durum) ? next.personelAdi || null : null,
       } as KasaHareketi);
       setKasaHareketleri((prev) => prev.map((x) => (x.id === kh.id ? next : x)));
     } catch (err) {
-      console.error('[kasa] tip değişimi:', err);
+      console.error('[kasa] ödeme durumu değişimi:', err);
       alert(formatKasaSaveError(err));
     } finally {
       setSavingKasa(false);
@@ -602,7 +657,7 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
             <span>Haftalık Kasa</span>
           </h1>
           <p className="text-[#64748b] text-xs font-semibold mt-0.5">
-            Şoför fişleri yönetici onayından sonra ÇIKIŞ (eksi bakiye) olarak düşer · Aralık seçip merkeze rapor gönderin
+            Çıkışlar: BORÇ · Personel ödedi · Kasa ödedi · Şoför fişleri onaydan sonra düşer
           </p>
         </div>
         
@@ -639,32 +694,42 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
         })}
       </div>
 
-      {/* Harcama bazlı özet — KASA / kişi kişi */}
+      {/* Ödeme durumu özeti — BORÇ / Personel / Kasa */}
       <div className="shrink-0 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
           <div>
             <h3 className="text-[11px] font-black uppercase tracking-wider text-slate-800">
-              Harcama özeti (seçili aralık)
+              Ödeme durumu özeti (seçili aralık)
             </h3>
             <p className="text-[10px] text-slate-500 mt-0.5">
-              Kasa ve personel harcamaları ayrı · Yönetici listeden tipi değiştirebilir
+              BORÇ · Personel ödedi · Kasa ödedi · Listeden hızlı değiştirilebilir
             </p>
           </div>
-          <span className="text-[10px] font-mono font-bold text-slate-600 bg-slate-50 border border-slate-100 px-2 py-1 rounded-lg">
-            Toplam çıkış ₺{totalOut.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
-          </span>
+          <div className="flex flex-wrap gap-1.5 text-[10px] font-mono font-bold">
+            <span className="bg-amber-50 border border-amber-200 text-amber-900 px-2 py-1 rounded-lg">
+              Borç ₺{odemeBazliOzet.totals.BORC.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
+            </span>
+            <span className="bg-violet-50 border border-violet-200 text-violet-900 px-2 py-1 rounded-lg">
+              Personel ₺{odemeBazliOzet.totals.PERSONEL_ODEDI.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
+            </span>
+            <span className="bg-slate-900 text-white px-2 py-1 rounded-lg">
+              Kasa ₺{odemeBazliOzet.totals.KASA_ODEDI.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
+            </span>
+          </div>
         </div>
-        {harcamaBazliOzet.length === 0 ? (
+        {odemeBazliOzet.satirlar.length === 0 ? (
           <p className="text-[11px] text-slate-400 italic">Bu aralıkta çıkış / harcama yok.</p>
         ) : (
           <div className="flex flex-wrap gap-2">
-            {harcamaBazliOzet.map((row) => (
+            {odemeBazliOzet.satirlar.map((row) => (
               <div
                 key={row.key}
                 className={`inline-flex items-center gap-2 rounded-xl border px-3 py-2 ${
-                  row.tip === 'KASA'
+                  row.durum === 'KASA_ODEDI'
                     ? 'bg-slate-900 text-white border-slate-900'
-                    : 'bg-violet-50 text-violet-950 border-violet-200'
+                    : row.durum === 'BORC'
+                      ? 'bg-amber-50 text-amber-950 border-amber-200'
+                      : 'bg-violet-50 text-violet-950 border-violet-200'
                 }`}
               >
                 <span className="text-[10px] font-black uppercase tracking-wide opacity-90">
@@ -731,11 +796,11 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
                   const next = e.target.value as 'GİRİŞ' | 'ÇIKIŞ';
                   setNewType(next);
                   if (next === 'GİRİŞ') {
-                    setNewHarcamaKaynagi('');
+                    setNewOdemeDurumu('');
                     setNewPersonelId('');
                     setPersonelArama('');
-                  } else if (!newHarcamaKaynagi) {
-                    setNewHarcamaKaynagi('KASA_HARCAMA');
+                  } else if (!newOdemeDurumu) {
+                    setNewOdemeDurumu('KASA_ODEDI');
                   }
                 }}
               >
@@ -747,41 +812,44 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
             {newType === 'ÇIKIŞ' && (
               <div className="space-y-2 rounded-xl border border-rose-100 bg-rose-50/40 p-3">
                 <label className="text-[10px] font-bold text-rose-800 uppercase block">
-                  Harcama Tipi <span className="text-rose-600">*</span>
+                  Ödeme Durumu <span className="text-rose-600">*</span>
                 </label>
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setNewHarcamaKaynagi('KASA_HARCAMA');
-                      setNewPersonelId('');
-                      setPersonelArama('');
-                    }}
-                    className={`text-[10px] font-black uppercase py-2 px-2 rounded-xl border cursor-pointer transition ${
-                      newHarcamaKaynagi === 'KASA_HARCAMA'
-                        ? 'bg-slate-900 text-white border-slate-900'
-                        : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
-                    }`}
-                  >
-                    Kasa Harcama
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setNewHarcamaKaynagi('PERSONEL_HARCAMA')}
-                    className={`text-[10px] font-black uppercase py-2 px-2 rounded-xl border cursor-pointer transition ${
-                      newHarcamaKaynagi === 'PERSONEL_HARCAMA'
-                        ? 'bg-violet-700 text-white border-violet-700'
-                        : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
-                    }`}
-                  >
-                    Personel Harcama
-                  </button>
+                <div className="grid grid-cols-1 gap-1.5">
+                  {ODEME_OPTIONS.map((opt) => (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      onClick={() => {
+                        setNewOdemeDurumu(opt.id);
+                        if (!personelZorunluMu(opt.id)) {
+                          setNewPersonelId('');
+                          setPersonelArama('');
+                        }
+                      }}
+                      className={`text-left text-[10px] font-black uppercase py-2 px-3 rounded-xl border cursor-pointer transition ${
+                        newOdemeDurumu === opt.id
+                          ? opt.id === 'KASA_ODEDI'
+                            ? 'bg-slate-900 text-white border-slate-900'
+                            : opt.id === 'BORC'
+                              ? 'bg-amber-600 text-white border-amber-600'
+                              : 'bg-violet-700 text-white border-violet-700'
+                          : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                      }`}
+                    >
+                      <span className="block">{opt.label}</span>
+                      <span className={`block text-[9px] font-semibold normal-case tracking-normal mt-0.5 ${
+                        newOdemeDurumu === opt.id ? 'opacity-90' : 'text-slate-500'
+                      }`}>
+                        {opt.hint}
+                      </span>
+                    </button>
+                  ))}
                 </div>
 
-                {newHarcamaKaynagi === 'PERSONEL_HARCAMA' && (
+                {personelZorunluMu(newOdemeDurumu) && (
                   <div className="space-y-1.5 pt-1">
                     <label className="text-[10px] font-bold text-violet-900 uppercase block">
-                      Harcayan Personel <span className="text-rose-600">*</span>
+                      Personel <span className="text-rose-600">*</span>
                     </label>
                     <input
                       type="text"
@@ -1001,6 +1069,7 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
                   const sofor = isSoforKaynakliKasaHareketi(kh);
                   const soforIade = isSoforIadeKasaHareketi(kh);
                   const soforKasa = isSoforUzerindenKasaGideri(kh);
+                  const odeme = resolveOdemeDurumu(kh);
                   return (
                   <div 
                     key={kh.id} 
@@ -1044,44 +1113,43 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
                           ŞOFÖR FİŞ
                         </span>
                       )}
-                      {kh.harcamaKaynagi === 'KASA_HARCAMA' && (
-                        <span className="inline-block py-0.5 px-2 rounded-full text-[9px] font-extrabold bg-slate-100 text-slate-700 border border-slate-200">
-                          KASA HARCAMA
+                      {odeme === 'BORC' && (
+                        <span className="inline-block py-0.5 px-2 rounded-full text-[9px] font-extrabold bg-amber-100 text-amber-900 border border-amber-200">
+                          BORÇ
                         </span>
                       )}
-                      {kh.harcamaKaynagi === 'PERSONEL_HARCAMA' && (
+                      {odeme === 'PERSONEL_ODEDI' && (
                         <span className="inline-block py-0.5 px-2 rounded-full text-[9px] font-extrabold bg-violet-100 text-violet-800 border border-violet-200">
-                          PERSONEL HARCAMA
+                          PERSONEL ÖDEDİ
+                        </span>
+                      )}
+                      {odeme === 'KASA_ODEDI' && (
+                        <span className="inline-block py-0.5 px-2 rounded-full text-[9px] font-extrabold bg-slate-100 text-slate-700 border border-slate-200">
+                          KASA ÖDEDİ
                         </span>
                       )}
                       {kh.hareketTipi === 'ÇIKIŞ' && (
-                        <div className="flex gap-0.5 w-full mt-0.5">
-                          <button
-                            type="button"
-                            disabled={savingKasa}
-                            onClick={() => void handleQuickHarcamaKaynagi(kh, 'KASA_HARCAMA')}
-                            className={`text-[8px] font-black uppercase px-1.5 py-0.5 rounded border cursor-pointer disabled:opacity-50 ${
-                              kh.harcamaKaynagi === 'KASA_HARCAMA'
-                                ? 'bg-slate-800 text-white border-slate-800'
-                                : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
-                            }`}
-                            title="Kasa Harcama olarak işaretle"
-                          >
-                            → Kasa
-                          </button>
-                          <button
-                            type="button"
-                            disabled={savingKasa}
-                            onClick={() => void handleQuickHarcamaKaynagi(kh, 'PERSONEL_HARCAMA')}
-                            className={`text-[8px] font-black uppercase px-1.5 py-0.5 rounded border cursor-pointer disabled:opacity-50 ${
-                              kh.harcamaKaynagi === 'PERSONEL_HARCAMA'
-                                ? 'bg-violet-700 text-white border-violet-700'
-                                : 'bg-white text-violet-700 border-violet-200 hover:bg-violet-50'
-                            }`}
-                            title="Personel Harcama olarak işaretle"
-                          >
-                            → Personel
-                          </button>
+                        <div className="flex flex-wrap gap-0.5 w-full mt-0.5">
+                          {ODEME_OPTIONS.map((opt) => (
+                            <button
+                              key={opt.id}
+                              type="button"
+                              disabled={savingKasa}
+                              onClick={() => void handleQuickOdemeDurumu(kh, opt.id)}
+                              className={`text-[8px] font-black uppercase px-1.5 py-0.5 rounded border cursor-pointer disabled:opacity-50 ${
+                                odeme === opt.id
+                                  ? opt.id === 'KASA_ODEDI'
+                                    ? 'bg-slate-800 text-white border-slate-800'
+                                    : opt.id === 'BORC'
+                                      ? 'bg-amber-600 text-white border-amber-600'
+                                      : 'bg-violet-700 text-white border-violet-700'
+                                  : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                              }`}
+                              title={`${opt.label} olarak işaretle`}
+                            >
+                              → {opt.short}
+                            </button>
+                          ))}
                         </div>
                       )}
                     </div>
