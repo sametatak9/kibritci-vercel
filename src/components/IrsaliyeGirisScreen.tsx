@@ -466,9 +466,9 @@ export const IrsaliyeGirisScreen: React.FC<IrsaliyeGirisScreenProps> = ({
       addNotification(`${withKalem.length} irsaliye → taslak fatura ${fatura.faturaNo} bağlandı.`);
     }
     const openRapor = window.confirm(
-      `Taslak fatura bağlandı.\nNo: ${fatura.faturaNo}\nİrsaliye: ${withKalem.length}${
+      `Taslak fatura bağlandı.\nNo: ${fatura.faturaNo}\n${withKalem.length} irsaliye faturaya bağlandı${
         fatura.saId ? `\nSipariş: ${fatura.saId}` : ''
-      }\n\nFatura sekmesinden fiyatları düzenleyebilirsiniz.\n\nZincir raporunu açmak ister misiniz?`
+      }\n\nFatura sekmesinden fiyatları düzenleyebilirsiniz.\n\nDönüşüm zincir raporunu açmak ister misiniz?`
     );
     if (openRapor) {
       const sa = fatura.saId
@@ -1075,11 +1075,11 @@ export const IrsaliyeGirisScreen: React.FC<IrsaliyeGirisScreenProps> = ({
                               {ir.kaynak !== 'MICIR_STABILIZE_FIS' ? (
                                 faturasizIds.has(ir.id) ? (
                                   <span className="text-[8px] font-black uppercase px-1.5 py-0.5 rounded w-fit bg-rose-50 text-rose-700">
-                                    Faturasız
+                                    Faturaya bağlanmadı
                                   </span>
                                 ) : (
                                   <span className="text-[8px] font-black uppercase px-1.5 py-0.5 rounded w-fit bg-violet-50 text-violet-700">
-                                    Faturalı
+                                    Faturaya bağlandı
                                   </span>
                                 )
                               ) : null}

@@ -23,6 +23,7 @@ import {
 import {
   buildIrsaliyeFromSatinAlma,
   describeEvrakZinciri,
+  ensureIrsaliyeSaBaglari,
   findIrsaliyelerForSa,
 } from '../lib/evrakDonusum';
 import { openEvrakZincirRaporu } from '../lib/evrakZincirRapor';
@@ -473,9 +474,20 @@ export const SatinAlmaScreen: React.FC<SatinAlmaScreenProps> = ({
         `${irsaliyeModalSa.saId}: ${created.length} irsaliye üretildi (${kalem.urunAdi}). Fatura bağlama ile devam edebilirsiniz.`
       );
     }
+    const saForRapor = irsaliyeModalSa;
     setIrsaliyeModalSa(null);
     setTalepTab('DONUSTURULDU');
-    alert(`${created.length} irsaliye oluşturuldu.\nİlk no: ${created[0]?.irsaliyeNo || '—'}`);
+    const openRapor = window.confirm(
+      `${created.length} irsaliye oluşturuldu (SA → sevk dönüşümü).\nİlk no: ${created[0]?.irsaliyeNo || '—'}\n\nDönüşüm zincir raporunu açmak ister misiniz?`
+    );
+    if (openRapor) {
+      openEvrakZincirRaporu({
+        sa: saForRapor,
+        irsaliyeler: [...created, ...irsaliyeler],
+        faturalar,
+        focusIrsaliyeIds: created.map((ir) => ir.id),
+      });
+    }
   };
 
   const handleSimulateESignature = (sa: SatinAlmaTalebi) => {
@@ -1118,8 +1130,21 @@ ${kalemOzet || '—'}${more}`,
                           const z = describeEvrakZinciri(sa, irsaliyeler, faturalar);
                           if (!z.sevk && !z.fatura) return null;
                           return (
-                            <span className="ml-1 text-[8px] font-black uppercase bg-violet-50 text-violet-700 border border-violet-100 px-1.5 py-0.5 rounded">
-                              Sevk {z.sevk} · Fatura {z.fatura}
+                            <span
+                              className={`ml-1 text-[8px] font-black uppercase border px-1.5 py-0.5 rounded ${
+                                z.tamamlandi
+                                  ? 'bg-violet-100 text-violet-800 border-violet-200'
+                                  : z.fatura > 0
+                                    ? 'bg-sky-50 text-sky-800 border-sky-100'
+                                    : 'bg-amber-50 text-amber-800 border-amber-100'
+                              }`}
+                              title={z.durumMetni}
+                            >
+                              {z.tamamlandi
+                                ? `Faturaya bağlandı · ${z.sevk} sevk`
+                                : z.fatura > 0
+                                  ? `${z.faturayaBagliSevk}/${z.sevk} faturaya bağlandı`
+                                  : `Sevk ${z.sevk} · fatura bekliyor`}
                             </span>
                           );
                         })()}
@@ -1204,15 +1229,22 @@ ${kalemOzet || '—'}${more}`,
                     </button>
                     <button
                       type="button"
-                      onClick={() =>
+                      onClick={() => {
+                        const { irsaliyeler: repaired, repairedIds } = ensureIrsaliyeSaBaglari(
+                          sa,
+                          irsaliyeler
+                        );
+                        if (repairedIds.length && setIrsaliyeler) {
+                          setIrsaliyeler(repaired);
+                        }
                         openEvrakZincirRaporu({
                           sa,
-                          irsaliyeler,
+                          irsaliyeler: repaired,
                           faturalar,
-                        })
-                      }
+                        });
+                      }}
                       className="bg-violet-50 hover:bg-violet-100 text-violet-900 border border-violet-200 px-3 py-1.5 rounded-xl font-bold transition flex items-center gap-1 cursor-pointer"
-                      title="SA → İrsaliye → Fatura zincir raporu"
+                      title="SA → İrsaliye → Fatura dönüşüm / bağlama raporu"
                     >
                       Zincir Raporu
                     </button>
