@@ -1,7 +1,9 @@
 /** Şoför yol / masraf fişi yardımcıları — onay sonrası Haftalık Kasa çıkışı */
+import { doc, getDoc } from 'firebase/firestore';
 import { KasaHareketi, KasaOdemeDurumu, SoforMasrafTipi, YolHarcamasi } from '../types/erp';
 import { kibritciReportHeaderHtml } from './kibritciBrand';
 import { formatDateLabelTr, normalizeDateKey, todayDateKey } from './dateKeyUtils';
+import { db, saveDocument } from './firebase';
 import {
   getReportEmailToolbarHtml,
   htmlToPlainText,
@@ -170,7 +172,7 @@ export function buildYolHarcamaKasaCikisPayload(
   const aciklamaExtra = String(item.aciklama || '').trim();
   const isKendi = tip === 'KENDI';
 
-  return {
+  const payload: KasaHareketi = {
     id,
     tarih,
     hareketTipi: 'ÇIKIŞ',
@@ -188,13 +190,67 @@ export function buildYolHarcamaKasaCikisPayload(
     soforOdemesi: isKendi,
     soforKasaHarcamasi: !isKendi,
     masrafTipi: tip,
-    /** Kendi cebinden → kasanın ödemesi gereken borç; kasa tipi → kasa ödedi */
     odemeDurumu: isKendi ? 'BORC' : 'KASA_ODEDI',
     harcamaKaynagi: isKendi ? 'PERSONEL_HARCAMA' : 'KASA_HARCAMA',
-    personelAdi: isKendi ? surucu : undefined,
     surucu,
     fisNo,
   };
+  if (isKendi) {
+    payload.personelAdi = surucu;
+  }
+  return payload;
+}
+
+/** Onaylı şoför fişlerini Haftalık Kasa'ya yazar (eksik kalanları tamamlar) */
+export async function syncApprovedYolHarcamalariToKasa(
+  yolHarcamalari: Array<
+    Pick<
+      YolHarcamasi,
+      | 'id'
+      | 'tarih'
+      | 'tutar'
+      | 'aciklama'
+      | 'fisNo'
+      | 'faturaFotoUrl'
+      | 'surucu'
+      | 'masrafTipi'
+      | 'nihaiMasrafTipi'
+      | 'durum'
+    >
+  >
+): Promise<{ created: number; skipped: number; errors: string[] }> {
+  let created = 0;
+  let skipped = 0;
+  const errors: string[] = [];
+
+  const approved = (yolHarcamalari || []).filter((y) => {
+    const d = String(y.durum || '').toLocaleUpperCase('tr-TR');
+    return d.includes('ONAYLANDI') && !d.includes('RED');
+  });
+
+  for (const item of approved) {
+    if (!item?.id) continue;
+    const kasaId = yolHarcamaKasaDocId(item.id);
+    try {
+      const existing = await getDoc(doc(db, 'kasaHareketleri', kasaId));
+      if (existing.exists()) {
+        skipped += 1;
+        continue;
+      }
+      const payload = buildYolHarcamaKasaCikisPayload(item);
+      if (!payload.tutar || payload.tutar <= 0) {
+        errors.push(`${item.id}: tutar geçersiz`);
+        continue;
+      }
+      await saveDocument('kasaHareketleri', payload);
+      created += 1;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      errors.push(`${item.fisNo || item.id}: ${msg}`);
+    }
+  }
+
+  return { created, skipped, errors };
 }
 
 export function filterYolHarcamalariByRange(

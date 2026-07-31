@@ -9,6 +9,12 @@ import { db, saveDocument } from '../lib/firebase';
 import { compressImage } from '../lib/imageCompress';
 import { collection, doc, setDoc, onSnapshot, updateDoc, deleteDoc, getDocs } from 'firebase/firestore';
 import {
+  buildYolHarcamaKasaCikisPayload,
+  syncApprovedYolHarcamalariToKasa,
+  yolHarcamaKasaDocId,
+} from '../lib/yolHarcamaUtils';
+import { formatFirestoreWriteError } from '../lib/authWriteGuard';
+import {
   buildSingleApprovalUpdate,
   buildWhatsAppUrl,
   canApproveMobilDocuments,
@@ -109,6 +115,7 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
     url: string;
     title: string;
   } | null>(null);
+  const yolKasaSyncDoneRef = React.useRef(false);
 
   // Security Gate Document Approval States
   const [gelenEvraklar, setGelenEvraklar] = useState<any[]>([]);
@@ -217,6 +224,16 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
       });
       list.sort((a, b) => new Date(b.tarih || 0).getTime() - new Date(a.tarih || 0).getTime());
       setYolHarcamalari(list);
+
+      // Onaylı ama kasaya düşmemiş fişleri bir kez otomatik tamamla
+      if (!yolKasaSyncDoneRef.current && list.some((x) => String(x.durum || '').includes('ONAYLANDI'))) {
+        yolKasaSyncDoneRef.current = true;
+        void syncApprovedYolHarcamalariToKasa(list).then((r) => {
+          if (r.created > 0) {
+            console.info(`[yol-kasa-sync] ${r.created} eksik kasa kaydı tamamlandı`);
+          }
+        });
+      }
     });
 
     return () => {
@@ -308,40 +325,41 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
       return;
     }
     try {
-      const { buildYolHarcamaKasaCikisPayload, yolHarcamaKasaDocId } = await import(
-        '../lib/yolHarcamaUtils'
+      const payload = buildYolHarcamaKasaCikisPayload(
+        { ...item, nihaiMasrafTipi },
+        nihaiMasrafTipi
       );
+      if (!payload.tutar || payload.tutar <= 0) {
+        alert('Tutar geçersiz; kasa kaydı oluşturulamadı.');
+        return;
+      }
+
+      // Önce kasa çıkışı — başarısızsa onay yazılmaz
+      await saveDocument('kasaHareketleri', payload);
+
       await updateDoc(doc(db, 'yolHarcamalari', item.id), {
         durum: 'ONAYLANDI',
         nihaiMasrafTipi,
         masrafTipi: item.masrafTipi || nihaiMasrafTipi,
         onaylayanYonetici: currentUser?.email || 'Sistem Yöneticisi',
         onayTarihi: new Date().toISOString(),
+        kasaHareketId: payload.id,
       });
-
-      const payload = buildYolHarcamaKasaCikisPayload(
-        { ...item, nihaiMasrafTipi },
-        nihaiMasrafTipi
-      );
-      const kasaRef = doc(db, 'kasaHareketleri', yolHarcamaKasaDocId(item.id));
-      await setDoc(kasaRef, payload);
 
       alert(
         nihaiMasrafTipi === 'KENDI'
-          ? 'Onaylandı: Şoföre iade olarak Haftalık Kasa çıkışına işlendi.'
-          : 'Onaylandı: Kasa harcaması olarak Haftalık Kasa çıkışına işlendi (şoföre ödeme yok).'
+          ? 'Onaylandı: Şoföre iade / kasa borcu olarak Haftalık Kasa çıkışına işlendi.\n\nNot: Haftalık Kasa’da tarih aralığını fiş tarihini kapsayacak şekilde genişletin.'
+          : 'Onaylandı: Kasa harcaması olarak Haftalık Kasa çıkışına işlendi.\n\nNot: Haftalık Kasa’da tarih aralığını fiş tarihini kapsayacak şekilde genişletin.'
       );
     } catch (err) {
-      console.error(err);
-      alert('Hata oluştu.');
+      console.error('[yol-harcama-onay]', err);
+      alert(`Kasa kaydı / onay başarısız: ${formatFirestoreWriteError(err)}`);
     }
   };
 
   const handleRejectYolHarcamasi = async (item: any) => {
     if (!window.confirm("Bu yol harcamasını reddetmek istediğinize emin misiniz?")) return;
     try {
-      const { yolHarcamaKasaDocId } = await import('../lib/yolHarcamaUtils');
-      const { deleteDoc } = await import('firebase/firestore');
       await updateDoc(doc(db, 'yolHarcamalari', item.id), {
         durum: 'REDDEDİLDİ',
         onaylayanYonetici: currentUser?.email || 'Sistem Yöneticisi',
@@ -356,7 +374,28 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
       alert("Harcama reddedildi.");
     } catch (err) {
       console.error(err);
-      alert("Reddetme işlemi başarısız.");
+      alert(`Reddetme işlemi başarısız: ${formatFirestoreWriteError(err)}`);
+    }
+  };
+
+  const handleSyncYolHarcamalariToKasa = async () => {
+    if (!window.confirm(
+      'Onaylanmış şoför fişlerinden Haftalık Kasa’da eksik olanları şimdi tamamlamak ister misiniz?'
+    )) {
+      return;
+    }
+    try {
+      const result = await syncApprovedYolHarcamalariToKasa(yolHarcamalari);
+      alert(
+        `Kasa senkronu tamamlandı.\n\nYeni yazılan: ${result.created}\nZaten vardı: ${result.skipped}` +
+          (result.errors.length
+            ? `\nHata: ${result.errors.slice(0, 5).join('\n')}`
+            : '') +
+          '\n\nHaftalık Kasa’da tarih aralığını fiş tarihlerini kapsayacak şekilde açın.'
+      );
+    } catch (err) {
+      console.error('[yol-kasa-sync]', err);
+      alert(`Senkron başarısız: ${formatFirestoreWriteError(err)}`);
     }
   };
 
@@ -3484,13 +3523,21 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
           {activeTab === 'sofor_talepleri' && (
             <div className="space-y-6">
               {/* Header */}
-              <div className="border bg-white p-4.5 rounded-2xl border-slate-200 flex justify-between items-center text-xs text-slate-800">
+              <div className="border bg-white p-4.5 rounded-2xl border-slate-200 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 text-xs text-slate-800">
                 <div className="space-y-1">
                   <span className="text-sky-400 font-bold block text-[11px] tracking-widest uppercase">🚛 ŞÖFÖR MOBİL PANELİ TALEPLERİ</span>
                   <p className="text-slate-400 leading-relaxed text-[11px]">
                     Şoförler tarafından eklenen yeni araç kartı talepleri ile seyahat yol harcamalarını (fiş/fatura) buradan inceleyip onaylayabilirsiniz. Onaylanan harcamalar otomatik olarak haftalık kasaya işlenir.
                   </p>
                 </div>
+                <button
+                  type="button"
+                  onClick={() => void handleSyncYolHarcamalariToKasa()}
+                  className="shrink-0 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[10px] px-3 py-2 rounded-xl cursor-pointer"
+                  title="Onaylı fişleri Haftalık Kasa’ya yaz"
+                >
+                  Onaylıları Kasaya Yaz
+                </button>
               </div>
 
               {/* 1. ARAÇ KARTLARI TALEPLERİ */}

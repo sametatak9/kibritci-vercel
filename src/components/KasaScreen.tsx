@@ -1,13 +1,13 @@
-import React, { useMemo, useState, useRef } from 'react';
+import React, { useMemo, useState, useRef, useEffect } from 'react';
 import { 
   Wallet, Plus, Trash2, ArrowUpRight, ArrowDownRight, Printer, Edit3,
-  Calendar, FileText, Search, CreditCard, ChevronRight, Eye, Image as ImageIcon, CheckCircle, AlertCircle, Mail
+  Calendar, FileText, Search, CreditCard, ChevronRight, Eye, Image as ImageIcon, CheckCircle, AlertCircle, Mail, RefreshCw
 } from 'lucide-react';
-import { KasaHareketi, KasaOdemeDurumu, Personel } from '../types/erp';
+import { KasaHareketi, KasaOdemeDurumu, Personel, YolHarcamasi } from '../types/erp';
 import { CorporateReportLayout } from './CorporateReportLayout';
 import { exportKasaExcel } from '../lib/kasaExcelExport';
 import { compressImage } from '../lib/imageCompress';
-import { removeDocument, saveDocument } from '../lib/firebase';
+import { db, removeDocument, saveDocument } from '../lib/firebase';
 import { ensureKasaFisFotoPersisted } from '../lib/sahaFaaliyetFotoStorage';
 import { todayDateKey } from '../lib/dateKeyUtils';
 import {
@@ -16,7 +16,9 @@ import {
   isSoforUzerindenKasaGideri,
   resolveKasaOdemeDurumu,
   resolveKasaRaporMasrafTipi,
+  syncApprovedYolHarcamalariToKasa,
 } from '../lib/yolHarcamaUtils';
+import { collection, getDocs } from 'firebase/firestore';
 
 type HarcamaKaynagi = 'KASA_HARCAMA' | 'PERSONEL_HARCAMA';
 
@@ -139,6 +141,39 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
   const [soforIadeEnd, setSoforIadeEnd] = useState(week0.end);
   const [soforIadeFiltre, setSoforIadeFiltre] = useState('');
   const [savingKasa, setSavingKasa] = useState(false);
+  const yolKasaSyncRef = useRef(false);
+
+  /** Onaylı şoför fişlerini kasaya tamamla (eksik kalanlar) */
+  const runYolKasaSync = async (silent = false) => {
+    try {
+      const snap = await getDocs(collection(db, 'yolHarcamalari'));
+      const list: YolHarcamasi[] = [];
+      snap.forEach((d) => list.push({ id: d.id, ...(d.data() as Omit<YolHarcamasi, 'id'>) }));
+      const result = await syncApprovedYolHarcamalariToKasa(list);
+      if (!silent) {
+        alert(
+          `Şoför fiş → kasa senkronu\n\nYeni: ${result.created} · Zaten vardı: ${result.skipped}` +
+            (result.errors.length ? `\nHata: ${result.errors.slice(0, 3).join('; ')}` : '') +
+            '\n\nTarih aralığını fiş tarihlerini kapsayacak şekilde genişletin.'
+        );
+      } else if (result.created > 0) {
+        console.info(`[kasa] ${result.created} onaylı şoför fişi kasaya yazıldı`);
+      }
+      return result;
+    } catch (err) {
+      console.error('[kasa] yol sync', err);
+      if (!silent) {
+        alert(`Senkron başarısız: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      return null;
+    }
+  };
+
+  useEffect(() => {
+    if (yolKasaSyncRef.current) return;
+    yolKasaSyncRef.current = true;
+    void runYolKasaSync(true);
+  }, []);
 
   const buildSoforReportBundle = async () => {
     const {
@@ -1268,6 +1303,15 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
                   className="border border-slate-200 rounded-lg px-2 py-1 text-[10px] w-28"
                 />
               </div>
+              <button
+                type="button"
+                onClick={() => void runYolKasaSync(false)}
+                className="bg-violet-700 hover:bg-violet-800 border border-violet-800 text-white text-[11px] font-bold py-1.5 px-3 rounded-lg flex items-center space-x-1.5 transition cursor-pointer"
+                title="Onaylı şoför fişlerini Haftalık Kasa’ya yaz"
+              >
+                <RefreshCw size={12} />
+                <span>Şoför Fiş → Kasa</span>
+              </button>
               <button
                 type="button"
                 onClick={() => void handleSoforMasrafIadeRaporu()}
