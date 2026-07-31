@@ -121,6 +121,12 @@ import { collection, onSnapshot, doc, getDoc, query, orderBy, limit } from 'fire
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { syncAuthClaimsFromServer } from './lib/authClaimsClient';
 import { assertErpWriteAuth, formatFirestoreWriteError } from './lib/authWriteGuard';
+import {
+  enqueueSahaFaaliyetSave,
+  fetchSahaFaaliyetById,
+  removeSahaFaaliyetSafe,
+  type SahaFaaliyetSaveSource,
+} from './lib/sahaFaaliyetPersistence';
 import { LoginScreen } from './components/LoginScreen';
 const YetkiVermeScreen = lazy(() => import('./components/YetkiVermeScreen').then(m => ({ default: m.YetkiVermeScreen })));
 const OperatorScreen = lazy(() => import('./components/OperatorScreen').then(m => ({ default: m.OperatorScreen })));
@@ -899,7 +905,6 @@ export default function App() {
             const mergedSaha = reportData;
             void (async () => {
               try {
-                const { enqueueSahaFaaliyetSave } = await import('./lib/sahaFaaliyetPersistence');
                 for (const sf of mergedSaha) {
                   if (sf.id?.startsWith('SF-MAY26-') || sf.id?.startsWith('SF-HAZ26-')) {
                     await enqueueSahaFaaliyetSave(sf, 'legacy_bootstrap');
@@ -2422,16 +2427,13 @@ export default function App() {
 
   const saveSahaFaaliyetNow = async (
     record: SahaFaaliyetiType,
-    kaynak: import('./lib/sahaFaaliyetPersistence').SahaFaaliyetSaveSource = 'formen_mobil'
+    kaynak: SahaFaaliyetSaveSource = 'formen_mobil'
   ) => {
     const authBlock = await assertErpWriteAuth();
     if (authBlock) {
       notifySahaFaaliyetFailure(authBlock);
       throw new Error(authBlock);
     }
-    const { enqueueSahaFaaliyetSave, fetchSahaFaaliyetById } = await import(
-      './lib/sahaFaaliyetPersistence'
-    );
     const result = await enqueueSahaFaaliyetSave(record, kaynak);
     if (!result.ok) {
       notifySahaFaaliyetFailure(result.error || 'Bilinmeyen hata');
@@ -2453,7 +2455,6 @@ export default function App() {
   };
 
   const removeSahaFaaliyetNow = async (record: SahaFaaliyetiType) => {
-    const { removeSahaFaaliyetSafe } = await import('./lib/sahaFaaliyetPersistence');
     const result = await removeSahaFaaliyetSafe(record.id, 'delete', record);
     if (!result.ok) {
       notifySahaFaaliyetFailure(result.error || 'Silme işlemi engellendi');

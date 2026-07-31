@@ -212,6 +212,7 @@ export const FormenScreen: React.FC<FormenScreenProps> = ({
   const [isCikisTalepleriList, setIsCikisTalepleriList] = useState<any[]>([]);
   const [isGuncellemeTalepleriList, setIsGuncellemeTalepleriList] = useState<any[]>([]);
   const [savingAttendance, setSavingAttendance] = useState(false);
+  const [savingFaaliyet, setSavingFaaliyet] = useState(false);
 
   // Quick select lists
   const isNitelikleriList = [
@@ -954,6 +955,7 @@ ${satirlar
 
   const handleSaveFaaliyet = async (e: React.SyntheticEvent) => {
     e.preventDefault();
+    if (savingFaaliyet) return;
     if (!isNiteligi) {
       showStatus('error', 'Lütfen iş niteliğini giriniz veya şablondan seçiniz!');
       return;
@@ -1008,6 +1010,7 @@ ${satirlar
       iceriAktarimDurumu: previousRecord?.iceriAktarimDurumu || 'BEKLIYOR',
     };
 
+    setSavingFaaliyet(true);
     try {
       await saveSahaFaaliyetNow!(faaliyetPayload, 'formen_mobil');
       if (!editingFaaliyetId) {
@@ -1021,8 +1024,19 @@ ${satirlar
         );
       }
     } catch (err: any) {
-      showStatus('error', `Faaliyet gönderilemedi: ${err?.message || 'Bağlantı hatası'}`);
+      const raw = String(err?.message || 'Bağlantı hatası');
+      const low = raw.toLowerCase();
+      const msg =
+        low.includes('failed to fetch dynamically imported module') ||
+        low.includes('importing a module script failed') ||
+        low.includes('not a valid javascript mime') ||
+        low.includes('text/html')
+          ? 'Sayfa güncellenmiş (eski önbellek). Ctrl+F5 ile yenileyip kaydı tekrar deneyin.'
+          : raw;
+      showStatus('error', `Faaliyet gönderilemedi: ${msg}`);
       return;
+    } finally {
+      setSavingFaaliyet(false);
     }
 
     if (editingFaaliyetId) {
@@ -2348,10 +2362,17 @@ ${satirlar
                     {/* Submit activity report */}
                     <button
                       type="submit"
-                      className="w-full bg-amber-500 hover:bg-amber-600 text-slate-950 font-black text-[10px] py-2.5 px-4 rounded-xl transition duration-150 shadow-md flex items-center justify-center space-x-1.5 cursor-pointer border-b-4 border-amber-700"
+                      disabled={savingFaaliyet}
+                      className="w-full bg-amber-500 hover:bg-amber-600 disabled:opacity-60 disabled:cursor-wait text-slate-950 font-black text-[10px] py-2.5 px-4 rounded-xl transition duration-150 shadow-md flex items-center justify-center space-x-1.5 cursor-pointer border-b-4 border-amber-700"
                     >
                       <Send size={12} />
-                      <span>{editingFaaliyetId ? 'GÜNCELLE' : 'KAYDET'}</span>
+                      <span>
+                        {savingFaaliyet
+                          ? 'KAYDEDİLİYOR…'
+                          : editingFaaliyetId
+                            ? 'GÜNCELLE'
+                            : 'KAYDET'}
+                      </span>
                     </button>
 
                   </div>
