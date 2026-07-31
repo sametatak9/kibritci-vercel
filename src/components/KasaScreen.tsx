@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { KasaHareketi, KasaOdemeDurumu, Personel, YolHarcamasi } from '../types/erp';
 import { CorporateReportLayout } from './CorporateReportLayout';
+import { ImageLightbox } from './ImageLightbox';
 import { exportKasaExcel } from '../lib/kasaExcelExport';
 import { compressImage } from '../lib/imageCompress';
 import { db, removeDocument, saveDocument } from '../lib/firebase';
@@ -27,7 +28,7 @@ const ODEME_OPTIONS: { id: KasaOdemeDurumu; label: string; short: string; hint: 
     id: 'BORC',
     label: 'BORÇ',
     short: 'Borç',
-    hint: 'Kasaya yazılır — kasanın personele ödemesi gereken borç',
+    hint: 'Kasaya yazılır — genelde firmaya borç (personel zorunlu değil)',
   },
   {
     id: 'PERSONEL_ODEDI',
@@ -59,8 +60,13 @@ function harcamaKaynagiFromOdeme(d: KasaOdemeDurumu): HarcamaKaynagi {
   return d === 'KASA_ODEDI' ? 'KASA_HARCAMA' : 'PERSONEL_HARCAMA';
 }
 
+/** Yalnızca personel cebinden ödediyse personel zorunlu; BORÇ firmaya da olabilir */
 function personelZorunluMu(d: KasaOdemeDurumu | ''): boolean {
-  return d === 'BORC' || d === 'PERSONEL_ODEDI';
+  return d === 'PERSONEL_ODEDI';
+}
+
+function personelAlanGoster(d: KasaOdemeDurumu | ''): boolean {
+  return d === 'PERSONEL_ODEDI' || d === 'BORC';
 }
 
 function formatKasaSaveError(err: unknown): string {
@@ -505,8 +511,6 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
         fisUrl = String(existing?.fisEvrakUrl || '').trim();
       }
 
-      const needsPersonel = newType === 'ÇIKIŞ' && personelZorunluMu(newOdemeDurumu);
-
       const record: KasaHareketi = {
         ...(existing || {}),
         id,
@@ -532,7 +536,11 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
         delete record.odemeDurumu;
         delete record.harcamaKaynagi;
       }
-      if (needsPersonel) {
+      // PERSONEL ÖDEDİ: zorunlu; BORÇ: isteğe bağlı; KASA ÖDEDİ: yok
+      if (
+        newType === 'ÇIKIŞ' &&
+        (personelZorunluMu(newOdemeDurumu) || (newOdemeDurumu === 'BORC' && newPersonelId))
+      ) {
         record.personelId = newPersonelId;
         record.personelAdi = selectedPersonelLabel || undefined;
       } else {
@@ -685,7 +693,7 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
         next.soforKasaHarcamasi = raporTip === 'KASA';
         next.soforOdemesi = raporTip === 'KENDI';
       }
-      if (!personelZorunluMu(durum)) {
+      if (durum === 'KASA_ODEDI') {
         delete next.personelId;
         delete next.personelAdi;
       }
@@ -696,8 +704,8 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
         masrafTipi: next.masrafTipi,
         soforKasaHarcamasi: next.soforKasaHarcamasi ?? null,
         soforOdemesi: next.soforOdemesi ?? null,
-        personelId: personelZorunluMu(durum) ? next.personelId || null : null,
-        personelAdi: personelZorunluMu(durum) ? next.personelAdi || null : null,
+        personelId: durum === 'KASA_ODEDI' ? null : next.personelId || null,
+        personelAdi: durum === 'KASA_ODEDI' ? null : next.personelAdi || null,
       } as KasaHareketi);
       setKasaHareketleri((prev) => prev.map((x) => (x.id === kh.id ? next : x)));
     } catch (err) {
@@ -882,7 +890,7 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
                       type="button"
                       onClick={() => {
                         setNewOdemeDurumu(opt.id);
-                        if (!personelZorunluMu(opt.id)) {
+                        if (opt.id === 'KASA_ODEDI') {
                           setNewPersonelId('');
                           setPersonelArama('');
                         }
@@ -907,10 +915,15 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
                   ))}
                 </div>
 
-                {personelZorunluMu(newOdemeDurumu) && (
+                {personelAlanGoster(newOdemeDurumu) && (
                   <div className="space-y-1.5 pt-1">
                     <label className="text-[10px] font-bold text-violet-900 uppercase block">
-                      Personel <span className="text-rose-600">*</span>
+                      Personel
+                      {personelZorunluMu(newOdemeDurumu) ? (
+                        <span className="text-rose-600"> *</span>
+                      ) : (
+                        <span className="text-slate-500 font-semibold normal-case"> (isteğe bağlı)</span>
+                      )}
                     </label>
                     <input
                       type="text"
@@ -920,12 +933,16 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
                       className="w-full text-xs font-semibold p-2 bg-white border border-violet-200 rounded-xl outline-none"
                     />
                     <select
-                      required
+                      required={personelZorunluMu(newOdemeDurumu)}
                       value={newPersonelId}
                       onChange={(e) => setNewPersonelId(e.target.value)}
                       className="w-full text-xs font-bold p-2 bg-white border border-violet-200 rounded-xl cursor-pointer outline-none"
                     >
-                      <option value="">Personel seçin…</option>
+                      <option value="">
+                        {personelZorunluMu(newOdemeDurumu)
+                          ? 'Personel seçin…'
+                          : 'Personel yok / firma borcu…'}
+                      </option>
                       {personelSecenekleri.map((p) => (
                         <option key={p.id} value={p.id}>
                           {p.label}{p.gorev ? ` · ${p.gorev}` : ''}
@@ -936,9 +953,13 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
                       <p className="text-[10px] text-violet-800 font-semibold">
                         Seçilen: {selectedPersonelLabel}
                       </p>
-                    ) : (
+                    ) : personelZorunluMu(newOdemeDurumu) ? (
                       <p className="text-[10px] text-rose-700 font-semibold">
                         Personel seçilmeden kayıt yapılamaz.
+                      </p>
+                    ) : (
+                      <p className="text-[10px] text-slate-500 font-semibold">
+                        Firma borcu için personel seçmeden kaydedebilirsiniz.
                       </p>
                     )}
                   </div>
@@ -1369,43 +1390,16 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
         </div>
       </div>
 
-      {/* High Fidelity Receipt Image Preview Modal Frame */}
       {selectedReceiptUrl && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-xs select-none">
-          <div className="w-full max-w-lg bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden shadow-2xl flex flex-col max-h-[85vh]">
-            <div className="p-4 bg-slate-950 border-b border-slate-800 flex items-center justify-between">
-              <div>
-                <p className="text-[10px] font-mono tracking-widest text-[#F59E0B] uppercase font-bold">KİBRİTÇİ İNŞAAT TAAHHÜT A.Ş.</p>
-                <h4 className="text-xs font-bold text-white truncate max-w-[320px]">{selectedReceiptName} - EVRAK / FİŞ DOSYA GÖRSELİ</h4>
-              </div>
-              <button 
-                onClick={() => { setSelectedReceiptUrl(null); setSelectedReceiptName(null); }}
-                className="text-slate-400 hover:text-white bg-slate-850 p-1.5 rounded-lg border border-slate-800 transition cursor-pointer"
-              >
-                ✕
-              </button>
-            </div>
-            
-            <div className="flex-1 overflow-auto p-6 flex justify-center items-center bg-slate-950/40">
-              <img 
-                src={selectedReceiptUrl} 
-                alt="Şantiye Fiş Görseli" 
-                className="max-w-full max-h-[50vh] object-contain rounded-xl border border-slate-850"
-                referrerPolicy="no-referrer"
-              />
-            </div>
-
-            <div className="p-4 bg-slate-900 border-t border-slate-800/80 flex justify-between items-center">
-              <span className="text-[9px] text-slate-500 font-mono">Güvenli Cloud Depolama Noktası / Fatura-Fiş Arşivi</span>
-              <button 
-                onClick={() => { setSelectedReceiptUrl(null); setSelectedReceiptName(null); }}
-                className="bg-amber-500 hover:bg-amber-600 text-slate-950 text-xs font-extrabold px-4 py-2 rounded-xl shadow transition"
-              >
-                Pencereyi Kapat
-              </button>
-            </div>
-          </div>
-        </div>
+        <ImageLightbox
+          url={selectedReceiptUrl}
+          title={`${selectedReceiptName || 'Evrak'} — Fiş / Fatura Görseli`}
+          fileName={`kasa-fis-${(selectedReceiptName || 'evrak').slice(0, 40)}`}
+          onClose={() => {
+            setSelectedReceiptUrl(null);
+            setSelectedReceiptName(null);
+          }}
+        />
       )}
 
       {/* ========================================================================= */}
@@ -1567,18 +1561,30 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
                 ) : (
                   <div className="grid grid-cols-2 gap-6">
                     {filteredHareketler.filter(k => k.fisEvrakUrl).map((kh, i) => (
-                      <div key={i} className="border border-slate-200 rounded-xl p-3 bg-slate-50 flex flex-col items-center justify-between text-center space-y-2">
+                      <button
+                        key={i}
+                        type="button"
+                        onClick={() => {
+                          setSelectedReceiptUrl(kh.fisEvrakUrl || null);
+                          setSelectedReceiptName(`${kh.tarih} · ${kh.aciklama}`);
+                        }}
+                        className="border border-slate-200 rounded-xl p-3 bg-slate-50 flex flex-col items-center justify-between text-center space-y-2 cursor-pointer hover:border-sky-300 hover:bg-sky-50/50 transition print:cursor-default"
+                        title="Büyüt / indir"
+                      >
                         <div className="text-[10px] text-slate-600 font-bold uppercase truncate max-w-[200px]">
                           {kh.tarih} · {kh.aciklama}
                         </div>
                         <img 
                           src={kh.fisEvrakUrl} 
                           alt="Fiş Fotoğrafı" 
-                          className="max-h-[140px] rounded object-contain border bg-white" 
+                          className="max-h-[140px] rounded object-contain border bg-white pointer-events-none" 
                           referrerPolicy="no-referrer"
                         />
+                        <span className="text-[8px] text-sky-700 font-bold uppercase tracking-tight print:hidden">
+                          Tıkla: büyüt / indir
+                        </span>
                         <span className="text-[8px] text-slate-400 font-mono uppercase tracking-tight">KONTROL ID: {kh.id}</span>
-                      </div>
+                      </button>
                     ))}
                   </div>
                 )}

@@ -28,6 +28,7 @@ import { fetchApiJson } from '../lib/apiClient';
 import { GuvenlikEvrakOnayHavuzu } from './GuvenlikEvrakOnayHavuzu';
 import { DijitalOnayScreen } from './DijitalOnayScreen';
 import { ImzaOnizlemeStrip } from './ImzaOnizlemeStrip';
+import { ImageLightbox } from './ImageLightbox';
 import { AcilOnayBadge } from './AcilOnayBadge';
 import { VidanjorFisOnayPanel } from './VidanjorFisOnayPanel';
 import { YildirimTankerFisOnayPanel } from './YildirimTankerFisOnayPanel';
@@ -3704,7 +3705,7 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
                               title="Büyütmek için tıklayın"
                             >
                               <span className="text-[8px] font-bold text-slate-500 uppercase tracking-wider block mb-1 group-hover:text-sky-700">
-                                📷 Harcama Belgesi — tıklayınca büyüt
+                                📷 Harcama Belgesi — büyüt / indir
                               </span>
                               <img
                                 src={item.faturaFotoUrl}
@@ -4251,39 +4252,12 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
       )}
 
       {soforFisLightbox && (
-        <div
-          className="fixed inset-0 z-[90] bg-black/85 flex items-center justify-center p-4"
-          onClick={() => setSoforFisLightbox(null)}
-          role="dialog"
-          aria-modal="true"
-          aria-label="Fiş görseli büyütülmüş"
-        >
-          <div
-            className="absolute top-4 left-4 right-4 flex items-start justify-between gap-3 pointer-events-none"
-          >
-            <p className="text-[11px] font-bold text-white/90 bg-black/40 px-3 py-1.5 rounded-lg max-w-[80%] truncate pointer-events-none">
-              {soforFisLightbox.title}
-            </p>
-            <button
-              type="button"
-              className="pointer-events-auto p-2 rounded-full bg-white/10 text-white hover:bg-white/20 cursor-pointer shrink-0"
-              onClick={() => setSoforFisLightbox(null)}
-              aria-label="Kapat"
-            >
-              <X size={20} />
-            </button>
-          </div>
-          <img
-            src={soforFisLightbox.url}
-            alt="Fiş büyütülmüş"
-            className="max-w-full max-h-[90vh] object-contain rounded-lg shadow-2xl"
-            referrerPolicy="no-referrer"
-            onClick={(e) => e.stopPropagation()}
-          />
-          <p className="absolute bottom-4 text-[10px] text-white/70 font-semibold">
-            Kapatmak için dışarı tıklayın
-          </p>
-        </div>
+        <ImageLightbox
+          url={soforFisLightbox.url}
+          title={soforFisLightbox.title}
+          fileName={`sofor-fis-${soforFisLightbox.title.slice(0, 40)}`}
+          onClose={() => setSoforFisLightbox(null)}
+        />
       )}
 
     </div>
