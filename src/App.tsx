@@ -2692,6 +2692,19 @@ export default function App() {
   }
 
   const matchedU = findKullaniciByEmail(kullanicilar, currentUser?.email);
+  const soforPortalUser = matchedU
+    ? {
+        ...currentUser,
+        ...matchedU,
+        email: currentUser?.email || matchedU.email,
+        displayName: currentUser?.displayName,
+        matchedPersonelId:
+          matchedU.matchedPersonelId ||
+          (matchedU.tcNo
+            ? personeller.find((p) => String(p.tcNo || '').trim() === String(matchedU.tcNo).trim())?.id
+            : undefined),
+      }
+    : currentUser;
   const userYetki = normalizeYetki(matchedU?.yetki);
   const emailLower = currentUser?.email?.toLowerCase();
   const isFounderAccount = emailLower === 'sametatak9@gmail.com';
@@ -2845,7 +2858,8 @@ export default function App() {
           setAraclar={setAraclarWithSync}
           aracKmLoglari={aracKmLoglari}
           setAracKmLoglari={setAracKmLoglariWithSync}
-          currentUser={currentUser}
+          currentUser={soforPortalUser}
+          personeller={personeller}
           onSignOut={handleSignOut}
           isStandalone={true}
         />
@@ -2977,7 +2991,8 @@ export default function App() {
           setAraclar={setAraclarWithSync}
           aracKmLoglari={aracKmLoglari}
           setAracKmLoglari={setAracKmLoglariWithSync}
-          currentUser={currentUser}
+          currentUser={soforPortalUser}
+          personeller={personeller}
           onSignOut={handleSignOut}
           isStandalone={true}
         />
@@ -3615,7 +3630,8 @@ export default function App() {
                     setAraclar={setAraclarWithSync}
                     aracKmLoglari={aracKmLoglari}
                     setAracKmLoglari={setAracKmLoglariWithSync}
-                    currentUser={currentUser}
+                    currentUser={soforPortalUser}
+                    personeller={personeller}
                     onSignOut={handleSignOut}
                     isStandalone={hideSidebarAndTopbar}
                   />

@@ -174,6 +174,18 @@ export const PersonelKartlariScreen: React.FC<PersonelKartlariScreenProps> = ({
       .sort((a, b) => String(b.tarih || '').localeCompare(String(a.tarih || ''), 'tr'));
   }, [selectedPersonnel]);
 
+  const soforFisKayitlari = useMemo(() => {
+    if (!selectedPersonnel) return [] as Array<{ id: string; tarih?: string; islem?: string; detay?: string }>;
+    const raw = ((selectedPersonnel as any).gecmis || []) as Array<{ id?: string; tarih?: string; islem?: string; detay?: string }>;
+    return raw
+      .filter((x) => {
+        const islem = String(x.islem || '').toLocaleLowerCase('tr-TR');
+        return islem.includes('şoför') || islem.includes('sofor') || islem.includes('yol harcama') || islem.includes('fiş');
+      })
+      .map((x) => ({ id: x.id || `${x.tarih || ''}_${x.detay || ''}`, tarih: x.tarih, islem: x.islem, detay: x.detay }))
+      .sort((a, b) => String(b.tarih || '').localeCompare(String(a.tarih || ''), 'tr'));
+  }, [selectedPersonnel]);
+
   const personelSahaFaaliyetleri = useMemo(() => {
     if (!selectedPersonnel) return [] as SahaFaaliyeti[];
     return sahaFaaliyetleri
@@ -610,6 +622,28 @@ export const PersonelKartlariScreen: React.FC<PersonelKartlariScreenProps> = ({
                       </div>
                     ))}
                   </>
+                )}
+              </div>
+            </div>
+
+            <div className="bg-white border border-[#e2e8f0] rounded-2xl p-5 shadow-sm space-y-4">
+              <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-1.5">
+                <Activity size={14} className="text-indigo-600" />
+                Şoför Yol Harcaması / Fiş Kayıtları
+              </h4>
+              <div className="space-y-2.5">
+                {soforFisKayitlari.length === 0 ? (
+                  <div className="h-16 border border-dashed border-slate-100 rounded-xl flex items-center justify-center text-[10px] text-slate-400 font-medium italic">
+                    Bu personel için şoför fiş / yol harcaması kaydı yok (eşleşmeli portal hesabından gönderilmeli).
+                  </div>
+                ) : (
+                  soforFisKayitlari.slice(0, 12).map((g) => (
+                    <div key={g.id} className="border border-indigo-100 rounded-xl p-2.5 bg-indigo-50/40 text-xs">
+                      <p className="text-[10px] text-slate-450 font-mono">{g.tarih || '-'}</p>
+                      <p className="text-slate-900 font-semibold mt-0.5">{g.islem || 'Şoför Fiş'}</p>
+                      <p className="text-slate-600 text-[11px] mt-1">{g.detay || '-'}</p>
+                    </div>
+                  ))
                 )}
               </div>
             </div>

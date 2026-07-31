@@ -19,6 +19,7 @@ interface LojistikScreenProps {
   aracKmLoglari: any[];
   setAracKmLoglari: any;
   currentUser?: any;
+  personeller?: Personel[];
   onSignOut?: () => void;
   isStandalone?: boolean;
 }
@@ -29,6 +30,7 @@ export const LojistikScreen: React.FC<LojistikScreenProps> = ({
   aracKmLoglari,
   setAracKmLoglari,
   currentUser,
+  personeller = [],
   onSignOut,
   isStandalone = false
 }) => {
@@ -167,7 +169,26 @@ export const LojistikScreen: React.FC<LojistikScreenProps> = ({
     setTimeout(() => setStatusMessage(null), 4000);
   };
 
-  const currentChauffeurName = currentUser?.displayName || currentUser?.ad || currentUser?.email || 'Şöför';
+  const currentChauffeurName =
+    currentUser?.ad || currentUser?.soyad
+      ? `${currentUser?.ad || ''} ${currentUser?.soyad || ''}`.trim()
+      : currentUser?.displayName || currentUser?.email || 'Şöför';
+
+  const matchedSoforPersonel = React.useMemo(() => {
+    const byId = currentUser?.matchedPersonelId
+      ? personeller.find((p) => p.id === currentUser.matchedPersonelId)
+      : undefined;
+    if (byId) return byId;
+    const tc = String(currentUser?.tcNo || '').trim();
+    if (tc) {
+      return personeller.find((p) => String(p.tcNo || '').trim() === tc);
+    }
+    return undefined;
+  }, [currentUser?.matchedPersonelId, currentUser?.tcNo, personeller]);
+
+  const soforPersonelAdi = matchedSoforPersonel
+    ? `${matchedSoforPersonel.ad} ${matchedSoforPersonel.soyad}`.trim()
+    : currentChauffeurName;
 
   // ==========================================
   // TAB 1: GÜNLÜK RUTIN (SABAH / AKŞAM KM)
@@ -574,16 +595,39 @@ export const LojistikScreen: React.FC<LojistikScreenProps> = ({
         fisNo,
         faturaFotoUrl: fotoUrl,
         durum: 'ONAY BEKLİYOR',
-        surucu: currentChauffeurName,
+        surucu: soforPersonelAdi || currentChauffeurName,
+        kaydedenEmail: currentUser?.email || '',
+        personelId: matchedSoforPersonel?.id || null,
+        personelAdi: matchedSoforPersonel
+          ? `${matchedSoforPersonel.ad} ${matchedSoforPersonel.soyad}`.trim()
+          : null,
         masrafTipi: harcamaMasrafTipi,
         olusturulma: new Date().toISOString(),
       });
 
+      if (matchedSoforPersonel?.id) {
+        const { appendSoforFisToPersonelGecmis } = await import('../lib/yolHarcamaUtils');
+        await appendSoforFisToPersonelGecmis({
+          personelId: matchedSoforPersonel.id,
+          yolHarcamaId: hId,
+          tarih: harcamaTarih,
+          tutar: amount,
+          fisNo,
+          aciklama: harcamaAciklama,
+          masrafTipi: harcamaMasrafTipi,
+          durum: 'ONAY BEKLİYOR',
+        });
+      }
+
       showStatus(
         'success',
         harcamaMasrafTipi === 'KENDI'
-          ? 'Kendi harcamanız yönetici onayına gönderildi (onay sonrası size ödenir).'
-          : 'Kasa harcaması yönetici onayına gönderildi (şirket kasasına işlenir).'
+          ? matchedSoforPersonel
+            ? `Kendi harcamanız yönetici onayına gönderildi · Personel: ${matchedSoforPersonel.ad} ${matchedSoforPersonel.soyad}`
+            : 'Kendi harcamanız yönetici onayına gönderildi (onay sonrası size ödenir).'
+          : matchedSoforPersonel
+            ? `Kasa harcaması yönetici onayına gönderildi · Personel: ${matchedSoforPersonel.ad} ${matchedSoforPersonel.soyad}`
+            : 'Kasa harcaması yönetici onayına gönderildi (şirket kasasına işlenir).'
       );
       setHarcamaTutar('');
       setHarcamaAciklama('');
@@ -663,7 +707,16 @@ export const LojistikScreen: React.FC<LojistikScreenProps> = ({
               <div>
                 <h1 className="font-semibold text-base tracking-tight">Şöför Mobil Paneli</h1>
                 <p className="text-[11px] text-slate-100 mt-0.5">
-                  Giriş Yapan Yetkili: <span className="font-bold">{currentChauffeurName}</span>
+                  Giriş Yapan Yetkili: <span className="font-bold">{soforPersonelAdi}</span>
+                  {matchedSoforPersonel ? (
+                    <span className="ml-2 text-[9px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-100 px-1.5 py-0.5 rounded-full">
+                      Eşleşti · TC {matchedSoforPersonel.tcNo}
+                    </span>
+                  ) : (
+                    <span className="ml-2 text-[9px] font-bold text-amber-700 bg-amber-50 border border-amber-100 px-1.5 py-0.5 rounded-full">
+                      Personel eşleşmesi yok
+                    </span>
+                  )}
                 </p>
               </div>
             </div>

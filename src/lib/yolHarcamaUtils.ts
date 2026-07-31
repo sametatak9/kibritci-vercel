@@ -1,5 +1,5 @@
 /** Şoför yol / masraf fişi yardımcıları — onay sonrası Haftalık Kasa çıkışı */
-import { doc, getDoc } from 'firebase/firestore';
+import { doc, getDoc, arrayUnion, updateDoc } from 'firebase/firestore';
 import { KasaHareketi, KasaOdemeDurumu, SoforMasrafTipi, YolHarcamasi } from '../types/erp';
 import { kibritciReportHeaderHtml } from './kibritciBrand';
 import { formatDateLabelTr, normalizeDateKey, todayDateKey } from './dateKeyUtils';
@@ -143,6 +143,39 @@ export function yolHarcamaKasaDocId(yolHarcamaId: string): string {
   return `kh_yol_${String(yolHarcamaId || '').trim()}`;
 }
 
+/** Şoför fişini eşleşen personel kartının geçmişine yazar */
+export async function appendSoforFisToPersonelGecmis(options: {
+  personelId: string;
+  yolHarcamaId: string;
+  tarih: string;
+  tutar: number;
+  fisNo?: string;
+  aciklama?: string;
+  masrafTipi?: string;
+  durum?: string;
+}): Promise<void> {
+  const { personelId, yolHarcamaId, tarih, tutar, fisNo, aciklama, masrafTipi, durum } =
+    options;
+  if (!personelId) return;
+  const tipLabel =
+    String(masrafTipi || '').toUpperCase() === 'KASA' ? 'Kasa harcaması' : 'Kendi / borç';
+  const entry = {
+    id: `sofor_fis_${yolHarcamaId}`,
+    tarih: `${tarih} ${new Date().toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}`,
+    islem: 'Şoför Yol Harcaması / Fiş',
+    detay: `${durum || 'KAYIT'} · ${tipLabel} · ${Number(tutar).toLocaleString('tr-TR')} ₺ · Fiş: ${fisNo || '—'} · ${String(aciklama || '').slice(0, 120)}`,
+    kaynak: 'SOFOR_MOBIL',
+    yolHarcamaId,
+  };
+  try {
+    await updateDoc(doc(db, 'personeller', personelId), {
+      gecmis: arrayUnion(entry),
+    });
+  } catch (err) {
+    console.warn('[sofor-fis] personel geçmişi yazılamadı:', personelId, err);
+  }
+}
+
 /** Onaylanan şoför fişinden Haftalık Kasa ÇIKIŞ kaydı */
 export function buildYolHarcamaKasaCikisPayload(
   item: Pick<
@@ -156,6 +189,8 @@ export function buildYolHarcamaKasaCikisPayload(
     | 'surucu'
     | 'masrafTipi'
     | 'nihaiMasrafTipi'
+    | 'personelId'
+    | 'personelAdi'
   >,
   nihaiOverride?: SoforMasrafTipi
 ): KasaHareketi {
@@ -168,6 +203,8 @@ export function buildYolHarcamaKasaCikisPayload(
     String(item.tarih || '').slice(0, 10) ||
     todayDateKey();
   const surucu = String(item.surucu || '').trim() || 'Bilinmeyen';
+  const personelAdi =
+    String(item.personelAdi || '').trim() || (tip === 'KENDI' ? surucu : '');
   const fisNo = String(item.fisNo || '').trim();
   const aciklamaExtra = String(item.aciklama || '').trim();
   const isKendi = tip === 'KENDI';
@@ -195,8 +232,11 @@ export function buildYolHarcamaKasaCikisPayload(
     surucu,
     fisNo,
   };
-  if (isKendi) {
-    payload.personelAdi = surucu;
+  if (item.personelId) {
+    payload.personelId = item.personelId;
+  }
+  if (personelAdi) {
+    payload.personelAdi = personelAdi;
   }
   return payload;
 }

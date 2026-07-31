@@ -402,11 +402,17 @@ export const AdminPanelScreen: React.FC<AdminPanelScreenProps> = ({
         authCreated = authResult.created;
       }
 
+      const tcTrim = editTcNo.trim();
+      const matchedByTc = tcTrim
+        ? personeller.find((p) => String(p.tcNo || '').trim() === tcTrim)
+        : undefined;
+
       const updatedUser: Kullanici = {
         ...editingUser,
-        ad: editAd.trim(),
-        soyad: editSoyad.trim(),
-        tcNo: editTcNo.trim(),
+        ad: editAd.trim() || matchedByTc?.ad || editingUser.ad,
+        soyad: editSoyad.trim() || matchedByTc?.soyad || editingUser.soyad,
+        tcNo: tcTrim,
+        matchedPersonelId: matchedByTc?.id || editingUser.matchedPersonelId,
         yetki: editYetki as any,
         durum: editDurum,
         sifreSifirlamaTalebi: false,

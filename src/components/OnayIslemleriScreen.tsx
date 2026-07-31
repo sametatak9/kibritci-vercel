@@ -10,6 +10,7 @@ import { compressImage } from '../lib/imageCompress';
 import { collection, doc, setDoc, onSnapshot, updateDoc, deleteDoc, getDocs } from 'firebase/firestore';
 import {
   buildYolHarcamaKasaCikisPayload,
+  appendSoforFisToPersonelGecmis,
   syncApprovedYolHarcamalariToKasa,
   yolHarcamaKasaDocId,
 } from '../lib/yolHarcamaUtils';
@@ -345,6 +346,19 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
         onayTarihi: new Date().toISOString(),
         kasaHareketId: payload.id,
       });
+
+      if (item.personelId) {
+        await appendSoforFisToPersonelGecmis({
+          personelId: item.personelId,
+          yolHarcamaId: item.id,
+          tarih: item.tarih,
+          tutar: Number(item.tutar) || 0,
+          fisNo: item.fisNo,
+          aciklama: item.aciklama,
+          masrafTipi: nihaiMasrafTipi,
+          durum: 'ONAYLANDI',
+        });
+      }
 
       alert(
         nihaiMasrafTipi === 'KENDI'
@@ -3624,8 +3638,11 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
                         <div className="space-y-2">
                           <div className="flex justify-between items-start">
                             <div>
-                              <span className="font-bold text-xs text-slate-800">{item.surucu || 'Bilinmeyen Şöför'}</span>
+                              <span className="font-bold text-xs text-slate-800">{item.personelAdi || item.surucu || 'Bilinmeyen Şöför'}</span>
                               <p className="text-[10px] text-slate-500 mt-0.5 font-mono">Tarih: {item.tarih}</p>
+                              {item.personelId && (
+                                <p className="text-[9px] text-emerald-700 font-bold mt-0.5">Personel kartına bağlı</p>
+                              )}
                             </div>
                             <div className="text-right">
                               <span className="text-xs font-black text-rose-600 font-mono block">{item.tutar} TL</span>

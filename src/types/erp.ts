@@ -348,6 +348,10 @@ export interface YolHarcamasi {
   aciklama: string;
   fisNo: string;
   faturaFotoUrl?: string;
+  /** Şoför / portal hesabının eşleştiği personel kartı */
+  personelId?: string;
+  personelAdi?: string;
+  kaydedenEmail?: string;
   durum: 'ONAY BEKLİYOR' | 'ONAYLANDI' | 'REDDEDİLDİ' | string;
   surucu?: string;
   /** Şoförün gönderirken seçtiği: kendi harcaması mı, kasa mı */
