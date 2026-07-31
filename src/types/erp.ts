@@ -117,7 +117,7 @@ export interface Irsaliye {
   micirFisId?: string;
   tonaj?: number;
   kiloKg?: number;
-  malzemeTipi?: 'MICIR' | 'STABILIZE' | string;
+  malzemeTipi?: 'MICIR' | 'STABILIZE' | 'TAS_TOZU' | string;
   icmeSuyuAdet?: number;
   sanayiSuyuAdet?: number;
   damacaAdet?: number;
@@ -163,7 +163,7 @@ export interface MicirStabilizeFis {
   tonaj: number;
   /** İrsaliyedeki kilo — kapıda tam girilir */
   kiloKg?: number;
-  malzemeTipi: 'MICIR' | 'STABILIZE';
+  malzemeTipi: 'MICIR' | 'STABILIZE' | 'TAS_TOZU';
   fisGorselUrl?: string;
   firmaUnvan: string;
   cariKartId?: string;

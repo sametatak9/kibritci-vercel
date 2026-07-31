@@ -113,7 +113,7 @@ const NOBET_FOTO_KAYNAK_ETIKET: Record<NobetArsivFotoKaynak, string> = {
   SU_TANKERI: 'Su Tankeri',
   VIDANJOR: 'Vidanjör',
   PETROL_TANKERI: 'Petrol Tankeri',
-  MICIR_STABILIZE: 'Mıcır & Stabilize',
+  MICIR_STABILIZE: 'Mıcır / Stabilize / Taş Tozu',
 };
 
 function isNobetImageUrl(fotoUrl?: string | null, fileName?: string | null): boolean {

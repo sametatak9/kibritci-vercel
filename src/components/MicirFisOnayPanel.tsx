@@ -13,6 +13,7 @@ import {
   kgToTon,
   malzemeTipiLabel,
   MicirMalzemeTipi,
+  normalizeMicirMalzemeTipi,
   resolveMicirKiloKg,
 } from '../lib/micirUtils';
 import {
@@ -80,7 +81,7 @@ export const MicirFisOnayPanel: React.FC<MicirFisOnayPanelProps> = ({
     setIrsaliyeNo(f.irsaliyeNo);
     setPlaka(f.plaka);
     setKiloKg(String(resolveMicirKiloKg(f) || ''));
-    setMalzemeTipi(f.malzemeTipi === 'STABILIZE' ? 'STABILIZE' : 'MICIR');
+    setMalzemeTipi(normalizeMicirMalzemeTipi(f.malzemeTipi));
   };
 
   const handleApprove = async (e: React.FormEvent) => {
@@ -194,7 +195,7 @@ export const MicirFisOnayPanel: React.FC<MicirFisOnayPanelProps> = ({
               <Truck size={13} /> {ENTO_MADEN_UNVAN} · Kapı İrsaliye Onayı
             </span>
             <p className="text-[#5B6B73] leading-relaxed text-[11px]">
-              Güvenliğin girdiği mıcır / stabilize evrakları irsaliyedir. Tarih, irsaliye no ve kilo
+              Güvenliğin girdiği mıcır / stabilize / taş tozu evrakları irsaliyedir. Tarih, irsaliye no ve kilo
               kontrol edilip onaylanınca <strong>İrsaliyeler</strong> sekmesine ve{' '}
               <strong>{ENTO_MADEN_UNVAN}</strong> cari kartının altına yazılır.
             </p>
@@ -360,6 +361,7 @@ export const MicirFisOnayPanel: React.FC<MicirFisOnayPanelProps> = ({
                     >
                       <option value="MICIR">Mıcır</option>
                       <option value="STABILIZE">Stabilize</option>
+                      <option value="TAS_TOZU">Taş Tozu</option>
                     </select>
                   </div>
                 </div>

@@ -83,6 +83,7 @@ import {
   kgToTon,
   malzemeTipiLabel,
   MicirMalzemeTipi,
+  normalizeMicirMalzemeTipi,
   resolveMicirKiloKg,
 } from '../lib/micirUtils';
 import {
@@ -1150,8 +1151,9 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
       const irsaliyeNo = String(patch.irsaliyeNo || record.irsaliyeNo || '').trim().toUpperCase();
       const tarih = String(patch.islemTarihi || record.islemTarihi || '').slice(0, 10);
       const plaka = String(patch.plaka || record.plaka || '').trim().toUpperCase();
-      const malzemeTipi =
-        String(patch.malzemeTipi || record.malzemeTipi || 'MICIR') === 'STABILIZE' ? 'STABILIZE' : 'MICIR';
+      const malzemeTipi = normalizeMicirMalzemeTipi(
+        patch.malzemeTipi || record.malzemeTipi || 'MICIR'
+      );
 
       await setDoc(
         doc(db, 'micirStabilizeFisleri', record.micirFisId),
@@ -1846,7 +1848,7 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
       const micirFisId = isMicir ? `mfis_${Date.now()}` : null;
       const guvenlikEvrakId = isMicir ? `EVR-MIC-${micirFisId}` : null;
       const irsaliyeId = isMicir ? `IR-MIC-${micirFisId}` : null;
-      const malzeme = stMalzemeTipi === 'STABILIZE' ? 'STABILIZE' : 'MICIR';
+      const malzeme = normalizeMicirMalzemeTipi(stMalzemeTipi);
       const malzemeAdi = malzemeTipiLabel(malzeme);
       const miktarLabel = isMicir ? formatMicirMiktarLabel(tonajNum, kiloKgNum) : '';
 
@@ -2349,8 +2351,7 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
           showStatus('error', 'Bu fiş zaten işlenmiş.');
           return;
         }
-        const micirTip: MicirMalzemeTipi =
-          fis.malzemeTipi === 'STABILIZE' ? 'STABILIZE' : 'MICIR';
+        const micirTip: MicirMalzemeTipi = normalizeMicirMalzemeTipi(fis.malzemeTipi);
         const saMatch = findMatchingMicirSatinAlma(satinAlmaProp, irsaliyelerProp, micirTip, {
           preferredSaId: (fis as MicirStabilizeFis).saId,
           preferredSaKalemId: (fis as MicirStabilizeFis).saKalemId,
@@ -2862,7 +2863,7 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
               }}
               className={`flex-1 lg:flex-none flex items-center justify-between text-xs px-3 py-2.5 rounded-lg font-bold transition cursor-pointer min-w-[120px] ${activeTab === 'mici_stabilize' ? 'bg-emerald-600 text-white shadow-md shadow-emerald-500/15' : 'text-slate-600 hover:bg-slate-100'}`}
             >
-              <span className="flex items-center space-x-2"><Truck size={13} /> <span>7. Mıcır &amp; Stabilize</span></span>
+              <span className="flex items-center space-x-2"><Truck size={13} /> <span>7. Mıcır / Stabilize / Taş Tozu</span></span>
               {iceridekiMiciStabilize.length > 0 && (
                 <span className="text-[9px] font-mono bg-emerald-500/20 text-emerald-400 rounded-full px-1.5 py-0.2 ml-1 hidden lg:inline">{iceridekiMiciStabilize.length}</span>
               )}
@@ -4241,6 +4242,7 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
                             >
                               <option value="MICIR">Mıcır</option>
                               <option value="STABILIZE">Stabilize</option>
+                              <option value="TAS_TOZU">Taş Tozu</option>
                             </select>
                           </div>
                           <div className="space-y-1">
