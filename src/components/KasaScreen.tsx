@@ -14,6 +14,7 @@ import {
   isSoforIadeKasaHareketi,
   isSoforKaynakliKasaHareketi,
   isSoforUzerindenKasaGideri,
+  resolveKasaRaporMasrafTipi,
 } from '../lib/yolHarcamaUtils';
 
 type HarcamaKaynagi = 'KASA_HARCAMA' | 'PERSONEL_HARCAMA';
@@ -174,7 +175,7 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
         tutar: Number(r.tutar) || 0,
         surucu: r.surucu,
         fotoUrl: r.fisEvrakUrl,
-        masrafTipi: isSoforUzerindenKasaGideri(r) ? 'KASA' : 'KENDI',
+        masrafTipi: resolveKasaRaporMasrafTipi(r) || (isSoforUzerindenKasaGideri(r) ? 'KASA' : 'KENDI'),
       })),
       surucuFiltre: soforIadeFiltre || undefined,
       olusturan: 'Haftalık Kasa',
@@ -480,6 +481,12 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
       if (newType === 'ÇIKIŞ' && newOdemeDurumu) {
         record.odemeDurumu = newOdemeDurumu;
         record.harcamaKaynagi = harcamaKaynagiFromOdeme(newOdemeDurumu);
+        const raporTip = newOdemeDurumu === 'KASA_ODEDI' ? 'KASA' : 'KENDI';
+        record.masrafTipi = raporTip;
+        if (isSoforKaynakliKasaHareketi(record)) {
+          record.soforKasaHarcamasi = raporTip === 'KASA';
+          record.soforOdemesi = raporTip === 'KENDI';
+        }
       } else {
         delete record.odemeDurumu;
         delete record.harcamaKaynagi;
@@ -496,6 +503,9 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
         ...record,
         odemeDurumu: record.odemeDurumu ?? null,
         harcamaKaynagi: record.harcamaKaynagi ?? null,
+        masrafTipi: record.masrafTipi ?? null,
+        soforKasaHarcamasi: record.soforKasaHarcamasi ?? null,
+        soforOdemesi: record.soforOdemesi ?? null,
         personelId: record.personelId ?? null,
         personelAdi: record.personelAdi ?? null,
       } as KasaHareketi);
@@ -627,6 +637,13 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
         odemeDurumu: durum,
         harcamaKaynagi: harcamaKaynagiFromOdeme(durum),
       };
+      // Rapor / şoför ayrımı da yönetici durumuna uysun
+      const raporTip = durum === 'KASA_ODEDI' ? 'KASA' : 'KENDI';
+      next.masrafTipi = raporTip;
+      if (isSoforKaynakliKasaHareketi(kh)) {
+        next.soforKasaHarcamasi = raporTip === 'KASA';
+        next.soforOdemesi = raporTip === 'KENDI';
+      }
       if (!personelZorunluMu(durum)) {
         delete next.personelId;
         delete next.personelAdi;
@@ -635,6 +652,9 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
         ...next,
         odemeDurumu: durum,
         harcamaKaynagi: next.harcamaKaynagi,
+        masrafTipi: next.masrafTipi,
+        soforKasaHarcamasi: next.soforKasaHarcamasi ?? null,
+        soforOdemesi: next.soforOdemesi ?? null,
         personelId: personelZorunluMu(durum) ? next.personelId || null : null,
         personelAdi: personelZorunluMu(durum) ? next.personelAdi || null : null,
       } as KasaHareketi);

@@ -54,19 +54,58 @@ export function isSoforKasaHareketi(
   return isSoforKaynakliKasaHareketi(k);
 }
 
-/** Şoföre iade edilecek (kendi cebinden) */
+/**
+ * Yönetici ödeme durumu / harcama kaynağı — rapor ve özet için nihai ayrım.
+ * KASA → şirket kasası; KENDI → şoför/personel (ödeme veya borç).
+ */
+export function resolveKasaRaporMasrafTipi(
+  k?: Pick<
+    KasaHareketi,
+    | 'hareketTipi'
+    | 'odemeDurumu'
+    | 'harcamaKaynagi'
+    | 'soforOdemesi'
+    | 'soforKasaHarcamasi'
+    | 'masrafTipi'
+    | 'id'
+  > | null
+): SoforMasrafTipi | null {
+  if (!k || k.hareketTipi === 'GİRİŞ') return null;
+
+  if (k.odemeDurumu === 'KASA_ODEDI') return 'KASA';
+  if (k.odemeDurumu === 'BORC' || k.odemeDurumu === 'PERSONEL_ODEDI') return 'KENDI';
+
+  if (k.harcamaKaynagi === 'KASA_HARCAMA') return 'KASA';
+  if (k.harcamaKaynagi === 'PERSONEL_HARCAMA') return 'KENDI';
+
+  // Soför fişi bayrakları (yönetici override yoksa)
+  if (isSoforKaynakliKasaHareketi(k)) {
+    if (k.soforKasaHarcamasi) return 'KASA';
+    if (normalizeSoforMasrafTipi(k.masrafTipi) === 'KASA') return 'KASA';
+    if (k.soforOdemesi || String(k.id || '').startsWith('kh_yol_')) return 'KENDI';
+  }
+
+  if (normalizeSoforMasrafTipi(k.masrafTipi) === 'KASA') return 'KASA';
+  // İşaretsiz çıkış → şirket kasası
+  if (k.hareketTipi === 'ÇIKIŞ') return 'KASA';
+  return null;
+}
+
+/** Şoföre iade edilecek (kendi cebinden) — yönetici KASA işaretlediyse false */
 export function isSoforIadeKasaHareketi(k?: KasaHareketi | null): boolean {
   if (!k || !isSoforKaynakliKasaHareketi(k)) return false;
+  const resolved = resolveKasaRaporMasrafTipi(k);
+  if (resolved === 'KASA') return false;
+  if (resolved === 'KENDI') return true;
   if (k.soforKasaHarcamasi) return false;
   if (normalizeSoforMasrafTipi(k.masrafTipi) === 'KASA') return false;
   return Boolean(k.soforOdemesi) || String(k.id || '').startsWith('kh_yol_');
 }
 
-/** Şirket kasası harcaması (şoför üzerinden, iade yok) */
+/** Şirket kasası harcaması (şoför üzerinden veya yönetici KASA) */
 export function isSoforUzerindenKasaGideri(k?: KasaHareketi | null): boolean {
   if (!k || !isSoforKaynakliKasaHareketi(k)) return false;
-  if (k.soforKasaHarcamasi) return true;
-  return normalizeSoforMasrafTipi(k.masrafTipi) === 'KASA';
+  return resolveKasaRaporMasrafTipi(k) === 'KASA';
 }
 
 export function yolHarcamaKasaDocId(yolHarcamaId: string): string {
@@ -362,11 +401,7 @@ export function buildKasaHarcamaAralikReportHtml(options: {
       surucu: r.surucu || (isSoforKaynakliKasaHareketi(r) ? 'Şoför' : r.referansTipi),
       fotoUrl: r.fisEvrakUrl,
       tipEtiket: isSoforKaynakliKasaHareketi(r) ? '[Şoför] ' : '',
-      masrafTipi: isSoforUzerindenKasaGideri(r)
-        ? 'KASA'
-        : isSoforIadeKasaHareketi(r)
-          ? 'KENDI'
-          : r.masrafTipi,
+      masrafTipi: resolveKasaRaporMasrafTipi(r) || r.masrafTipi || 'KASA',
     }));
   const toplam = rows.reduce((s, r) => s + (Number(r.tutar) || 0), 0);
   const soforToplam = options.items
