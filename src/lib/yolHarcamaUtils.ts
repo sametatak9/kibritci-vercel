@@ -4,6 +4,7 @@ import { kibritciReportHeaderHtml } from './kibritciBrand';
 import { formatDateLabelTr, normalizeDateKey, todayDateKey } from './dateKeyUtils';
 import {
   getReportEmailToolbarHtml,
+  htmlToPlainText,
   openHtmlReportWindow,
   openReportEmailComposer,
 } from './reportEmail';
@@ -495,6 +496,64 @@ export function buildKasaHarcamaAralikReportHtml(options: {
 </html>`;
 }
 
+/** Düz metin kasa dökümü — e-posta gövdesi için */
+export function buildKasaCikisMailPlainText(
+  items: KasaHareketi[],
+  startDate: string,
+  endDate: string
+): string {
+  const start = formatDateLabelTr(normalizeDateKey(startDate) || startDate);
+  const end = formatDateLabelTr(normalizeDateKey(endDate) || endDate);
+  const rows = [...(items || [])].sort((a, b) =>
+    String(a.tarih).localeCompare(String(b.tarih))
+  );
+
+  let borc = 0;
+  let personel = 0;
+  let kasa = 0;
+  const lines: string[] = [
+    'KASA HARCAMA / ÇIKIŞ DÖKÜMÜ',
+    `Tarih aralığı: ${start} — ${end}`,
+    `Kalem: ${rows.length}`,
+    '',
+  ];
+
+  rows.forEach((r, i) => {
+    const durum = resolveKasaOdemeDurumu(r) || 'KASA_ODEDI';
+    const tutar = Number(r.tutar) || 0;
+    if (durum === 'BORC') borc += tutar;
+    else if (durum === 'PERSONEL_ODEDI') personel += tutar;
+    else kasa += tutar;
+
+    const who = String(r.personelAdi || r.surucu || '—').trim();
+    const aciklama = String(r.aciklama || '—').replace(/\s+/g, ' ').trim();
+    lines.push(
+      `${i + 1}) ${r.tarih} · ${kasaOdemeDurumuLabel(durum)} · −${tutar.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺`
+    );
+    lines.push(`   ${aciklama.slice(0, 160)}${aciklama.length > 160 ? '…' : ''}`);
+    lines.push(
+      `   ${who}${r.fisNo ? ` · Fiş: ${r.fisNo}` : ''}`
+    );
+    lines.push('');
+  });
+
+  const toplam = borc + personel + kasa;
+  lines.push('────────────────────────');
+  lines.push(
+    `Kasa borcu (ödenmesi gereken): −${borc.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺`
+  );
+  lines.push(
+    `Personel ödedi: −${personel.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺`
+  );
+  lines.push(
+    `Kasa ödedi: −${kasa.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺`
+  );
+  lines.push(
+    `TOPLAM: −${toplam.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺`
+  );
+  return lines.join('\n');
+}
+
 export function openSoforMasrafIadeReport(html: string, title: string): void {
   openHtmlReportWindow(html, title);
 }
@@ -504,16 +563,17 @@ export function emailSoforMasrafIadeReport(options: {
   startDate: string;
   endDate: string;
   toplam?: number;
+  items?: KasaHareketi[];
 }): void {
   const start = formatDateLabelTr(normalizeDateKey(options.startDate) || options.startDate);
   const end = formatDateLabelTr(normalizeDateKey(options.endDate) || options.endDate);
-  const toplamStr =
-    options.toplam != null
-      ? ` Toplam çıkış: −${options.toplam.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺.`
-      : '';
+  const body =
+    options.items && options.items.length > 0
+      ? buildKasaCikisMailPlainText(options.items, options.startDate, options.endDate)
+      : htmlToPlainText(options.html);
   openReportEmailComposer({
     subject: `Kibritçi — Şoför Masraf İade (${start} / ${end})`,
-    body: `Merkez bilginize sunulur.${toplamStr}\n\nŞoför yol harcaması fişleri (yönetici onaylı / Haftalık Kasa çıkışı) ekte HTML olarak indirilebilir.`,
+    body,
     html: options.html,
     fileName: `Sofor_Masraf_Iade_${options.startDate}_${options.endDate}.html`,
     defaultTo: MERKEZ_KASA_EMAIL,
@@ -525,16 +585,17 @@ export function emailKasaHarcamaAralikReport(options: {
   startDate: string;
   endDate: string;
   toplam?: number;
+  items?: KasaHareketi[];
 }): void {
   const start = formatDateLabelTr(normalizeDateKey(options.startDate) || options.startDate);
   const end = formatDateLabelTr(normalizeDateKey(options.endDate) || options.endDate);
-  const toplamStr =
-    options.toplam != null
-      ? ` Toplam kasa çıkışı: −${options.toplam.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺.`
-      : '';
+  const body =
+    options.items && options.items.length > 0
+      ? buildKasaCikisMailPlainText(options.items, options.startDate, options.endDate)
+      : htmlToPlainText(options.html);
   openReportEmailComposer({
     subject: `Kibritçi — Kasa Harcama Raporu (${start} / ${end})`,
-    body: `Merkez bilginize sunulur.${toplamStr}\n\nSeçili aralıktaki Haftalık Kasa çıkış / harcama dökümü ekte HTML olarak indirilebilir.`,
+    body,
     html: options.html,
     fileName: `Kasa_Harcama_${options.startDate}_${options.endDate}.html`,
     defaultTo: MERKEZ_KASA_EMAIL,

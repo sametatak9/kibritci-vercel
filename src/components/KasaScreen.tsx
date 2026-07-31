@@ -175,7 +175,7 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
       surucuFiltre: soforIadeFiltre || undefined,
       olusturan: 'Haftalık Kasa',
     });
-    return { html, start, end, toplam };
+    return { html, start, end, toplam, rows };
   };
 
   const handleSoforMasrafIadeRaporu = async () => {
@@ -196,6 +196,7 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
       startDate: bundle.start,
       endDate: bundle.end,
       toplam: bundle.toplam,
+      items: bundle.rows,
     });
   };
 
@@ -218,7 +219,7 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
       items: rows,
       olusturan: 'Haftalık Kasa',
     });
-    return { html, start, end, toplam };
+    return { html, start, end, toplam, rows };
   };
 
   const handleAralikHarcamaRaporu = async () => {
@@ -237,6 +238,7 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
       startDate: bundle.start,
       endDate: bundle.end,
       toplam: bundle.toplam,
+      items: bundle.rows,
     });
   };
 
