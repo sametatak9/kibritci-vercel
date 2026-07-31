@@ -30,7 +30,7 @@ export const LojistikScreen: React.FC<LojistikScreenProps> = ({
   aracKmLoglari,
   setAracKmLoglari,
   currentUser,
-  personeller = [],
+  personeller: personellerProp = [],
   onSignOut,
   isStandalone = false
 }) => {
@@ -65,7 +65,8 @@ export const LojistikScreen: React.FC<LojistikScreenProps> = ({
   };
 
   // Synchronized Firestore Collections
-  const [personeller, setPersoneller] = useState<Personel[]>([]);
+  const [personellerLive, setPersonellerLive] = useState<Personel[]>([]);
+  const personeller = personellerLive.length > 0 ? personellerLive : personellerProp;
   const [gunlukRutinLoglar, setGunlukRutinLoglar] = useState<any[]>([]);
   const [haftalikKmLoglar, setHaftalikKmLoglar] = useState<any[]>([]);
   const [aracTalepleri, setAracTalepleri] = useState<any[]>([]);
@@ -96,7 +97,7 @@ export const LojistikScreen: React.FC<LojistikScreenProps> = ({
       snap.forEach((doc) => {
         list.push({ id: doc.id, ...doc.data() } as Personel);
       });
-      setPersoneller(list);
+      setPersonellerLive(list);
     });
 
     const unsubG = onSnapshot(collection(db, 'gunlukRutinKmLoglari'), (snap) => {
