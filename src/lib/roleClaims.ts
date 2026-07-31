@@ -52,6 +52,24 @@ export function normalizeClaimRole(yetki?: string | null): string {
   return aliases[v] ?? v;
 }
 
+/** Firestore rules ile uyumlu: AKTIF (ASCII) → AKTİF (Türkçe İ) */
+export function normalizeClaimDurum(durum?: string | null): string {
+  const raw = String(durum || 'ONAY BEKLİYOR').trim();
+  if (!raw) return 'ONAY BEKLİYOR';
+  const upper = raw.toLocaleUpperCase('tr-TR');
+  // ASCII I / Turkish İ / mixed "AKTIF"
+  const compact = upper.replace(/\s+/g, '');
+  if (compact === 'AKTİF' || compact === 'AKTIF' || compact === 'ACTIVE') return 'AKTİF';
+  if (compact === 'KISITLI' || compact.replace(/İ/g, 'I') === 'KISITLI') return 'KISITLI';
+  if (upper.includes('ONAY') && upper.includes('BEK')) return 'ONAY BEKLİYOR';
+  return upper;
+}
+
+export function isActivePortalDurum(durum?: string | null): boolean {
+  const n = normalizeClaimDurum(durum);
+  return n === 'AKTİF';
+}
+
 export function buildAuthCustomClaims(input: {
   email: string;
   yetki?: string | null;
@@ -61,7 +79,7 @@ export function buildAuthCustomClaims(input: {
   return {
     email,
     role: normalizeClaimRole(input.yetki),
-    durum: String(input.durum || 'ONAY BEKLİYOR').trim(),
+    durum: normalizeClaimDurum(input.durum),
   };
 }
 

@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { Personel, AylikYoklamaMap, YoklamaDurum, SahaFaaliyeti as SahaFaaliyetiType, SahaFaaliyetTipi } from '../types/erp';
 import { db, saveDocument } from '../lib/firebase';
+import { assertErpWriteAuth, formatFirestoreWriteError } from '../lib/authWriteGuard';
 import { compressImage } from '../lib/imageCompress';
 import { buildPersonelListForMonth, getYoklamaDay, isDayActiveForPersonel, isTaseronPersonel, isIdariPersonel, setYoklamaDay, isKampciTesisatciMermerci } from '../lib/yoklamaUtils';
 import { buildFormenGunlukOzet } from '../lib/gunlukAkisUtils';
@@ -145,6 +146,12 @@ export const FormenScreen: React.FC<FormenScreenProps> = ({
   const [presentIds, setPresentIds] = useState<string[]>([]);
   const [absentIds, setAbsentIds] = useState<string[]>([]);
   const [mesaiSaatleri, setMesaiSaatleri] = useState<Record<string, number>>({});
+  const [aylikDraft, setAylikDraft] = useState<AylikYoklamaMap>({});
+  const [aylikDirty, setAylikDirty] = useState(false);
+  const [aylikSaving, setAylikSaving] = useState(false);
+  const [aylikMesaiEdit, setAylikMesaiEdit] = useState<{ personelId: string; day: number } | null>(null);
+  const [aylikMesaiInput, setAylikMesaiInput] = useState('');
+  const aylikStatusCycle: YoklamaDurum[] = ['Geldi', 'Yok', 'İzinli', 'Raporlu', 'Pazar', 'Tatil', 'Girilmedi'];
   const [hasLocalAttendanceDraft, setHasLocalAttendanceDraft] = useState(false);
   const [spotlightMesai, setSpotlightMesai] = useState<string>('0');
   const [lastAttendanceSaveAt, setLastAttendanceSaveAt] = useState<string | null>(null);
@@ -515,6 +522,11 @@ export const FormenScreen: React.FC<FormenScreenProps> = ({
     if (savingAttendance) return;
     setSavingAttendance(true);
     try {
+      const authBlock = await assertErpWriteAuth();
+      if (authBlock) {
+        showStatus('error', authBlock);
+        return;
+      }
       const next = { ...yoklamalar };
 
       activeStaff.forEach(p => {
@@ -554,7 +566,7 @@ export const FormenScreen: React.FC<FormenScreenProps> = ({
       setLastAttendanceSaveAt(new Date().toLocaleString('tr-TR'));
       showStatus('success', `📅 ${selectedDate} Tarihli Yoklama ve Mesai Saatleri, Formen imzasıyla başarıyla sisteme kaydedildi ve ana programa gönderildi!`);
     } catch (err: any) {
-      showStatus('error', `Yoklama kaydedilemedi: ${err?.message || 'Bilinmeyen hata'}`);
+      showStatus('error', formatFirestoreWriteError(err, err?.message || 'Yoklama kaydedilemedi'));
     } finally {
       setSavingAttendance(false);
     }
@@ -641,6 +653,7 @@ ${satirlar
   };
 
   const handleExportAylikPuantajCsv = () => {
+    const sourceMap = aylikDirty ? aylikDraft : yoklamalar;
     const daysInMonth = new Date(year, month, 0).getDate();
     const days = Array.from({ length: daysInMonth }, (_, i) => i + 1);
     const rows: string[][] = [
@@ -648,7 +661,7 @@ ${satirlar
     ];
 
     monthPersonelList.forEach((p) => {
-      const map = yoklamalar[p.id] as any;
+      const map = sourceMap[p.id] as any;
       let geldi = 0;
       let toplamMesai = 0;
       const dayCells = days.map((d) => {
@@ -666,6 +679,91 @@ ${satirlar
     const periodLabel = `${year}-${String(month).padStart(2, '0')}`;
     downloadCsv(rows, `Formen_Aylik_Puantaj_${periodLabel}.csv`);
     showStatus('success', 'Aylik puantaj CSV raporu indirildi.');
+  };
+
+  useEffect(() => {
+    if (activeTab !== 'aylik_puantaj') return;
+    if (aylikDirty) return;
+    setAylikDraft(yoklamalar);
+  }, [activeTab, yoklamalar, year, month, aylikDirty]);
+
+  const handleAylikCellCycle = (personelId: string, d: number) => {
+    const p = monthPersonelList.find((x) => x.id === personelId);
+    if (!p) return;
+    const personMap = aylikDraft[personelId];
+    if (!isDayActiveForPersonel(p, year, month, d, personMap as any)) return;
+
+    const dayData =
+      getYoklamaDay(personMap, year, month, d) ||
+      ({ durum: 'Girilmedi' as YoklamaDurum, mesaiSaati: 0 });
+    const idx = aylikStatusCycle.indexOf(dayData.durum as YoklamaDurum);
+    const nextStatus = aylikStatusCycle[(idx + 1) % aylikStatusCycle.length];
+
+    setAylikDraft((prev) => ({
+      ...prev,
+      [personelId]: setYoklamaDay(prev[personelId], year, month, d, {
+        ...dayData,
+        durum: nextStatus,
+        gonderen: currentUser?.email || 'formen',
+      }),
+    }));
+    setAylikDirty(true);
+  };
+
+  const openAylikMesaiEdit = (personelId: string, d: number) => {
+    const dayData = getYoklamaDay(aylikDraft[personelId], year, month, d);
+    setAylikMesaiEdit({ personelId, day: d });
+    setAylikMesaiInput(String(Number(dayData?.mesaiSaati || 0) || ''));
+  };
+
+  const applyAylikMesaiEdit = () => {
+    if (!aylikMesaiEdit) return;
+    const raw = Number(String(aylikMesaiInput).replace(',', '.'));
+    const hours = Number.isFinite(raw) ? Math.max(0, Math.min(24, Math.round(raw * 2) / 2)) : 0;
+    const { personelId, day: d } = aylikMesaiEdit;
+    const dayData =
+      getYoklamaDay(aylikDraft[personelId], year, month, d) ||
+      ({ durum: 'Girilmedi' as YoklamaDurum, mesaiSaati: 0 });
+    setAylikDraft((prev) => ({
+      ...prev,
+      [personelId]: setYoklamaDay(prev[personelId], year, month, d, {
+        ...dayData,
+        mesaiSaati: hours,
+        gonderen: currentUser?.email || 'formen',
+      }),
+    }));
+    setAylikDirty(true);
+    setAylikMesaiEdit(null);
+    setAylikMesaiInput('');
+  };
+
+  const handleSaveAylikPuantaj = async () => {
+    if (aylikSaving) return;
+    setAylikSaving(true);
+    try {
+      const authBlock = await assertErpWriteAuth();
+      if (authBlock) {
+        showStatus('error', authBlock);
+        return;
+      }
+      if (saveYoklamalarNow) {
+        await saveYoklamalarNow(aylikDraft);
+      } else {
+        setYoklamalar(aylikDraft);
+      }
+      setAylikDirty(false);
+      showStatus('success', `${String(month).padStart(2, '0')}/${year} aylık yoklama/mesai kaydedildi.`);
+    } catch (err: any) {
+      showStatus('error', formatFirestoreWriteError(err, err?.message || 'Aylık puantaj kaydedilemedi'));
+    } finally {
+      setAylikSaving(false);
+    }
+  };
+
+  const resetAylikDraft = () => {
+    setAylikDraft(yoklamalar);
+    setAylikDirty(false);
+    setAylikMesaiEdit(null);
   };
 
   // Quick status helper
@@ -3056,19 +3154,67 @@ _Lütfen bu personelin sigorta giriş işlemlerini başlatınız._`}
               {activeTab === 'aylik_puantaj' && (
                 <div className="space-y-3.5 animate-in fade-in duration-150">
                   <div className="bg-white rounded-3xl border p-4 shadow-xs space-y-3">
-                    <div className="flex items-center justify-between">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
                       <div className="flex items-center space-x-2">
                         <FileText size={14} className="text-amber-500" />
-                        <span className="font-bold text-[10px] uppercase tracking-wider text-slate-900">AYLIK GÜNCEL PUANTAJ TABLOSU</span>
+                        <span className="font-bold text-[10px] uppercase tracking-wider text-slate-900">AYLIK YOKLAMA / MESAİ GİRİŞİ</span>
                       </div>
                       <span className="text-[9px] font-mono font-bold text-slate-500">
                         {String(month).padStart(2, '0')}/{year}
                       </span>
                     </div>
                     <p className="text-[9px] text-slate-500 leading-snug">
-                      Bu tablo, ana sistemdeki yoklama verisiyle aynı kaynaktan canlı okunur. Çıkışı gelen personelin çıkış sonrası günleri otomatik kapanır.
+                      Hücreye dokunun: durum döner (G/Y/İ/R/P/T/-). Mesai için hücredeki <strong>+saat</strong> satırına basılı tutun veya uzun dokunun.
+                      Kaydetmeden önce değişiklikler yalnızca bu ekranda tutulur.
+                      {aylikDirty ? (
+                        <span className="block mt-1 text-amber-700 font-bold">Kaydedilmemiş değişiklik var.</span>
+                      ) : null}
                     </p>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const d = new Date(year, month - 2, 1);
+                          setSelectedDate(
+                            `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`
+                          );
+                          setAylikDirty(false);
+                        }}
+                        className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-black text-[10px] py-2 rounded-xl"
+                      >
+                        ← Önceki Ay
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const d = new Date(year, month, 1);
+                          setSelectedDate(
+                            `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`
+                          );
+                          setAylikDirty(false);
+                        }}
+                        className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-black text-[10px] py-2 rounded-xl"
+                      >
+                        Sonraki Ay →
+                      </button>
+                    </div>
                     <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => void handleSaveAylikPuantaj()}
+                        disabled={aylikSaving || !aylikDirty}
+                        className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white font-black text-[10px] py-2.5 rounded-xl transition"
+                      >
+                        {aylikSaving ? 'Kaydediliyor…' : 'Kaydet'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={resetAylikDraft}
+                        disabled={!aylikDirty}
+                        className="w-full bg-slate-100 hover:bg-slate-200 disabled:opacity-40 text-slate-700 font-black text-[10px] py-2.5 rounded-xl transition"
+                      >
+                        Vazgeç
+                      </button>
                       <button
                         type="button"
                         onClick={handleExportAylikPuantajCsv}
@@ -3081,7 +3227,7 @@ _Lütfen bu personelin sigorta giriş işlemlerini başlatınız._`}
                         onClick={() => setActiveTab('yoklama')}
                         className="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 font-black text-[10px] py-2.5 rounded-xl transition"
                       >
-                        Yoklama Sekmesine Dön
+                        Günlük Yoklama
                       </button>
                     </div>
                   </div>
@@ -3103,7 +3249,7 @@ _Lütfen bu personelin sigorta giriş işlemlerini başlatınız._`}
                         </thead>
                         <tbody>
                           {monthPersonelList.map((p) => {
-                            const personMap = yoklamalar[p.id] as any;
+                            const personMap = aylikDraft[p.id] as any;
                             let geldiCount = 0;
                             let mesaiToplam = 0;
                             return (
@@ -3126,10 +3272,59 @@ _Lütfen bu personelin sigorta giriş işlemlerini başlatınız._`}
                                   const mesai = Number(data?.mesaiSaati || 0);
                                   if (durum === 'Geldi') geldiCount += 1;
                                   mesaiToplam += mesai;
+                                  const letter =
+                                    durum === 'Geldi'
+                                      ? 'G'
+                                      : durum === 'Yok'
+                                        ? 'Y'
+                                        : durum === 'İzinli'
+                                          ? 'İ'
+                                          : durum === 'Raporlu'
+                                            ? 'R'
+                                            : durum === 'Pazar'
+                                              ? 'P'
+                                              : durum === 'Tatil'
+                                                ? 'T'
+                                                : '-';
                                   return (
-                                    <td key={d} className="p-1 text-center">
-                                      <span className="text-[9px] font-bold text-slate-700">{durum === 'Geldi' ? 'G' : durum === 'Yok' ? 'Y' : durum === 'İzinli' ? 'İ' : durum === 'Raporlu' ? 'R' : durum === 'Pazar' ? 'P' : durum === 'Tatil' ? 'T' : '-'}</span>
-                                      {mesai > 0 && <span className="block text-[7px] font-mono text-amber-700">+{mesai}</span>}
+                                    <td key={d} className="p-0.5 text-center">
+                                      <div
+                                        role="button"
+                                        tabIndex={0}
+                                        onClick={() => handleAylikCellCycle(p.id, d)}
+                                        onKeyDown={(e) => {
+                                          if (e.key === 'Enter' || e.key === ' ') {
+                                            e.preventDefault();
+                                            handleAylikCellCycle(p.id, d);
+                                          }
+                                        }}
+                                        onContextMenu={(e) => {
+                                          e.preventDefault();
+                                          openAylikMesaiEdit(p.id, d);
+                                        }}
+                                        className={`w-full min-w-[28px] rounded-md border px-0.5 py-1 cursor-pointer select-none ${
+                                          durum === 'Geldi'
+                                            ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                                            : durum === 'Yok'
+                                              ? 'bg-rose-50 border-rose-200 text-rose-800'
+                                              : durum === 'Girilmedi'
+                                                ? 'bg-white border-slate-200 text-slate-500'
+                                                : 'bg-amber-50 border-amber-200 text-amber-900'
+                                        }`}
+                                        title="Dokun: durum · Sağ tık: mesai"
+                                      >
+                                        <span className="text-[9px] font-bold block">{letter}</span>
+                                        <button
+                                          type="button"
+                                          className="block w-full text-[7px] font-mono text-amber-700 min-h-[10px] cursor-pointer"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            openAylikMesaiEdit(p.id, d);
+                                          }}
+                                        >
+                                          {mesai > 0 ? `+${mesai}` : '·'}
+                                        </button>
+                                      </div>
                                     </td>
                                   );
                                 })}
@@ -3142,6 +3337,46 @@ _Lütfen bu personelin sigorta giriş işlemlerini başlatınız._`}
                       </table>
                     </div>
                   </div>
+
+                  {aylikMesaiEdit && (
+                    <div className="fixed inset-0 z-[80] bg-slate-950/60 flex items-end sm:items-center justify-center p-4">
+                      <div className="bg-white rounded-2xl w-full max-w-sm p-4 space-y-3 shadow-xl">
+                        <h4 className="text-xs font-black uppercase text-slate-900">Mesai saati</h4>
+                        <p className="text-[10px] text-slate-500">
+                          Gün {aylikMesaiEdit.day} · 0–24 saat (0.5 adım)
+                        </p>
+                        <input
+                          type="number"
+                          min={0}
+                          max={24}
+                          step={0.5}
+                          value={aylikMesaiInput}
+                          onChange={(e) => setAylikMesaiInput(e.target.value)}
+                          className="w-full text-sm font-bold p-2.5 border border-slate-200 rounded-xl bg-slate-50"
+                          autoFocus
+                        />
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setAylikMesaiEdit(null);
+                              setAylikMesaiInput('');
+                            }}
+                            className="flex-1 py-2 rounded-xl bg-slate-100 text-slate-700 text-[10px] font-black"
+                          >
+                            İptal
+                          </button>
+                          <button
+                            type="button"
+                            onClick={applyAylikMesaiEdit}
+                            className="flex-1 py-2 rounded-xl bg-amber-500 text-slate-950 text-[10px] font-black"
+                          >
+                            Uygula
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 

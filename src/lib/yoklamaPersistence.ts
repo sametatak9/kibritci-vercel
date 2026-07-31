@@ -11,6 +11,7 @@ import {
 } from 'firebase/firestore';
 import { AylikYoklamaMap } from '../types/erp';
 import { db, cleanUndefined, withTimeout } from './firebase';
+import { formatFirestoreWriteError } from './authWriteGuard';
 import {
   countYoklamaDateKeys,
   countYoklamaDayEntries,
@@ -232,7 +233,7 @@ export async function persistYoklamaDocument(
       filledDayCount: countYoklamaFilledDays(payload),
     };
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
+    const msg = formatFirestoreWriteError(err, 'Yoklama yazılamadı');
     return { ok: false, error: `Yoklama yazılamadı: ${msg}` };
   }
 }

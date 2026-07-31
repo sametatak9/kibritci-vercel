@@ -245,7 +245,7 @@ const PublicGirisKayitForm: React.FC<PublicGirisKayitScreenProps> = ({
 
     setSaving(true);
     try {
-      await ensureFirestoreAuth();
+      await ensureFirestoreAuth({ allowAnonymous: true });
       const newPersonel: Personel = {
         ...form,
         id: `p_${Date.now()}`,

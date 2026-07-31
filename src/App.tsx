@@ -120,6 +120,7 @@ import {
 import { collection, onSnapshot, doc, getDoc, query, orderBy, limit } from 'firebase/firestore';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { syncAuthClaimsFromServer } from './lib/authClaimsClient';
+import { assertErpWriteAuth, formatFirestoreWriteError } from './lib/authWriteGuard';
 import { LoginScreen } from './components/LoginScreen';
 const YetkiVermeScreen = lazy(() => import('./components/YetkiVermeScreen').then(m => ({ default: m.YetkiVermeScreen })));
 const OperatorScreen = lazy(() => import('./components/OperatorScreen').then(m => ({ default: m.OperatorScreen })));
@@ -128,6 +129,7 @@ const PublicSatinAlmaShareScreen = lazy(() => import('./components/PublicSatinAl
 import { fetchSatinAlmaPublicShare } from './lib/satinAlmaPublicShare';
 import { installReportEmailGlobalBridge } from './lib/reportEmail';
 import { CANONICAL_ANA_FIRMA_ADI, isKibritciCompany, normalizeTurkishName } from './lib/yoklamaUtils';
+import { isActivePortalDurum } from './lib/roleClaims';
 import {
   buildSaIrsaliyeFormPrefill,
   type SaIrsaliyeFormPrefill,
@@ -241,6 +243,8 @@ export default function App() {
   const [loadingMsg, setLoadingMsg] = useState('Google Cloud Veritabanı bağlantısı kuruluyor...');
   const [startupError, setStartupError] = useState<{ message: string; step: string; technical?: string } | null>(null);
   const [geminiApiAlert, setGeminiApiAlert] = useState<string | null>(null);
+  const [authWriteWarning, setAuthWriteWarning] = useState<string | null>(null);
+  const [claimsTick, setClaimsTick] = useState(0);
   const [dashboardDataReady, setDashboardDataReady] = useState(false);
 
   // Global State Engine
@@ -417,7 +421,7 @@ export default function App() {
     if (viewGirisId) {
       setPublicLoading(true);
       void (async () => {
-        await ensureFirestoreAuth();
+        await ensureFirestoreAuth({ allowAnonymous: true });
         try {
           const snap = await getDoc(doc(db, 'personelGirisTalepleri', viewGirisId));
           if (snap.exists()) {
@@ -519,11 +523,36 @@ export default function App() {
     if (!firebaseUser || firebaseUser.isAnonymous) return;
 
     claimsSyncedRef.current = true;
-    void syncAuthClaimsFromServer(currentUser.email.toLowerCase()).catch((err) => {
-      console.warn('Claim senkronizasyonu atlandı:', err);
-      claimsSyncedRef.current = false;
-    });
+    void syncAuthClaimsFromServer(currentUser.email.toLowerCase())
+      .then(async () => {
+        try {
+          await auth.currentUser?.getIdToken(true);
+        } catch {
+          /* ignore */
+        }
+        setClaimsTick((t) => t + 1);
+      })
+      .catch((err) => {
+        console.warn('Claim senkronizasyonu atlandı:', err);
+        claimsSyncedRef.current = false;
+        setClaimsTick((t) => t + 1);
+      });
   }, [authLoading, currentUser?.email, currentUser?.uid]);
+
+  // ERP yazma oturumu uyarısı (anonim / durum claim)
+  useEffect(() => {
+    if (authLoading || !currentUser) {
+      setAuthWriteWarning(null);
+      return;
+    }
+    let cancelled = false;
+    void assertErpWriteAuth().then((msg) => {
+      if (!cancelled) setAuthWriteWarning(msg);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [authLoading, currentUser?.uid, currentUser?.email, claimsTick]);
 
   // Son görülme tarihini güncelle (Her 5 dakikada bir en fazla)
   useEffect(() => {
@@ -565,9 +594,9 @@ export default function App() {
         if (!authed) {
           setStartupError({
             message:
-              'Veritabanı güvenlik oturumu açılamadı. Firebase Console > Authentication > Sign-in method bölümünde Anonymous ve Email/Password etkin olmalı.',
+              'Veritabanına yazmak için e-posta oturumu gerekli. Anonim oturum kaydedemez — çıkış yapıp e-posta ve şifre ile yeniden giriş yapın.',
             step: 'Güvenli veritabanı oturumu kontrol ediliyor',
-            technical: 'ensureFirestoreAuth returned false',
+            technical: 'ensureFirestoreAuth returned false (anonymous or missing email session)',
           });
           setDbStatus('error');
           return;
@@ -2262,19 +2291,26 @@ export default function App() {
   };
 
   const notifyYoklamaSaveFailure = (message: string) => {
-    console.error('[yoklama]', message);
-    void addNotification(`⚠️ Yoklama kaydı korundu: ${message}`);
+    const friendly = formatFirestoreWriteError(message, message);
+    console.error('[yoklama]', friendly);
+    void addNotification(`⚠️ Yoklama kaydı korundu: ${friendly}`);
   };
 
   persistenceFailureRef.current = (collection, message) => {
-    console.error(`[persist:${collection}]`, message);
-    void addNotification(`⚠️ ${collection} kaydı korundu: ${message}`);
+    const friendly = formatFirestoreWriteError(message, message);
+    console.error(`[persist:${collection}]`, friendly);
+    void addNotification(`⚠️ ${collection} kaydı korundu: ${friendly}`);
   };
 
   const saveYoklamalarNow = async (
     next: AylikYoklamaMap,
     kaynak: import('./lib/yoklamaPersistence').YoklamaSaveSource = 'formen_mobil'
   ) => {
+    const authBlock = await assertErpWriteAuth();
+    if (authBlock) {
+      notifyYoklamaSaveFailure(authBlock);
+      throw new Error(authBlock);
+    }
     const result = await saveYoklamaDocument(next, kaynak);
     if (!result.ok) {
       notifyYoklamaSaveFailure(result.error || 'Bilinmeyen hata');
@@ -3004,6 +3040,22 @@ export default function App() {
           />
         )}
 
+        {authWriteWarning && (
+          <div className="shrink-0 border-b border-rose-500/50 bg-rose-950/95 px-4 py-2.5 text-[11px] leading-relaxed text-rose-50 flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <span className="font-bold text-rose-200">Kayıt engeli:</span>{' '}
+              {authWriteWarning}
+            </div>
+            <button
+              type="button"
+              onClick={() => void handleSignOut()}
+              className="shrink-0 rounded-lg bg-rose-600 hover:bg-rose-500 px-3 py-1.5 text-[10px] font-black uppercase tracking-wide text-white cursor-pointer"
+            >
+              Çıkış / Yeniden Giriş
+            </button>
+          </div>
+        )}
+
         {geminiApiAlert && !hideSidebarAndTopbar && isFounderAccount && (
           <div className="shrink-0 border-b border-amber-500/40 bg-amber-950/90 px-4 py-2 text-[11px] leading-relaxed text-amber-100">
             <span className="font-bold text-amber-300">Yapay zeka API uyarısı:</span>{' '}
@@ -3019,7 +3071,7 @@ export default function App() {
             const matchedYetki = normalizeYetki(matchedUser?.yetki);
             const currentEmail = currentUser?.email?.toLowerCase();
             const privileged = currentEmail === 'sametatak9@gmail.com' || currentEmail === SECONDARY_ADMIN_EMAIL;
-            const hasActiveMobileRole = isMobileRole(matchedYetki) && matchedUser?.durum === 'AKTİF';
+            const hasActiveMobileRole = isMobileRole(matchedYetki) && isActivePortalDurum(matchedUser?.durum);
             const isBlocked =
               !privileged &&
               !hasActiveMobileRole &&

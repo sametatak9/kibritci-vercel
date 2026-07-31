@@ -39,7 +39,7 @@ export const db = initializeFirestore(
 export const auth = getAuth(app);
 export const storage = getStorage(app);
 
-/** Firestore güvenlik kuralları oturum gerektirir; giriş öncesi anonim oturum açar. */
+/** Firestore güvenlik kuralları oturum gerektirir. */
 async function waitForAuthUser(maxMs = 8000) {
   if (auth.currentUser) return auth.currentUser;
   return new Promise<typeof auth.currentUser>((resolve) => {
@@ -53,9 +53,38 @@ async function waitForAuthUser(maxMs = 8000) {
   });
 }
 
-export async function ensureFirestoreAuth(): Promise<boolean> {
+export type EnsureFirestoreAuthOptions = {
+  /**
+   * true: oturum yoksa anonim aç (yalnızca public koleksiyonlar: personelGirisTalepleri vb.)
+   * false/undefined: ERP — anonim oluşturma yok; mevcut anonim oturum yetersiz sayılır
+   */
+  allowAnonymous?: boolean;
+};
+
+/**
+ * Firestore oturumu hazırlar.
+ * ERP yazmaları için allowAnonymous=false (varsayılan): e-posta oturumu şart.
+ */
+export async function ensureFirestoreAuth(
+  opts?: EnsureFirestoreAuthOptions
+): Promise<boolean> {
+  const allowAnonymous = Boolean(opts?.allowAnonymous);
   const existing = await waitForAuthUser(6000);
-  if (existing) return true;
+
+  if (existing) {
+    if (existing.isAnonymous && !allowAnonymous) {
+      console.warn(
+        '[Firebase] Anonim oturum ERP yazması için yetersiz; e-posta girişi gerekli.'
+      );
+      return false;
+    }
+    return true;
+  }
+
+  if (!allowAnonymous) {
+    console.warn('[Firebase] ERP oturumu yok; anonim oluşturulmayacak.');
+    return false;
+  }
 
   try {
     await signInAnonymously(auth);
@@ -358,8 +387,10 @@ export async function syncArrayToFirestore<T extends { id: string }>(
     // #endregion
     await Promise.all(promises);
   } catch (error) {
+    const { formatFirestoreWriteError } = await import('./authWriteGuard');
+    const friendly = formatFirestoreWriteError(error, `Error syncing ${collectionName}`);
     console.error(`Error syncing array for collection ${collectionName}:`, error);
-    throw error instanceof Error ? error : new Error(String(error));
+    throw new Error(friendly);
   }
 }
 

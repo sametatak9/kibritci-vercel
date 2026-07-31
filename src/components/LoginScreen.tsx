@@ -84,6 +84,12 @@ async function completeEmailLogin(
   await syncAuthClaimsFromServer(emailLower).catch((err) => {
     console.warn('Claim sync atlandı (giriş devam ediyor):', err);
   });
+  // Claim sonrası token'ı zorla yenile (syncAuthClaimsFromServer zaten getIdToken(true) çağırır)
+  try {
+    await auth.currentUser?.getIdToken(true);
+  } catch {
+    /* ignore */
+  }
   finishPortalLogin(emailLower, cred.user.uid, onLoginSuccess);
 }
 
@@ -345,7 +351,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
     const passTrim = password.trim();
 
     if (isSignUp) {
-      await ensureFirestoreAuth();
+      await ensureFirestoreAuth({ allowAnonymous: true });
     }
 
     try {
@@ -585,12 +591,14 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
         }
       }
     } catch (err: any) {
-      // Offline fallback / Anon login
+      // Offline fallback — anonim ERP yazamaz; kullanıcıyı uyar
+      setErrorMsg(
+        'Demo girişi başarısız. E-posta/şifre ile giriş yapın. Anonim oturum kayıt yapamaz.'
+      );
       try {
         const res = await signInAnonymously(auth);
         onLoginSuccess(res.user);
       } catch (nestedErr) {
-        // Fallback simulated success
         onLoginSuccess({ email: 'demo@kibritci.com', displayName: 'Demo Kullanıcı', uid: 'test-user-id' });
       }
     } finally {
