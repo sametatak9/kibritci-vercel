@@ -194,7 +194,10 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
           const matchSurucu = String(kh.surucu || '')
             .toLowerCase()
             .includes(kw);
-          return matchDesc || matchType || matchId || matchSurucu;
+          const matchPersonel = String(kh.personelAdi || '')
+            .toLowerCase()
+            .includes(kw);
+          return matchDesc || matchType || matchId || matchSurucu || matchPersonel;
         }
         return true;
       }),
@@ -216,6 +219,51 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
   const soforKasaOut = filteredHareketler
     .filter((k) => k.hareketTipi === 'ÇIKIŞ' && isSoforUzerindenKasaGideri(k))
     .reduce((sum, current) => sum + current.tutar, 0);
+
+  /** Seçili aralık — kasa / personel bazlı harcama özeti */
+  const harcamaBazliOzet = useMemo(() => {
+    const buckets = new Map<string, { key: string; label: string; tutar: number; tip: 'KASA' | 'PERSONEL' }>();
+
+    const add = (key: string, label: string, tip: 'KASA' | 'PERSONEL', tutar: number) => {
+      const prev = buckets.get(key);
+      if (prev) prev.tutar += tutar;
+      else buckets.set(key, { key, label, tip, tutar });
+    };
+
+    for (const kh of filteredHareketler) {
+      if (kh.hareketTipi !== 'ÇIKIŞ') continue;
+      const tutar = Number(kh.tutar) || 0;
+      if (tutar <= 0) continue;
+
+      if (kh.harcamaKaynagi === 'PERSONEL_HARCAMA') {
+        const name = String(kh.personelAdi || kh.surucu || 'Personel (adsız)').trim();
+        add(`p:${kh.personelId || name}`, name, 'PERSONEL', tutar);
+        continue;
+      }
+      if (kh.harcamaKaynagi === 'KASA_HARCAMA') {
+        add('kasa', 'KASA', 'KASA', tutar);
+        continue;
+      }
+      // Şoför kendi cebinden → kişi adı
+      if (isSoforIadeKasaHareketi(kh)) {
+        const name = String(kh.surucu || 'Şoför').trim();
+        add(`sofor:${name}`, name, 'PERSONEL', tutar);
+        continue;
+      }
+      // Şoför üzerinden şirket kasası
+      if (isSoforUzerindenKasaGideri(kh)) {
+        add('kasa', 'KASA', 'KASA', tutar);
+        continue;
+      }
+      // İşaretsiz eski çıkışlar → KASA
+      add('kasa', 'KASA', 'KASA', tutar);
+    }
+
+    return [...buckets.values()].sort((a, b) => {
+      if (a.tip !== b.tip) return a.tip === 'KASA' ? -1 : 1;
+      return b.tutar - a.tutar || a.label.localeCompare(b.label, 'tr');
+    });
+  }, [filteredHareketler]);
 
   const personelSecenekleri = useMemo(() => {
     const q = personelArama.trim().toLocaleLowerCase('tr-TR');
@@ -474,6 +522,48 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
     setSoforIadeEnd(endDate);
   };
 
+  /** Yönetici: kayıt üzerinde harcama tipini hızlı değiştir */
+  const handleQuickHarcamaKaynagi = async (
+    kh: KasaHareketi,
+    tip: HarcamaKaynagi
+  ) => {
+    if (kh.hareketTipi !== 'ÇIKIŞ') {
+      alert('Harcama tipi yalnızca ÇIKIŞ kayıtlarında değiştirilir.');
+      return;
+    }
+    if (tip === 'PERSONEL_HARCAMA' && !kh.personelId && !kh.personelAdi) {
+      handleStartEdit(kh);
+      setNewHarcamaKaynagi('PERSONEL_HARCAMA');
+      alert('Personel Harcama için soldaki formdan harcayan personeli seçip kaydı güncelleyin.');
+      return;
+    }
+    if (savingKasa) return;
+    setSavingKasa(true);
+    try {
+      const next: KasaHareketi = {
+        ...kh,
+        harcamaKaynagi: tip,
+      };
+      if (tip === 'KASA_HARCAMA') {
+        delete next.personelId;
+        delete next.personelAdi;
+      }
+      const { saveDocument } = await import('../lib/firebase');
+      await saveDocument('kasaHareketleri', {
+        ...next,
+        harcamaKaynagi: tip,
+        personelId: tip === 'PERSONEL_HARCAMA' ? next.personelId || null : null,
+        personelAdi: tip === 'PERSONEL_HARCAMA' ? next.personelAdi || null : null,
+      } as KasaHareketi);
+      setKasaHareketleri((prev) => prev.map((x) => (x.id === kh.id ? next : x)));
+    } catch (err) {
+      console.error('[kasa] tip değişimi:', err);
+      alert(err instanceof Error ? err.message : 'Harcama tipi güncellenemedi');
+    } finally {
+      setSavingKasa(false);
+    }
+  };
+
   return (
     <div className="flex-grow p-3 sm:p-4 lg:p-6 h-full flex flex-col font-sans gap-4 lg:gap-6 select-none bg-slate-50">
       
@@ -521,6 +611,46 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
         })}
       </div>
 
+      {/* Harcama bazlı özet — KASA / kişi kişi */}
+      <div className="shrink-0 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+          <div>
+            <h3 className="text-[11px] font-black uppercase tracking-wider text-slate-800">
+              Harcama özeti (seçili aralık)
+            </h3>
+            <p className="text-[10px] text-slate-500 mt-0.5">
+              Kasa ve personel harcamaları ayrı · Yönetici listeden tipi değiştirebilir
+            </p>
+          </div>
+          <span className="text-[10px] font-mono font-bold text-slate-600 bg-slate-50 border border-slate-100 px-2 py-1 rounded-lg">
+            Toplam çıkış ₺{totalOut.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
+          </span>
+        </div>
+        {harcamaBazliOzet.length === 0 ? (
+          <p className="text-[11px] text-slate-400 italic">Bu aralıkta çıkış / harcama yok.</p>
+        ) : (
+          <div className="flex flex-wrap gap-2">
+            {harcamaBazliOzet.map((row) => (
+              <div
+                key={row.key}
+                className={`inline-flex items-center gap-2 rounded-xl border px-3 py-2 ${
+                  row.tip === 'KASA'
+                    ? 'bg-slate-900 text-white border-slate-900'
+                    : 'bg-violet-50 text-violet-950 border-violet-200'
+                }`}
+              >
+                <span className="text-[10px] font-black uppercase tracking-wide opacity-90">
+                  {row.label}
+                </span>
+                <span className="text-sm font-black font-mono tabular-nums">
+                  ₺{row.tutar.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
       {/* Main split dashboard view */}
       <div className="flex-1 flex flex-col lg:flex-row gap-4 lg:gap-6 min-h-0">
         
@@ -532,7 +662,7 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
             <div className="flex items-center space-x-2">
               <Wallet size={16} />
               <h3 className="font-bold text-xs uppercase tracking-widest">
-                {editingId ? "KASA KAYDI DÜZENLE" : "YENİ KASA HAREKETİ"}
+                {editingId ? "KASA KAYDI DÜZENLE (Yönetici)" : "YENİ KASA HAREKETİ"}
               </h3>
             </div>
             {editingId && (
@@ -895,6 +1025,36 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
                         <span className="inline-block py-0.5 px-2 rounded-full text-[9px] font-extrabold bg-violet-100 text-violet-800 border border-violet-200">
                           PERSONEL HARCAMA
                         </span>
+                      )}
+                      {kh.hareketTipi === 'ÇIKIŞ' && (
+                        <div className="flex gap-0.5 w-full mt-0.5">
+                          <button
+                            type="button"
+                            disabled={savingKasa}
+                            onClick={() => void handleQuickHarcamaKaynagi(kh, 'KASA_HARCAMA')}
+                            className={`text-[8px] font-black uppercase px-1.5 py-0.5 rounded border cursor-pointer disabled:opacity-50 ${
+                              kh.harcamaKaynagi === 'KASA_HARCAMA'
+                                ? 'bg-slate-800 text-white border-slate-800'
+                                : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                            }`}
+                            title="Kasa Harcama olarak işaretle"
+                          >
+                            → Kasa
+                          </button>
+                          <button
+                            type="button"
+                            disabled={savingKasa}
+                            onClick={() => void handleQuickHarcamaKaynagi(kh, 'PERSONEL_HARCAMA')}
+                            className={`text-[8px] font-black uppercase px-1.5 py-0.5 rounded border cursor-pointer disabled:opacity-50 ${
+                              kh.harcamaKaynagi === 'PERSONEL_HARCAMA'
+                                ? 'bg-violet-700 text-white border-violet-700'
+                                : 'bg-white text-violet-700 border-violet-200 hover:bg-violet-50'
+                            }`}
+                            title="Personel Harcama olarak işaretle"
+                          >
+                            → Personel
+                          </button>
+                        </div>
                       )}
                     </div>
 
