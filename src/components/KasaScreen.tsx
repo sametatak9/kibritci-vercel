@@ -7,7 +7,8 @@ import { KasaHareketi, Personel } from '../types/erp';
 import { CorporateReportLayout } from './CorporateReportLayout';
 import { exportKasaExcel } from '../lib/kasaExcelExport';
 import { compressImage } from '../lib/imageCompress';
-import { removeDocument } from '../lib/firebase';
+import { removeDocument, saveDocument } from '../lib/firebase';
+import { ensureKasaFisFotoPersisted } from '../lib/sahaFaaliyetFotoStorage';
 import { todayDateKey } from '../lib/dateKeyUtils';
 import {
   isSoforIadeKasaHareketi,
@@ -16,6 +17,22 @@ import {
 } from '../lib/yolHarcamaUtils';
 
 type HarcamaKaynagi = 'KASA_HARCAMA' | 'PERSONEL_HARCAMA';
+
+function formatKasaSaveError(err: unknown): string {
+  const msg = err instanceof Error ? err.message : String(err);
+  const low = msg.toLowerCase();
+  if (
+    low.includes('failed to fetch dynamically imported module') ||
+    low.includes('importing a module script failed') ||
+    low.includes('error loading dynamically imported module')
+  ) {
+    return 'Sayfa güncellenmiş (eski önbellek). Ctrl+F5 ile yenileyip kaydı tekrar deneyin.';
+  }
+  if (low.includes('permission') || low.includes('oturum yetkisiz')) {
+    return 'Oturum yetkisiz. E-posta ile yeniden giriş yapıp tekrar deneyin.';
+  }
+  return msg || 'Bilinmeyen hata';
+}
 
 interface KasaScreenProps {
   kasaHareketleri: KasaHareketi[];
@@ -362,21 +379,35 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
     setSavingKasa(true);
     try {
       const id = editingId || `kh_${Date.now()}`;
-      let fisUrl = String(uploadedFileBase64 || '').trim();
-      if (fisUrl.startsWith('data:')) {
-        const { ensureKasaFisFotoPersisted } = await import('../lib/sahaFaaliyetFotoStorage');
-        fisUrl = await ensureKasaFisFotoPersisted(id, fisUrl);
-        if (!fisUrl) {
-          const keep = window.confirm(
-            'Fiş görseli yüklenemedi (çok büyük veya ağ hatası).\nKayıt görselsiz kaydedilsin mi?'
-          );
-          if (!keep) return;
-        }
-      }
-
       const existing = editingId
         ? kasaHareketleri.find((x) => x.id === editingId)
         : undefined;
+
+      let fisUrl = String(uploadedFileBase64 || '').trim();
+      // Yeni çekilen/yüklenen data URL → Storage; mevcut https/storage URL dokunma
+      if (fisUrl.startsWith('data:')) {
+        try {
+          const persisted = await ensureKasaFisFotoPersisted(id, fisUrl);
+          if (persisted) {
+            fisUrl = persisted;
+          } else {
+            const keep = window.confirm(
+              'Fiş görseli yüklenemedi (çok büyük veya ağ hatası).\nKayıt görselsiz / eski görselle kaydedilsin mi?'
+            );
+            if (!keep) return;
+            fisUrl = String(existing?.fisEvrakUrl || '').trim();
+          }
+        } catch (fotoErr) {
+          console.warn('[kasa] fiş Storage atlandı:', fotoErr);
+          const keep = window.confirm(
+            'Fiş görseli Storage’a taşınamadı.\nKayıt mevcut görselle / görselsiz devam etsin mi?'
+          );
+          if (!keep) return;
+          fisUrl = String(existing?.fisEvrakUrl || '').trim();
+        }
+      } else if (!fisUrl) {
+        fisUrl = String(existing?.fisEvrakUrl || '').trim();
+      }
 
       const isPersonelHarcama = newType === 'ÇIKIŞ' && newHarcamaKaynagi === 'PERSONEL_HARCAMA';
 
@@ -389,7 +420,7 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
         aciklama: newDesc.trim(),
         referansTipi: newRefType,
         referansId: newRefId || undefined,
-        fisEvrakUrl: fisUrl || existing?.fisEvrakUrl || undefined,
+        fisEvrakUrl: fisUrl || undefined,
       };
 
       if (newType === 'ÇIKIŞ' && newHarcamaKaynagi) {
@@ -405,7 +436,6 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
         delete record.personelAdi;
       }
 
-      const { saveDocument } = await import('../lib/firebase');
       await saveDocument('kasaHareketleri', {
         ...record,
         harcamaKaynagi: record.harcamaKaynagi ?? null,
@@ -452,8 +482,7 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
       );
     } catch (err) {
       console.error('[kasa] kayıt hatası:', err);
-      const msg = err instanceof Error ? err.message : String(err);
-      alert(`Kasa hareketi kaydedilemedi: ${msg}`);
+      alert(`Kasa hareketi kaydedilemedi: ${formatKasaSaveError(err)}`);
     } finally {
       setSavingKasa(false);
     }
@@ -548,7 +577,6 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
         delete next.personelId;
         delete next.personelAdi;
       }
-      const { saveDocument } = await import('../lib/firebase');
       await saveDocument('kasaHareketleri', {
         ...next,
         harcamaKaynagi: tip,
@@ -558,7 +586,7 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
       setKasaHareketleri((prev) => prev.map((x) => (x.id === kh.id ? next : x)));
     } catch (err) {
       console.error('[kasa] tip değişimi:', err);
-      alert(err instanceof Error ? err.message : 'Harcama tipi güncellenemedi');
+      alert(formatKasaSaveError(err));
     } finally {
       setSavingKasa(false);
     }
