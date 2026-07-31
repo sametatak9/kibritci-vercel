@@ -1806,7 +1806,7 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
         : activeTab === 'petrol_tankeri'
           ? 'Petrol Tankeri'
           : activeTab === 'mici_stabilize'
-            ? 'Mıcır & Stabilize'
+            ? 'Mıcır / Stabilize / Taş Tozu'
             : 'Su Tankeri';
 
     const isMicir = currentTip === 'MICIR_STABILIZE';
@@ -2730,7 +2730,7 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
             {[
               { key: 'irsaliye' as const, label: 'Evrak', icon: FileText, tone: 'bg-amber-500 text-slate-950' },
               { key: 'arac' as const, label: 'Araç', icon: Truck, tone: 'bg-sky-600 text-white' },
-              { key: 'mici_stabilize' as const, label: 'Mıcır', icon: Truck, tone: 'bg-emerald-600 text-white' },
+              { key: 'mici_stabilize' as const, label: 'Mıcır+', icon: Truck, tone: 'bg-emerald-600 text-white' },
               { key: 'evrak_galerisi' as const, label: 'Evrak Duvarı', icon: Images, tone: 'bg-[#0F6C5C] text-white' },
             ].map((item) => {
               const Icon = item.icon;
@@ -4051,7 +4051,7 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
             const currentLabel = 
               activeTab === 'vidanjor' ? 'Vidanjör' : 
               activeTab === 'petrol_tankeri' ? 'Petrol Tankeri' : 
-              activeTab === 'mici_stabilize' ? 'Mıcır & Stabilize Kamyonu' : 
+              activeTab === 'mici_stabilize' ? 'Mıcır / Stabilize / Taş Tozu' : 
               'Su Tankeri';
 
             const currentIcon = 
