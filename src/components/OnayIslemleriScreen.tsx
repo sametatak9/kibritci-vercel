@@ -105,6 +105,10 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
 
   const [aracOnayTalepleri, setAracOnayTalepleri] = useState<any[]>([]);
   const [yolHarcamalari, setYolHarcamalari] = useState<any[]>([]);
+  const [soforFisLightbox, setSoforFisLightbox] = useState<{
+    url: string;
+    title: string;
+  } | null>(null);
 
   // Security Gate Document Approval States
   const [gelenEvraklar, setGelenEvraklar] = useState<any[]>([]);
@@ -3624,14 +3628,27 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
                           </div>
 
                           {item.faturaFotoUrl && (
-                            <div className="border border-slate-100 rounded-xl overflow-hidden bg-slate-50 flex flex-col items-center justify-center p-2">
-                              <span className="text-[8px] font-bold text-slate-500 uppercase tracking-wider block mb-1">📷 Harcama Belgesi (Fiş/Fatura)</span>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setSoforFisLightbox({
+                                  url: item.faturaFotoUrl,
+                                  title: `${item.surucu || 'Şoför'} · ${item.fisNo || item.tarih || 'Fiş'} · ${item.tutar} TL`,
+                                })
+                              }
+                              className="w-full border border-slate-100 rounded-xl overflow-hidden bg-slate-50 flex flex-col items-center justify-center p-2 cursor-pointer hover:border-sky-300 hover:bg-sky-50/40 transition group text-left"
+                              title="Büyütmek için tıklayın"
+                            >
+                              <span className="text-[8px] font-bold text-slate-500 uppercase tracking-wider block mb-1 group-hover:text-sky-700">
+                                📷 Harcama Belgesi — tıklayınca büyüt
+                              </span>
                               <img
                                 src={item.faturaFotoUrl}
                                 alt="Fis Görseli"
-                                className="max-h-40 max-w-full rounded object-contain"
+                                className="max-h-40 max-w-full rounded object-contain pointer-events-none"
+                                referrerPolicy="no-referrer"
                               />
-                            </div>
+                            </button>
                           )}
                         </div>
 
@@ -4166,6 +4183,42 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
             </div>
 
           </div>
+        </div>
+      )}
+
+      {soforFisLightbox && (
+        <div
+          className="fixed inset-0 z-[90] bg-black/85 flex items-center justify-center p-4"
+          onClick={() => setSoforFisLightbox(null)}
+          role="dialog"
+          aria-modal="true"
+          aria-label="Fiş görseli büyütülmüş"
+        >
+          <div
+            className="absolute top-4 left-4 right-4 flex items-start justify-between gap-3 pointer-events-none"
+          >
+            <p className="text-[11px] font-bold text-white/90 bg-black/40 px-3 py-1.5 rounded-lg max-w-[80%] truncate pointer-events-none">
+              {soforFisLightbox.title}
+            </p>
+            <button
+              type="button"
+              className="pointer-events-auto p-2 rounded-full bg-white/10 text-white hover:bg-white/20 cursor-pointer shrink-0"
+              onClick={() => setSoforFisLightbox(null)}
+              aria-label="Kapat"
+            >
+              <X size={20} />
+            </button>
+          </div>
+          <img
+            src={soforFisLightbox.url}
+            alt="Fiş büyütülmüş"
+            className="max-w-full max-h-[90vh] object-contain rounded-lg shadow-2xl"
+            referrerPolicy="no-referrer"
+            onClick={(e) => e.stopPropagation()}
+          />
+          <p className="absolute bottom-4 text-[10px] text-white/70 font-semibold">
+            Kapatmak için dışarı tıklayın
+          </p>
         </div>
       )}
 
