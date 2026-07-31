@@ -485,7 +485,7 @@ export default function App() {
                 localStorage.removeItem('kibritci_portal_session');
                 setCurrentUser(null);
                 setAuthLoading(false);
-              }, 12000);
+              }, 8000);
             }
             return;
           }
@@ -614,25 +614,52 @@ export default function App() {
         // ciddi biçimde yavaşlatıyordu. Sadece canlı dinleyicisi olmayan küçük
         // yardımcı koleksiyonları arka planda yükle.
         if (!allowDemoSeed) {
-          void Promise.allSettled([
-            fetchCollection<Demisbas>('demirbaslar').then(setDemirbaslar),
-            fetchCollection<EpostaGonderim>('epostaGonderimleri').then(setEpostaGonderimleri),
-            fetchCollection<PersonelIslemGecmisi>('personelIslemGecmisi').then(setPersonelIslemGecmisi),
-            fetchCollection<CariKartIslem>('cariIslemGecmisi').then(setCariIslemGecmisi),
-            fetchCollection<StokKartIslem>('stokIslemGecmisi').then(setStokIslemGecmisi),
-            // Eski demo kasa seed'leri (k1/k2) canlıda silinince yeniden oluşmasın / kalsın
-            ...INITIAL_KASA.map((seed) =>
-              removeDocument('kasaHareketleri', seed.id).catch((err) =>
-                console.warn('[kasa] demo seed silinemedi:', seed.id, err)
-              )
-            ),
-          ]).then((results) => {
-            results.forEach((result, index) => {
-              if (result.status === 'rejected') {
-                console.warn(`Yardımcı koleksiyon ${index} arka planda yüklenemedi:`, result.reason);
-              }
+          const loadAuxiliaryCollections = () => {
+            void Promise.allSettled([
+              fetchCollection<Demisbas>('demirbaslar').then(setDemirbaslar),
+              fetchCollection<EpostaGonderim>('epostaGonderimleri').then(setEpostaGonderimleri),
+              fetchCollection<PersonelIslemGecmisi>('personelIslemGecmisi').then(setPersonelIslemGecmisi),
+              fetchCollection<CariKartIslem>('cariIslemGecmisi').then(setCariIslemGecmisi),
+              fetchCollection<StokKartIslem>('stokIslemGecmisi').then(setStokIslemGecmisi),
+            ]).then((results) => {
+              results.forEach((result, index) => {
+                if (result.status === 'rejected') {
+                  console.warn(`Yardımcı koleksiyon ${index} arka planda yüklenemedi:`, result.reason);
+                }
+              });
             });
-          });
+
+            // Demo kasa seed temizliği bir kez (her girişte yazma yükü olmasın)
+            const kasaCleanKey = 'kibritci_kasa_demo_cleaned_v1';
+            try {
+              if (typeof localStorage !== 'undefined' && !localStorage.getItem(kasaCleanKey)) {
+                void Promise.allSettled(
+                  INITIAL_KASA.map((seed) =>
+                    removeDocument('kasaHareketleri', seed.id).catch((err) =>
+                      console.warn('[kasa] demo seed silinemedi:', seed.id, err)
+                    )
+                  )
+                ).then(() => {
+                  try {
+                    localStorage.setItem(kasaCleanKey, '1');
+                  } catch {
+                    /* ignore */
+                  }
+                });
+              }
+            } catch {
+              /* ignore */
+            }
+          };
+
+          if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+            (window as Window & { requestIdleCallback: (cb: () => void, opts?: { timeout: number }) => number }).requestIdleCallback(
+              loadAuxiliaryCollections,
+              { timeout: 2500 }
+            );
+          } else {
+            setTimeout(loadAuxiliaryCollections, 600);
+          }
           return;
         }
 
@@ -1031,22 +1058,6 @@ export default function App() {
       markDashboardSnapshot('faturalar');
     }, markDashboardSnapshotError('faturalar'));
 
-    const unsubEvrakBaglanti = onSnapshot(collection(db, 'evrakBaglantiGruplari'), (snapshot) => {
-      const list: EvrakBaglantiGrubu[] = [];
-      snapshot.forEach((doc) => {
-        list.push({ id: doc.id, ...doc.data() } as any);
-      });
-      setEvrakBaglantiGruplari(list);
-    });
-
-    const unsubAnalizRapor = onSnapshot(collection(db, 'onayliAnalizRaporlari'), (snapshot) => {
-      const list: OnayliAnalizRaporu[] = [];
-      snapshot.forEach((doc) => {
-        list.push({ id: doc.id, ...doc.data() } as any);
-      });
-      setOnayliAnalizRaporlari(list);
-    });
-
     const unsubSatinAlma = onSnapshot(collection(db, 'satinAlmaTalepleri'), (snapshot) => {
       const list: SatinAlmaTalebi[] = [];
       snapshot.forEach((doc) => {
@@ -1055,6 +1066,199 @@ export default function App() {
       setSatinAlmaTalepleri(list);
       markDashboardSnapshot('satinAlmaTalepleri');
     }, markDashboardSnapshotError('satinAlmaTalepleri'));
+
+    // İkincil koleksiyonlar: ilk boyamayı hızlandırmak için kısa gecikmeyle bağlanır (salt okuma)
+    const deferredUnsubs: Array<() => void> = [];
+    let deferredStarted = false;
+    let deferredTimer: ReturnType<typeof setTimeout> | null = null;
+    let deferredIdleId: number | null = null;
+
+    const attachDeferredListeners = () => {
+      if (deferredStarted) return;
+      deferredStarted = true;
+
+      deferredUnsubs.push(
+        onSnapshot(collection(db, 'evrakBaglantiGruplari'), (snapshot) => {
+          const list: EvrakBaglantiGrubu[] = [];
+          snapshot.forEach((doc) => {
+            list.push({ id: doc.id, ...doc.data() } as any);
+          });
+          setEvrakBaglantiGruplari(list);
+        })
+      );
+
+      deferredUnsubs.push(
+        onSnapshot(collection(db, 'onayliAnalizRaporlari'), (snapshot) => {
+          const list: OnayliAnalizRaporu[] = [];
+          snapshot.forEach((doc) => {
+            list.push({ id: doc.id, ...doc.data() } as any);
+          });
+          setOnayliAnalizRaporlari(list);
+        })
+      );
+
+      deferredUnsubs.push(
+        onSnapshot(collection(db, 'sahaFaaliyetleri'), (snapshot) => {
+          const list: SahaFaaliyetiType[] = [];
+          snapshot.forEach((doc) => {
+            list.push({ id: doc.id, ...doc.data() } as any);
+          });
+          setSahaFaaliyetleri(list);
+        })
+      );
+
+      deferredUnsubs.push(
+        onSnapshot(collection(db, 'programliFaaliyetler'), (snapshot) => {
+          const list: ProgramliFaaliyet[] = [];
+          snapshot.forEach((doc) => {
+            list.push({ id: doc.id, ...doc.data() } as ProgramliFaaliyet);
+          });
+          setProgramliFaaliyetler(list);
+        })
+      );
+
+      deferredUnsubs.push(
+        onSnapshot(collection(db, 'kasaHareketleri'), (snapshot) => {
+          const list: KasaHareketi[] = [];
+          snapshot.forEach((docSnap) => {
+            list.push({ ...docSnap.data(), id: docSnap.id } as KasaHareketi);
+          });
+          setKasaHareketleri(list);
+        })
+      );
+
+      deferredUnsubs.push(
+        onSnapshot(collection(db, 'kampOdalari'), (snapshot) => {
+          const list: KampOdasi[] = [];
+          snapshot.forEach((doc) => {
+            list.push({ id: doc.id, ...doc.data() } as any);
+          });
+          setKampOdalari(list);
+          if (list.length > 0) markProductionLive();
+        })
+      );
+
+      deferredUnsubs.push(
+        onSnapshot(collection(db, 'kampKayitlari'), (snapshot) => {
+          const list: KampKaydi[] = [];
+          snapshot.forEach((doc) => {
+            list.push({ id: doc.id, ...doc.data() } as any);
+          });
+          setKampKayitlari(list);
+        })
+      );
+
+      deferredUnsubs.push(
+        onSnapshot(collection(db, 'kampYerleskeleri'), (snapshot) => {
+          const list: KampYerleske[] = [];
+          snapshot.forEach((doc) => {
+            list.push({ id: doc.id, ...doc.data() } as any);
+          });
+          setKampYerleskeleri(list);
+        })
+      );
+
+      deferredUnsubs.push(
+        onSnapshot(collection(db, 'kampKatlari'), (snapshot) => {
+          const list: KampKat[] = [];
+          snapshot.forEach((doc) => {
+            list.push({ id: doc.id, ...doc.data() } as any);
+          });
+          setKampKatlari(list);
+        })
+      );
+
+      deferredUnsubs.push(
+        onSnapshot(collection(db, 'araclar'), (snapshot) => {
+          const list: AracBakim[] = [];
+          snapshot.forEach((doc) => {
+            list.push({ id: doc.id, ...doc.data() } as any);
+          });
+          setAraclar(list);
+        })
+      );
+
+      deferredUnsubs.push(
+        onSnapshot(collection(db, 'aracKmLoglari'), (snapshot) => {
+          const list: any[] = [];
+          snapshot.forEach((doc) => {
+            list.push({ id: doc.id, ...doc.data() });
+          });
+          list.sort((a, b) => new Date(b.tarih || 0).getTime() - new Date(a.tarih || 0).getTime());
+          setAracKmLoglari(list);
+        })
+      );
+
+      deferredUnsubs.push(
+        onSnapshot(collection(db, 'operatorFaaliyetleri'), (snapshot) => {
+          const list: OperatorFaaliyet[] = [];
+          snapshot.forEach((doc) => {
+            list.push({ id: doc.id, ...doc.data() } as any);
+          });
+          setOperatorFaaliyetleri(list);
+        })
+      );
+
+      deferredUnsubs.push(
+        onSnapshot(collection(db, 'taseronKesintiRaporlari'), (snapshot) => {
+          const list: TaseronKesintiRaporu[] = [];
+          snapshot.forEach((doc) => {
+            const data = doc.data() as TaseronKesintiRaporu;
+            list.push({ ...data, id: doc.id, kesintiTipi: data.kesintiTipi || 'IS_MAKINESI' });
+          });
+          setTaseronKesintiRaporlari(list);
+        })
+      );
+
+      deferredUnsubs.push(
+        onSnapshot(collection(db, 'taseronEnerjiKayitlari'), (snapshot) => {
+          const list: TaseronEnerjiKaydi[] = [];
+          snapshot.forEach((doc) => {
+            list.push({ id: doc.id, ...doc.data() } as TaseronEnerjiKaydi);
+          });
+          setTaseronEnerjiKayitlari(list);
+        })
+      );
+
+      deferredUnsubs.push(
+        onSnapshot(collection(db, 'taseronYemekKayitlari'), (snapshot) => {
+          const list: TaseronYemekKaydi[] = [];
+          snapshot.forEach((doc) => {
+            list.push({ id: doc.id, ...doc.data() } as TaseronYemekKaydi);
+          });
+          setTaseronYemekKayitlari(list);
+        })
+      );
+
+      deferredUnsubs.push(
+        onSnapshot(collection(db, 'maasOdemeleri'), (snapshot) => {
+          const list: MaaşOdeme[] = [];
+          snapshot.forEach((doc) => {
+            list.push({ id: doc.id, ...doc.data() } as any);
+          });
+          setMaasOdemeleri(list);
+        })
+      );
+
+      deferredUnsubs.push(
+        onSnapshot(collection(db, 'hazirTutanaklar'), (snapshot) => {
+          const list: HazirTutanak[] = [];
+          snapshot.forEach((docItem) => {
+            list.push({ id: docItem.id, ...docItem.data() } as any);
+          });
+          setHazirTutanaklar(list);
+        })
+      );
+    };
+
+    deferredTimer = setTimeout(attachDeferredListeners, 280);
+    if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+      deferredIdleId = (
+        window as Window & {
+          requestIdleCallback: (cb: () => void, opts?: { timeout: number }) => number;
+        }
+      ).requestIdleCallback(attachDeferredListeners, { timeout: 900 });
+    }
 
     const unsubPersonel = onSnapshot(collection(db, 'personeller'), (snapshot) => {
       const list: Personel[] = [];
@@ -1177,86 +1381,12 @@ export default function App() {
       }
     });
 
-    const unsubSahaFaaliyetleri = onSnapshot(collection(db, 'sahaFaaliyetleri'), (snapshot) => {
-      const list: SahaFaaliyetiType[] = [];
-      snapshot.forEach((doc) => {
-        list.push({ id: doc.id, ...doc.data() } as any);
-      });
-      setSahaFaaliyetleri(list);
-    });
-
-    const unsubProgramliFaaliyetler = onSnapshot(collection(db, 'programliFaaliyetler'), (snapshot) => {
-      const list: ProgramliFaaliyet[] = [];
-      snapshot.forEach((doc) => {
-        list.push({ id: doc.id, ...doc.data() } as ProgramliFaaliyet);
-      });
-      setProgramliFaaliyetler(list);
-    });
-
-    const unsubKasaHareketleri = onSnapshot(collection(db, 'kasaHareketleri'), (snapshot) => {
-      const list: KasaHareketi[] = [];
-      snapshot.forEach((docSnap) => {
-        list.push({ ...docSnap.data(), id: docSnap.id } as KasaHareketi);
-      });
-      setKasaHareketleri(list);
-    });
-
-    const unsubKampOdalari = onSnapshot(collection(db, 'kampOdalari'), (snapshot) => {
-      const list: KampOdasi[] = [];
-      snapshot.forEach((doc) => {
-        list.push({ id: doc.id, ...doc.data() } as any);
-      });
-      setKampOdalari(list);
-      if (list.length > 0) markProductionLive();
-    });
-
-    const unsubKampKayitlari = onSnapshot(collection(db, 'kampKayitlari'), (snapshot) => {
-      const list: KampKaydi[] = [];
-      snapshot.forEach((doc) => {
-        list.push({ id: doc.id, ...doc.data() } as any);
-      });
-      setKampKayitlari(list);
-    });
-
-    const unsubKampYerleskeleri = onSnapshot(collection(db, 'kampYerleskeleri'), (snapshot) => {
-      const list: KampYerleske[] = [];
-      snapshot.forEach((doc) => {
-        list.push({ id: doc.id, ...doc.data() } as any);
-      });
-      setKampYerleskeleri(list);
-    });
-
-    const unsubKampKatlari = onSnapshot(collection(db, 'kampKatlari'), (snapshot) => {
-      const list: KampKat[] = [];
-      snapshot.forEach((doc) => {
-        list.push({ id: doc.id, ...doc.data() } as any);
-      });
-      setKampKatlari(list);
-    });
-
     const unsubStoklar = onSnapshot(collection(db, 'stokKartlar'), (snapshot) => {
       const list: StokKart[] = [];
       snapshot.forEach((docSnap) => {
         list.push({ ...docSnap.data(), id: docSnap.id } as StokKart);
       });
       setStokKartlar(list);
-    });
-
-    const unsubAraclar = onSnapshot(collection(db, 'araclar'), (snapshot) => {
-      const list: AracBakim[] = [];
-      snapshot.forEach((doc) => {
-        list.push({ id: doc.id, ...doc.data() } as any);
-      });
-      setAraclar(list);
-    });
-
-    const unsubAracKm = onSnapshot(collection(db, 'aracKmLoglari'), (snapshot) => {
-      const list: any[] = [];
-      snapshot.forEach((doc) => {
-        list.push({ id: doc.id, ...doc.data() });
-      });
-      list.sort((a, b) => new Date(b.tarih || 0).getTime() - new Date(a.tarih || 0).getTime());
-      setAracKmLoglari(list);
     });
 
     const unsubCari = onSnapshot(collection(db, 'cariKartlar'), (snapshot) => {
@@ -1301,55 +1431,6 @@ export default function App() {
       }
     });
 
-    const unsubOperator = onSnapshot(collection(db, 'operatorFaaliyetleri'), (snapshot) => {
-      const list: OperatorFaaliyet[] = [];
-      snapshot.forEach((doc) => {
-        list.push({ id: doc.id, ...doc.data() } as any);
-      });
-      setOperatorFaaliyetleri(list);
-    });
-
-    const unsubTaseronKesinti = onSnapshot(collection(db, 'taseronKesintiRaporlari'), (snapshot) => {
-      const list: TaseronKesintiRaporu[] = [];
-      snapshot.forEach((doc) => {
-        const data = doc.data() as TaseronKesintiRaporu;
-        list.push({ ...data, id: doc.id, kesintiTipi: data.kesintiTipi || 'IS_MAKINESI' });
-      });
-      setTaseronKesintiRaporlari(list);
-    });
-
-    const unsubTaseronEnerji = onSnapshot(collection(db, 'taseronEnerjiKayitlari'), (snapshot) => {
-      const list: TaseronEnerjiKaydi[] = [];
-      snapshot.forEach((doc) => {
-        list.push({ id: doc.id, ...doc.data() } as TaseronEnerjiKaydi);
-      });
-      setTaseronEnerjiKayitlari(list);
-    });
-
-    const unsubTaseronYemek = onSnapshot(collection(db, 'taseronYemekKayitlari'), (snapshot) => {
-      const list: TaseronYemekKaydi[] = [];
-      snapshot.forEach((doc) => {
-        list.push({ id: doc.id, ...doc.data() } as TaseronYemekKaydi);
-      });
-      setTaseronYemekKayitlari(list);
-    });
-
-    const unsubMaasOde = onSnapshot(collection(db, 'maasOdemeleri'), (snapshot) => {
-      const list: MaaşOdeme[] = [];
-      snapshot.forEach((doc) => {
-        list.push({ id: doc.id, ...doc.data() } as any);
-      });
-      setMaasOdemeleri(list);
-    });
-
-    const unsubTutanaklar = onSnapshot(collection(db, 'hazirTutanaklar'), (snapshot) => {
-      const list: HazirTutanak[] = [];
-      snapshot.forEach((docItem) => {
-        list.push({ id: docItem.id, ...docItem.data() } as any);
-      });
-      setHazirTutanaklar(list);
-    });
-
     const qNotif = query(collection(db, 'bildirimler'), orderBy('tarih', 'desc'), limit(30));
     const unsubNotif = onSnapshot(qNotif, (snapshot) => {
       const list: any[] = [];
@@ -1360,32 +1441,26 @@ export default function App() {
     });
 
     return () => {
+      if (deferredTimer) clearTimeout(deferredTimer);
+      if (
+        deferredIdleId != null &&
+        typeof window !== 'undefined' &&
+        'cancelIdleCallback' in window
+      ) {
+        (
+          window as Window & { cancelIdleCallback: (id: number) => void }
+        ).cancelIdleCallback(deferredIdleId);
+      }
+      deferredUnsubs.forEach((u) => u());
       unsubIrsaliyeler();
       unsubFaturalar();
-      unsubEvrakBaglanti();
-      unsubAnalizRapor();
       unsubSatinAlma();
       unsubPersonel();
       unsubYoklamalar();
       unsubKullanicilar();
-      unsubSahaFaaliyetleri();
-      unsubProgramliFaaliyetler();
-      unsubKasaHareketleri();
-      unsubKampOdalari();
-      unsubKampKayitlari();
-      unsubKampYerleskeleri();
-      unsubKampKatlari();
       unsubNotif();
       unsubStoklar();
-      unsubAraclar();
-      unsubAracKm();
       unsubCari();
-      unsubOperator();
-      unsubTaseronKesinti();
-      unsubTaseronEnerji();
-      unsubTaseronYemek();
-      unsubMaasOde();
-      unsubTutanaklar();
     };
   }, [dbStatus, currentUser]);
 
@@ -2323,12 +2398,19 @@ export default function App() {
   const setYoklamalarWithSync = (updater: AylikYoklamaMap | ((y: AylikYoklamaMap) => AylikYoklamaMap)) => {
     setYoklamalar((prev) => {
       const next = typeof updater === 'function' ? updater(prev) : updater;
-      void saveYoklamaDocument(next, 'sync').then((result) => {
+      void (async () => {
+        const authBlock = await assertErpWriteAuth();
+        if (authBlock) {
+          setYoklamalar(prev);
+          notifyYoklamaSaveFailure(authBlock);
+          return;
+        }
+        const result = await saveYoklamaDocument(next, 'sync');
         if (!result.ok) {
           setYoklamalar(prev);
           notifyYoklamaSaveFailure(result.error || 'Yoklama kaydı sunucuya yazılamadı');
         }
-      });
+      })();
       return next;
     });
   };
@@ -2342,6 +2424,11 @@ export default function App() {
     record: SahaFaaliyetiType,
     kaynak: import('./lib/sahaFaaliyetPersistence').SahaFaaliyetSaveSource = 'formen_mobil'
   ) => {
+    const authBlock = await assertErpWriteAuth();
+    if (authBlock) {
+      notifySahaFaaliyetFailure(authBlock);
+      throw new Error(authBlock);
+    }
     const { enqueueSahaFaaliyetSave, fetchSahaFaaliyetById } = await import(
       './lib/sahaFaaliyetPersistence'
     );

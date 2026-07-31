@@ -322,6 +322,12 @@ export async function syncArrayToFirestore<T extends { id: string }>(
   newArray: T[]
 ): Promise<void> {
   try {
+    const { assertErpWriteAuth } = await import('./authWriteGuard');
+    const authBlock = await assertErpWriteAuth();
+    if (authBlock) {
+      throw new Error(authBlock);
+    }
+
     if (collectionName === 'sahaFaaliyetleri') {
       const { syncSahaFaaliyetleriArray } = await import('./sahaFaaliyetPersistence');
       const result = await syncSahaFaaliyetleriArray(
