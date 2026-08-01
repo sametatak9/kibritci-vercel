@@ -2259,6 +2259,7 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
               pendingGateDocs={pendingGateDocs}
               pendingWaybills={pendingWaybills}
               pendingInvoices={pendingInvoices}
+              irsaliyeler={irsaliyeler}
               signatureText={signatureText}
               setActiveDocForDetail={setActiveDocForDetail}
               handleApproveDocument={handleApproveDocument}

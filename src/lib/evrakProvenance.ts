@@ -186,3 +186,166 @@ export function resolveGuvenlikEvrakProvenance(e: {
 
   return out;
 }
+
+/** Mobil / kapı irsaliye kaynağı → kim girdi, ne tür evrak */
+export function describeIrsaliyeKaynakKanal(kaynak?: string | null): {
+  kanal: string;
+  evrakTuru: string;
+  className: string;
+} {
+  const k = String(kaynak || '').trim();
+  if (k === 'MICIR_STABILIZE_FIS') {
+    return {
+      kanal: 'Güvenlik',
+      evrakTuru: 'Ento Mıcır / Stabilize irsaliye',
+      className: `${BADGE_BASE} bg-teal-50 text-teal-800 border-teal-200`,
+    };
+  }
+  if (k === 'VIDANJOR_FIS') {
+    return {
+      kanal: 'Kampçı',
+      evrakTuru: 'Şeker Vidanjör irsaliye',
+      className: `${BADGE_BASE} bg-sky-50 text-sky-800 border-sky-200`,
+    };
+  }
+  if (k === 'YILDIRIM_TANKER_FIS') {
+    return {
+      kanal: 'Tesisatçı',
+      evrakTuru: 'Yıldırım Tanker irsaliye',
+      className: `${BADGE_BASE} bg-amber-50 text-amber-900 border-amber-200`,
+    };
+  }
+  if (k === 'KAPI_EVRAK') {
+    return {
+      kanal: 'Güvenlik',
+      evrakTuru: 'Kapı evrak irsaliye',
+      className: `${BADGE_BASE} bg-emerald-50 text-emerald-800 border-emerald-200`,
+    };
+  }
+  return {
+    kanal: 'Ofis',
+    evrakTuru: 'İrsaliye',
+    className: `${BADGE_BASE} bg-slate-50 text-slate-700 border-slate-200`,
+  };
+}
+
+export type FaturaMutabakatLinkedIr = {
+  id: string;
+  irsaliyeNo: string;
+  tarih?: string;
+  plaka?: string;
+  tonaj?: number;
+  kiloKg?: number;
+  malzemeTipi?: string;
+  fisEvrakUrl?: string;
+  kaynak?: string;
+  kalemOzet: string;
+  kanal: string;
+  evrakTuru: string;
+  badgeClass: string;
+};
+
+/** Fatura kartı için bağlı irsaliye + foto + kanal özeti */
+export function buildFaturaMutabakatOzet(
+  ft: {
+    bagliIrsaliyeler?: string[] | null;
+    kalemler?: { urunAdi?: string; miktar?: number; birim?: string; stokKartId?: string }[] | null;
+    genelToplam?: number;
+    toplamTutar?: number;
+    cariUnvan?: string;
+    saId?: string | null;
+  },
+  irsaliyeler: {
+    id: string;
+    irsaliyeNo?: string;
+    tarih?: string;
+    plaka?: string;
+    tonaj?: number;
+    kiloKg?: number;
+    malzemeTipi?: string;
+    fisEvrakUrl?: string;
+    kaynak?: string;
+    kalemler?: { urunAdi?: string; miktar?: number; birim?: string }[];
+  }[]
+): {
+  linked: FaturaMutabakatLinkedIr[];
+  fotoUrls: string[];
+  kanalOzeti: string;
+  stokBagliKalem: number;
+  stokToplamKalem: number;
+  miktarOzeti: string;
+} {
+  const refs = ft.bagliIrsaliyeler || [];
+  const linked: FaturaMutabakatLinkedIr[] = [];
+  for (const ref of refs) {
+    const ir = irsaliyeler.find(
+      (x) => x.id === ref || x.irsaliyeNo === ref || String(x.id) === String(ref)
+    );
+    if (!ir) {
+      linked.push({
+        id: String(ref),
+        irsaliyeNo: String(ref),
+        kalemOzet: 'Kayıt listede yok (silinmiş olabilir)',
+        kanal: '?',
+        evrakTuru: 'İrsaliye',
+        badgeClass: `${BADGE_BASE} bg-slate-50 text-slate-500 border-slate-200`,
+      });
+      continue;
+    }
+    const ch = describeIrsaliyeKaynakKanal(ir.kaynak);
+    const kalemOzet =
+      (ir.kalemler || [])
+        .slice(0, 3)
+        .map((k) => `${k.urunAdi || '—'} ${k.miktar ?? ''}${k.birim ? ` ${k.birim}` : ''}`)
+        .join(' · ') ||
+      (ir.malzemeTipi ? String(ir.malzemeTipi) : 'Kalem yok');
+    linked.push({
+      id: ir.id,
+      irsaliyeNo: ir.irsaliyeNo || ir.id,
+      tarih: ir.tarih,
+      plaka: ir.plaka,
+      tonaj: ir.tonaj,
+      kiloKg: ir.kiloKg,
+      malzemeTipi: ir.malzemeTipi,
+      fisEvrakUrl: ir.fisEvrakUrl,
+      kaynak: ir.kaynak,
+      kalemOzet,
+      kanal: ch.kanal,
+      evrakTuru: ch.evrakTuru,
+      badgeClass: ch.className,
+    });
+  }
+
+  const fotoUrls = linked
+    .map((l) => String(l.fisEvrakUrl || '').trim())
+    .filter((u) => u.length > 8);
+
+  const kanallar = [...new Set(linked.map((l) => l.kanal).filter((k) => k && k !== '?'))];
+  const turler = [...new Set(linked.map((l) => l.evrakTuru))];
+  const kanalOzeti =
+    kanallar.length || turler.length
+      ? `${kanallar.join(' + ') || '—'}${turler.length ? ` · ${turler.join(', ')}` : ''}`
+      : 'Bağlı irsaliye yok';
+
+  const ftKalemler = ft.kalemler || [];
+  const stokToplamKalem = ftKalemler.length;
+  const stokBagliKalem = ftKalemler.filter((k) => Boolean(k.stokKartId)).length;
+
+  const tonSum = linked.reduce((a, l) => a + (Number(l.tonaj) || 0), 0);
+  const kgSum = linked.reduce((a, l) => a + (Number(l.kiloKg) || 0), 0);
+  const miktarParts: string[] = [];
+  if (linked.length) miktarParts.push(`${linked.length} irsaliye`);
+  if (kgSum > 0) miktarParts.push(`${kgSum.toLocaleString('tr-TR')} kg`);
+  else if (tonSum > 0) miktarParts.push(`${tonSum.toLocaleString('tr-TR')} ton`);
+  if (ftKalemler.length) {
+    miktarParts.push(
+      ftKalemler
+        .slice(0, 2)
+        .map((k) => `${k.urunAdi} ${k.miktar ?? ''}`)
+        .join(', ')
+    );
+  }
+  const miktarOzeti = miktarParts.join(' · ') || 'Miktar özeti yok';
+
+  return { linked, fotoUrls, kanalOzeti, stokBagliKalem, stokToplamKalem, miktarOzeti };
+}
