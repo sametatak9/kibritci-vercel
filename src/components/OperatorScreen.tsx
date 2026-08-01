@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { HardHat, Clock, Calendar, Building2, Camera, Save, Search, FileText, Trash2, CreditCard as Edit3, CircleCheck as CheckCircle, X, ChevronDown, ChevronUp, Truck, TriangleAlert as AlertTriangle, Download, Mail, ListFilter as Filter, Plus, Printer } from 'lucide-react';
 import { AracBakim, CariKart, OperatorFaaliyet, TaseronKesintiRaporu, Personel } from '../types/erp';
 import { compressImage } from '../lib/imageCompress';
-import { getTaseronCariKartlar } from '../lib/taseronUtils';
+import { getTaseronCariKartlar, buildOperatorIsKaydiEtiketi, makineEtiketi } from '../lib/taseronUtils';
 import { indirIsMakinesiRaporu } from '../lib/taseronReportUtils';
 import { kibritciLogoHtml } from '../lib/kibritciBrand';
 
@@ -56,6 +56,16 @@ export const OperatorScreen: React.FC<OperatorScreenProps> = ({
 
   const taseronCariler = useMemo(() => getTaseronCariKartlar(cariKartlar), [cariKartlar]);
 
+  const canliIsKaydiEtiketi = useMemo(() => {
+    const arac = araclar.find((a) => a.id === selectedAracId);
+    return buildOperatorIsKaydiEtiketi({
+      makineKaynak,
+      operatorTipi,
+      makineManuelAd: makineKaynak === 'MANUEL' ? makineManuelAd : undefined,
+      aracPlaka: makineKaynak === 'MANUEL' ? makineManuelAd : arac?.plaka,
+    });
+  }, [makineKaynak, operatorTipi, makineManuelAd, selectedAracId, araclar]);
+
   const ismakineAraclari = useMemo(() => {
     return araclar.filter(a =>
       a.tur === 'İŞ MAKİNESİ' ||
@@ -74,7 +84,10 @@ export const OperatorScreen: React.FC<OperatorScreenProps> = ({
         f.operatorIsim.toLowerCase().includes(q) ||
         f.yapilanIs.toLowerCase().includes(q) ||
         f.firmaAdi.toLowerCase().includes(q) ||
-        f.aracPlaka?.toLowerCase().includes(q)
+        f.aracPlaka?.toLowerCase().includes(q) ||
+        makineEtiketi(f).toLowerCase().includes(q) ||
+        String(f.isKaydiEtiketi || '').toLowerCase().includes(q) ||
+        String(f.operatorTipi || '').toLowerCase().includes(q)
       );
     }
     return list.sort((a, b) => new Date(b.tarih).getTime() - new Date(a.tarih).getTime());
@@ -129,13 +142,21 @@ export const OperatorScreen: React.FC<OperatorScreenProps> = ({
 
     const firmaId = firmaSecim === 'cari' ? selectedCariId : undefined;
 
-    const kaynak: OperatorFaaliyet['makineKaynak'] =
-      makineKaynak === 'MANUEL' ? 'MANUEL' : operatorTipi === 'KİRALIK' ? 'KIRALIK' : 'DEMIRBAS';
+    // Makine kaynağı kullanıcı seçimiyle kalır; tip yalnızca etiket (JCB/KATO/…)
+    const kaynak: OperatorFaaliyet['makineKaynak'] = makineKaynak;
+    const aracPlaka =
+      makineKaynak === 'MANUEL' ? makineManuelAd : arac?.plaka;
+    const isKaydiEtiketi = buildOperatorIsKaydiEtiketi({
+      makineKaynak: kaynak,
+      operatorTipi,
+      makineManuelAd: makineKaynak === 'MANUEL' ? makineManuelAd : undefined,
+      aracPlaka,
+    });
 
     const yeniFaaliyet: OperatorFaaliyet = {
       id: editingId || `of_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
       aracId: makineKaynak === 'MANUEL' ? `manuel_${Date.now()}` : selectedAracId,
-      aracPlaka: makineKaynak === 'MANUEL' ? makineManuelAd : arac?.plaka,
+      aracPlaka,
       operatorPersonelId: selectedPersonelId,
       operatorIsim: `${personel?.ad} ${personel?.soyad}`,
       operatorTipi,
@@ -153,6 +174,7 @@ export const OperatorScreen: React.FC<OperatorScreenProps> = ({
       operatorTc: personel?.tcNo,
       makineKaynak: kaynak,
       makineManuelAd: makineKaynak === 'MANUEL' ? makineManuelAd : undefined,
+      isKaydiEtiketi,
       onayDurumu: 'ONAYLANDI',
       kaydedenKullanici: currentUser?.email,
       kayitTarihi: new Date().toISOString()
@@ -165,7 +187,9 @@ export const OperatorScreen: React.FC<OperatorScreenProps> = ({
     }
 
     if (addNotification) {
-      addNotification(`${personel?.ad} ${personel?.soyad} - ${arac?.plaka} | ${calismaSuresi.toFixed(1)} saat ${firmaAdi} için ${yapilanIs} kaydedildi.`);
+      addNotification(
+        `${isKaydiEtiketi} · ${personel?.ad} ${personel?.soyad} | ${calismaSuresi.toFixed(1)} sa · ${firmaAdi}`
+      );
     }
 
     // Reset form
@@ -184,7 +208,9 @@ export const OperatorScreen: React.FC<OperatorScreenProps> = ({
   };
 
   const handleDuzenle = (f: OperatorFaaliyet) => {
-    setSelectedAracId(f.aracId);
+    setMakineKaynak(f.makineKaynak || (f.operatorTipi === 'KİRALIK' ? 'KIRALIK' : 'DEMIRBAS'));
+    setMakineManuelAd(f.makineManuelAd || '');
+    setSelectedAracId(f.makineKaynak === 'MANUEL' ? '' : f.aracId);
     setSelectedPersonelId(f.operatorPersonelId || '');
     setOperatorTipi(f.operatorTipi);
     setTarih(f.tarih);
@@ -419,7 +445,18 @@ export const OperatorScreen: React.FC<OperatorScreenProps> = ({
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-semibold"
                   />
                 ) : (
-                  <select value={selectedAracId} onChange={e => setSelectedAracId(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-semibold text-slate-700 outline-none focus:border-amber-500">
+                  <select
+                    value={selectedAracId}
+                    onChange={(e) => {
+                      const id = e.target.value;
+                      setSelectedAracId(id);
+                      const arac = araclar.find((a) => a.id === id);
+                      const mm = `${arac?.markaModel || ''} ${arac?.plaka || ''}`.toLocaleLowerCase('tr-TR');
+                      if (mm.includes('jcb')) setOperatorTipi('JCB');
+                      else if (mm.includes('kato')) setOperatorTipi('KATO');
+                    }}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-semibold text-slate-700 outline-none focus:border-amber-500"
+                  >
                     <option value="">İş Makinesi Seçiniz</option>
                     {ismakineAraclari.map(a => (
                       <option key={a.id} value={a.id}>{a.plaka} - {a.markaModel}</option>
@@ -439,13 +476,35 @@ export const OperatorScreen: React.FC<OperatorScreenProps> = ({
               </div>
 
               <div>
-                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Operatör Tipi</label>
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+                  Makine Etiketi
+                </label>
+                <p className="text-[9px] text-slate-500 font-semibold mb-1.5 leading-snug">
+                  JCB / KATO vb. iş kaydı etiketidir; makine kaynağı (Demirbaş / Kiralık) ile birleşir.
+                </p>
                 <div className="grid grid-cols-4 gap-2">
-                  {(['JCB', 'KATO', 'KİRALIK', 'DİĞER'] as const).map(tip => (
-                    <button key={tip} onClick={() => setOperatorTipi(tip)} className={`py-1.5 px-2 rounded-lg border text-[10px] font-bold uppercase transition ${operatorTipi === tip ? 'bg-amber-500 text-slate-950 border-amber-500' : 'bg-slate-50 text-slate-500 border-slate-200 hover:border-amber-300'}`}>
+                  {(['JCB', 'KATO', 'KİRALIK', 'DİĞER'] as const).map((tip) => (
+                    <button
+                      key={tip}
+                      type="button"
+                      onClick={() => setOperatorTipi(tip)}
+                      className={`py-1.5 px-2 rounded-lg border text-[10px] font-bold uppercase transition ${
+                        operatorTipi === tip
+                          ? 'bg-amber-500 text-slate-950 border-amber-500'
+                          : 'bg-slate-50 text-slate-500 border-slate-200 hover:border-amber-300'
+                      }`}
+                    >
                       {tip}
                     </button>
                   ))}
+                </div>
+                <div className="mt-2 rounded-xl border border-amber-200 bg-amber-50 px-2.5 py-2">
+                  <p className="text-[8px] font-black uppercase tracking-wider text-amber-700/80 mb-0.5">
+                    İş kaydı etiketi
+                  </p>
+                  <p className="text-[11px] font-extrabold text-amber-950 leading-snug">
+                    {canliIsKaydiEtiketi}
+                  </p>
                 </div>
               </div>
 
@@ -574,8 +633,10 @@ export const OperatorScreen: React.FC<OperatorScreenProps> = ({
                   <div key={f.id} className="border border-slate-100 rounded-xl p-3 hover:shadow-sm transition bg-slate-50/50">
                     <div className="flex justify-between items-start">
                       <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 mb-1">
-                          <span className="bg-amber-100 text-amber-800 text-[9px] font-black px-2 py-0.5 rounded-full uppercase">{f.operatorTipi}</span>
+                        <div className="flex items-center gap-2 mb-1 flex-wrap">
+                          <span className="bg-amber-100 text-amber-900 text-[9px] font-black px-2 py-0.5 rounded-full">
+                            {f.isKaydiEtiketi || makineEtiketi(f)}
+                          </span>
                           <span className="text-[10px] text-slate-400 font-mono">{f.tarih}</span>
                           <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full ${f.kesintiYansitildi ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-800'}`}>
                             {f.kesintiYansitildi ? 'Kesintiye Yansıtıldı' : 'Bekliyor'}
@@ -736,8 +797,10 @@ export const OperatorScreen: React.FC<OperatorScreenProps> = ({
               .sort((a, b) => new Date(b.tarih).getTime() - new Date(a.tarih).getTime())
               .map(f => (
                 <div key={f.id} className="border border-slate-100 rounded-xl p-3 bg-slate-50/50 hover:shadow-sm transition">
-                  <div className="flex items-center gap-2 mb-2">
-                    <span className="bg-amber-100 text-amber-800 text-[9px] font-black px-2 py-0.5 rounded-full">{f.operatorTipi}</span>
+                  <div className="flex items-center gap-2 mb-2 flex-wrap">
+                    <span className="bg-amber-100 text-amber-900 text-[9px] font-black px-2 py-0.5 rounded-full">
+                      {f.isKaydiEtiketi || makineEtiketi(f)}
+                    </span>
                     <span className="text-[10px] text-slate-400 font-mono">{f.tarih}</span>
                   </div>
                   <p className="text-xs font-bold text-slate-800 mb-1">{f.yapilanIs}</p>

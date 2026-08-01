@@ -703,6 +703,8 @@ export interface OperatorFaaliyet {
   kesintiYansitildi?: boolean;
   makineKaynak?: 'DEMIRBAS' | 'KIRALIK' | 'MANUEL';
   makineManuelAd?: string;
+  /** Örn. "Demirbaş JCB makinesi iş kaydı" — arşiv/liste etiketı */
+  isKaydiEtiketi?: string;
   onayDurumu: 'BEKLEMEDE' | 'ONAYLANDI' | 'REDDEDİLDİ';
   kaydedenKullanici?: string;
   kayitTarihi?: string;

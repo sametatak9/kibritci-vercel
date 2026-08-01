@@ -229,10 +229,43 @@ export function yemekAylikOzet(
   };
 }
 
+export function makineKaynakLabel(kaynak?: OperatorFaaliyet['makineKaynak'] | null): string {
+  if (kaynak === 'KIRALIK') return 'Kiralık';
+  if (kaynak === 'MANUEL') return 'Elle';
+  return 'Demirbaş';
+}
+
+/**
+ * İş kaydı etiketi — örn. "Demirbaş JCB makinesi iş kaydı"
+ * Makine kaynağı (Demirbaş/Kiralık/Elle) + makine tipi etiketi (JCB/KATO/…) birleşir.
+ */
+export function buildOperatorIsKaydiEtiketi(opts: {
+  makineKaynak?: OperatorFaaliyet['makineKaynak'] | null;
+  operatorTipi?: OperatorFaaliyet['operatorTipi'] | string | null;
+  makineManuelAd?: string | null;
+  aracPlaka?: string | null;
+}): string {
+  const kaynak = makineKaynakLabel(opts.makineKaynak);
+  const tipRaw = String(opts.operatorTipi || 'DİĞER').trim().toLocaleUpperCase('tr-TR') || 'DİĞER';
+  // Kaynak zaten kiralıkken tip "KİRALIK" tekrarını kısalt
+  const tip =
+    opts.makineKaynak === 'KIRALIK' && tipRaw === 'KİRALIK' ? 'makine' : tipRaw === 'KİRALIK' ? 'Kiralık' : tipRaw;
+
+  const plaka = String(opts.aracPlaka || opts.makineManuelAd || '').trim();
+  const base =
+    tip === 'makine'
+      ? `${kaynak} makinesi iş kaydı`
+      : `${kaynak} ${tip} makinesi iş kaydı`;
+  return plaka ? `${base} · ${plaka}` : base;
+}
+
 export function makineEtiketi(f: OperatorFaaliyet): string {
-  if (f.makineKaynak === 'MANUEL' && f.makineManuelAd) return f.makineManuelAd;
-  if (f.makineKaynak === 'KIRALIK' || f.operatorTipi === 'KİRALIK') return `Kiralık · ${f.aracPlaka || '—'}`;
-  return f.aracPlaka || f.aracId || 'Demirbaş Makine';
+  return buildOperatorIsKaydiEtiketi({
+    makineKaynak: f.makineKaynak,
+    operatorTipi: f.operatorTipi,
+    makineManuelAd: f.makineManuelAd,
+    aracPlaka: f.aracPlaka,
+  });
 }
 
 export function hesaplaKesintiTutari(toplamSaat: number, saatlikUcret: number): number {
