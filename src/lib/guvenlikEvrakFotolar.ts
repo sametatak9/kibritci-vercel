@@ -95,19 +95,48 @@ export function countPaketFotolar(paket: GuvenlikFotoPaket): number {
   return flattenGuvenlikFotolar(paket).length;
 }
 
-export function createEmptyUploadPackage(): {
+export type GuvenlikUploadKalem = {
+  id: string;
+  urunAdi: string;
+  miktar: string;
+  birim: string;
+  stokKartId?: string;
+};
+
+export type GuvenlikUploadPackage = {
   id: string;
   evrakTuru: 'İRSALİYE' | 'FATURA' | 'MAKBUZ' | 'GENEL_EVRAK';
   aciklama: string;
   firma: string;
   cariKartId: string;
-} & GuvenlikFotoPaket {
+  /** İrsaliye / taşıma evrak no */
+  evrakNo: string;
+  /** Araç plakası (taşıma) */
+  plaka: string;
+  /** Manuel / rehber kalemler (kg vb.) */
+  kalemler: GuvenlikUploadKalem[];
+} & GuvenlikFotoPaket;
+
+export function createEmptyUploadKalem(): GuvenlikUploadKalem {
+  return {
+    id: `k_${Date.now()}_${Math.random().toString(36).substring(2, 5)}`,
+    urunAdi: '',
+    miktar: '',
+    birim: 'KG',
+    stokKartId: '',
+  };
+}
+
+export function createEmptyUploadPackage(): GuvenlikUploadPackage {
   return {
     id: `q_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
     evrakTuru: 'İRSALİYE',
     aciklama: '',
     firma: '',
     cariKartId: '',
+    evrakNo: '',
+    plaka: '',
+    kalemler: [createEmptyUploadKalem()],
     ...emptyFotoPaket(),
   };
 }

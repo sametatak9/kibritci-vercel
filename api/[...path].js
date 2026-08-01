@@ -4,6 +4,13 @@ var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
 var __getOwnPropNames = Object.getOwnPropertyNames;
 var __getProtoOf = Object.getPrototypeOf;
 var __hasOwnProp = Object.prototype.hasOwnProperty;
+var __esm = (fn, res) => function __init() {
+  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+};
+var __export = (target, all) => {
+  for (var name in all)
+    __defProp(target, name, { get: all[name], enumerable: true });
+};
 var __copyProps = (to, from, except, desc) => {
   if (from && typeof from === "object" || typeof from === "function") {
     for (let key of __getOwnPropNames(from))
@@ -20,6 +27,285 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
   isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target,
   mod
 ));
+
+// src/lib/roleClaims.ts
+function isFounderEmail(email) {
+  const key = email?.trim().toLowerCase() || "";
+  return FOUNDER_EMAILS.includes(key);
+}
+function verifyFounderCredentials(email, password) {
+  const key = email.trim().toLowerCase();
+  return FOUNDER_PASSWORDS[key] === password;
+}
+function normalizeClaimRole(yetki) {
+  if (!yetki) return "M\u0130SAF\u0130R";
+  let v = String(yetki).trim().toLocaleUpperCase("tr-TR");
+  const aliases = {
+    KAMPCI: "KAMP\xC7I",
+    KAMPC\u0130: "KAMP\xC7I",
+    GUVENLIK: "G\xDCVENL\u0130K",
+    LOJISTIK: "LOJ\u0130ST\u0130K",
+    DEPO: "DEPOCU",
+    \u015E\u00D6F\u00D6R: "LOJ\u0130ST\u0130K",
+    \u015EOF\u00D6R: "LOJ\u0130ST\u0130K",
+    SOF\u00D6R: "LOJ\u0130ST\u0130K",
+    SOFOR: "LOJ\u0130ST\u0130K",
+    DRIVER: "LOJ\u0130ST\u0130K"
+  };
+  return aliases[v] ?? v;
+}
+function normalizeClaimDurum(durum) {
+  const raw = String(durum || "ONAY BEKL\u0130YOR").trim();
+  if (!raw) return "ONAY BEKL\u0130YOR";
+  const upper = raw.toLocaleUpperCase("tr-TR");
+  const compact = upper.replace(/\s+/g, "");
+  if (compact === "AKT\u0130F" || compact === "AKTIF" || compact === "ACTIVE") return "AKT\u0130F";
+  if (compact === "KISITLI" || compact.replace(/İ/g, "I") === "KISITLI") return "KISITLI";
+  if (upper.includes("ONAY") && upper.includes("BEK")) return "ONAY BEKL\u0130YOR";
+  return upper;
+}
+function buildAuthCustomClaims(input) {
+  const email = input.email.trim().toLowerCase();
+  return {
+    email,
+    role: normalizeClaimRole(input.yetki),
+    durum: normalizeClaimDurum(input.durum)
+  };
+}
+var FOUNDER_EMAILS, FOUNDER_PASSWORDS;
+var init_roleClaims = __esm({
+  "src/lib/roleClaims.ts"() {
+    FOUNDER_EMAILS = ["sametatak9@gmail.com", "santiye@kibritci.com"];
+    FOUNDER_PASSWORDS = {
+      "sametatak9@gmail.com": "117270Sa",
+      "santiye@kibritci.com": "kibritci2026"
+    };
+  }
+});
+
+// src/lib/dateKeyUtils.ts
+var init_dateKeyUtils = __esm({
+  "src/lib/dateKeyUtils.ts"() {
+  }
+});
+
+// src/lib/gorevUtils.ts
+var init_gorevUtils = __esm({
+  "src/lib/gorevUtils.ts"() {
+  }
+});
+
+// src/lib/yoklamaUtils.ts
+function parseFlexibleDateParts(raw) {
+  if (!raw) return null;
+  const v = raw.trim();
+  if (!v) return null;
+  const ymd = v.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/);
+  if (ymd) {
+    const year = Number(ymd[1]);
+    const month = Number(ymd[2]);
+    const day = Number(ymd[3]);
+    if (year >= 1900 && month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+      return { year, month, day };
+    }
+  }
+  const dmy = v.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})$/);
+  if (dmy) {
+    const day = Number(dmy[1]);
+    const month = Number(dmy[2]);
+    const year = Number(dmy[3]);
+    if (year >= 1900 && month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+      return { year, month, day };
+    }
+  }
+  const dm = v.match(/^(\d{1,2})[-/.](\d{1,2})$/);
+  if (dm) {
+    const day = Number(dm[1]);
+    const month = Number(dm[2]);
+    const year = 2024;
+    if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+      return { year, month, day };
+    }
+  }
+  return null;
+}
+function isDateInEmploymentRange(p, year, month, day) {
+  const currentDateVal = year * 1e4 + month * 100 + day;
+  const hireTarih = p.iseGirisTarihi || p.girisTarihi || p.kayitTarihi;
+  const hire = parseFlexibleDateParts(hireTarih);
+  if (hire) {
+    const hireDateVal = hire.year * 1e4 + hire.month * 100 + hire.day;
+    if (currentDateVal < hireDateVal) return false;
+  }
+  const exitTarih = p.istenCikisTarihi || p.cikisTarihi;
+  const exit = parseFlexibleDateParts(exitTarih);
+  if (exit) {
+    const exitDateVal = exit.year * 1e4 + exit.month * 100 + exit.day;
+    if (currentDateVal > exitDateVal) return false;
+  }
+  return true;
+}
+function isDayActiveForPersonel(p, year, month, day, _personMap) {
+  return isDateInEmploymentRange(p, year, month, day);
+}
+function normalizeCompanyName(name) {
+  return String(name || "").toLocaleUpperCase("tr-TR").replace(/İ/g, "I").replace(/Ş/g, "S").replace(/Ğ/g, "G").replace(/Ü/g, "U").replace(/Ö/g, "O").replace(/Ç/g, "C").replace(/\s+/g, " ").trim();
+}
+function isKibritciCompany(name) {
+  const n = normalizeCompanyName(name);
+  return !n || n.includes("KIBRITCI");
+}
+function isTaseronPersonel(p) {
+  if (!p) return false;
+  if (p.firmaTipi === "TASERON") return true;
+  const firmaAdi = String(p.firmaAdi || "").trim();
+  if (!firmaAdi) return false;
+  return !isKibritciCompany(firmaAdi);
+}
+var init_yoklamaUtils = __esm({
+  "src/lib/yoklamaUtils.ts"() {
+  }
+});
+
+// src/lib/yetkiUtils.ts
+var MOBILE_ROLE_ALLOWED_TABS, MOBILE_ROLE_HOME_TAB;
+var init_yetkiUtils = __esm({
+  "src/lib/yetkiUtils.ts"() {
+    MOBILE_ROLE_ALLOWED_TABS = {
+      FORMEN: ["formen_ekrani", "faaliyet_personel", "rapor_programlama", "personel"],
+      G\u00DCVENL\u0130K: ["guvenlik_ekrani"],
+      KAMP\u00C7I: ["kampci_ekrani"],
+      TES\u0130SAT\u00C7I: ["tesisatci_ekrani"],
+      MERMERC\u0130: ["mermerci_ekrani"],
+      LOJ\u0130ST\u0130K: ["lojistik_ekrani"],
+      DEPOCU: ["depocu_ekrani"],
+      ANAHTARCI: ["imalat_terminali"]
+    };
+    MOBILE_ROLE_HOME_TAB = Object.fromEntries(
+      Object.entries(MOBILE_ROLE_ALLOWED_TABS).map(([role, tabs]) => [role, tabs[0]])
+    );
+  }
+});
+
+// src/lib/mobilOnayUtils.ts
+var init_mobilOnayUtils = __esm({
+  "src/lib/mobilOnayUtils.ts"() {
+    init_yetkiUtils();
+  }
+});
+
+// src/lib/guvenlikHelpers.ts
+function isAkvizyonFirmaAdi(name) {
+  const n = String(name || "").toLocaleUpperCase("tr-TR").replace(/İ/g, "I").replace(/Ş/g, "S").replace(/Ğ/g, "G").replace(/Ü/g, "U").replace(/Ö/g, "O").replace(/Ç/g, "C").replace(/\s+/g, " ").trim();
+  return n.includes("AKVIZYON");
+}
+function isAkvizyonPersonel(p) {
+  if (!p) return false;
+  if (!isTaseronPersonel(p)) return false;
+  return isAkvizyonFirmaAdi(p.firmaAdi);
+}
+function isPersonelActiveOnDate(p, dateStr) {
+  const parts = String(dateStr || "").split("-").map(Number);
+  if (parts.length < 3 || parts.some((n) => !Number.isFinite(n))) return true;
+  const [y, m, d] = parts;
+  return isDayActiveForPersonel(p, y, m, d);
+}
+var init_guvenlikHelpers = __esm({
+  "src/lib/guvenlikHelpers.ts"() {
+    init_dateKeyUtils();
+    init_gorevUtils();
+    init_yoklamaUtils();
+    init_roleClaims();
+    init_mobilOnayUtils();
+  }
+});
+
+// src/lib/akvizyonNobetAutoArchive.ts
+var akvizyonNobetAutoArchive_exports = {};
+__export(akvizyonNobetAutoArchive_exports, {
+  AKVIZYON_NOBET_KAPANIS_SAAT: () => AKVIZYON_NOBET_KAPANIS_SAAT,
+  buildAkvizyonOtomatikKapanisPayload: () => buildAkvizyonOtomatikKapanisPayload,
+  collectAkvizyonPersonelForDate: () => collectAkvizyonPersonelForDate,
+  finalizeAkvizyonYoklamaMap: () => finalizeAkvizyonYoklamaMap,
+  getIstanbulDateParts: () => getIstanbulDateParts,
+  isAkvizyonNobetKapanisZamaniGecti: () => isAkvizyonNobetKapanisZamaniGecti,
+  isAkvizyonNobetKilitli: () => isAkvizyonNobetKilitli,
+  istanbulTodayKey: () => istanbulTodayKey,
+  shouldAutoCloseAkvizyonNobet: () => shouldAutoCloseAkvizyonNobet
+});
+function getIstanbulDateParts(now = /* @__PURE__ */ new Date()) {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Europe/Istanbul",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23"
+  }).formatToParts(now);
+  const get = (type) => parts.find((p) => p.type === type)?.value || "00";
+  const dateKey = `${get("year")}-${get("month")}-${get("day")}`;
+  return {
+    dateKey,
+    hour: Number(get("hour")),
+    minute: Number(get("minute"))
+  };
+}
+function istanbulTodayKey(now = /* @__PURE__ */ new Date()) {
+  return getIstanbulDateParts(now).dateKey;
+}
+function isAkvizyonNobetKapanisZamaniGecti(tarih, now = /* @__PURE__ */ new Date()) {
+  const { dateKey, hour, minute } = getIstanbulDateParts(now);
+  if (tarih < dateKey) return true;
+  if (tarih > dateKey) return false;
+  return hour > AKVIZYON_NOBET_KAPANIS_SAAT || hour === AKVIZYON_NOBET_KAPANIS_SAAT && minute >= 0;
+}
+function isAkvizyonNobetKilitli(doc) {
+  return Boolean(doc?.kilitli || doc?.otomatikKapanis);
+}
+function collectAkvizyonPersonelForDate(personeller, tarih) {
+  return (personeller || []).filter(
+    (p) => isAkvizyonPersonel(p) && isPersonelActiveOnDate(p, tarih)
+  );
+}
+function finalizeAkvizyonYoklamaMap(personelIds, existing) {
+  const next = { ...existing || {} };
+  for (const id of personelIds) {
+    if (!next[id]) next[id] = "Gelmedi";
+  }
+  return next;
+}
+function buildAkvizyonOtomatikKapanisPayload(options) {
+  const nowIso = options.nowIso || (/* @__PURE__ */ new Date()).toISOString();
+  const yoklama = finalizeAkvizyonYoklamaMap(
+    options.personelIds,
+    options.existing?.yoklama
+  );
+  return {
+    id: options.tarih,
+    tarih: options.tarih,
+    kayitZamani: options.existing?.kayitZamani || nowIso,
+    kaydeden: options.existing?.kaydeden || options.kaydeden || "sistem_otomatik",
+    yoklama,
+    kilitli: true,
+    otomatikKapanis: true,
+    kapanisZamani: nowIso,
+    kapanisSaati: AKVIZYON_NOBET_KAPANIS_SAAT,
+    notlar: options.existing?.notlar || `Akvizyon grup n\xF6beti saat ${AKVIZYON_NOBET_KAPANIS_SAAT}:00'da otomatik kapat\u0131l\u0131p ar\u015Fivlendi.`
+  };
+}
+function shouldAutoCloseAkvizyonNobet(tarih, existing, now = /* @__PURE__ */ new Date()) {
+  if (!isAkvizyonNobetKapanisZamaniGecti(tarih, now)) return false;
+  if (isAkvizyonNobetKilitli(existing)) return false;
+  return true;
+}
+var AKVIZYON_NOBET_KAPANIS_SAAT;
+var init_akvizyonNobetAutoArchive = __esm({
+  "src/lib/akvizyonNobetAutoArchive.ts"() {
+    init_guvenlikHelpers();
+    AKVIZYON_NOBET_KAPANIS_SAAT = 21;
+  }
+});
 
 // api/handler.ts
 var import_express = __toESM(require("express"));
@@ -331,45 +617,7 @@ function getFirebaseAdmin() {
 
 // src/server/authClaimsService.ts
 var import_crypto = require("crypto");
-
-// src/lib/roleClaims.ts
-var FOUNDER_EMAILS = ["sametatak9@gmail.com", "santiye@kibritci.com"];
-var FOUNDER_PASSWORDS = {
-  "sametatak9@gmail.com": "117270Sa",
-  "santiye@kibritci.com": "kibritci2026"
-};
-function isFounderEmail(email) {
-  const key = email?.trim().toLowerCase() || "";
-  return FOUNDER_EMAILS.includes(key);
-}
-function verifyFounderCredentials(email, password) {
-  const key = email.trim().toLowerCase();
-  return FOUNDER_PASSWORDS[key] === password;
-}
-function normalizeClaimRole(yetki) {
-  if (!yetki) return "M\u0130SAF\u0130R";
-  let v = String(yetki).trim().toLocaleUpperCase("tr-TR");
-  const aliases = {
-    KAMPCI: "KAMP\xC7I",
-    KAMPC\u0130: "KAMP\xC7I",
-    GUVENLIK: "G\xDCVENL\u0130K",
-    LOJISTIK: "LOJ\u0130ST\u0130K",
-    DEPO: "DEPOCU",
-    \u015EOF\u00D6R: "LOJ\u0130ST\u0130K",
-    SOFOR: "LOJ\u0130ST\u0130K"
-  };
-  return aliases[v] ?? v;
-}
-function buildAuthCustomClaims(input) {
-  const email = input.email.trim().toLowerCase();
-  return {
-    email,
-    role: normalizeClaimRole(input.yetki),
-    durum: String(input.durum || "ONAY BEKL\u0130YOR").trim()
-  };
-}
-
-// src/server/authClaimsService.ts
+init_roleClaims();
 async function readKullaniciClaimsSource(email) {
   const admin2 = getFirebaseAdmin();
   const emailKey = email.trim().toLowerCase();
@@ -1703,6 +1951,74 @@ L\xFCtfen en uygun kategoriyi 'detectedType' alan\u0131na atay\u0131p d\xF6k\xFC
     } catch (error) {
       console.error("Error in chat assistant endpoint:", error);
       res.status(500).json({ error: error.message || "Failed to process message" });
+    }
+  });
+  app2.post("/api/cron/akvizyon-nobet-kapat", async (req, res) => {
+    const expected = String(process.env.CRON_SECRET || "").trim();
+    if (!expected) {
+      return res.status(503).json({ error: "CRON_SECRET tan\u0131ml\u0131 de\u011Fil" });
+    }
+    const headerSecret = String(req.headers["x-cron-secret"] || "").trim();
+    const bearer = String(req.headers.authorization || "").replace(/^Bearer\s+/i, "").trim();
+    if (headerSecret !== expected && bearer !== expected) {
+      return res.status(401).json({ error: "Yetkisiz cron iste\u011Fi" });
+    }
+    if (!isFirebaseAdminConfigured()) {
+      return res.status(503).json({ error: "Firebase Admin yap\u0131land\u0131r\u0131lmam\u0131\u015F" });
+    }
+    try {
+      const {
+        buildAkvizyonOtomatikKapanisPayload: buildAkvizyonOtomatikKapanisPayload2,
+        collectAkvizyonPersonelForDate: collectAkvizyonPersonelForDate2,
+        istanbulTodayKey: istanbulTodayKey2,
+        shouldAutoCloseAkvizyonNobet: shouldAutoCloseAkvizyonNobet2,
+        AKVIZYON_NOBET_KAPANIS_SAAT: AKVIZYON_NOBET_KAPANIS_SAAT2
+      } = await Promise.resolve().then(() => (init_akvizyonNobetAutoArchive(), akvizyonNobetAutoArchive_exports));
+      const force = Boolean(req.body?.force);
+      const tarih = String(req.body?.tarih || istanbulTodayKey2()).slice(0, 10);
+      const admin2 = getFirebaseAdmin();
+      const db = admin2.firestore();
+      const existingSnap = await db.collection("akvizyonYoklamalari").doc(tarih).get();
+      const existing = existingSnap.exists ? { id: existingSnap.id, ...existingSnap.data() } : null;
+      if (!force && !shouldAutoCloseAkvizyonNobet2(tarih, existing)) {
+        return res.json({
+          success: true,
+          skipped: true,
+          reason: existing?.kilitli ? "already_locked" : "before_close_time",
+          tarih,
+          closeHour: AKVIZYON_NOBET_KAPANIS_SAAT2
+        });
+      }
+      const personelSnap = await db.collection("personeller").get();
+      const personeller = personelSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      const akvizyonList = collectAkvizyonPersonelForDate2(personeller, tarih);
+      const payload = buildAkvizyonOtomatikKapanisPayload2({
+        tarih,
+        personelIds: akvizyonList.map((p) => p.id),
+        existing,
+        kaydeden: "sistem_otomatik_cron"
+      });
+      await db.collection("akvizyonYoklamalari").doc(tarih).set(payload, { merge: true });
+      await db.collection("akvizyonNobetArsivleri").doc(tarih).set(
+        {
+          ...payload,
+          arsivTipi: "AKVIZYON_GRUP_NOBET",
+          personelSayisi: akvizyonList.length,
+          geldiSayisi: Object.values(payload.yoklama || {}).filter((v) => v === "Geldi").length,
+          gelmediSayisi: Object.values(payload.yoklama || {}).filter((v) => v === "Gelmedi").length
+        },
+        { merge: true }
+      );
+      return res.json({
+        success: true,
+        archived: true,
+        tarih,
+        personelSayisi: akvizyonList.length,
+        kapanisZamani: payload.kapanisZamani
+      });
+    } catch (error) {
+      console.error("Akvizyon n\xF6bet otomatik kapan\u0131\u015F hatas\u0131:", error);
+      return res.status(500).json({ error: error.message || "Otomatik kapan\u0131\u015F ba\u015Far\u0131s\u0131z" });
     }
   });
 }

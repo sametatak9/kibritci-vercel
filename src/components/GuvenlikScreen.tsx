@@ -9,7 +9,7 @@ import EvrakDuvariPanel, {
   isEvrakBekleyen,
 } from './EvrakDuvariPanel';
 import { Personel, Irsaliye, IrsaliyeItem, Fatura, MicirStabilizeFis, CariKart, StokKart, SatinAlmaTalebi } from '../types/erp';
-import { db, cleanUndefined, ensureFirestoreAuth, withTimeout } from '../lib/firebase';
+import { db, cleanUndefined, ensureFirestoreAuth, withTimeout, saveDocument } from '../lib/firebase';
 import { compressImage } from '../lib/imageCompress';
 import { fetchApiJson } from '../lib/apiClient';
 import { collection, doc, setDoc, onSnapshot, addDoc, getDocs, deleteDoc, updateDoc } from 'firebase/firestore';
@@ -22,9 +22,11 @@ import {
   upsertKapiDraftIrsaliye,
   finalizeKapiIrsaliyeApproval,
 } from '../lib/kapiIrsaliyeUtils';
+import { autoEnsureCari } from '../lib/evrakBatchImportUtils';
 import {
   countPaketFotolar,
   createEmptyUploadPackage,
+  createEmptyUploadKalem,
   GUVENLIK_FOTO_METOD_HINT,
   GUVENLIK_FOTO_METOD_LABEL,
   GuvenlikFotoMetod,
@@ -679,7 +681,10 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
             docType,
           }),
         });
-        if (response && !response.error) return response;
+        if (response && !response.error) {
+          // API { success, data } veya düz gövde dönebilir
+          return response.data ?? response;
+        }
       } catch (err) {
         console.error('Tek foto YZ parse hatası:', err);
       }
@@ -862,6 +867,16 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
     }
   };
 
+  const isUploadPackageIncomplete = (x: any) => {
+    if (!String(x.aciklama || '').trim() || countPaketFotolar(x) === 0) return true;
+    if (x.evrakTuru !== 'İRSALİYE') return false;
+    if (!String(x.evrakNo || '').trim() || !String(x.firma || '').trim()) return true;
+    const kalemler = Array.isArray(x.kalemler) ? x.kalemler : [];
+    return !kalemler.some(
+      (k: any) => String(k.urunAdi || '').trim() && Number(String(k.miktar || '').replace(',', '.')) > 0
+    );
+  };
+
   const handleSendQueueToManager = async () => {
     if (uploadQueue.length === 0) {
       alert('Gönderilecek evrak bulunmuyor. Lütfen önce dosya yükleyin!');
@@ -883,6 +898,41 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
     if (eksikAciklama.length > 0) {
       alert('Her evrak paketinde açıklama zorunludur.');
       return;
+    }
+
+    const irsaliyeEksik = uploadQueue.filter((item) => {
+      if (item.evrakTuru !== 'İRSALİYE') return false;
+      if (!String(item.evrakNo || '').trim()) return true;
+      if (!String(item.firma || '').trim()) return true;
+      const kalemler = Array.isArray(item.kalemler) ? item.kalemler : [];
+      return !kalemler.some(
+        (k: any) => String(k.urunAdi || '').trim() && Number(String(k.miktar || '').replace(',', '.')) > 0
+      );
+    });
+    if (irsaliyeEksik.length > 0) {
+      alert(
+        'İRSALİYE paketlerinde zorunlu:\n• İrsaliye / taşıma no\n• Firma (cari seç veya yaz)\n• En az bir kalem (ürün + miktar / KG)\n\nFotoğrafla birlikte bu bilgileri girin; yönetici son kontrolü yapar.'
+      );
+      return;
+    }
+
+    // Cari yoksa oluşturulsun mu?
+    const yeniCariGereken = uploadQueue.filter(
+      (item) =>
+        (item.evrakTuru === 'İRSALİYE' || item.evrakTuru === 'FATURA') &&
+        String(item.firma || '').trim() &&
+        !item.cariKartId &&
+        suggestCariFromDb(item.firma, cariKartlarLive, 1).length === 0
+    );
+    if (yeniCariGereken.length > 0) {
+      const names = yeniCariGereken.map((x) => x.firma).join(', ');
+      const ok = window.confirm(
+        `Sistemde cari bulunamadı:\n${names}\n\nKapıda yeni tedarikçi cari kartı oluşturulsun mu?\n(Yönetici sonra kontrol eder.)`
+      );
+      if (!ok) {
+        alert('Önce cari önerisinden seçin veya firma adını düzeltin.');
+        return;
+      }
     }
 
     sendInFlightRef.current = true;
@@ -927,12 +977,63 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
             );
           }
 
+          let firmaAdi = String(item.firma || '').trim();
+          let cariKartId = String(item.cariKartId || '').trim();
+          let liveCari = [...cariKartlarLive];
+
+          if (firmaAdi && !cariKartId) {
+            const hit = suggestCariFromDb(firmaAdi, liveCari, 1)[0];
+            if (hit) {
+              cariKartId = hit.id;
+              firmaAdi = hit.unvan;
+            } else if (item.evrakTuru === 'İRSALİYE' || item.evrakTuru === 'FATURA') {
+              const ensured = autoEnsureCari(
+                firmaAdi,
+                liveCari,
+                `Kapı güvenlik evrakı · ${uniqueId}`
+              );
+              if (ensured.cari) {
+                ensured.cari.yetkili = currentUser?.email || 'güvenlik';
+                ensured.cari.adres = 'Kapı girişinden oluşturuldu — yönetici onayı bekleniyor.';
+                await saveDocument('cariKartlar', ensured.cari);
+                liveCari = ensured.cariler;
+                setCariKartlarLive(ensured.cariler);
+                cariKartId = ensured.cari.id;
+                firmaAdi = ensured.cari.unvan;
+              }
+            }
+          } else if (cariKartId) {
+            const c = liveCari.find((x) => x.id === cariKartId);
+            if (c) firmaAdi = c.unvan;
+          }
+
+          const manualKalemler = (Array.isArray(item.kalemler) ? item.kalemler : [])
+            .map((k: any) => ({
+              id: k.id,
+              urunAdi: String(k.urunAdi || '').trim(),
+              miktar: Number(String(k.miktar || '').replace(',', '.')),
+              birim: String(k.birim || 'KG').trim() || 'KG',
+              stokKartId: k.stokKartId || undefined,
+            }))
+            .filter((k: any) => k.urunAdi && Number.isFinite(k.miktar) && k.miktar > 0);
+
+          // Stok önerisi uygula (seçilmemişse)
+          const matchedKalemler = manualKalemler.map((k: any) => {
+            if (k.stokKartId) return k;
+            const stokHit = suggestStokFromDb(k.urunAdi, stokKartlarLive, 1)[0];
+            return stokHit ? { ...k, stokKartId: stokHit.id, birim: k.birim || stokHit.birim || 'KG' } : k;
+          });
+
+          const evrakNo = String(item.evrakNo || '').trim();
+          const plaka = String(item.plaka || '').trim();
+
           const newEvrak = cleanUndefined({
             id: uniqueId,
-            evrakNo: '',
+            evrakNo: evrakNo || '',
             evrakTuru: item.evrakTuru,
-            firma: String(item.firma || '').trim(),
-            cariKartId: item.cariKartId || '',
+            firma: firmaAdi,
+            cariKartId: cariKartId || '',
+            plaka: plaka || '',
             tarih: islemTarihi,
             saat: new Date().toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' }),
             fotoUrl: lean.fotoUrl || '',
@@ -940,6 +1041,7 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
             kalemFotolar: lean.kalemFotolar,
             firmaFotolar: lean.firmaFotolar,
             faturaFotolar: lean.faturaFotolar,
+            kalemler: matchedKalemler,
             fileName: primarySlot?.fileName || 'evrak_paketi',
             fileType: primarySlot?.fileType || 'image/jpeg',
             durum: 'BEKLEMEDE',
@@ -957,6 +1059,8 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
               ? 'Fotoğraf boyutu limiti nedeniyle görsel kaydedilemedi; meta kayıt oluşturuldu. Tekrar fotoğraf ekleyin.'
               : null,
             kayitZamani: new Date().toISOString(),
+            kapidaGirildi: true,
+            kaynak: 'KAPI_EVRAK',
           });
 
           await withTimeout(
@@ -965,14 +1069,40 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
           );
           savedIds.add(item.id);
 
+          // İrsaliye: yönetici öncesi taslak oluştur (stok miktarı artmaz)
+          if (item.evrakTuru === 'İRSALİYE' && (evrakNo || matchedKalemler.length > 0)) {
+            try {
+              const { irsaliye, summary } = await upsertKapiDraftIrsaliye({
+                guvenlikEvrakId: uniqueId,
+                firma: firmaAdi,
+                irsaliyeNo: evrakNo || uniqueId,
+                tarih: islemTarihi,
+                fotoUrl: lean.fotoUrl || '',
+                kalemler: matchedKalemler,
+                cariKartlar: liveCari,
+                stokKartlar: stokKartlarLive,
+                kaydeden: currentUser?.email || 'nobetci_guvenlik',
+              });
+              await updateDoc(doc(db, 'guvenlikGelenEvraklar', uniqueId), cleanUndefined({
+                irsaliyeId: irsaliye.id,
+                matchSummary: summary,
+                cariKartId: summary.cariKartId || cariKartId || '',
+                firma: summary.cariUnvan || firmaAdi,
+                kalemler: irsaliye.kalemler || matchedKalemler,
+              }));
+            } catch (draftErr) {
+              console.warn('[kapı] taslak irsaliye:', draftErr);
+            }
+          }
+
           if (lean.fotoUrl) {
             void triggerBackgroundAiParsing(
               uniqueId,
               lean.fotoUrl,
               newEvrak.evrakTuru as string,
               {
-                firmaHint: (newEvrak.firma as string) || undefined,
-                cariKartId: (newEvrak.cariKartId as string) || undefined,
+                firmaHint: firmaAdi || undefined,
+                cariKartId: cariKartId || undefined,
                 kalemFotoUrl: lean.kalemFotolar[0]?.dataUrl,
                 firmaFotoUrl: lean.firmaFotolar[0]?.dataUrl,
                 faturaFotoUrl: lean.faturaFotolar[0]?.dataUrl,
@@ -2958,8 +3088,7 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
                 onKaydet={handleSendQueueToManager}
                 kaydetLabel="Kuyruğu Kaydet"
                 kaydetDisabled={
-                  uploadQueue.length === 0 ||
-                  uploadQueue.some((x) => !String(x.aciklama || '').trim() || countPaketFotolar(x) === 0)
+                  uploadQueue.length === 0 || uploadQueue.some(isUploadPackageIncomplete)
                 }
                 kaydetLoading={loadingIrsaliye}
                 onGuncelle={() => {
@@ -2984,9 +3113,10 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
                   📄 KAPIDA İRSALİYE / EVRAK GİRİŞİ (3 FOTO YÖNTEMİ)
                 </span>
                 <p className="text-[10px] text-slate-500 -mt-2">
-                  Görünmeme sorununu çözmek için her evrak paketinde ayrı fotoğraflar yükleyin:
-                  <strong> 1) Kalem</strong>, <strong>2) Firma adı</strong>, <strong>3) Fatura</strong>.
-                  Birden fazla fotoğraf eklenebilir. Firma yazdıkça cari önerilir.
+                  İrsaliye / taşıma evrakında fotoğrafla birlikte <strong>irsaliye no</strong>,{' '}
+                  <strong>firma (cari seç veya kur)</strong> ve <strong>kalem / KG</strong> girin.
+                  Stok önerilerinden eşleştirin. Yönetici son kontroldür; fatura mutabakatı için zemin burada kurulur.
+                  Foto: <strong>1) Kalem</strong>, <strong>2) Firma adı</strong>, <strong>3) Fatura</strong>.
                 </p>
 
                 <div className="flex flex-wrap gap-2">
@@ -3049,15 +3179,23 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
                               value={item.evrakTuru}
                               onChange={(e) => {
                                 const next = [...uploadQueue];
-                                next[index] = { ...next[index], evrakTuru: e.target.value };
+                                const tur = e.target.value;
+                                next[index] = {
+                                  ...next[index],
+                                  evrakTuru: tur,
+                                  kalemler:
+                                    tur === 'İRSALİYE' && !(next[index].kalemler || []).length
+                                      ? [createEmptyUploadKalem()]
+                                      : next[index].kalemler || [createEmptyUploadKalem()],
+                                };
                                 setUploadQueue(next);
                               }}
                               className="w-full bg-white border border-slate-200 p-1.5 rounded-lg text-xs"
                             >
-                              <option value="İRSALİYE">📄 İRSALİYE</option>
+                              <option value="İRSALİYE">📄 İRSALİYE / TAŞIMA</option>
                               <option value="FATURA">💰 FATURA</option>
                               <option value="MAKBUZ">🎫 MAKBUZ</option>
-                              <option value="GENEL_EVRAK">📦 GENEL EVRAK</option>
+                              <option value="GENEL_EVRAK">📦 GENEL EVRAK / TESLİM</option>
                             </select>
                           </div>
                           <div className="space-y-1">
@@ -3076,9 +3214,53 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
                           </div>
                         </div>
 
+                        {(item.evrakTuru === 'İRSALİYE' || item.evrakTuru === 'FATURA') && (
+                          <div className="rounded-xl border border-amber-200 bg-amber-50/50 p-3 space-y-2.5">
+                            <p className="text-[9px] font-black uppercase tracking-wider text-amber-900">
+                              {item.evrakTuru === 'İRSALİYE'
+                                ? 'İrsaliye / taşıma rehberi (zorunlu)'
+                                : 'Fatura rehberi'}
+                            </p>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                              <div className="space-y-1">
+                                <label className="text-[8px] font-black text-slate-500 uppercase block">
+                                  {item.evrakTuru === 'İRSALİYE' ? 'İrsaliye / Taşıma No *' : 'Fatura No'}
+                                </label>
+                                <input
+                                  type="text"
+                                  value={item.evrakNo || ''}
+                                  onChange={(e) => {
+                                    const next = [...uploadQueue];
+                                    next[index] = { ...next[index], evrakNo: e.target.value };
+                                    setUploadQueue(next);
+                                  }}
+                                  placeholder="Evrak üzerindeki numara"
+                                  className="w-full bg-white border border-amber-200 p-1.5 rounded-lg text-xs font-bold"
+                                />
+                              </div>
+                              <div className="space-y-1">
+                                <label className="text-[8px] font-black text-slate-500 uppercase block">
+                                  Plaka (taşıma)
+                                </label>
+                                <input
+                                  type="text"
+                                  value={item.plaka || ''}
+                                  onChange={(e) => {
+                                    const next = [...uploadQueue];
+                                    next[index] = { ...next[index], plaka: e.target.value.toLocaleUpperCase('tr-TR') };
+                                    setUploadQueue(next);
+                                  }}
+                                  placeholder="34 ABC 123"
+                                  className="w-full bg-white border border-amber-200 p-1.5 rounded-lg text-xs font-mono font-bold"
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
                         <div className="space-y-1 text-xs">
                           <label className="text-[8px] font-black text-slate-500 uppercase block">
-                            Firma / Cari
+                            Firma / Cari {item.evrakTuru === 'İRSALİYE' ? '*' : ''}
                           </label>
                           <input
                             type="text"
@@ -3092,7 +3274,20 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
                             className="w-full bg-white border border-slate-200 p-1.5 rounded-lg text-xs"
                           />
                           {item.cariKartId ? (
-                            <p className="text-[9px] font-bold text-teal-700">✓ Cari seçildi · {item.firma}</p>
+                            <div className="flex items-center justify-between gap-2">
+                              <p className="text-[9px] font-bold text-teal-700">✓ Cari seçildi · {item.firma}</p>
+                              <button
+                                type="button"
+                                className="text-[9px] font-bold text-slate-500 underline cursor-pointer"
+                                onClick={() => {
+                                  const next = [...uploadQueue];
+                                  next[index] = { ...next[index], cariKartId: '' };
+                                  setUploadQueue(next);
+                                }}
+                              >
+                                Değiştir
+                              </button>
+                            </div>
                           ) : (
                             <div className="flex flex-wrap gap-1 pt-0.5">
                               {suggestCariFromDb(item.firma || '', cariKartlarLive, 4).map((o) => (
@@ -3109,9 +3304,140 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
                                   {o.unvan}
                                 </button>
                               ))}
+                              {String(item.firma || '').trim().length >= 3 &&
+                                suggestCariFromDb(item.firma || '', cariKartlarLive, 1).length === 0 && (
+                                  <span className="text-[9px] font-semibold text-amber-800 bg-amber-100 border border-amber-200 px-2 py-1 rounded-lg">
+                                    Cari yok → gönderimde oluşturulacak
+                                  </span>
+                                )}
                             </div>
                           )}
                         </div>
+
+                        {item.evrakTuru === 'İRSALİYE' && (
+                          <div className="space-y-2 rounded-xl border border-indigo-100 bg-white p-3">
+                            <div className="flex items-center justify-between gap-2">
+                              <p className="text-[9px] font-black uppercase text-indigo-700 tracking-wider">
+                                Kalemler / KG *
+                              </p>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const next = [...uploadQueue];
+                                  const kalemler = [...(next[index].kalemler || []), createEmptyUploadKalem()];
+                                  next[index] = { ...next[index], kalemler };
+                                  setUploadQueue(next);
+                                }}
+                                className="text-[9px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-1 rounded-lg cursor-pointer"
+                              >
+                                + Kalem
+                              </button>
+                            </div>
+                            {(item.kalemler || [createEmptyUploadKalem()]).map((k: any, ki: number) => {
+                              const stokOneriler = suggestStokFromDb(k.urunAdi || '', stokKartlarLive, 3);
+                              return (
+                                <div key={k.id || ki} className="rounded-lg border border-slate-150 bg-slate-50/80 p-2 space-y-1.5">
+                                  <div className="grid grid-cols-12 gap-1.5">
+                                    <input
+                                      type="text"
+                                      value={k.urunAdi || ''}
+                                      onChange={(e) => {
+                                        const next = [...uploadQueue];
+                                        const kalemler = [...(next[index].kalemler || [])];
+                                        kalemler[ki] = { ...kalemler[ki], urunAdi: e.target.value, stokKartId: '' };
+                                        next[index] = { ...next[index], kalemler };
+                                        setUploadQueue(next);
+                                      }}
+                                      placeholder="Malzeme / ürün adı"
+                                      className="col-span-6 bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-[10px] font-semibold"
+                                    />
+                                    <input
+                                      type="number"
+                                      value={k.miktar || ''}
+                                      onChange={(e) => {
+                                        const next = [...uploadQueue];
+                                        const kalemler = [...(next[index].kalemler || [])];
+                                        kalemler[ki] = { ...kalemler[ki], miktar: e.target.value };
+                                        next[index] = { ...next[index], kalemler };
+                                        setUploadQueue(next);
+                                      }}
+                                      placeholder="Miktar"
+                                      className="col-span-3 bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-[10px] font-bold"
+                                    />
+                                    <select
+                                      value={k.birim || 'KG'}
+                                      onChange={(e) => {
+                                        const next = [...uploadQueue];
+                                        const kalemler = [...(next[index].kalemler || [])];
+                                        kalemler[ki] = { ...kalemler[ki], birim: e.target.value };
+                                        next[index] = { ...next[index], kalemler };
+                                        setUploadQueue(next);
+                                      }}
+                                      className="col-span-2 bg-white border border-slate-200 rounded-lg px-1 py-1.5 text-[10px] font-bold"
+                                    >
+                                      <option value="KG">KG</option>
+                                      <option value="TON">TON</option>
+                                      <option value="Adet">Adet</option>
+                                      <option value="M3">M3</option>
+                                      <option value="Lt">Lt</option>
+                                    </select>
+                                    <button
+                                      type="button"
+                                      title="Kalemi sil"
+                                      onClick={() => {
+                                        const next = [...uploadQueue];
+                                        const kalemler = (next[index].kalemler || []).filter((_: any, i: number) => i !== ki);
+                                        next[index] = {
+                                          ...next[index],
+                                          kalemler: kalemler.length ? kalemler : [createEmptyUploadKalem()],
+                                        };
+                                        setUploadQueue(next);
+                                      }}
+                                      className="col-span-1 text-rose-500 font-black text-sm cursor-pointer"
+                                    >
+                                      ×
+                                    </button>
+                                  </div>
+                                  {k.stokKartId ? (
+                                    <p className="text-[9px] font-bold text-teal-700">
+                                      ✓ Stok:{' '}
+                                      {stokKartlarLive.find((s) => s.id === k.stokKartId)?.stokAdi || k.stokKartId}
+                                    </p>
+                                  ) : (
+                                    <div className="flex flex-wrap gap-1">
+                                      {stokOneriler.map((s) => (
+                                        <button
+                                          key={s.id}
+                                          type="button"
+                                          onClick={() => {
+                                            const next = [...uploadQueue];
+                                            const kalemler = [...(next[index].kalemler || [])];
+                                            kalemler[ki] = {
+                                              ...kalemler[ki],
+                                              stokKartId: s.id,
+                                              urunAdi: kalemler[ki].urunAdi || s.stokAdi,
+                                              birim: kalemler[ki].birim || s.birim || 'KG',
+                                            };
+                                            next[index] = { ...next[index], kalemler };
+                                            setUploadQueue(next);
+                                          }}
+                                          className="text-[8px] font-bold px-1.5 py-0.5 rounded border border-sky-200 bg-sky-50 text-sky-800 cursor-pointer"
+                                        >
+                                          {s.stokAdi}
+                                        </button>
+                                      ))}
+                                      {String(k.urunAdi || '').trim().length >= 2 && stokOneriler.length === 0 && (
+                                        <span className="text-[8px] text-slate-400 font-semibold">
+                                          Stok eşleşmedi — yönetici bağlar
+                                        </span>
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
 
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                           {([
@@ -3188,9 +3514,7 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
                       <button
                         type="button"
                         onClick={handleSendQueueToManager}
-                        disabled={uploadQueue.some(
-                          (x) => !String(x.aciklama || '').trim() || countPaketFotolar(x) === 0
-                        )}
+                        disabled={uploadQueue.some(isUploadPackageIncomplete)}
                         className="bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold text-xs py-2.5 px-6 rounded-xl transition disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
                       >
                         {loadingIrsaliye
