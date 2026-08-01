@@ -229,7 +229,12 @@ export async function persistYoklamaDocument(
   let remote: AylikYoklamaMap;
 
   try {
-    remote = await fetchYoklamaMapWithRetry(isProductionLive() ? 3 : 2);
+    // Kalıcı koruma: yazmadan önce mümkünse sunucu gerçeğini al (IndexedDB sapması)
+    try {
+      remote = (await fetchYoklamaMapFromServer()).map;
+    } catch {
+      remote = await fetchYoklamaMapWithRetry(isProductionLive() ? 3 : 2);
+    }
   } catch (err) {
     if (isProductionLive() || hasSubstantialYoklamaData(localMap)) {
       return {

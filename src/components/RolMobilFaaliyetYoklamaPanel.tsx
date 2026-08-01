@@ -1,0 +1,618 @@
+/**
+ * Şöför / Operatör mobil — NORMAL + MESAİ faaliyet + günlük yoklama.
+ * Mermerci/Tesisatçı ile aynı model: Faaliyeti Olan Personeller + ZER hakediş besler.
+ * Yoklama yalnızca sparse (dokunulan hücreler) yazar — mevcut haritayı ezmez.
+ */
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  ClipboardList,
+  Camera,
+  CheckCircle,
+  RefreshCw,
+  Pencil,
+  Trash2,
+  Calendar,
+  Truck,
+  HardHat,
+} from 'lucide-react';
+import { collection, deleteDoc, doc, onSnapshot, setDoc } from 'firebase/firestore';
+import { AylikYoklamaMap, Personel, SoforSahaFaaliyet, OperatorSahaFaaliyet } from '../types/erp';
+import { db, cleanUndefined } from '../lib/firebase';
+import { compressImage } from '../lib/imageCompress';
+import { todayDateKey, formatDateLabelTr, normalizeDateKey } from '../lib/dateKeyUtils';
+import { applySahaMesaiToYoklama, normalizeMesaiHours } from '../lib/sahaFaaliyetUtils';
+import { ensureSahaFaaliyetFotolarPersisted } from '../lib/sahaFaaliyetFotoStorage';
+import { isOperatorGorev, isSoforGorev, getYoklamaDay, setYoklamaDay } from '../lib/yoklamaUtils';
+import { resolveGeldiRolPersonelIds, type MobilRolEtiket } from '../lib/mobilRolEtiketUtils';
+import { PARSEL_BLOK_MAP, PARSEL_LIST, defaultBlokForParsel } from '../data/parselBlokMap';
+import { KampGunlukYoklamaTab } from './KampGunlukYoklamaTab';
+
+type Rol = 'SOFOR' | 'OPERATOR';
+type Kayit = SoforSahaFaaliyet | OperatorSahaFaaliyet;
+
+const SOFOR_IS_OPTIONS = [
+  'Malzeme Taşıma',
+  'Personel Servisi',
+  'Mikser / Beton',
+  'Hafriyat Nakli',
+  'Şantiye İçi Transfer',
+  'Dış Rota / Tedarik',
+  'Diğer',
+];
+
+const OPERATOR_IS_OPTIONS = [
+  'Kazı / Hafriyat',
+  'Dolgu / Serim',
+  'Yükleme',
+  'Saha Temizlik',
+  'Blok / Parsel İmalat Destek',
+  'Diğer İş Makinesi',
+];
+
+interface RolMobilFaaliyetYoklamaPanelProps {
+  rol: Rol;
+  personeller: Personel[];
+  yoklamalar?: AylikYoklamaMap;
+  setYoklamalar?: (updater: AylikYoklamaMap | ((y: AylikYoklamaMap) => AylikYoklamaMap)) => void;
+  saveYoklamalarNow?: (next: AylikYoklamaMap) => Promise<void>;
+  currentUser: any;
+  addNotification?: (mesaj: string, meta?: Record<string, unknown>) => void | Promise<void>;
+  /** false ise sadece faaliyet (üst sekme zaten yoklama ayırıyorsa) */
+  showYoklamaTab?: boolean;
+  initialSubTab?: 'faaliyet' | 'yoklama';
+}
+
+export const RolMobilFaaliyetYoklamaPanel: React.FC<RolMobilFaaliyetYoklamaPanelProps> = ({
+  rol,
+  personeller,
+  yoklamalar = {},
+  setYoklamalar,
+  saveYoklamalarNow,
+  currentUser,
+  addNotification,
+  showYoklamaTab = true,
+  initialSubTab = 'faaliyet',
+}) => {
+  const collectionName = rol === 'SOFOR' ? 'soforSahaFaaliyetleri' : 'operatorSahaFaaliyetleri';
+  const kaynakEkran = rol === 'SOFOR' ? 'SOFOR_MOBIL' : 'OPERATOR_MOBIL';
+  const etiketRol = (rol === 'SOFOR' ? 'SOFOR' : 'OPERATOR') as MobilRolEtiket;
+  const isOptions = rol === 'SOFOR' ? SOFOR_IS_OPTIONS : OPERATOR_IS_OPTIONS;
+  const TitleIcon = rol === 'SOFOR' ? Truck : HardHat;
+  const title = rol === 'SOFOR' ? 'Şöför Saha Faaliyeti' : 'Operatör Saha Faaliyeti';
+  const matchGorev = rol === 'SOFOR' ? isSoforGorev : isOperatorGorev;
+
+  const [activeSubTab, setActiveSubTab] = useState<'faaliyet' | 'yoklama'>(initialSubTab);
+  const [statusMessage, setStatusMessage] = useState<{
+    type: 'success' | 'error' | 'info';
+    text: string;
+  } | null>(null);
+  const statusHideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const showStatus = (type: 'success' | 'error' | 'info', text: string, autoHideMs = 4000) => {
+    if (statusHideTimer.current) clearTimeout(statusHideTimer.current);
+    setStatusMessage({ type, text });
+    if (type !== 'info' && autoHideMs > 0) {
+      statusHideTimer.current = setTimeout(() => setStatusMessage(null), autoHideMs);
+    }
+  };
+
+  const [faaliyetGrubu, setFaaliyetGrubu] = useState<'NORMAL' | 'MESAI'>('NORMAL');
+  const [isNiteligi, setIsNiteligi] = useState(isOptions[0]);
+  const [parsel, setParsel] = useState(PARSEL_LIST[0] || 'GENEL SAHA');
+  const [blok, setBlok] = useState(defaultBlokForParsel(PARSEL_LIST[0] || 'GENEL SAHA'));
+  const [faaliyetTarih, setFaaliyetTarih] = useState(todayDateKey());
+  const [aciklama, setAciklama] = useState('');
+  const [fotoUrl, setFotoUrl] = useState('');
+  const [personelMesaiSaatleri, setPersonelMesaiSaatleri] = useState<Record<string, number>>({});
+  const [savingFaaliyet, setSavingFaaliyet] = useState(false);
+  const [faaliyetler, setFaaliyetler] = useState<Kayit[]>([]);
+  const [editingFaaliyetId, setEditingFaaliyetId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, collectionName), (snap) => {
+      const list: Kayit[] = [];
+      snap.forEach((d) => list.push({ id: d.id, ...(d.data() as Omit<Kayit, 'id'>) }));
+      list.sort((a, b) => String(b.tarih).localeCompare(String(a.tarih)));
+      setFaaliyetler(list);
+    });
+    return () => unsub();
+  }, [collectionName]);
+
+  const rolPersoneller = useMemo(
+    () => personeller.filter((p) => matchGorev(p.gorev)),
+    [personeller, matchGorev]
+  );
+
+  const gunlukFaaliyetler = useMemo(
+    () => faaliyetler.filter((f) => normalizeDateKey(f.tarih) === normalizeDateKey(faaliyetTarih)),
+    [faaliyetler, faaliyetTarih]
+  );
+
+  const blokOptions = PARSEL_BLOK_MAP[parsel] || [];
+
+  const handleFaaliyetFoto = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const reader = new FileReader();
+      const raw = await new Promise<string>((resolve, reject) => {
+        reader.onload = () => resolve(String(reader.result || ''));
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+      const compressed = await compressImage(raw, 0.72, 1600);
+      setFotoUrl(compressed);
+    } catch {
+      showStatus('error', 'Fotoğraf okunamadı.');
+    }
+  };
+
+  const resetFaaliyetForm = () => {
+    setEditingFaaliyetId(null);
+    setFaaliyetGrubu('NORMAL');
+    setIsNiteligi(isOptions[0]);
+    setParsel(PARSEL_LIST[0] || 'GENEL SAHA');
+    setBlok(defaultBlokForParsel(PARSEL_LIST[0] || 'GENEL SAHA'));
+    setFaaliyetTarih(todayDateKey());
+    setAciklama('');
+    setFotoUrl('');
+    setPersonelMesaiSaatleri({});
+  };
+
+  const syncMesai = async (
+    tarih: string,
+    nextMap?: Record<string, number>,
+    prevMap?: Record<string, number>
+  ) => {
+    if (!saveYoklamalarNow && !setYoklamalar) return;
+    const gonderen = String(currentUser?.email || kaynakEkran);
+    let draft = yoklamalar;
+    if (prevMap && Object.keys(prevMap).length) {
+      draft = applySahaMesaiToYoklama(draft, tarih, prevMap, gonderen, 'subtract');
+    }
+    if (nextMap && Object.keys(nextMap).length) {
+      draft = applySahaMesaiToYoklama(draft, tarih, nextMap, gonderen, 'add');
+    }
+    const dk = normalizeDateKey(tarih);
+    const [y, m, d] = dk.split('-').map(Number);
+    const touched = new Set([
+      ...Object.keys(prevMap || {}),
+      ...Object.keys(nextMap || {}),
+    ]);
+    const sparse: AylikYoklamaMap = {};
+    for (const pid of touched) {
+      const cell = getYoklamaDay(draft[pid], y, m, d);
+      if (!cell) continue;
+      sparse[pid] = setYoklamaDay({}, y, m, d, cell) as any;
+    }
+    if (Object.keys(sparse).length === 0) return;
+    if (saveYoklamalarNow) {
+      await saveYoklamalarNow(sparse);
+    } else if (setYoklamalar) {
+      setYoklamalar(draft);
+    }
+  };
+
+  const handleSaveFaaliyet = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!aciklama.trim()) {
+      showStatus('error', 'Açıklama zorunlu.');
+      return;
+    }
+    setSavingFaaliyet(true);
+    showStatus('info', 'Kaydediliyor…', 0);
+    try {
+      const kaydedenEmail = String(currentUser?.email || '').trim().toLowerCase();
+      const existing = editingFaaliyetId
+        ? faaliyetler.find((f) => f.id === editingFaaliyetId)
+        : undefined;
+      const id = editingFaaliyetId || `${rol.toLowerCase()}_sf_${Date.now()}`;
+
+      let mesaiMap: Record<string, number> | undefined;
+      if (faaliyetGrubu === 'MESAI') {
+        mesaiMap = Object.fromEntries(
+          Object.entries(personelMesaiSaatleri)
+            .map(([pid, h]) => [pid, normalizeMesaiHours(h)] as const)
+            .filter(([, h]) => h > 0)
+        );
+        if (!mesaiMap || Object.keys(mesaiMap).length === 0) {
+          showStatus('error', 'Mesaili faaliyet için en az bir personele saat girin.');
+          setSavingFaaliyet(false);
+          return;
+        }
+      }
+
+      let aktifPersonelListesi: string[] = [];
+      if (mesaiMap && Object.keys(mesaiMap).length > 0) {
+        aktifPersonelListesi = Object.keys(mesaiMap);
+      } else {
+        aktifPersonelListesi = resolveGeldiRolPersonelIds(
+          personeller,
+          yoklamalar,
+          normalizeDateKey(faaliyetTarih),
+          etiketRol,
+          { ensureEmail: kaydedenEmail }
+        );
+      }
+
+      let fotoPersisted = fotoUrl || '';
+      if (fotoPersisted.startsWith('data:')) {
+        const ensured = await ensureSahaFaaliyetFotolarPersisted({
+          id,
+          tarih: normalizeDateKey(faaliyetTarih),
+          fotoUrl: fotoPersisted,
+        } as any);
+        fotoPersisted = String(ensured.fotoUrl || fotoPersisted);
+      }
+
+      const payload: Kayit = {
+        id,
+        tarih: normalizeDateKey(faaliyetTarih),
+        faaliyetGrubu,
+        isNiteligi,
+        parsel,
+        blok,
+        aciklama: aciklama.trim(),
+        fotoUrl: fotoPersisted || null,
+        aktifPersonelListesi,
+        personelMesaiSaatleri: mesaiMap,
+        durum: 'KAYITLI',
+        kaydeden: kaydedenEmail || undefined,
+        kaynakEkran: kaynakEkran as any,
+        olusturulma: existing?.olusturulma || new Date().toISOString(),
+        guncellenme: new Date().toISOString(),
+      };
+
+      if (faaliyetGrubu !== 'MESAI') {
+        (payload as any).personelMesaiSaatleri = null;
+      }
+
+      await setDoc(doc(db, collectionName, id), cleanUndefined(payload));
+
+      if (faaliyetGrubu === 'MESAI' || existing?.faaliyetGrubu === 'MESAI') {
+        await syncMesai(
+          String(payload.tarih),
+          faaliyetGrubu === 'MESAI' && mesaiMap ? mesaiMap : undefined,
+          existing?.faaliyetGrubu === 'MESAI' ? existing.personelMesaiSaatleri : undefined
+        );
+      }
+
+      if (addNotification) {
+        await addNotification(
+          `${rol === 'SOFOR' ? 'Şöför' : 'Operatör'} ${
+            faaliyetGrubu === 'MESAI' ? 'mesai ' : ''
+          }faaliyeti: ${isNiteligi} (${payload.parsel} / ${payload.blok})`
+        );
+      }
+      showStatus('success', editingFaaliyetId ? 'Faaliyet güncellendi.' : 'Faaliyet kaydedildi.');
+      resetFaaliyetForm();
+    } catch (err: any) {
+      console.error(err);
+      showStatus('error', 'Kayıt başarısız: ' + (err?.message || ''));
+    } finally {
+      setSavingFaaliyet(false);
+    }
+  };
+
+  const handleEditFaaliyet = (f: Kayit) => {
+    setEditingFaaliyetId(f.id);
+    setFaaliyetTarih(normalizeDateKey(f.tarih));
+    setFaaliyetGrubu(f.faaliyetGrubu || 'NORMAL');
+    setIsNiteligi(f.isNiteligi || isOptions[0]);
+    setParsel(f.parsel || PARSEL_LIST[0]);
+    setBlok(f.blok || defaultBlokForParsel(f.parsel || PARSEL_LIST[0]));
+    setAciklama(f.aciklama || '');
+    setFotoUrl(f.fotoUrl || '');
+    setPersonelMesaiSaatleri(f.personelMesaiSaatleri || {});
+    setActiveSubTab('faaliyet');
+  };
+
+  const handleSilFaaliyet = async (f: Kayit) => {
+    if (!window.confirm('Bu faaliyet silinsin mi?')) return;
+    try {
+      await deleteDoc(doc(db, collectionName, f.id));
+      if (f.faaliyetGrubu === 'MESAI' && f.personelMesaiSaatleri) {
+        await syncMesai(f.tarih, undefined, f.personelMesaiSaatleri);
+      }
+      if (editingFaaliyetId === f.id) resetFaaliyetForm();
+      showStatus('success', 'Faaliyet silindi.');
+    } catch (err: any) {
+      showStatus('error', 'Silinemedi: ' + (err?.message || ''));
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-3">
+        <div className={`p-2.5 rounded-2xl ${rol === 'SOFOR' ? 'bg-sky-100' : 'bg-amber-100'}`}>
+          <TitleIcon className={rol === 'SOFOR' ? 'text-sky-700' : 'text-amber-800'} size={20} />
+        </div>
+        <div>
+          <h2 className="text-sm font-black text-slate-900 uppercase tracking-wide">{title}</h2>
+          <p className="text-[10px] text-slate-500">
+            Normal / mesai faaliyet → Faaliyeti Olan Personeller · ZER · kendi yoklama
+          </p>
+        </div>
+      </div>
+
+      {statusMessage && (
+        <div
+          className={`p-3 rounded-xl border flex items-center gap-2 max-w-xl ${
+            statusMessage.type === 'success'
+              ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
+              : statusMessage.type === 'info'
+                ? 'bg-slate-100 border-slate-200 text-slate-700'
+                : 'bg-rose-50 border-rose-200 text-rose-700'
+          }`}
+        >
+          {statusMessage.type === 'info' ? (
+            <RefreshCw size={14} className="animate-spin shrink-0" />
+          ) : (
+            <CheckCircle size={14} className="shrink-0" />
+          )}
+          <span className="text-xs font-bold">{statusMessage.text}</span>
+        </div>
+      )}
+
+      {showYoklamaTab && (
+        <div className="flex flex-wrap gap-2 border-b border-slate-200 pb-1">
+          <button
+            type="button"
+            onClick={() => setActiveSubTab('faaliyet')}
+            className={`px-4 py-2.5 rounded-xl font-bold text-xs transition flex items-center gap-2 border cursor-pointer ${
+              activeSubTab === 'faaliyet'
+                ? 'bg-slate-900 border-slate-800 text-white'
+                : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'
+            }`}
+          >
+            <ClipboardList size={14} /> Faaliyet
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveSubTab('yoklama')}
+            className={`px-4 py-2.5 rounded-xl font-bold text-xs transition flex items-center gap-2 border cursor-pointer ${
+              activeSubTab === 'yoklama'
+                ? 'bg-emerald-600 border-emerald-500 text-white'
+                : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'
+            }`}
+          >
+            <Calendar size={14} /> Yoklama
+          </button>
+        </div>
+      )}
+
+      {(activeSubTab === 'faaliyet' || !showYoklamaTab) && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <div className="bg-white border border-slate-200 rounded-2xl p-4 space-y-3 shadow-sm">
+            <h3 className="text-xs font-black uppercase tracking-wider text-slate-800">
+              {editingFaaliyetId ? 'Faaliyet Düzenle' : 'Yeni Faaliyet'}
+            </h3>
+            <form onSubmit={handleSaveFaaliyet} className="space-y-3 text-xs">
+              <div className="flex bg-slate-100 p-1 rounded-xl">
+                <button
+                  type="button"
+                  onClick={() => setFaaliyetGrubu('NORMAL')}
+                  className={`flex-1 py-2 text-[10px] font-black uppercase rounded-lg cursor-pointer ${
+                    faaliyetGrubu === 'NORMAL' ? 'bg-slate-900 text-white' : 'text-slate-500'
+                  }`}
+                >
+                  Normal
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFaaliyetGrubu('MESAI')}
+                  className={`flex-1 py-2 text-[10px] font-black uppercase rounded-lg cursor-pointer ${
+                    faaliyetGrubu === 'MESAI' ? 'bg-amber-500 text-slate-900' : 'text-slate-500'
+                  }`}
+                >
+                  Mesaili
+                </button>
+              </div>
+
+              <label className="block space-y-1">
+                <span className="text-[9px] font-black text-slate-500 uppercase">Tarih</span>
+                <input
+                  type="date"
+                  value={faaliyetTarih}
+                  onChange={(e) => setFaaliyetTarih(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-bold"
+                />
+              </label>
+
+              <label className="block space-y-1">
+                <span className="text-[9px] font-black text-slate-500 uppercase">İş Niteliği</span>
+                <select
+                  value={isNiteligi}
+                  onChange={(e) => setIsNiteligi(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-bold"
+                >
+                  {isOptions.map((o) => (
+                    <option key={o} value={o}>
+                      {o}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <div className="grid grid-cols-2 gap-2">
+                <label className="block space-y-1">
+                  <span className="text-[9px] font-black text-slate-500 uppercase">Parsel *</span>
+                  <select
+                    required
+                    value={parsel}
+                    onChange={(e) => {
+                      const next = e.target.value;
+                      setParsel(next);
+                      setBlok(defaultBlokForParsel(next));
+                    }}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-bold"
+                  >
+                    {PARSEL_LIST.map((p) => (
+                      <option key={p} value={p}>
+                        {p}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="block space-y-1">
+                  <span className="text-[9px] font-black text-slate-500 uppercase">Blok *</span>
+                  <select
+                    required
+                    value={blok}
+                    onChange={(e) => setBlok(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-bold"
+                  >
+                    {(blokOptions.length ? blokOptions : ['GENEL SAHA']).map((b) => (
+                      <option key={b} value={b}>
+                        {b}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+
+              <label className="block space-y-1">
+                <span className="text-[9px] font-black text-slate-500 uppercase">Açıklama *</span>
+                <textarea
+                  required
+                  value={aciklama}
+                  onChange={(e) => setAciklama(e.target.value)}
+                  rows={3}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-medium"
+                  placeholder="Yapılan işi kısaca yazın"
+                />
+              </label>
+
+              <label className="flex items-center justify-center gap-2 w-full bg-slate-50 border border-dashed border-slate-300 rounded-xl px-3 py-3 cursor-pointer hover:bg-slate-100">
+                <Camera size={14} className="text-slate-600" />
+                <span className="font-bold text-slate-700 text-[10px]">
+                  {fotoUrl ? 'Fotoğraf seçildi — değiştir' : 'Faaliyet fotoğrafı'}
+                </span>
+                <input type="file" accept="image/*" className="hidden" onChange={handleFaaliyetFoto} />
+              </label>
+              {fotoUrl && (
+                <img src={fotoUrl} alt="" className="max-h-36 rounded-xl border object-contain bg-slate-50" />
+              )}
+
+              {faaliyetGrubu === 'MESAI' && (
+                <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 space-y-2">
+                  <p className="text-[9px] font-black uppercase text-amber-800">Mesai Saatleri</p>
+                  {rolPersoneller.length === 0 ? (
+                    <p className="text-[10px] text-amber-700 italic">Bu görevde personel bulunamadı.</p>
+                  ) : (
+                    <div className="max-h-44 overflow-y-auto space-y-1">
+                      {rolPersoneller.map((p) => {
+                        const hrs = personelMesaiSaatleri[p.id] || 0;
+                        return (
+                          <div
+                            key={p.id}
+                            className={`flex items-center justify-between gap-2 border rounded-lg px-2 py-1.5 ${
+                              hrs > 0 ? 'bg-amber-100 border-amber-300' : 'bg-white border-slate-200'
+                            }`}
+                          >
+                            <span className="text-[9px] font-bold text-slate-800 truncate">
+                              {p.ad} {p.soyad}
+                            </span>
+                            <input
+                              type="number"
+                              min={0}
+                              max={14}
+                              step={0.5}
+                              value={hrs}
+                              onChange={(e) =>
+                                setPersonelMesaiSaatleri((prev) => ({
+                                  ...prev,
+                                  [p.id]: Number(e.target.value) || 0,
+                                }))
+                              }
+                              className="w-16 text-center text-[10px] font-bold border rounded-lg py-1"
+                            />
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <div className="flex gap-2">
+                <button
+                  type="submit"
+                  disabled={savingFaaliyet}
+                  className="flex-1 bg-slate-900 text-white font-black text-[10px] py-3 rounded-xl disabled:opacity-60 cursor-pointer"
+                >
+                  {savingFaaliyet ? 'Kaydediliyor…' : editingFaaliyetId ? 'GÜNCELLE' : 'KAYDET'}
+                </button>
+                {editingFaaliyetId && (
+                  <button
+                    type="button"
+                    onClick={resetFaaliyetForm}
+                    className="px-4 py-3 rounded-xl bg-slate-100 text-slate-700 font-bold text-[10px] cursor-pointer"
+                  >
+                    İptal
+                  </button>
+                )}
+              </div>
+            </form>
+          </div>
+
+          <div className="bg-white border border-slate-200 rounded-2xl p-4 space-y-3 shadow-sm">
+            <h3 className="text-xs font-black uppercase tracking-wider text-slate-800">
+              {formatDateLabelTr(faaliyetTarih)} kayıtları ({gunlukFaaliyetler.length})
+            </h3>
+            {gunlukFaaliyetler.length === 0 ? (
+              <p className="text-[11px] text-slate-500 italic">Bu tarihte kayıt yok.</p>
+            ) : (
+              <div className="space-y-2 max-h-[28rem] overflow-y-auto">
+                {gunlukFaaliyetler.map((f) => (
+                  <div key={f.id} className="border border-slate-150 rounded-xl p-3 space-y-1.5 bg-slate-50/80">
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <p className="text-[11px] font-black text-slate-800">{f.isNiteligi}</p>
+                        <p className="text-[9px] text-slate-500 font-bold">
+                          {f.parsel} / {f.blok} · {f.faaliyetGrubu === 'MESAI' ? 'MESAİ' : 'NORMAL'}
+                        </p>
+                      </div>
+                      <div className="flex gap-1">
+                        <button
+                          type="button"
+                          onClick={() => handleEditFaaliyet(f)}
+                          className="p-1.5 rounded-lg bg-white border text-slate-600 cursor-pointer"
+                        >
+                          <Pencil size={12} />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void handleSilFaaliyet(f)}
+                          className="p-1.5 rounded-lg bg-rose-50 border border-rose-200 text-rose-600 cursor-pointer"
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      </div>
+                    </div>
+                    <p className="text-[10px] text-slate-700">{f.aciklama}</p>
+                    <p className="text-[9px] text-slate-500">
+                      Personel: {(f.aktifPersonelListesi || []).length}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {showYoklamaTab && activeSubTab === 'yoklama' && (
+        <KampGunlukYoklamaTab
+          personeller={personeller}
+          yoklamalar={yoklamalar}
+          setYoklamalar={setYoklamalar}
+          saveYoklamalarNow={saveYoklamalarNow}
+          currentUser={currentUser}
+          addNotification={addNotification}
+          personelKapsami={rol === 'SOFOR' ? 'sofor' : 'operator'}
+        />
+      )}
+    </div>
+  );
+};

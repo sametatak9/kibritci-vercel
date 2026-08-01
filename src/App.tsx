@@ -2976,6 +2976,30 @@ export default function App() {
           setAracKmLoglari={setAracKmLoglariWithSync}
           currentUser={soforPortalUser}
           personeller={personeller}
+          yoklamalar={yoklamalar}
+          setYoklamalar={setYoklamalarWithSync}
+          saveYoklamalarNow={saveYoklamalarNow}
+          addNotification={addNotification}
+          onSignOut={handleSignOut}
+          isStandalone={true}
+        />
+      );
+    }
+    if (userYetki === 'OPERATÖR') {
+      return (
+        <OperatorScreen
+          araclar={araclar}
+          personeller={personeller}
+          cariKartlar={cariKartlar}
+          operatorFaaliyetleri={operatorFaaliyetleri}
+          setOperatorFaaliyetleri={setOperatorFaaliyetleriWithSync}
+          taseronKesintiRaporlari={taseronKesintiRaporlari}
+          setTaseronKesintiRaporlari={setTaseronKesintiRaporlariWithSync}
+          currentUser={currentUser}
+          addNotification={addNotification}
+          yoklamalar={yoklamalar}
+          setYoklamalar={setYoklamalarWithSync}
+          saveYoklamalarNow={saveYoklamalarNow}
           onSignOut={handleSignOut}
           isStandalone={true}
         />
@@ -3109,6 +3133,30 @@ export default function App() {
           setAracKmLoglari={setAracKmLoglariWithSync}
           currentUser={soforPortalUser}
           personeller={personeller}
+          yoklamalar={yoklamalar}
+          setYoklamalar={setYoklamalarWithSync}
+          saveYoklamalarNow={saveYoklamalarNow}
+          addNotification={addNotification}
+          onSignOut={handleSignOut}
+          isStandalone={true}
+        />
+      );
+    }
+    if (role === 'OPERATÖR') {
+      return (
+        <OperatorScreen
+          araclar={araclar}
+          personeller={personeller}
+          cariKartlar={cariKartlar}
+          operatorFaaliyetleri={operatorFaaliyetleri}
+          setOperatorFaaliyetleri={setOperatorFaaliyetleriWithSync}
+          taseronKesintiRaporlari={taseronKesintiRaporlari}
+          setTaseronKesintiRaporlari={setTaseronKesintiRaporlariWithSync}
+          currentUser={currentUser}
+          addNotification={addNotification}
+          yoklamalar={yoklamalar}
+          setYoklamalar={setYoklamalarWithSync}
+          saveYoklamalarNow={saveYoklamalarNow}
           onSignOut={handleSignOut}
           isStandalone={true}
         />
@@ -3757,6 +3805,10 @@ export default function App() {
                     setAracKmLoglari={setAracKmLoglariWithSync}
                     currentUser={soforPortalUser}
                     personeller={personeller}
+                    yoklamalar={yoklamalar}
+                    setYoklamalar={setYoklamalarWithSync}
+                    saveYoklamalarNow={saveYoklamalarNow}
+                    addNotification={addNotification}
                     onSignOut={handleSignOut}
                     isStandalone={hideSidebarAndTopbar}
                   />
@@ -3814,7 +3866,7 @@ export default function App() {
               )}
 
               {activeTab === "operator" && (
-                isYonetici ? (
+                isYonetici || userYetki === 'OPERATÖR' ? (
                   <OperatorScreen
                     araclar={araclar}
                     personeller={personeller}
@@ -3825,6 +3877,11 @@ export default function App() {
                     setTaseronKesintiRaporlari={setTaseronKesintiRaporlariWithSync}
                     currentUser={currentUser}
                     addNotification={addNotification}
+                    yoklamalar={yoklamalar}
+                    setYoklamalar={setYoklamalarWithSync}
+                    saveYoklamalarNow={saveYoklamalarNow}
+                    onSignOut={handleSignOut}
+                    isStandalone={hideSidebarAndTopbar}
                   />
                 ) : renderAccessDenied()
               )}

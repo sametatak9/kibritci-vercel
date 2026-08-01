@@ -27,6 +27,30 @@ export function isMermerciGorev(gorev?: string): boolean {
   return normalizeGorevKey(gorev).includes('MERMERCI');
 }
 
+export function isSoforGorev(gorev?: string): boolean {
+  const g = normalizeGorevKey(gorev);
+  return (
+    g.includes('SOFOR') ||
+    g.includes('SOFÖR') ||
+    g.includes('SURUCU') ||
+    g.includes('LOJISTIK') ||
+    g === 'DRIVER'
+  );
+}
+
+export function isOperatorGorev(gorev?: string): boolean {
+  const g = normalizeGorevKey(gorev);
+  return (
+    g.includes('OPERATOR') ||
+    g.includes('OPERATÖR') ||
+    g.includes('IS MAKINE') ||
+    g.includes('ISMAKINE') ||
+    g.includes('JCB') ||
+    g.includes('EXCAVATOR') ||
+    g.includes('KEKO')
+  );
+}
+
 export function isKampciGorev(gorev?: string): boolean {
   const g = normalizeGorevKey(gorev);
   // KAMPÇI / Kampçı / KAMP GÖREVLİSİ / KAMP PERSONEL
@@ -45,10 +69,16 @@ export function isFormenGorev(gorev?: string): boolean {
   return g.includes('FORMEN') || g.includes('FORMAN');
 }
 
+/** Formen günlük yoklama / faaliyet havuzundan hariç tutulan roller */
 export function isKampciTesisatciMermerci(gorev?: string): boolean {
   if (!gorev) return false;
-  const g = normalizeGorevKey(gorev);
-  return g.includes('KAMPCI') || g.includes('TESISATCI') || g.includes('MERMERCI');
+  return (
+    isKampciGorev(gorev) ||
+    isTesisatciGorev(gorev) ||
+    isMermerciGorev(gorev) ||
+    isSoforGorev(gorev) ||
+    isOperatorGorev(gorev)
+  );
 }
 
 /** @deprecated Kampçı yoklaması artık yalnızca kampçı — isKampciGorev kullanın */

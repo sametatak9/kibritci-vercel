@@ -22,6 +22,7 @@ import {
   canonicalizeAnaFirmaAdi,
   isTaseronPersonel,
   isKampciGorev,
+  isSoforGorev,
   isIdariPersonel,
 } from '../lib/yoklamaUtils';
 import { firmaEslesir } from '../lib/taseronUtils';
@@ -87,7 +88,7 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
   const filterKampciPersonel = React.useCallback(
     (p: Personel) => {
       if (isTaseronPersonel(p) || isIdariPersonel(p)) return false;
-      return isKampciGorev(p.gorev);
+      return isKampciGorev(p.gorev) || isSoforGorev(p.gorev);
     },
     []
   );

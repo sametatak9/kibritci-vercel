@@ -1,10 +1,12 @@
 import React, { useState, useMemo } from 'react';
 import { HardHat, Clock, Calendar, Building2, Camera, Save, Search, FileText, Trash2, CreditCard as Edit3, CircleCheck as CheckCircle, X, ChevronDown, ChevronUp, Truck, TriangleAlert as AlertTriangle, Download, Mail, ListFilter as Filter, Plus, Printer } from 'lucide-react';
-import { AracBakim, CariKart, OperatorFaaliyet, TaseronKesintiRaporu, Personel } from '../types/erp';
+import { AracBakim, AylikYoklamaMap, CariKart, OperatorFaaliyet, TaseronKesintiRaporu, Personel } from '../types/erp';
 import { compressImage } from '../lib/imageCompress';
 import { getTaseronCariKartlar, buildOperatorIsKaydiEtiketi, makineEtiketi } from '../lib/taseronUtils';
 import { indirIsMakinesiRaporu } from '../lib/taseronReportUtils';
 import { kibritciLogoHtml } from '../lib/kibritciBrand';
+import { RolMobilFaaliyetYoklamaPanel } from './RolMobilFaaliyetYoklamaPanel';
+import { KampGunlukYoklamaTab } from './KampGunlukYoklamaTab';
 
 interface OperatorScreenProps {
   araclar: AracBakim[];
@@ -16,6 +18,11 @@ interface OperatorScreenProps {
   setTaseronKesintiRaporlari: React.Dispatch<React.SetStateAction<TaseronKesintiRaporu[]>>;
   currentUser: any;
   addNotification?: (mesaj: string) => void;
+  yoklamalar?: AylikYoklamaMap;
+  setYoklamalar?: (updater: AylikYoklamaMap | ((y: AylikYoklamaMap) => AylikYoklamaMap)) => void;
+  saveYoklamalarNow?: (next: AylikYoklamaMap) => Promise<void>;
+  onSignOut?: () => void;
+  isStandalone?: boolean;
 }
 
 export const OperatorScreen: React.FC<OperatorScreenProps> = ({
@@ -27,9 +34,16 @@ export const OperatorScreen: React.FC<OperatorScreenProps> = ({
   taseronKesintiRaporlari,
   setTaseronKesintiRaporlari,
   currentUser,
-  addNotification
+  addNotification,
+  yoklamalar = {},
+  setYoklamalar,
+  saveYoklamalarNow,
+  onSignOut,
+  isStandalone = false,
 }) => {
-  const [activeSubTab, setActiveSubTab] = useState<'faaliyet' | 'rapor' | 'arsiv'>('faaliyet');
+  const [activeSubTab, setActiveSubTab] = useState<
+    'faaliyet' | 'saha_faaliyet' | 'yoklama' | 'rapor' | 'arsiv'
+  >('saha_faaliyet');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedAracId, setSelectedAracId] = useState('');
   const [selectedPersonelId, setSelectedPersonelId] = useState('');
@@ -405,11 +419,43 @@ export const OperatorScreen: React.FC<OperatorScreenProps> = ({
           <p className="text-[10px] text-slate-400">JCB, KATO, Kiralık ve diğer iş makinelerinin günlük faaliyet kayıtları, taşeron kesinti raporları ve arşiv.</p>
         </div>
         <div className="flex flex-wrap gap-2 w-full md:w-auto">
-          <button onClick={() => setActiveSubTab('faaliyet')} className={`px-4 py-2 rounded-xl text-xs font-bold transition ${activeSubTab === 'faaliyet' ? 'bg-amber-500 text-slate-950' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>Faaliyet Girişi</button>
+          <button onClick={() => setActiveSubTab('saha_faaliyet')} className={`px-4 py-2 rounded-xl text-xs font-bold transition ${activeSubTab === 'saha_faaliyet' ? 'bg-amber-500 text-slate-950' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>Saha Faaliyet (N/M)</button>
+          <button onClick={() => setActiveSubTab('yoklama')} className={`px-4 py-2 rounded-xl text-xs font-bold transition ${activeSubTab === 'yoklama' ? 'bg-emerald-500 text-slate-950' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>Operatör Yoklama</button>
+          <button onClick={() => setActiveSubTab('faaliyet')} className={`px-4 py-2 rounded-xl text-xs font-bold transition ${activeSubTab === 'faaliyet' ? 'bg-amber-500 text-slate-950' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>Makine Saat Kaydı</button>
           <button onClick={() => setActiveSubTab('rapor')} className={`px-4 py-2 rounded-xl text-xs font-bold transition ${activeSubTab === 'rapor' ? 'bg-amber-500 text-slate-950' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>Kesinti Raporları</button>
           <button onClick={() => setActiveSubTab('arsiv')} className={`px-4 py-2 rounded-xl text-xs font-bold transition ${activeSubTab === 'arsiv' ? 'bg-amber-500 text-slate-950' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>Arşiv</button>
         </div>
       </div>
+
+      {activeSubTab === 'saha_faaliyet' && (
+        <div className="bg-white border rounded-2xl p-4 sm:p-5 shadow-sm">
+          <RolMobilFaaliyetYoklamaPanel
+            rol="OPERATOR"
+            personeller={personeller}
+            yoklamalar={yoklamalar}
+            setYoklamalar={setYoklamalar}
+            saveYoklamalarNow={saveYoklamalarNow}
+            currentUser={currentUser}
+            addNotification={addNotification}
+            showYoklamaTab={false}
+            initialSubTab="faaliyet"
+          />
+        </div>
+      )}
+
+      {activeSubTab === 'yoklama' && (
+        <div className="bg-white border rounded-2xl p-4 sm:p-5 shadow-sm">
+          <KampGunlukYoklamaTab
+            personeller={personeller}
+            yoklamalar={yoklamalar}
+            setYoklamalar={setYoklamalar}
+            saveYoklamalarNow={saveYoklamalarNow}
+            currentUser={currentUser}
+            addNotification={addNotification}
+            personelKapsami="operator"
+          />
+        </div>
+      )}
 
       {/* FAALİYET GİRİŞİ */}
       {activeSubTab === 'faaliyet' && (

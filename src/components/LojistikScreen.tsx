@@ -3,12 +3,14 @@ import {
   Truck, Plus, Trash2, Camera, CheckCircle, Search, AlertCircle, 
   FileText, Calendar, Printer, Phone, MapPin, Wallet, ClipboardList, Clock, Check, X, Image as ImageIcon
 } from 'lucide-react';
-import { AracBakim, Personel } from '../types/erp';
+import { AracBakim, AylikYoklamaMap, Personel } from '../types/erp';
 import { compressImage } from '../lib/imageCompress';
 import { db } from '../lib/firebase';
 import { collection, onSnapshot, doc, setDoc, deleteDoc, updateDoc } from 'firebase/firestore';
 import { CorporateReportLayout } from './CorporateReportLayout';
 import { KibritciLogo } from './KibritciLogo';
+import { RolMobilFaaliyetYoklamaPanel } from './RolMobilFaaliyetYoklamaPanel';
+import { KampGunlukYoklamaTab } from './KampGunlukYoklamaTab';
 
 interface LojistikScreenProps {
   irsaliyeler: any[];
@@ -20,8 +22,12 @@ interface LojistikScreenProps {
   setAracKmLoglari: any;
   currentUser?: any;
   personeller?: Personel[];
+  yoklamalar?: AylikYoklamaMap;
+  setYoklamalar?: (updater: AylikYoklamaMap | ((y: AylikYoklamaMap) => AylikYoklamaMap)) => void;
+  saveYoklamalarNow?: (next: AylikYoklamaMap) => Promise<void>;
   onSignOut?: () => void;
   isStandalone?: boolean;
+  addNotification?: (mesaj: string, meta?: Record<string, unknown>) => void | Promise<void>;
 }
 
 export const LojistikScreen: React.FC<LojistikScreenProps> = ({
@@ -31,10 +37,25 @@ export const LojistikScreen: React.FC<LojistikScreenProps> = ({
   setAracKmLoglari,
   currentUser,
   personeller: personellerProp = [],
+  yoklamalar = {},
+  setYoklamalar,
+  saveYoklamalarNow,
   onSignOut,
-  isStandalone = false
+  isStandalone = false,
+  addNotification,
 }) => {
-  const [activeTab, setActiveTab] = useState<'günlük_rutin' | 'günlük_faaliyet' | 'haftalık_km' | 'araç_kartı' | 'rotalar' | 'yol_harcaması' | 'mini_raporlar' | 'aylik_rapor'>('günlük_rutin');
+  const [activeTab, setActiveTab] = useState<
+    | 'günlük_rutin'
+    | 'günlük_faaliyet'
+    | 'saha_faaliyet'
+    | 'yoklama'
+    | 'haftalık_km'
+    | 'araç_kartı'
+    | 'rotalar'
+    | 'yol_harcaması'
+    | 'mini_raporlar'
+    | 'aylik_rapor'
+  >('saha_faaliyet');
   const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
 
   const getMaintenanceAlerts = (a: AracBakim) => {
@@ -754,9 +775,21 @@ export const LojistikScreen: React.FC<LojistikScreenProps> = ({
             onClick={() => setActiveTab('günlük_faaliyet')}
             className={`px-4 py-2 rounded-xl text-xs font-bold transition duration-150 shrink-0 cursor-pointer ${activeTab === 'günlük_faaliyet' ? 'bg-slate-900 text-white shadow-sm shadow-slate-500/10' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'}`}
           >
-            📝 Günlük Faaliyet Kaydı
+            📝 Sevk / KM Faaliyet
           </button>
-          <button 
+          <button
+            onClick={() => setActiveTab('saha_faaliyet')}
+            className={`px-4 py-2 rounded-xl text-xs font-bold transition duration-150 shrink-0 cursor-pointer ${activeTab === 'saha_faaliyet' ? 'bg-sky-700 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'}`}
+          >
+            🏗️ Saha Faaliyet (Normal/Mesai)
+          </button>
+          <button
+            onClick={() => setActiveTab('yoklama')}
+            className={`px-4 py-2 rounded-xl text-xs font-bold transition duration-150 shrink-0 cursor-pointer ${activeTab === 'yoklama' ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'}`}
+          >
+            ✅ Şöför Yoklama
+          </button>
+          <button
             onClick={() => setActiveTab('haftalık_km')}
             className={`px-4 py-2 rounded-xl text-xs font-bold transition duration-150 shrink-0 cursor-pointer ${activeTab === 'haftalık_km' ? 'bg-slate-900 text-white shadow-sm shadow-slate-500/10' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'}`}
           >
@@ -892,6 +925,36 @@ export const LojistikScreen: React.FC<LojistikScreenProps> = ({
                     <span>Günlük Rutini Kaydet</span>
                   </button>
                 </div>
+              </div>
+            )}
+
+            {activeTab === 'saha_faaliyet' && (
+              <div className="bg-white border border-slate-200 rounded-3xl p-4 sm:p-5 shadow-xs animate-in fade-in duration-150">
+                <RolMobilFaaliyetYoklamaPanel
+                  rol="SOFOR"
+                  personeller={personeller}
+                  yoklamalar={yoklamalar}
+                  setYoklamalar={setYoklamalar}
+                  saveYoklamalarNow={saveYoklamalarNow}
+                  currentUser={currentUser}
+                  addNotification={addNotification}
+                  showYoklamaTab={false}
+                  initialSubTab="faaliyet"
+                />
+              </div>
+            )}
+
+            {activeTab === 'yoklama' && (
+              <div className="bg-white border border-slate-200 rounded-3xl p-4 sm:p-5 shadow-xs animate-in fade-in duration-150">
+                <KampGunlukYoklamaTab
+                  personeller={personeller}
+                  yoklamalar={yoklamalar}
+                  setYoklamalar={setYoklamalar}
+                  saveYoklamalarNow={saveYoklamalarNow}
+                  currentUser={currentUser}
+                  addNotification={addNotification}
+                  personelKapsami="sofor"
+                />
               </div>
             )}
 

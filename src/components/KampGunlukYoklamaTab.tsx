@@ -12,6 +12,8 @@ import {
   isKampciGorev,
   isTesisatciGorev,
   isMermerciGorev,
+  isSoforGorev,
+  isOperatorGorev,
 } from '../lib/yoklamaUtils';
 import { todayDateKey, normalizeDateKey, formatDateLabelTr } from '../lib/dateKeyUtils';
 import { downloadCsv } from '../lib/reportExport';
@@ -23,8 +25,8 @@ interface KampGunlukYoklamaTabProps {
   saveYoklamalarNow?: (next: AylikYoklamaMap) => Promise<void>;
   currentUser: any;
   addNotification?: (mesaj: string) => void;
-  /** Varsayılan: kampçı. Tesisatçı / mermerci kendi mobillerinde */
-  personelKapsami?: 'kamp' | 'tesisatci' | 'mermerci';
+  /** Varsayılan: kampçı + şöför. Tesisatçı / mermerci / şöför / operatör kendi mobillerinde */
+  personelKapsami?: 'kamp' | 'tesisatci' | 'mermerci' | 'sofor' | 'operator';
 }
 
 export const KampGunlukYoklamaTab: React.FC<KampGunlukYoklamaTabProps> = ({
@@ -74,8 +76,13 @@ export const KampGunlukYoklamaTab: React.FC<KampGunlukYoklamaTabProps> = ({
         if (!isTesisatciGorev(p.gorev)) return false;
       } else if (personelKapsami === 'mermerci') {
         if (!isMermerciGorev(p.gorev)) return false;
-      } else if (!isKampciGorev(p.gorev)) {
-        return false;
+      } else if (personelKapsami === 'sofor') {
+        if (!isSoforGorev(p.gorev)) return false;
+      } else if (personelKapsami === 'operator') {
+        if (!isOperatorGorev(p.gorev)) return false;
+      } else {
+        // Kampçı yoklama: kampçılar + şöförler
+        if (!isKampciGorev(p.gorev) && !isSoforGorev(p.gorev)) return false;
       }
       return isDayActiveForPersonel(p, year, month, day, yoklamalar[p.id] as any);
     });

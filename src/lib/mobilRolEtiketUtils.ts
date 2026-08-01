@@ -9,6 +9,8 @@ import {
   isIdariPersonel,
   isKampciGorev,
   isMermerciGorev,
+  isOperatorGorev,
+  isSoforGorev,
   isTaseronPersonel,
   isTesisatciGorev,
 } from './yoklamaUtils';
@@ -17,7 +19,9 @@ import { normalizeGorev } from './gorevUtils';
 export type MobilRolEtiket =
   | 'KAMPCI'
   | 'TESISATCI'
-  | 'MERMERCI';
+  | 'MERMERCI'
+  | 'SOFOR'
+  | 'OPERATOR';
 
 function isKampciRol(gorev?: string): boolean {
   if (isKampciGorev(gorev)) return true;
@@ -39,7 +43,9 @@ function isAktifPersonel(p: Personel): boolean {
 export function roleGorevMatcher(rol: MobilRolEtiket): (gorev?: string) => boolean {
   if (rol === 'KAMPCI') return isKampciRol;
   if (rol === 'TESISATCI') return isTesisatciGorev;
-  return isMermerciGorev;
+  if (rol === 'MERMERCI') return isMermerciGorev;
+  if (rol === 'SOFOR') return isSoforGorev;
+  return isOperatorGorev;
 }
 
 function isGeldiDurum(durum?: string | null): boolean {

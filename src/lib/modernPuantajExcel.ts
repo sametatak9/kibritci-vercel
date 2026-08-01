@@ -8,6 +8,8 @@ import {
   isFormenGorev,
   isKampciGorev,
   isMermerciGorev,
+  isOperatorGorev,
+  isSoforGorev,
   isTesisatciGorev,
 } from './yoklamaUtils';
 
@@ -17,6 +19,8 @@ export type PuantajPersonelGrup =
   | 'KAMPCI'
   | 'TESISATCI'
   | 'MERMERCI'
+  | 'SOFOR'
+  | 'OPERATOR'
   | 'DIGER';
 
 export const PUANTAJ_GRUP_ORDER: PuantajPersonelGrup[] = [
@@ -25,6 +29,8 @@ export const PUANTAJ_GRUP_ORDER: PuantajPersonelGrup[] = [
   'KAMPCI',
   'TESISATCI',
   'MERMERCI',
+  'SOFOR',
+  'OPERATOR',
   'DIGER',
 ];
 
@@ -33,6 +39,8 @@ export function resolvePuantajPersonelGrup(p: Personel): PuantajPersonelGrup {
   if (isKampciGorev(p.gorev)) return 'KAMPCI';
   if (isTesisatciGorev(p.gorev)) return 'TESISATCI';
   if (isMermerciGorev(p.gorev)) return 'MERMERCI';
+  if (isSoforGorev(p.gorev)) return 'SOFOR';
+  if (isOperatorGorev(p.gorev)) return 'OPERATOR';
   return 'DUZ_ISCI';
 }
 
@@ -48,6 +56,10 @@ export function puantajGrupLabel(grup: PuantajPersonelGrup): string {
       return 'TESİSATÇI GRUBU';
     case 'MERMERCI':
       return 'MERMERCİ GRUBU';
+    case 'SOFOR':
+      return 'ŞÖFÖR GRUBU';
+    case 'OPERATOR':
+      return 'OPERATÖR GRUBU';
     default:
       return 'DİĞER PERSONEL';
   }
@@ -65,6 +77,10 @@ function sheetNameForGrup(grup: PuantajPersonelGrup): string {
       return 'Tesisatci';
     case 'MERMERCI':
       return 'Mermerci';
+    case 'SOFOR':
+      return 'Sofor';
+    case 'OPERATOR':
+      return 'Operator';
     default:
       return 'Diger';
   }
@@ -82,6 +98,10 @@ function groupColor(grup: PuantajPersonelGrup): string {
       return 'FFC2410C';
     case 'MERMERCI':
       return 'FFBE185D';
+    case 'SOFOR':
+      return 'FF0369A1';
+    case 'OPERATOR':
+      return 'FFB45309';
     default:
       return 'FF475569';
   }
@@ -148,7 +168,7 @@ const SUMMARY_LABELS = [
 
 function applyPageSetup(ws: any) {
   ws.pageSetup = {
-    paperSize: 8,
+    paperSize: 8, // A3
     orientation: 'landscape',
     fitToPage: true,
     fitToWidth: 1,

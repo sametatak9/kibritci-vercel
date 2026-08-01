@@ -65,7 +65,8 @@ export function shouldBlockYoklamaMassWrite(
 
   if (remoteFilled >= 20) {
     const filledDrop = remoteFilled - mergedFilled;
-    if (filledDrop > 40 || mergedFilled < remoteFilled * 0.88) {
+    // Kalıcı koruma: dolu günlerin %5'inden fazla veya 15+ gün kaybı engellenir
+    if (filledDrop > 15 || mergedFilled < remoteFilled * 0.95) {
       return {
         blocked: true,
         reason: `Şüpheli toplu yoklama silme engellendi (${remoteFilled} → ${mergedFilled} dolu gün). Arşivden geri yükleyebilirsiniz.`,
@@ -73,8 +74,8 @@ export function shouldBlockYoklamaMassWrite(
     }
   }
 
-  if (remoteDateKeys >= 80) {
-    if (mergedDateKeys < remoteDateKeys * 0.88) {
+  if (remoteDateKeys >= 50) {
+    if (mergedDateKeys < remoteDateKeys * 0.95) {
       return {
         blocked: true,
         reason: `Tarih anahtarı kaybı engellendi (${remoteDateKeys} → ${mergedDateKeys}). Bağlantı sorunu olabilir; tekrar deneyin.`,

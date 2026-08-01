@@ -43,6 +43,7 @@ export const MOBILE_ROLE_ALLOWED_TABS: Record<string, PortalPageKey[]> = {
   TESİSATÇI: ['tesisatci_ekrani'],
   MERMERCİ: ['mermerci_ekrani'],
   LOJİSTİK: ['lojistik_ekrani'],
+  OPERATÖR: ['operator'],
   DEPOCU: ['depocu_ekrani'],
   ANAHTARCI: ['imalat_terminali'],
 };
@@ -67,6 +68,8 @@ const YETKI_ALIASES: Record<string, string> = {
   TESISATCI: 'TESİSATÇI',
   TESİSATCI: 'TESİSATÇI',
   MERMERCI: 'MERMERCİ',
+  OPERATOR: 'OPERATÖR',
+  OPERATÖR: 'OPERATÖR',
   'İDARİ İŞLER': 'İDARİ_İŞLER',
   'IDARI ISLER': 'İDARİ_İŞLER',
   IDARI_ISLER: 'İDARİ_İŞLER',
@@ -136,6 +139,7 @@ export function getMobileRoleDisplayName(yetki?: string | null): string {
     MERMERCİ: 'Mermerci Mobil',
     GÜVENLİK: 'Güvenlik Mobil',
     LOJİSTİK: 'Şöför Mobil',
+    OPERATÖR: 'Operatör Mobil',
     DEPOCU: 'Depocu Mobil',
     ANAHTARCI: 'İmalat Terminali Mobil',
   };

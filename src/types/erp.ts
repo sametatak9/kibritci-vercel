@@ -278,6 +278,46 @@ export interface MermerciFaaliyet {
   guncellenme?: string;
 }
 
+/** Şöför mobil — saha/nakliye faaliyeti (Faaliyeti Olan Personeller besler) */
+export interface SoforSahaFaaliyet {
+  id: string;
+  tarih: string;
+  faaliyetGrubu: 'NORMAL' | 'MESAI';
+  isNiteligi: string;
+  parsel: string;
+  blok: string;
+  aciklama: string;
+  fotoUrl?: string | null;
+  fotoUrls?: string[];
+  aktifPersonelListesi?: string[];
+  personelMesaiSaatleri?: Record<string, number>;
+  durum?: string;
+  kaydeden?: string;
+  kaynakEkran?: 'SOFOR_MOBIL';
+  olusturulma?: string;
+  guncellenme?: string;
+}
+
+/** Operatör mobil — iş makinesi saha faaliyeti (Faaliyeti Olan Personeller besler) */
+export interface OperatorSahaFaaliyet {
+  id: string;
+  tarih: string;
+  faaliyetGrubu: 'NORMAL' | 'MESAI';
+  isNiteligi: string;
+  parsel: string;
+  blok: string;
+  aciklama: string;
+  fotoUrl?: string | null;
+  fotoUrls?: string[];
+  aktifPersonelListesi?: string[];
+  personelMesaiSaatleri?: Record<string, number>;
+  durum?: string;
+  kaydeden?: string;
+  kaynakEkran?: 'OPERATOR_MOBIL';
+  olusturulma?: string;
+  guncellenme?: string;
+}
+
 export interface FaturaItem {
   id: string;
   urunAdi: string;

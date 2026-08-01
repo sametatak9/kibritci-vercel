@@ -128,7 +128,10 @@ export function personMatchesFaaliyet(
     .toLowerCase();
   if (
     kaydedenEmail &&
-    (kaynak === 'TESISATCI_MOBIL' || kaynak === 'MERMERCI_MOBIL') &&
+    (kaynak === 'TESISATCI_MOBIL' ||
+      kaynak === 'MERMERCI_MOBIL' ||
+      kaynak === 'SOFOR_MOBIL' ||
+      kaynak === 'OPERATOR_MOBIL') &&
     String(p.eposta || '').trim().toLowerCase() === kaydedenEmail
   ) {
     return true;
@@ -235,9 +238,14 @@ function absorbFaaliyetPersonel(
   const kaydedenKampci = findPersonelByEmail(personeller, f.kaydedenKampci);
   if (kaydedenKampci && isKampciGorev(kaydedenKampci.gorev)) addPerson(kaydedenKampci);
 
-  // Tesisatçı / Mermerci mobil kaydeden
+  // Tesisatçı / Mermerci / Şöför / Operatör mobil kaydeden
   const kaynak = String(f.kaynakEkran || '');
-  if (kaynak === 'TESISATCI_MOBIL' || kaynak === 'MERMERCI_MOBIL') {
+  if (
+    kaynak === 'TESISATCI_MOBIL' ||
+    kaynak === 'MERMERCI_MOBIL' ||
+    kaynak === 'SOFOR_MOBIL' ||
+    kaynak === 'OPERATOR_MOBIL'
+  ) {
     const kaydedenMobil = findPersonelByEmail(personeller, f.kaydeden);
     if (kaydedenMobil) addPerson(kaydedenMobil);
   }

@@ -28,7 +28,7 @@ import {
   Pencil,
   Save,
 } from 'lucide-react';
-import { AylikYoklamaMap, KampFaaliyet, MermerciFaaliyet, Personel, SahaFaaliyeti, TesisatciFaaliyet } from '../types/erp';
+import { AylikYoklamaMap, KampFaaliyet, MermerciFaaliyet, OperatorSahaFaaliyet, Personel, SahaFaaliyeti, SoforSahaFaaliyet, TesisatciFaaliyet } from '../types/erp';
 import { FaaliyetEtiketIlerlemePanel } from './FaaliyetEtiketIlerlemePanel';
 import {
   FAALIYET_ETIKET_ONSETLERI,
@@ -63,7 +63,7 @@ import { formatDateLabelTr, todayDateKey } from '../lib/dateKeyUtils';
 import { isKampciGorev, normalizeTurkishName } from '../lib/yoklamaUtils';
 import { db } from '../lib/firebase';
 import { collection, onSnapshot } from 'firebase/firestore';
-import { tesisatciToSaha, mermerciToSaha } from '../lib/mobilFaaliyetAdapter';
+import { tesisatciToSaha, mermerciToSaha, soforToSaha, operatorToSaha } from '../lib/mobilFaaliyetAdapter';
 import { GunlukFaaliyetProgramScreen } from './GunlukFaaliyetProgramScreen';
 import {
   PARSEL_LIST,
@@ -138,6 +138,8 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
   const [kampFaaliyetleri, setKampFaaliyetleri] = useState<KampFaaliyet[]>([]);
   const [tesisatciFaaliyetleri, setTesisatciFaaliyetleri] = useState<TesisatciFaaliyet[]>([]);
   const [mermerciFaaliyetleri, setMermerciFaaliyetleri] = useState<MermerciFaaliyet[]>([]);
+  const [soforSahaFaaliyetleri, setSoforSahaFaaliyetleri] = useState<SoforSahaFaaliyet[]>([]);
+  const [operatorSahaFaaliyetleri, setOperatorSahaFaaliyetleri] = useState<OperatorSahaFaaliyet[]>([]);
   const [exportingExcel, setExportingExcel] = useState(false);
   const [programFocusPersonId, setProgramFocusPersonId] = useState<string | null>(null);
   const [faaliyetsizSearch, setFaaliyetsizSearch] = useState('');
@@ -176,14 +178,40 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
     return () => unsub();
   }, []);
 
-  /** Formen saha + tesisatçı + mermerci (program atama havuzuna karışmaz) */
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, 'soforSahaFaaliyetleri'), (snap) => {
+      const list: SoforSahaFaaliyet[] = [];
+      snap.forEach((d) => list.push({ id: d.id, ...(d.data() as Omit<SoforSahaFaaliyet, 'id'>) }));
+      setSoforSahaFaaliyetleri(list);
+    });
+    return () => unsub();
+  }, []);
+
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, 'operatorSahaFaaliyetleri'), (snap) => {
+      const list: OperatorSahaFaaliyet[] = [];
+      snap.forEach((d) => list.push({ id: d.id, ...(d.data() as Omit<OperatorSahaFaaliyet, 'id'>) }));
+      setOperatorSahaFaaliyetleri(list);
+    });
+    return () => unsub();
+  }, []);
+
+  /** Formen saha + mobil roller (program atama havuzuna karışmaz) */
   const tumSahaFaaliyetleri = useMemo(
     () => [
       ...sahaFaaliyetleri,
       ...tesisatciFaaliyetleri.map(tesisatciToSaha),
       ...mermerciFaaliyetleri.map(mermerciToSaha),
+      ...soforSahaFaaliyetleri.map(soforToSaha),
+      ...operatorSahaFaaliyetleri.map(operatorToSaha),
     ],
-    [sahaFaaliyetleri, tesisatciFaaliyetleri, mermerciFaaliyetleri]
+    [
+      sahaFaaliyetleri,
+      tesisatciFaaliyetleri,
+      mermerciFaaliyetleri,
+      soforSahaFaaliyetleri,
+      operatorSahaFaaliyetleri,
+    ]
   );
 
   const periodLabel = useMemo(
