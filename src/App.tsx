@@ -244,24 +244,6 @@ export default function App() {
     }
   }, [currentUser]);
 
-  // Eski "mobil istatistik" oturumu: yönetici/Formen için tam ERP sekmelerini geri aç
-  useEffect(() => {
-    if (!currentUser || !isMobileMode || isMobileDirect) return;
-    const matched = findKullaniciByEmail(kullanicilar, currentUser?.email);
-    const yetki = normalizeYetki(matched?.yetki);
-    const email = currentUser?.email?.toLowerCase() || '';
-    const yonetici =
-      yetki === 'YÖNETİCİ' ||
-      yetki === 'KURUCU' ||
-      yetki === 'PROJE_MÜDÜRÜ' ||
-      email === 'sametatak9@gmail.com' ||
-      email === SECONDARY_ADMIN_EMAIL ||
-      email === 'santiye@kibritci.com';
-    if (!(yonetici || isIdariIslerRole(yetki) || yetki === 'FORMEN')) return;
-    setIsMobileDirect(true);
-    localStorage.setItem('kibritci_mobile_direct', 'true');
-  }, [currentUser, isMobileMode, isMobileDirect, kullanicilar]);
-
   // Realtime Cloud Connection Monitor Status
   const [dbStatus, setDbStatus] = useState<'loading' | 'synced' | 'error' | 'offline'>('loading');
   const [loadingMsg, setLoadingMsg] = useState('Google Cloud Veritabanı bağlantısı kuruluyor...');
@@ -314,6 +296,25 @@ export default function App() {
   // Realtime user accounts & vehicle logs
   const [kullanicilar, setKullanicilar] = useState<Kullanici[]>([]);
   const [aracKmLoglari, setAracKmLoglari] = useState<any[]>([]);
+
+  // Eski "mobil istatistik" oturumu: yönetici/Formen için tam ERP sekmelerini geri aç
+  // NOT: kullanicilar declare edildikten sonra — aksi halde TDZ ("Cannot access before initialization")
+  useEffect(() => {
+    if (!currentUser || !isMobileMode || isMobileDirect) return;
+    const matched = findKullaniciByEmail(kullanicilar, currentUser?.email);
+    const yetki = normalizeYetki(matched?.yetki);
+    const email = currentUser?.email?.toLowerCase() || '';
+    const yonetici =
+      yetki === 'YÖNETİCİ' ||
+      yetki === 'KURUCU' ||
+      yetki === 'PROJE_MÜDÜRÜ' ||
+      email === 'sametatak9@gmail.com' ||
+      email === SECONDARY_ADMIN_EMAIL ||
+      email === 'santiye@kibritci.com';
+    if (!(yonetici || isIdariIslerRole(yetki) || yetki === 'FORMEN')) return;
+    setIsMobileDirect(true);
+    localStorage.setItem('kibritci_mobile_direct', 'true');
+  }, [currentUser, isMobileMode, isMobileDirect, kullanicilar]);
 
   // Operator & Heavy Equipment Activity Logs
   const [operatorFaaliyetleri, setOperatorFaaliyetleri] = useState<OperatorFaaliyet[]>([]);
