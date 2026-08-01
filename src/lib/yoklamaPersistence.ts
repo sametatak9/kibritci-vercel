@@ -2,6 +2,7 @@ import {
   collection,
   doc,
   getDoc,
+  getDocFromServer,
   getDocs,
   limit,
   orderBy,
@@ -83,6 +84,21 @@ export async function fetchYoklamaMap(): Promise<AylikYoklamaMap> {
   const docSnap = await withTimeout(getDoc(docRef));
   if (!docSnap.exists()) return {};
   return parseYoklamaDataJson(docSnap.data() as Record<string, unknown>);
+}
+
+/** IndexedDB önbelleğini atlayıp sunucudan oku (masaüstü/telefon senkron farkı için). */
+export async function fetchYoklamaMapFromServer(): Promise<{
+  map: AylikYoklamaMap;
+  dataJson: string | null;
+}> {
+  const docRef = doc(db, 'yoklamalar', YOKLAMA_DOC_ID);
+  const docSnap = await withTimeout(getDocFromServer(docRef), 45000);
+  if (!docSnap.exists()) return { map: {}, dataJson: null };
+  const raw = docSnap.data() as Record<string, unknown>;
+  return {
+    map: parseYoklamaDataJson(raw),
+    dataJson: typeof raw.dataJson === 'string' ? raw.dataJson : null,
+  };
 }
 
 async function fetchYoklamaMapWithRetry(retries = 3): Promise<AylikYoklamaMap> {

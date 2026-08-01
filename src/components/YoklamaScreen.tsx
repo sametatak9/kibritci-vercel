@@ -51,6 +51,12 @@ interface YoklamaScreenProps {
     next: AylikYoklamaMap,
     kaynak?: YoklamaSaveSource
   ) => Promise<unknown>;
+  /** IndexedDB atlayıp sunucudan oku (Firestore'a yazmaz) */
+  reloadYoklamalarFromServer?: () => Promise<{
+    personCount: number;
+    filledDayCount: number;
+    map: AylikYoklamaMap;
+  }>;
   addNotification?: (mesaj: string) => void;
   sahaFaaliyetleri?: SahaFaaliyeti[];
   onOpenFaaliyetPersonel?: () => void;
@@ -62,6 +68,7 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
   yoklamalar, 
   setYoklamalar,
   saveYoklamalarNow,
+  reloadYoklamalarFromServer,
   addNotification,
   sahaFaaliyetleri = [],
   onOpenFaaliyetPersonel,
@@ -96,6 +103,7 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
   const [hasPendingChanges, setHasPendingChanges] = useState(false);
   const [savingDraft, setSavingDraft] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
+  const [serverRefreshLoading, setServerRefreshLoading] = useState(false);
 
   // Report formatting state
   const [reportType, setReportType] = useState<'NORMAL' | 'E-IMZALI'>('NORMAL');
@@ -136,8 +144,51 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
       setDraftYoklamalar(yoklamalar);
       setUndoStack([]);
       setRedoStack([]);
+      return;
     }
-  }, [yoklamalar, hasPendingChanges]);
+    // Takılı boş/zayıf taslak, dolu sunucu haritasını gizlemesin (masaüstü sık)
+    const remoteFilled = countYoklamaFilledDays(yoklamalar);
+    const localFilled = countYoklamaFilledDays(draftYoklamalar);
+    if (remoteFilled > localFilled + 20) {
+      setDraftYoklamalar(yoklamalar);
+      setHasPendingChanges(false);
+      setUndoStack([]);
+      setRedoStack([]);
+      if (addNotification) {
+        addNotification(
+          `Yoklama taslağı sunucu ile senkronlandı (${remoteFilled} dolu gün). Kaydedilmemiş zayıf taslak atıldı.`
+        );
+      }
+    }
+  }, [yoklamalar, hasPendingChanges, draftYoklamalar, addNotification]);
+
+  const handleForceServerRefresh = async () => {
+    if (!reloadYoklamalarFromServer) {
+      alert('Sunucu yenileme bu oturumda kullanılamıyor. Sayfayı Ctrl+Shift+R ile yenileyin.');
+      return;
+    }
+    setServerRefreshLoading(true);
+    try {
+      const stats = await reloadYoklamalarFromServer();
+      setHasPendingChanges(false);
+      setUndoStack([]);
+      setRedoStack([]);
+      setDraftYoklamalar(stats.map);
+      if (addNotification) {
+        addNotification(
+          `Yoklama sunucudan yenilendi: ${stats.personCount} personel · ${stats.filledDayCount} dolu gün.`
+        );
+      }
+      alert(
+        `Sunucudan yüklendi.\nPersonel: ${stats.personCount}\nDolu gün: ${stats.filledDayCount}\n\nHâlâ boşsa üstten «Yoklama Arşivi» ile yedek geri yükleyin.`
+      );
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Sunucu yenilemesi başarısız';
+      alert(msg);
+    } finally {
+      setServerRefreshLoading(false);
+    }
+  };
 
   const updateDraftYoklama = (
     updater: AylikYoklamaMap | ((prev: AylikYoklamaMap) => AylikYoklamaMap)
@@ -440,6 +491,32 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
     const prevMonth = selectedMonth === 1 ? 12 : selectedMonth - 1;
     const prevYear = selectedMonth === 1 ? selectedYear - 1 : selectedYear;
     const prevFilled = countFilledDaysInMonth(source, prevYear, prevMonth);
+
+    // Bu ay boş ama haritada başka ay doluysa (yanlış yıl/ay seçimi) en dolu dönemi bul
+    let bestYear = selectedYear;
+    let bestMonth = selectedMonth;
+    let bestFilled = thisMonth;
+    if (thisMonth === 0) {
+      const monthTotals = new Map<string, number>();
+      for (const personMap of Object.values(source || {})) {
+        if (!personMap || typeof personMap !== 'object') continue;
+        for (const [key, data] of Object.entries(personMap)) {
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(key)) continue;
+          const durum = (data as { durum?: string })?.durum;
+          if (!durum || durum === 'Girilmedi') continue;
+          const ym = key.slice(0, 7);
+          monthTotals.set(ym, (monthTotals.get(ym) || 0) + 1);
+        }
+      }
+      for (const [ym, n] of monthTotals) {
+        if (n > bestFilled) {
+          bestFilled = n;
+          bestYear = Number(ym.slice(0, 4));
+          bestMonth = Number(ym.slice(5, 7));
+        }
+      }
+    }
+
     return {
       persons: countYoklamaPersons(source),
       filledTotal: countYoklamaFilledDays(source),
@@ -447,6 +524,9 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
       prevMonth,
       prevYear,
       prevFilled,
+      bestYear,
+      bestMonth,
+      bestFilled,
     };
   }, [yoklamalar, draftYoklamalar, hasPendingChanges, selectedYear, selectedMonth]);
 
@@ -878,6 +958,16 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
               <span>Taslağı Geri Al</span>
             </button>
             <button
+              type="button"
+              onClick={() => void handleForceServerRefresh()}
+              disabled={serverRefreshLoading || !reloadYoklamalarFromServer}
+              className="text-[11px] bg-sky-50 hover:bg-sky-100 text-sky-900 border border-sky-200 rounded-lg px-3 py-1.5 font-bold cursor-pointer transition flex items-center space-x-1 shadow-sm disabled:opacity-50"
+              title="Telefon dolu / PC boş ise IndexedDB önbelleğini atlayıp sunucudan zorla çeker. Veritabanına yazmaz."
+            >
+              <RefreshCw size={13} className={serverRefreshLoading ? 'animate-spin' : ''} />
+              <span>{serverRefreshLoading ? 'Sunucu…' : 'Sunucudan Yenile'}</span>
+            </button>
+            <button
               onClick={handleToggleArchivePanel}
               className="text-[11px] bg-indigo-50 hover:bg-indigo-100 text-indigo-800 border border-indigo-200 rounded-lg px-3 py-1.5 font-bold cursor-pointer transition flex items-center space-x-1 shadow-sm"
               title="Otomatik yoklama yedeklerini listeler ve geri yükler."
@@ -1279,18 +1369,51 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
             </p>
             <p className="text-[10px] text-amber-900/80 font-semibold leading-snug">
               {yoklamaLoadStats.filledTotal > 0
-                ? `Veritabanından ${yoklamaLoadStats.persons} personel · ${yoklamaLoadStats.filledTotal} dolu gün yüklü; bu ayda yevmiye/mesai kaydı yok. Mor ■ ve koyu mesai kutuları “işe giriş öncesi / çıkış sonrası kapalı gün”dir — silinmiş yoklama değildir. Formen kaydı başka bir tarihe (ör. bugün) yazılmış olabilir. Üstten «Yoklama Arşivi» ile yedekten geri yüklemeyi deneyin.`
-                : 'Henüz hiç yoklama günü yüklenmedi. Ağ / oturumu kontrol edin; «Yoklama Arşivi»nden geri yükleyin. Bu ekranda Kaydet’e basmayın.'}
+                ? `Veritabanından ${yoklamaLoadStats.persons} personel · ${yoklamaLoadStats.filledTotal} dolu gün yüklü; bu ayda yevmiye/mesai kaydı yok. Mor ■ ve koyu mesai kutuları “işe giriş öncesi / çıkış sonrası kapalı gün”dir — silinmiş yoklama değildir. Formen kaydı başka bir tarihe (ör. bugün) yazılmış olabilir. Üstten «Sunucudan Yenile» veya «Yoklama Arşivi» deneyin.`
+                : 'Henüz hiç yoklama günü yüklenmedi. Üstten «Sunucudan Yenile» ile PC önbelleğini atlayın; olmazsa «Yoklama Arşivi»nden geri yükleyin. Bu ekranda Kaydet’e basmayın.'}
             </p>
           </div>
-          {yoklamaLoadStats.prevFilled > 0 && (
+          <div className="flex flex-wrap gap-2 shrink-0">
+            {reloadYoklamalarFromServer && (
+              <button
+                type="button"
+                onClick={() => void handleForceServerRefresh()}
+                disabled={serverRefreshLoading}
+                className="text-[11px] font-extrabold px-3 py-2 rounded-xl bg-sky-700 hover:bg-sky-800 text-white cursor-pointer disabled:opacity-50"
+              >
+                {serverRefreshLoading ? 'Yenileniyor…' : 'Sunucudan Yenile'}
+              </button>
+            )}
+          {yoklamaLoadStats.bestFilled > 0 &&
+            (yoklamaLoadStats.bestYear !== selectedYear ||
+              yoklamaLoadStats.bestMonth !== selectedMonth) && (
+            <button
+              type="button"
+              onClick={() => {
+                setSelectedMonth(yoklamaLoadStats.bestMonth);
+                setSelectedYear(yoklamaLoadStats.bestYear);
+              }}
+              className="text-[11px] font-extrabold px-3 py-2 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white cursor-pointer"
+            >
+              {new Date(yoklamaLoadStats.bestYear, yoklamaLoadStats.bestMonth - 1, 1).toLocaleDateString(
+                'tr-TR',
+                { month: 'long', year: 'numeric' }
+              )}{' '}
+              aç ({yoklamaLoadStats.bestFilled} gün)
+            </button>
+          )}
+          {yoklamaLoadStats.prevFilled > 0 &&
+            !(
+              yoklamaLoadStats.prevYear === yoklamaLoadStats.bestYear &&
+              yoklamaLoadStats.prevMonth === yoklamaLoadStats.bestMonth
+            ) && (
             <button
               type="button"
               onClick={() => {
                 setSelectedMonth(yoklamaLoadStats.prevMonth);
                 setSelectedYear(yoklamaLoadStats.prevYear);
               }}
-              className="text-[11px] font-extrabold px-3 py-2 rounded-xl bg-amber-700 hover:bg-amber-800 text-white cursor-pointer shrink-0"
+              className="text-[11px] font-extrabold px-3 py-2 rounded-xl bg-amber-700 hover:bg-amber-800 text-white cursor-pointer"
             >
               {new Date(yoklamaLoadStats.prevYear, yoklamaLoadStats.prevMonth - 1, 1).toLocaleDateString(
                 'tr-TR',
@@ -1299,6 +1422,7 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
               aç ({yoklamaLoadStats.prevFilled} gün)
             </button>
           )}
+          </div>
         </div>
       )}
 

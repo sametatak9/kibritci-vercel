@@ -122,11 +122,15 @@ import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { syncAuthClaimsFromServer } from './lib/authClaimsClient';
 import { assertErpWriteAuth, formatFirestoreWriteError } from './lib/authWriteGuard';
 import {
+  countYoklamaFilledDays,
+} from './lib/yoklamaGuard';
+import {
   enqueueSahaFaaliyetSave,
   fetchSahaFaaliyetById,
   removeSahaFaaliyetSafe,
   type SahaFaaliyetSaveSource,
 } from './lib/sahaFaaliyetPersistence';
+import { fetchYoklamaMapFromServer } from './lib/yoklamaPersistence';
 import { LoginScreen } from './components/LoginScreen';
 const YetkiVermeScreen = lazy(() => import('./components/YetkiVermeScreen').then(m => ({ default: m.YetkiVermeScreen })));
 const OperatorScreen = lazy(() => import('./components/OperatorScreen').then(m => ({ default: m.OperatorScreen })));
@@ -1384,16 +1388,68 @@ export default function App() {
         const rawJson = typeof raw.dataJson === 'string' ? raw.dataJson : null;
         // Aynı payload tekrar parse/render edilmesin (kasma)
         if (rawJson && rawJson === yoklamaJsonSeenRef.current) return;
-        if (rawJson) yoklamaJsonSeenRef.current = rawJson;
 
         const data = parseYoklamaSnapshotData(raw) as AylikYoklamaMap;
-        setYoklamalar(data);
+        const nextFilled = countYoklamaFilledDays(data);
+        const fromCache = Boolean(snap.metadata?.fromCache);
+
+        setYoklamalar((prev) => {
+          const prevFilled = countYoklamaFilledDays(prev);
+          // Masaüstü IndexedDB bazen eski/zayıf paket döndürür — dolu haritayı ezme
+          if (
+            fromCache &&
+            prevFilled >= 80 &&
+            nextFilled < Math.max(30, prevFilled * 0.25)
+          ) {
+            console.warn('[yoklama] Cache snapshot küçülmesi yok sayıldı', {
+              prevFilled,
+              nextFilled,
+            });
+            return prev;
+          }
+          return data;
+        });
+        // Ref'i yalnızca kabul edilen (veya ilk) paket için güncelle — zayıf cache ezmesin
+        if (
+          !(
+            fromCache &&
+            countYoklamaFilledDays(data) < 30 &&
+            (yoklamaJsonSeenRef.current?.length || 0) > 50_000
+          )
+        ) {
+          if (rawJson) yoklamaJsonSeenRef.current = rawJson;
+        }
         if (hasSubstantialYoklamaData(data)) markProductionLive();
       },
       (err) => {
         console.warn('Yoklama canlı dinleme hatası:', err);
       }
     );
+
+    // Açılışta sunucudan zorla oku — telefon/PC önbellek farkını kapat
+    void (async () => {
+      try {
+        const { map, dataJson } = await fetchYoklamaMapFromServer();
+        const serverFilled = countYoklamaFilledDays(map);
+        setYoklamalar((prev) => {
+          const prevFilled = countYoklamaFilledDays(prev);
+          if (serverFilled >= prevFilled || prevFilled < 30) {
+            return map;
+          }
+          console.warn('[yoklama] Sunucu zayıf, mevcut daha dolu korunuyor', {
+            prevFilled,
+            serverFilled,
+          });
+          return prev;
+        });
+        if (dataJson && (serverFilled >= 30 || !yoklamaJsonSeenRef.current)) {
+          yoklamaJsonSeenRef.current = dataJson;
+        }
+        if (hasSubstantialYoklamaData(map)) markProductionLive();
+      } catch (err) {
+        console.warn('Yoklama sunucu yenilemesi atlandı:', err);
+      }
+    })();
 
     const unsubKullanicilar = onSnapshot(collection(db, 'kullanicilar'), (snapshot) => {
       const raw = parseKullanicilarSnapshot(snapshot.docs) as Kullanici[];
@@ -2432,6 +2488,19 @@ export default function App() {
     return result;
   };
 
+  /** Masaüstü IndexedDB sapması: sunucudan oku, state güncelle (Firestore'a yazmaz). */
+  const reloadYoklamalarFromServer = async () => {
+    const { map, dataJson } = await fetchYoklamaMapFromServer();
+    if (dataJson) yoklamaJsonSeenRef.current = dataJson;
+    setYoklamalar(map);
+    if (hasSubstantialYoklamaData(map)) markProductionLive();
+    return {
+      personCount: Object.keys(map || {}).length,
+      filledDayCount: countYoklamaFilledDays(map),
+      map,
+    };
+  };
+
   const setYoklamalarWithSync = (updater: AylikYoklamaMap | ((y: AylikYoklamaMap) => AylikYoklamaMap)) => {
     setYoklamalar((prev) => {
       const next = typeof updater === 'function' ? updater(prev) : updater;
@@ -3342,6 +3411,7 @@ export default function App() {
                   yoklamalar={yoklamalar}
                   setYoklamalar={setYoklamalarWithSync}
                   saveYoklamalarNow={saveYoklamalarNow}
+                  reloadYoklamalarFromServer={reloadYoklamalarFromServer}
                   addNotification={addNotification}
                   sahaFaaliyetleri={sahaFaaliyetleri}
                   onOpenFaaliyetPersonel={() => handleTabNavigation('faaliyet_personel')}
