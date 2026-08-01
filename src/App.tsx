@@ -333,6 +333,7 @@ export default function App() {
   const deltaKapiCariSeedRef = useRef(false);
   const yeditepePersonelSeedRef = useRef(false);
   const yeditepeCariSeedRef = useRef(false);
+  const kampRepairInFlightRef = useRef(false);
   const yoklamaJsonSeenRef = useRef<string | null>(null);
   const yoklamaSyncPendingRef = useRef<{
     prev: AylikYoklamaMap;
