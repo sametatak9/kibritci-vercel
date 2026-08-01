@@ -2933,7 +2933,8 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
           saveYoklamalarNow={saveYoklamalarNow}
           currentUser={currentUser}
           gonderenFallback="kampci"
-          title="KAMPÇI AYLIK PUANTAJ / MESAİ"
+          storageKey="aylik_puantaj_last_kampci"
+          title="KAMPÇI AYLIK YOKLAMA / MESAİ"
           onStatus={showKampYoklamaStatus}
         />
       )}
