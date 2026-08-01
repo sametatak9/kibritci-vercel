@@ -19,8 +19,24 @@ import {
   YoklamaArchiveEntry,
 } from '../lib/yoklamaPersistence';
 import type { YoklamaSaveSource } from '../lib/yoklamaPersistence';
+import { countYoklamaFilledDays, countYoklamaPersons } from '../lib/yoklamaGuard';
 import { db } from '../lib/firebase';
 import { collection, onSnapshot } from 'firebase/firestore';
+
+/** Seçili ayda Girilmedi dışı dolu hücre sayısı */
+function countFilledDaysInMonth(map: AylikYoklamaMap, year: number, month: number): number {
+  const prefix = `${year}-${String(month).padStart(2, '0')}-`;
+  let n = 0;
+  for (const personMap of Object.values(map || {})) {
+    if (!personMap || typeof personMap !== 'object') continue;
+    for (const [key, data] of Object.entries(personMap)) {
+      if (!key.startsWith(prefix)) continue;
+      const durum = (data as { durum?: string })?.durum;
+      if (durum && durum !== 'Girilmedi') n++;
+    }
+  }
+  return n;
+}
 
 const maskName = (name?: string): string => {
   return name || '';
@@ -423,9 +439,25 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
   const daysInMonth = new Date(selectedYear, selectedMonth, 0).getDate();
   const daysArray = Array.from({ length: daysInMonth }, (_, i) => i + 1);
 
+  const yoklamaLoadStats = useMemo(() => {
+    const source = hasPendingChanges ? draftYoklamalar : yoklamalar;
+    const thisMonth = countFilledDaysInMonth(source, selectedYear, selectedMonth);
+    const prevMonth = selectedMonth === 1 ? 12 : selectedMonth - 1;
+    const prevYear = selectedMonth === 1 ? selectedYear - 1 : selectedYear;
+    const prevFilled = countFilledDaysInMonth(source, prevYear, prevMonth);
+    return {
+      persons: countYoklamaPersons(source),
+      filledTotal: countYoklamaFilledDays(source),
+      thisMonth,
+      prevMonth,
+      prevYear,
+      prevFilled,
+    };
+  }, [yoklamalar, draftYoklamalar, hasPendingChanges, selectedYear, selectedMonth]);
+
   // Yoklama codes list for cycling: G: Geldi, Y: Yok, İ: İzinli, R: Raporlu, P: Pazar, T: Tatil
   const statusCycle: YoklamaDurum[] = ['Geldi', 'Yok', 'İzinli', 'Raporlu', 'Pazar', 'Tatil', 'Girilmedi'];
-  
+   
   const getStatusColor = (status: YoklamaDurum) => {
     switch (status) {
       case 'Geldi': return 'bg-emerald-100 text-emerald-800 border-emerald-200';
@@ -1120,6 +1152,12 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
                   <option key={y} value={y}>{y}</option>
                 ))}
               </select>
+              <span className="text-[10px] font-bold text-slate-500 bg-slate-100 border border-slate-200 rounded-lg px-2 py-1">
+                {new Date(selectedYear, selectedMonth - 1, 1).toLocaleDateString('tr-TR', {
+                  month: 'long',
+                  year: 'numeric',
+                })}
+              </span>
             </div>
 
             <button
@@ -1582,6 +1620,41 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
             </button>
           </div>
         </div>
+
+      {yoklamaLoadStats.thisMonth === 0 && (
+        <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 flex flex-wrap items-center justify-between gap-3 shrink-0">
+          <div className="space-y-1 min-w-0">
+            <p className="text-[11px] font-extrabold text-amber-950">
+              {new Date(selectedYear, selectedMonth - 1, 1).toLocaleDateString('tr-TR', {
+                month: 'long',
+                year: 'numeric',
+              })}{' '}
+              dönemi şu an boş görünüyor
+            </p>
+            <p className="text-[10px] text-amber-900/80 font-semibold leading-snug">
+              {yoklamaLoadStats.filledTotal > 0
+                ? `Veritabanından ${yoklamaLoadStats.persons} personel · ${yoklamaLoadStats.filledTotal} dolu gün yüklü. Bu ay için henüz kayıt yok (yeni ay başlangıcı olabilir). Önceki ayları dönem seçiminden açın — veri silinmedi.`
+                : 'Henüz hiç yoklama günü yüklenmedi. Ağ bağlantısı / oturumu kontrol edin; varsa «Arşivden geri yükle» kullanın. Bu ekranda Kaydet’e basmayın.'}
+            </p>
+          </div>
+          {yoklamaLoadStats.prevFilled > 0 && (
+            <button
+              type="button"
+              onClick={() => {
+                setSelectedMonth(yoklamaLoadStats.prevMonth);
+                setSelectedYear(yoklamaLoadStats.prevYear);
+              }}
+              className="text-[11px] font-extrabold px-3 py-2 rounded-xl bg-amber-700 hover:bg-amber-800 text-white cursor-pointer shrink-0"
+            >
+              {new Date(yoklamaLoadStats.prevYear, yoklamaLoadStats.prevMonth - 1, 1).toLocaleDateString(
+                'tr-TR',
+                { month: 'long', year: 'numeric' }
+              )}{' '}
+              aç ({yoklamaLoadStats.prevFilled} gün)
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Main Grid Card View */}
       <div className="flex-1 bg-white border border-[#e2e8f0] rounded-2xl flex flex-col overflow-hidden shadow-sm">
