@@ -159,7 +159,8 @@ export const KampGunlukYoklamaTab: React.FC<KampGunlukYoklamaTabProps> = ({
 
     setSavingAttendance(true);
     try {
-      let nextYoklamalar = { ...yoklamalar };
+      const sparse: AylikYoklamaMap = {};
+      const gonderen = currentUser?.email || 'kampci';
 
       activeStaff.forEach((p) => {
         let durumToSave: YoklamaDurum | null = null;
@@ -173,20 +174,20 @@ export const KampGunlukYoklamaTab: React.FC<KampGunlukYoklamaTabProps> = ({
         }
 
         if (durumToSave) {
-          const personelMap = nextYoklamalar[p.id] as any || {};
-          const currentMap = setYoklamaDay(personelMap, year, month, day, {
+          sparse[p.id] = setYoklamaDay(sparse[p.id], year, month, day, {
             durum: durumToSave,
             mesaiSaati: mesaiToSave,
-            gonderen: currentUser?.email || 'kampci'
+            gonderen,
           });
-          nextYoklamalar[p.id] = currentMap as any;
         }
       });
 
-      if (setYoklamalar) {
-        setYoklamalar(nextYoklamalar);
+      if (Object.keys(sparse).length === 0) {
+        if (addNotification) addNotification('Kaydedilecek işaretli personel yok.');
+        return;
       }
-      await saveYoklamalarNow(nextYoklamalar);
+
+      await saveYoklamalarNow(sparse);
 
       setHasLocalAttendanceDraft(false);
       const stamp = new Date().toLocaleString('tr-TR');

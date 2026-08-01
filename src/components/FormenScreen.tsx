@@ -533,7 +533,7 @@ export const FormenScreen: React.FC<FormenScreenProps> = ({
     setMesaiSaatleri(copy);
   };
 
-  // Digital Signature Save — yalnızca dokunulan personeller yazılır; işaretsiz eski kayıt silinmez
+  // Digital Signature Save — yalnızca dokunulan personelin SEÇİLİ GÜNÜ yazılır (tam harita gönderme)
   const handleSaveYoklama = async () => {
     if (savingAttendance) return;
     setSavingAttendance(true);
@@ -543,42 +543,54 @@ export const FormenScreen: React.FC<FormenScreenProps> = ({
         showStatus('error', authBlock);
         return;
       }
-      const next = { ...yoklamalar };
       const idsToWrite =
         attendanceTouchedIds.length > 0
           ? attendanceTouchedIds
           : [...presentIds, ...absentIds];
 
+      if (idsToWrite.length === 0) {
+        showStatus('error', 'Kaydedilecek işaretli personel yok. Önce Geldi / Yok seçin.');
+        return;
+      }
+
+      // Kritik: sadece değişen gün hücreleri — tam yoklama haritası gönderilmez
+      // (aksi halde yerel Girilmedi kayıtları sunucudaki dolu Temmuz günlerini ezebilir)
+      const sparse: AylikYoklamaMap = {};
+      const gonderen = currentUser?.email || 'formen';
+
       idsToWrite.forEach((pid) => {
-        const dayData = getYoklamaDay(next[pid], year, month, day);
         if (presentIds.includes(pid)) {
-          next[pid] = setYoklamaDay(next[pid], year, month, day, {
-            ...(dayData || { durum: 'Girilmedi' as YoklamaDurum, mesaiSaati: 0 }),
+          sparse[pid] = setYoklamaDay(sparse[pid], year, month, day, {
             durum: 'Geldi',
             mesaiSaati: mesaiSaatleri[pid] || 0,
-            gonderen: currentUser?.email || 'formen',
+            gonderen,
           });
         } else if (absentIds.includes(pid)) {
-          next[pid] = setYoklamaDay(next[pid], year, month, day, {
-            ...(dayData || { durum: 'Girilmedi' as YoklamaDurum, mesaiSaati: 0 }),
+          sparse[pid] = setYoklamaDay(sparse[pid], year, month, day, {
             durum: 'Yok',
             mesaiSaati: 0,
-            gonderen: currentUser?.email || 'formen',
+            gonderen,
           });
         } else {
-          // Formen bu kişiyi bilinçli sıfırladı → ancak o zaman Girilmedi
-          next[pid] = setYoklamaDay(next[pid], year, month, day, {
+          // Bilinçli sıfırlama — yalnızca bu gün
+          sparse[pid] = setYoklamaDay(sparse[pid], year, month, day, {
             durum: 'Girilmedi',
             mesaiSaati: 0,
-            gonderen: currentUser?.email || 'formen',
+            gonderen,
           });
         }
       });
 
       if (saveYoklamalarNow) {
-        await saveYoklamalarNow(next);
+        await saveYoklamalarNow(sparse);
       } else {
-        setYoklamalar(next);
+        setYoklamalar((prev) => {
+          const merged = { ...prev };
+          for (const [pid, days] of Object.entries(sparse)) {
+            merged[pid] = { ...(merged[pid] || {}), ...(days as object) } as any;
+          }
+          return merged;
+        });
       }
 
       setHasLocalAttendanceDraft(false);
@@ -590,7 +602,10 @@ export const FormenScreen: React.FC<FormenScreenProps> = ({
       } catch {
         /* ignore */
       }
-      showStatus('success', `📅 ${selectedDate} Tarihli Yoklama ve Mesai Saatleri, Formen imzasıyla başarıyla sisteme kaydedildi ve ana programa gönderildi!`);
+      showStatus(
+        'success',
+        `📅 ${selectedDate} · ${idsToWrite.length} personel kaydedildi (diğer günler korunur). Ana programda aynı tarihi kontrol edin.`
+      );
     } catch (err: any) {
       showStatus('error', formatFirestoreWriteError(err, err?.message || 'Yoklama kaydedilemedi'));
     } finally {
@@ -835,18 +850,42 @@ ${satirlar
     const hasPrev = previousMesaiMap && Object.values(previousMesaiMap).some((h) => Number(h) > 0);
     if (!hasNew && !hasPrev) return;
 
-    let next = { ...yoklamalar };
+    const dk = normalizeDateKey(tarih);
+    if (!dk) return;
+    const [y, m, d] = dk.split('-').map(Number);
     const gonderen = formenEmail || 'FORMEN_MOBIL';
+
+    let working = { ...yoklamalar };
     if (hasPrev) {
-      next = applySahaMesaiToYoklama(next, tarih, previousMesaiMap, gonderen, 'subtract');
+      working = applySahaMesaiToYoklama(working, tarih, previousMesaiMap, gonderen, 'subtract');
     }
     if (hasNew) {
-      next = applySahaMesaiToYoklama(next, tarih, mesaiMap, gonderen, 'add');
+      working = applySahaMesaiToYoklama(working, tarih, mesaiMap, gonderen, 'add');
     }
+
+    // Sadece bu tarihe dokunan personelleri yaz
+    const touchedIds = new Set([
+      ...Object.keys(mesaiMap || {}),
+      ...Object.keys(previousMesaiMap || {}),
+    ]);
+    const sparse: AylikYoklamaMap = {};
+    for (const pid of touchedIds) {
+      const dayData = getYoklamaDay(working[pid], y, m, d);
+      if (!dayData) continue;
+      sparse[pid] = setYoklamaDay(sparse[pid], y, m, d, dayData);
+    }
+    if (Object.keys(sparse).length === 0) return;
+
     if (saveYoklamalarNow) {
-      await saveYoklamalarNow(next);
+      await saveYoklamalarNow(sparse);
     } else {
-      setYoklamalar(next);
+      setYoklamalar((prev) => {
+        const merged = { ...prev };
+        for (const [pid, days] of Object.entries(sparse)) {
+          merged[pid] = { ...(merged[pid] || {}), ...(days as object) } as any;
+        }
+        return merged;
+      });
     }
   };
 

@@ -1633,8 +1633,8 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
             </p>
             <p className="text-[10px] text-amber-900/80 font-semibold leading-snug">
               {yoklamaLoadStats.filledTotal > 0
-                ? `Veritabanından ${yoklamaLoadStats.persons} personel · ${yoklamaLoadStats.filledTotal} dolu gün yüklü. Bu ay için henüz kayıt yok (yeni ay başlangıcı olabilir). Önceki ayları dönem seçiminden açın — veri silinmedi.`
-                : 'Henüz hiç yoklama günü yüklenmedi. Ağ bağlantısı / oturumu kontrol edin; varsa «Arşivden geri yükle» kullanın. Bu ekranda Kaydet’e basmayın.'}
+                ? `Veritabanından ${yoklamaLoadStats.persons} personel · ${yoklamaLoadStats.filledTotal} dolu gün yüklü; bu ayda yevmiye/mesai kaydı yok. Mor ■ ve koyu mesai kutuları “işe giriş öncesi / çıkış sonrası kapalı gün”dir — silinmiş yoklama değildir. Formen kaydı başka bir tarihe (ör. bugün) yazılmış olabilir. Üstten «Yoklama Arşivi» ile yedekten geri yüklemeyi deneyin.`
+                : 'Henüz hiç yoklama günü yüklenmedi. Ağ / oturumu kontrol edin; «Yoklama Arşivi»nden geri yükleyin. Bu ekranda Kaydet’e basmayın.'}
             </p>
           </div>
           {yoklamaLoadStats.prevFilled > 0 && (
