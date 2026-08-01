@@ -244,6 +244,24 @@ export default function App() {
     }
   }, [currentUser]);
 
+  // Eski "mobil istatistik" oturumu: yönetici/Formen için tam ERP sekmelerini geri aç
+  useEffect(() => {
+    if (!currentUser || !isMobileMode || isMobileDirect) return;
+    const matched = findKullaniciByEmail(kullanicilar, currentUser?.email);
+    const yetki = normalizeYetki(matched?.yetki);
+    const email = currentUser?.email?.toLowerCase() || '';
+    const yonetici =
+      yetki === 'YÖNETİCİ' ||
+      yetki === 'KURUCU' ||
+      yetki === 'PROJE_MÜDÜRÜ' ||
+      email === 'sametatak9@gmail.com' ||
+      email === SECONDARY_ADMIN_EMAIL ||
+      email === 'santiye@kibritci.com';
+    if (!(yonetici || isIdariIslerRole(yetki) || yetki === 'FORMEN')) return;
+    setIsMobileDirect(true);
+    localStorage.setItem('kibritci_mobile_direct', 'true');
+  }, [currentUser, isMobileMode, isMobileDirect, kullanicilar]);
+
   // Realtime Cloud Connection Monitor Status
   const [dbStatus, setDbStatus] = useState<'loading' | 'synced' | 'error' | 'offline'>('loading');
   const [loadingMsg, setLoadingMsg] = useState('Google Cloud Veritabanı bağlantısı kuruluyor...');
@@ -3057,9 +3075,16 @@ export default function App() {
       );
     }
 
-    if (isMobileDirect) {
-      // Fall through to normal responsive layout
-    } else {
+    // FORMEN / yönetici / idari: mobilde de tam kabuk (Yoklama, Faaliyet, Saha sekmeleri).
+    // Eski "MOBİL SÜRÜM (İSTATİSTİK)" MobileManagerScreen bu sekmeleri tamamen yutuyordu.
+    const keepFullErpShell =
+      isMobileDirect ||
+      role === 'FORMEN' ||
+      isYonetici ||
+      isIdariIsler ||
+      !isMobileRole(role);
+
+    if (!keepFullErpShell) {
       return (
         <MobileManagerScreen
           currentUser={currentUser}
@@ -3114,10 +3139,11 @@ export default function App() {
           onClose={() => setIsSidebarOpen(false)}
           kisitliSayfalar={sanitizeKisitliSayfalar(userYetki, matchedU?.kisitliSayfalar)}
           onToggleMobileMode={() => {
+            // Tam ERP kabuğu (sidebar + Yoklama/Faaliyet/Saha); istatistik kabuğu sekmeleri yutmasın
             setIsMobileMode(true);
-            setIsMobileDirect(false);
+            setIsMobileDirect(true);
             localStorage.setItem('kibritci_mobile_mode', 'true');
-            localStorage.setItem('kibritci_mobile_direct', 'false');
+            localStorage.setItem('kibritci_mobile_direct', 'true');
           }}
         />
       )}
@@ -3160,9 +3186,9 @@ export default function App() {
             onNotificationClick={handleNotificationClick}
             onToggleMobileMode={() => {
               setIsMobileMode(true);
-              setIsMobileDirect(false);
+              setIsMobileDirect(true);
               localStorage.setItem('kibritci_mobile_mode', 'true');
-              localStorage.setItem('kibritci_mobile_direct', 'false');
+              localStorage.setItem('kibritci_mobile_direct', 'true');
             }}
             onProfileClick={() => setIsProfileModalOpen(true)}
             pendingOnayCount={countChromePendingOnay({

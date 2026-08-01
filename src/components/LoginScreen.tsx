@@ -961,13 +961,14 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
                   type="submit"
                   disabled={loading}
                   onClick={() => {
+                    // Tam ERP sekmeleri (Yoklama / Faaliyet / Saha / Formen) — istatistik kabuğu yutmasın
                     localStorage.setItem('kibritci_mobile_mode', 'true');
-                    localStorage.setItem('kibritci_mobile_direct', 'false');
+                    localStorage.setItem('kibritci_mobile_direct', 'true');
                   }}
                   className="bg-slate-800 hover:bg-slate-750 active:scale-[0.98] text-slate-200 font-bold py-2.5 px-2 rounded-xl border border-slate-700/60 transition flex items-center justify-center space-x-1 cursor-pointer text-[10px]"
                 >
                   <Smartphone size={12} className="text-amber-550 shrink-0" />
-                  <span className="truncate">MOBİL SÜRÜM (İSTATİSTİK)</span>
+                  <span className="truncate">MOBİL SÜRÜM (TAM ERP)</span>
                 </button>
 
                 <button
