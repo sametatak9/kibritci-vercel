@@ -81,8 +81,9 @@ export const KampGunlukYoklamaTab: React.FC<KampGunlukYoklamaTabProps> = ({
       } else if (personelKapsami === 'operator') {
         if (!isOperatorGorev(p.gorev)) return false;
       } else {
-        // Kampçı yoklama: kampçılar + şöförler
-        if (!isKampciGorev(p.gorev) && !isSoforGorev(p.gorev)) return false;
+        // Kampçı yoklama: yalnızca kampçılar (şöför/operatör kendi ekranlarında)
+        if (isSoforGorev(p.gorev) || isOperatorGorev(p.gorev)) return false;
+        if (!isKampciGorev(p.gorev)) return false;
       }
       return isDayActiveForPersonel(p, year, month, day, yoklamalar[p.id] as any);
     });

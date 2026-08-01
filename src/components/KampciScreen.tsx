@@ -23,6 +23,7 @@ import {
   isTaseronPersonel,
   isKampciGorev,
   isSoforGorev,
+  isOperatorGorev,
   isIdariPersonel,
 } from '../lib/yoklamaUtils';
 import { firmaEslesir } from '../lib/taseronUtils';
@@ -88,7 +89,9 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
   const filterKampciPersonel = React.useCallback(
     (p: Personel) => {
       if (isTaseronPersonel(p) || isIdariPersonel(p)) return false;
-      return isKampciGorev(p.gorev) || isSoforGorev(p.gorev);
+      // Şöför / operatör kendi yoklamalarında; kampçı listesinde görünmez
+      if (isSoforGorev(p.gorev) || isOperatorGorev(p.gorev)) return false;
+      return isKampciGorev(p.gorev);
     },
     []
   );

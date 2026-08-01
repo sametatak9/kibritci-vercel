@@ -10,7 +10,7 @@ import { Personel, AylikYoklamaMap, YoklamaDurum, SahaFaaliyeti as SahaFaaliyeti
 import { db, saveDocument } from '../lib/firebase';
 import { assertErpWriteAuth, formatFirestoreWriteError } from '../lib/authWriteGuard';
 import { compressImage } from '../lib/imageCompress';
-import { buildPersonelListForMonth, getYoklamaDay, isDayActiveForPersonel, isTaseronPersonel, isIdariPersonel, setYoklamaDay, isKampciTesisatciMermerci } from '../lib/yoklamaUtils';
+import { buildPersonelListForMonth, getYoklamaDay, isDayActiveForPersonel, isTaseronPersonel, isIdariPersonel, setYoklamaDay, isKampciTesisatciMermerci, isSoforGorev, isOperatorGorev } from '../lib/yoklamaUtils';
 import { buildFormenGunlukOzet } from '../lib/gunlukAkisUtils';
 import { buildWhatsAppUrl, isLegacySahaRecord } from '../lib/mobilOnayUtils';
 import {
@@ -160,6 +160,7 @@ export const FormenScreen: React.FC<FormenScreenProps> = ({
 
   const filterFormenPuantajPersonel = React.useCallback((p: Personel) => {
     if (isTaseronPersonel(p) || isIdariPersonel(p)) return false;
+    if (isSoforGorev(p.gorev) || isOperatorGorev(p.gorev)) return false;
     if (isKampciTesisatciMermerci(p.gorev)) return false;
     return true;
   }, []);
@@ -246,6 +247,7 @@ export const FormenScreen: React.FC<FormenScreenProps> = ({
     () =>
       monthPersonelList.filter((p) => {
         if (isTaseronPersonel(p) || isIdariPersonel(p)) return false;
+        if (isSoforGorev(p.gorev) || isOperatorGorev(p.gorev)) return false;
         if (isKampciTesisatciMermerci(p.gorev)) return false;
         return isDayActiveForPersonel(p, year, month, day, yoklamalar[p.id] as any);
       }),
