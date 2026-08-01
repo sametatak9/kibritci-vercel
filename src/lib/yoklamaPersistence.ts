@@ -25,6 +25,11 @@ import { hasSubstantialYoklamaData, isProductionLive } from './productionDataGua
 export const YOKLAMA_DOC_ID = 'global_yoklama_map';
 export const YOKLAMA_ARCHIVE_COLLECTION = 'yoklamaArsivleri';
 const MAX_ARCHIVES = 80;
+/** Arşiv budama en fazla bu kadar saniyede bir çalışır (her kayıtta tam tarama yok) */
+const ARCHIVE_PRUNE_MIN_INTERVAL_MS = 10 * 60 * 1000;
+
+let lastArchivePruneAt = 0;
+let archivePruneInFlight: Promise<void> | null = null;
 
 export type YoklamaSaveSource =
   | 'yoklama_screen'
@@ -134,17 +139,28 @@ export async function archiveYoklamaSnapshot(
     20000
   );
 
-  void pruneOldYoklamaArchives().catch((err) => {
-    console.warn('Yoklama arşivi temizliği atlandı:', err);
-  });
+  const now = Date.now();
+  if (now - lastArchivePruneAt >= ARCHIVE_PRUNE_MIN_INTERVAL_MS) {
+    lastArchivePruneAt = now;
+    if (!archivePruneInFlight) {
+      archivePruneInFlight = pruneOldYoklamaArchives()
+        .catch((err) => {
+          console.warn('Yoklama arşivi temizliği atlandı:', err);
+        })
+        .finally(() => {
+          archivePruneInFlight = null;
+        });
+    }
+  }
 
   return id;
 }
 
 async function pruneOldYoklamaArchives(): Promise<void> {
   const colRef = collection(db, YOKLAMA_ARCHIVE_COLLECTION);
+  // Sadece fazlalık kadar oku — tüm arşiv koleksiyonunu çekme
   const snapshot = await withTimeout(
-    getDocs(query(colRef, orderBy('olusturmaTarihi', 'desc')))
+    getDocs(query(colRef, orderBy('olusturmaTarihi', 'desc'), limit(MAX_ARCHIVES + 25)))
   );
   const docs = snapshot.docs;
   if (docs.length <= MAX_ARCHIVES) return;
@@ -174,9 +190,8 @@ export async function listYoklamaArchives(limitCount = 25): Promise<YoklamaArchi
 }
 
 export async function loadYoklamaArchiveMap(archiveId: string): Promise<AylikYoklamaMap> {
-  const snapshot = await withTimeout(getDocs(collection(db, YOKLAMA_ARCHIVE_COLLECTION)));
-  const found = snapshot.docs.find((d) => d.id === archiveId);
-  if (!found) throw new Error('Arşiv kaydı bulunamadı');
+  const found = await withTimeout(getDoc(doc(db, YOKLAMA_ARCHIVE_COLLECTION, archiveId)));
+  if (!found.exists()) throw new Error('Arşiv kaydı bulunamadı');
   return parseYoklamaDataJson(found.data() as Record<string, unknown>);
 }
 

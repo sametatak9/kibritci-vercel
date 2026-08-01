@@ -139,20 +139,15 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
     }
   }, [yoklamalar, hasPendingChanges]);
 
-  const cloneYoklamaMap = (map: AylikYoklamaMap): AylikYoklamaMap =>
-    JSON.parse(JSON.stringify(map || {})) as AylikYoklamaMap;
-
-  const isSameYoklamaMap = (a: AylikYoklamaMap, b: AylikYoklamaMap): boolean =>
-    JSON.stringify(a || {}) === JSON.stringify(b || {});
-
   const updateDraftYoklama = (
     updater: AylikYoklamaMap | ((prev: AylikYoklamaMap) => AylikYoklamaMap)
   ) => {
     setDraftYoklamalar((prev) => {
       const next = typeof updater === 'function' ? updater(prev) : updater;
-      if (isSameYoklamaMap(prev, next)) return prev;
+      if (prev === next) return prev;
+      // Derin klon yok: prev zaten immutable anlık görüntü
       setUndoStack((stack) => {
-        const merged = [...stack, cloneYoklamaMap(prev)];
+        const merged = [...stack, prev];
         return merged.length > 80 ? merged.slice(merged.length - 80) : merged;
       });
       setRedoStack([]);
@@ -256,21 +251,21 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
   const handleUndoDraftChange = () => {
     if (undoStack.length === 0 || savingDraft) return;
     const previous = undoStack[undoStack.length - 1];
-    const current = cloneYoklamaMap(draftYoklamalar);
+    const current = draftYoklamalar;
     setUndoStack((stack) => stack.slice(0, -1));
     setRedoStack((stack) => [...stack, current]);
     setDraftYoklamalar(previous);
-    setHasPendingChanges(!isSameYoklamaMap(previous, yoklamalar));
+    setHasPendingChanges(previous !== yoklamalar);
   };
 
   const handleRedoDraftChange = () => {
     if (redoStack.length === 0 || savingDraft) return;
     const next = redoStack[redoStack.length - 1];
-    const current = cloneYoklamaMap(draftYoklamalar);
+    const current = draftYoklamalar;
     setRedoStack((stack) => stack.slice(0, -1));
     setUndoStack((stack) => [...stack, current]);
     setDraftYoklamalar(next);
-    setHasPendingChanges(!isSameYoklamaMap(next, yoklamalar));
+    setHasPendingChanges(next !== yoklamalar);
   };
 
   const handleAiFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {

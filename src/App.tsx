@@ -333,7 +333,11 @@ export default function App() {
   const deltaKapiCariSeedRef = useRef(false);
   const yeditepePersonelSeedRef = useRef(false);
   const yeditepeCariSeedRef = useRef(false);
-  const kampRepairInFlightRef = useRef(false);
+  const yoklamaJsonSeenRef = useRef<string | null>(null);
+  const yoklamaSyncPendingRef = useRef<{
+    prev: AylikYoklamaMap;
+    next: AylikYoklamaMap;
+  } | null>(null);
   const personelAutoCreateBlocklistRef = useRef(new Set<string>());
   const personelDeletedIdBlocklistRef = useRef(new Set<string>());
   const kampKayitlariRef = useRef(kampKayitlari);
@@ -1352,23 +1356,24 @@ export default function App() {
       }
     }, markDashboardSnapshotError('personeller'));
 
-    const unsubYoklamalar = onSnapshot(doc(db, 'yoklamalar', 'global_yoklama_map'), (snap) => {
-      if (!snap.exists()) return;
-      const data = parseYoklamaSnapshotData(snap.data() as Record<string, unknown>) as AylikYoklamaMap;
-      const personCount = Object.keys(data).length;
-      let totalDayKeys = 0;
-      let nonDateKeyCount = 0;
-      Object.values(data).forEach((personMap) => {
-        if (!personMap || typeof personMap !== 'object') return;
-        const keys = Object.keys(personMap as Record<string, unknown>);
-        totalDayKeys += keys.length;
-        keys.forEach((k) => {
-          if (!/^\d{4}-\d{2}-\d{2}$/.test(k)) nonDateKeyCount++;
-        });
-      });
-      setYoklamalar(data);
-      if (hasSubstantialYoklamaData(data)) markProductionLive();
-    });
+    const unsubYoklamalar = onSnapshot(
+      doc(db, 'yoklamalar', 'global_yoklama_map'),
+      (snap) => {
+        if (!snap.exists()) return;
+        const raw = snap.data() as Record<string, unknown>;
+        const rawJson = typeof raw.dataJson === 'string' ? raw.dataJson : null;
+        // Aynı payload tekrar parse/render edilmesin (kasma)
+        if (rawJson && rawJson === yoklamaJsonSeenRef.current) return;
+        if (rawJson) yoklamaJsonSeenRef.current = rawJson;
+
+        const data = parseYoklamaSnapshotData(raw) as AylikYoklamaMap;
+        setYoklamalar(data);
+        if (hasSubstantialYoklamaData(data)) markProductionLive();
+      },
+      (err) => {
+        console.warn('Yoklama canlı dinleme hatası:', err);
+      }
+    );
 
     const unsubKullanicilar = onSnapshot(collection(db, 'kullanicilar'), (snapshot) => {
       const raw = parseKullanicilarSnapshot(snapshot.docs) as Kullanici[];
@@ -2397,12 +2402,29 @@ export default function App() {
       throw new Error(result.error || 'Yoklama kaydedilemedi');
     }
     setYoklamalar(result.map || next);
+    if (result.map) {
+      try {
+        yoklamaJsonSeenRef.current = JSON.stringify(result.map);
+      } catch {
+        /* ignore */
+      }
+    }
     return result;
   };
 
   const setYoklamalarWithSync = (updater: AylikYoklamaMap | ((y: AylikYoklamaMap) => AylikYoklamaMap)) => {
     setYoklamalar((prev) => {
       const next = typeof updater === 'function' ? updater(prev) : updater;
+      if (next === prev) return prev;
+      yoklamaSyncPendingRef.current = { prev, next };
+      return next;
+    });
+    // Yan etki state updater dışında (StrictMode çift çağrıda çift yazma riski yok)
+    queueMicrotask(() => {
+      const pending = yoklamaSyncPendingRef.current;
+      if (!pending) return;
+      yoklamaSyncPendingRef.current = null;
+      const { prev, next } = pending;
       void (async () => {
         const authBlock = await assertErpWriteAuth();
         if (authBlock) {
@@ -2414,9 +2436,14 @@ export default function App() {
         if (!result.ok) {
           setYoklamalar(prev);
           notifyYoklamaSaveFailure(result.error || 'Yoklama kaydı sunucuya yazılamadı');
+          return;
+        }
+        if (result.map) {
+          const rawJson = JSON.stringify(result.map);
+          yoklamaJsonSeenRef.current = rawJson;
+          setYoklamalar(result.map);
         }
       })();
-      return next;
     });
   };
 

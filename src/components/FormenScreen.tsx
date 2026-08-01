@@ -238,13 +238,21 @@ export const FormenScreen: React.FC<FormenScreenProps> = ({
 
   const parsellerList = PARSEL_LIST;
 
-  const monthPersonelList = buildPersonelListForMonth(personeller, yoklamalar, year, month);
-  const activeStaff = monthPersonelList.filter((p) => {
-    if (isTaseronPersonel(p) || isIdariPersonel(p)) return false;
-    // Kampçı, Tesisatçı ve Mermerci personeller Kampçı ekranında listelenecektir.
-    if (isKampciTesisatciMermerci(p.gorev)) return false;
-    return isDayActiveForPersonel(p, year, month, day, yoklamalar[p.id] as any);
-  });
+  const monthPersonelList = useMemo(
+    () => buildPersonelListForMonth(personeller, yoklamalar, year, month),
+    [personeller, yoklamalar, year, month]
+  );
+  const activeStaff = useMemo(
+    () =>
+      monthPersonelList.filter((p) => {
+        if (isTaseronPersonel(p) || isIdariPersonel(p)) return false;
+        if (isKampciTesisatciMermerci(p.gorev)) return false;
+        return isDayActiveForPersonel(p, year, month, day, yoklamalar[p.id] as any);
+      }),
+    [monthPersonelList, yoklamalar, year, month, day]
+  );
+  const presentIdSet = useMemo(() => new Set(presentIds), [presentIds]);
+  const absentIdSet = useMemo(() => new Set(absentIds), [absentIds]);
   const assignedPersonelOnSelectedDate = useMemo(() => {
     const ids = new Set<string>();
     selectedDateFaaliyetleri.forEach((f) => {
@@ -254,17 +262,19 @@ export const FormenScreen: React.FC<FormenScreenProps> = ({
     return ids;
   }, [selectedDateFaaliyetleri, editingFaaliyetId]);
 
-  const faaliyetPersonelPoolBase = activeStaff.filter(
-    (p) => presentIds.includes(p.id) && !assignedPersonelOnSelectedDate.has(p.id)
+  const faaliyetPersonelPoolBase = useMemo(
+    () => activeStaff.filter((p) => presentIdSet.has(p.id) && !assignedPersonelOnSelectedDate.has(p.id)),
+    [activeStaff, presentIdSet, assignedPersonelOnSelectedDate]
   );
-  const filteredFaaliyetPersonelPool = faaliyetPersonelPoolBase.filter((p) => {
+  const filteredFaaliyetPersonelPool = useMemo(() => {
     const q = faaliyetPersonelSearch.trim().toLocaleLowerCase('tr-TR');
-    if (!q) return true;
-    return (
-      `${p.ad} ${p.soyad}`.toLocaleLowerCase('tr-TR').includes(q) ||
-      String(p.gorev || '').toLocaleLowerCase('tr-TR').includes(q)
+    if (!q) return faaliyetPersonelPoolBase;
+    return faaliyetPersonelPoolBase.filter(
+      (p) =>
+        `${p.ad} ${p.soyad}`.toLocaleLowerCase('tr-TR').includes(q) ||
+        String(p.gorev || '').toLocaleLowerCase('tr-TR').includes(q)
     );
-  });
+  }, [faaliyetPersonelPoolBase, faaliyetPersonelSearch]);
 
   const parseDateParts = (dateStr: string) => {
     const [y, m, d] = String(dateStr || '').split('-').map(Number);
@@ -474,11 +484,19 @@ export const FormenScreen: React.FC<FormenScreenProps> = ({
   const getDisplayName = (ad?: string, soyad?: string): string =>
     `${ad || '-'} ${soyad || ''}`.trim();
 
-  const remainingStaff = activeStaff.filter(p => !presentIds.includes(p.id) && !absentIds.includes(p.id));
-  const filteredRemaining = remainingStaff.filter(p => 
-    `${p.ad} ${p.soyad}`.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    (p.gorev || '').toLowerCase().includes(searchQuery.toLowerCase())
+  const remainingStaff = useMemo(
+    () => activeStaff.filter((p) => !presentIdSet.has(p.id) && !absentIdSet.has(p.id)),
+    [activeStaff, presentIdSet, absentIdSet]
   );
+  const filteredRemaining = useMemo(() => {
+    const q = searchQuery.toLowerCase();
+    if (!q) return remainingStaff;
+    return remainingStaff.filter(
+      (p) =>
+        `${p.ad} ${p.soyad}`.toLowerCase().includes(q) ||
+        (p.gorev || '').toLowerCase().includes(q)
+    );
+  }, [remainingStaff, searchQuery]);
 
   // Spotlight staff (the first unmarked employee in the pile)
   const spotlightStaff = filteredRemaining[0] || null;
