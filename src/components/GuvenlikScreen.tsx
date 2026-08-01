@@ -4038,7 +4038,6 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
                               ))}
                             </div>
                           )}
-                          )}
                         </div>
                       </div>
 
