@@ -89,6 +89,8 @@ import { loadKampStateSnapshot, ensureYapıFromOdalari } from './lib/kampYapisi'
 import {
   evictActiveKampResidentsForPersonel,
   isPersonelAktifDurum,
+  reactivateEvictedKampStays,
+  detectMassKampEvictionDate,
 } from './lib/kampPlacementUtils';
 import { probeGeminiApi } from './lib/apiClient';
 import {
@@ -366,6 +368,7 @@ export default function App() {
   const personelDeletedIdBlocklistRef = useRef(new Set<string>());
   const kampKayitlariRef = useRef(kampKayitlari);
   const kampOdalariRef = useRef(kampOdalari);
+  const kampAutoRestoreTriedRef = useRef(false);
   kampKayitlariRef.current = kampKayitlari;
   kampOdalariRef.current = kampOdalari;
   const persistenceFailureRef = useRef<(collection: string, message: string) => void>((c, m) => {
@@ -1990,19 +1993,34 @@ export default function App() {
         setKampKayitlari(nextKayitlar);
       }
 
-      // 3. Aktif kamp sakinleri: silinen personeli yeniden oluşturma —
-      //    yetim oda kaydını tahliye et; yalnızca bilinçli misafir yerleşimleri için kart aç.
+      // 3. Aktif kamp sakinleri:
+      //    - personelId kaymışsa İSİMLE eşleştirip yeniden bağla (asla otomatik tahliye etme)
+      //    - yalnızca bilerek silinen / engelli listede olanları tahliye et
+      //    - kartı hiç yoksa (isimle de yok) misafir kartı oluştur — odadan düşürme
       const activeResidents = kampKayitlari.filter((k) => k.durum === 'AKTIF');
       const toCreate: Personel[] = [];
       const orphanKayitIds = new Set<string>();
+      const relinkPatches = new Map<string, string>(); // kayitId → personelId
 
       activeResidents.forEach((k) => {
-        const nameClean = k.personelIsim.trim();
+        const nameClean = (k.personelIsim || '').trim();
         if (!nameClean) return;
 
         const nameKeyLower = nameClean.toLocaleLowerCase('tr-TR');
         const nameKeyNorm = normalizeTurkishName(nameClean);
 
+        const existsById = Boolean(
+          k.personelId && personeller.some((p) => p.id === k.personelId)
+        );
+        const matchedByName = personeller.find((p) => {
+          const fullName = `${p.ad} ${p.soyad}`.trim();
+          return (
+            fullName.toLocaleLowerCase('tr-TR') === nameKeyLower ||
+            normalizeTurkishName(fullName) === nameKeyNorm
+          );
+        });
+
+        // Bilinçli silme engeli — yalnızca bunlar tahliye edilir
         if (personelAutoCreateBlocklistRef.current.has(nameKeyLower)) {
           orphanKayitIds.add(k.id);
           return;
@@ -2017,24 +2035,15 @@ export default function App() {
         }
         if (isPlaceholderPersonelName(nameClean)) return;
 
-        const existsById = Boolean(
-          k.personelId && personeller.some((p) => p.id === k.personelId)
-        );
-        const existsByName = personeller.some((p) => {
-          const fullName = `${p.ad} ${p.soyad}`.trim();
-          return (
-            fullName.toLocaleLowerCase('tr-TR') === nameKeyLower ||
-            normalizeTurkishName(fullName) === nameKeyNorm
-          );
-        });
-
-        // personelId vardı ama kart silinmiş → yeniden oluşturma, kamptan düşür
-        if (k.personelId && !existsById) {
-          orphanKayitIds.add(k.id);
+        // ID yok / kaymış ama isim mevcut → yeniden bağla (tahliye YOK)
+        if (!existsById && matchedByName) {
+          if (k.personelId !== matchedByName.id) {
+            relinkPatches.set(k.id, matchedByName.id);
+          }
           return;
         }
 
-        if (existsById || existsByName) return;
+        if (existsById || matchedByName) return;
 
         const alreadyQueued = toCreate.some((p) => {
           const fullName = `${p.ad} ${p.soyad}`.trim();
@@ -2091,9 +2100,24 @@ export default function App() {
 
       let workingKayitlar = kampKayitlari;
 
+      // ID yeniden bağlama — odada kalır
+      if (relinkPatches.size > 0) {
+        workingKayitlar = workingKayitlar.map((k) => {
+          const newPid = relinkPatches.get(k.id);
+          if (!newPid) return k;
+          const updated = { ...k, personelId: newPid };
+          void saveDocument('kampKayitlari', updated);
+          return updated;
+        });
+        setKampKayitlari(workingKayitlar);
+        console.log(
+          `[kamp] ${relinkPatches.size} yerleşim personelId yeniden bağlandı (tahliye yok)`
+        );
+      }
+
       if (orphanKayitIds.size > 0) {
         const cikisTarihi = new Date().toISOString().slice(0, 10);
-        workingKayitlar = kampKayitlari.map((k) =>
+        workingKayitlar = workingKayitlar.map((k) =>
           orphanKayitIds.has(k.id) && k.durum === 'AKTIF'
             ? { ...k, durum: 'PASIF' as const, cikisTarihi }
             : k
@@ -2151,6 +2175,59 @@ export default function App() {
       }
     }
   }, [personeller, kampKayitlari]);
+
+  // Toplu yanlış tahliye (PASIF) tespit edilirse bir kez otomatik geri yükle
+  useEffect(() => {
+    if (kampAutoRestoreTriedRef.current) return;
+    if (!currentUser) return;
+    if (kampKayitlari.length === 0 || kampOdalari.length === 0) return;
+
+    const aktifCount = kampKayitlari.filter((k) => k.durum === 'AKTIF').length;
+    const mass = detectMassKampEvictionDate(kampKayitlari, 5);
+    if (!mass) return;
+
+    // Aktif yerleşim hâlâ doluysa dokunma
+    if (aktifCount >= mass.count) return;
+
+    const storageKey = `kibritci_kamp_auto_restore_${mass.date}`;
+    try {
+      if (localStorage.getItem(storageKey) === '1') {
+        kampAutoRestoreTriedRef.current = true;
+        return;
+      }
+    } catch {
+      /* ignore */
+    }
+
+    kampAutoRestoreTriedRef.current = true;
+
+    void (async () => {
+      try {
+        const result = await reactivateEvictedKampStays({
+          kampKayitlari: kampKayitlariRef.current,
+          kampOdalari: kampOdalariRef.current,
+          onlyCikisTarihi: mass.date,
+          blockedPersonelIds: personelDeletedIdBlocklistRef.current,
+          blockedNameKeys: personelAutoCreateBlocklistRef.current,
+        });
+        if (result.reactivatedCount > 0) {
+          setKampKayitlari(result.kampKayitlari);
+          setKampOdalari(result.kampOdalari);
+          console.info(
+            `[kamp] Toplu tahliye geri alındı: ${result.reactivatedCount} yerleşim (${mass.date}, atlanan ${result.skippedCount})`
+          );
+        }
+        try {
+          localStorage.setItem(storageKey, '1');
+        } catch {
+          /* ignore */
+        }
+      } catch (err) {
+        console.warn('[kamp] Otomatik yerleşim geri yükleme başarısız:', err);
+        kampAutoRestoreTriedRef.current = false;
+      }
+    })();
+  }, [currentUser, kampKayitlari, kampOdalari]);
 
 
   const setSatinAlmaTalepleriWithSync = (updater: SatinAlmaTalebi[] | ((s: SatinAlmaTalebi[]) => SatinAlmaTalebi[])) => {

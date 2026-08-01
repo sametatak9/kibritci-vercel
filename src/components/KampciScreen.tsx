@@ -8,7 +8,7 @@ import { db, saveDocument } from '../lib/firebase';
 import { compressImage } from '../lib/imageCompress';
 import { ensureKampFaaliyetFotoPersisted } from '../lib/sahaFaaliyetFotoStorage';
 import { createKampYerleske, createKampKat, katsForYerleske, createKampOdasi, deleteKampOdasi, updateKampOdasi } from '../lib/kampYapisi';
-import { assignKampResident, evictKampResident } from '../lib/kampPlacementUtils';
+import { assignKampResident, evictKampResident, reactivateEvictedKampStays, detectMassKampEvictionDate } from '../lib/kampPlacementUtils';
 import { buildKampciGunlukOzet } from '../lib/gunlukAkisUtils';
 import { buildWhatsAppUrl } from '../lib/mobilOnayUtils';
 import { KampHaftalikYoklamaTab } from './KampHaftalikYoklamaTab';
@@ -662,6 +662,61 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
     } catch (err) {
       console.error(err);
       showStatus('error', 'Kamp verileri yenilenemedi.');
+    }
+  };
+
+  const handleRestoreYerlesim = async () => {
+    const aktif = kampKayitlari.filter((k) => k.durum === 'AKTIF').length;
+    const mass = detectMassKampEvictionDate(kampKayitlari, 3);
+    const pasifRecent = kampKayitlari.filter((k) => {
+      if (k.durum !== 'PASIF') return false;
+      const d = (k.cikisTarihi || '').slice(0, 10);
+      if (!d) return true;
+      const cutoff = new Date();
+      cutoff.setDate(cutoff.getDate() - 45);
+      return d >= cutoff.toISOString().slice(0, 10);
+    }).length;
+
+    if (pasifRecent === 0) {
+      showStatus('info', 'Geri yüklenecek yakın tarihli PASIF yerleşim bulunamadı.');
+      return;
+    }
+
+    const msg = mass
+      ? `Aktif yerleşim: ${aktif}\n${mass.date} tarihinde ${mass.count} kişi PASIF görünüyor.\n\nBu toplu tahliyeyi geri alıp personelleri odalarına yerleştirmek istiyor musunuz?`
+      : `Aktif yerleşim: ${aktif}\nSon 45 günde ${pasifRecent} PASIF yerleşim var.\n\nUygun olanları odalarına geri yüklemek istiyor musunuz?`;
+
+    if (!window.confirm(msg)) return;
+
+    showStatus('info', 'Yerleşimler geri yükleniyor…', 0);
+    try {
+      const result = await reactivateEvictedKampStays({
+        kampKayitlari,
+        kampOdalari,
+        withinDays: 45,
+        onlyCikisTarihi: mass?.date,
+      });
+      setKampKayitlari(result.kampKayitlari);
+      setKampOdalari(result.kampOdalari);
+      if (result.reactivatedCount > 0) {
+        showStatus(
+          'success',
+          `${result.reactivatedCount} personel odalarına geri yerleştirildi${result.skippedCount ? ` (${result.skippedCount} atlandı)` : ''}.`
+        );
+        void addNotification?.(
+          `Kamp yerleşim geri yükleme: ${result.reactivatedCount} kayıt AKTIF yapıldı.`
+        );
+      } else {
+        showStatus(
+          'info',
+          result.skippedCount > 0
+            ? `Geri yükleme yapılamadı (${result.skippedCount} kayıt atlandı — kapasite veya mükerrer aktif).`
+            : 'Geri yüklenecek uygun kayıt bulunamadı.'
+        );
+      }
+    } catch (err) {
+      console.error(err);
+      showStatus('error', err instanceof Error ? err.message : 'Yerleşim geri yüklenemedi.');
     }
   };
 
@@ -1863,6 +1918,22 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
               <h3 className="font-bold text-sm text-slate-800 mt-0.5">🔑 Check-In Giriş İşlemi</h3>
             </div>
 
+            {kampKayitlari.filter((k) => k.durum === 'AKTIF').length === 0 &&
+              kampKayitlari.some((k) => k.durum === 'PASIF') && (
+              <div className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-2.5 space-y-2">
+                <p className="text-[10px] font-bold text-amber-950 leading-snug">
+                  Aktif yerleşim görünmüyor. Kayıtlar silinmedi; PASIF’e alınmış olabilir.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => void handleRestoreYerlesim()}
+                  className="w-full bg-amber-600 hover:bg-amber-700 text-white text-[10px] font-black uppercase tracking-wide px-3 py-2 rounded-lg cursor-pointer"
+                >
+                  Yerleşimleri geri yükle
+                </button>
+              </div>
+            )}
+
             <form onSubmit={handlePlacementSubmit} className="space-y-4">
               {/* Target Room Selection — yerleşke → kat → oda */}
               <div className="space-y-1.5">
@@ -1943,6 +2014,14 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
                 className="bg-slate-100 hover:bg-slate-200 text-slate-700 text-[10px] font-bold px-3 py-1.5 rounded-lg transition cursor-pointer flex items-center gap-1"
               >
                 <RefreshCw size={11} /> Yenile
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleRestoreYerlesim()}
+                className="bg-amber-100 hover:bg-amber-200 text-amber-900 text-[10px] font-bold px-3 py-1.5 rounded-lg transition cursor-pointer flex items-center gap-1"
+                title="Yanlışlıkla PASIF’e alınan yerleşimleri odalara geri alır"
+              >
+                <DoorOpen size={11} /> Yerleşim Geri Yükle
               </button>
             </div>
 
