@@ -9,6 +9,7 @@ import {
   GuvenlikFotoSlot,
   isLikelyImageUrl,
   pickPrimaryFotoUrl,
+  formatEvrakGonderimLabel,
 } from '../lib/guvenlikEvrakFotolar';
 
 interface GuvenlikEvrakOnayHavuzuProps {
@@ -293,9 +294,14 @@ export const GuvenlikEvrakOnayHavuzu: React.FC<GuvenlikEvrakOnayHavuzuProps> = (
                       }`}>
                         {docItem.evrakTuru || 'EVRAK'}
                       </span>
-                      <span className="flex items-center gap-1.5 shrink-0">
+                      <span className="flex flex-col items-end gap-0.5 shrink-0">
                         <AcilOnayBadge tarih={docItem.tarih} saat={docItem.saat} />
-                        <span className="text-[9px] text-slate-500 font-mono">{docItem.tarih}{docItem.saat ? ` · ${docItem.saat}` : ''}</span>
+                        <span className="text-[8px] font-black uppercase tracking-wider text-slate-400">
+                          Gönderilme
+                        </span>
+                        <span className="text-[9px] text-slate-700 font-mono font-bold">
+                          {formatEvrakGonderimLabel(docItem)}
+                        </span>
                       </span>
                     </div>
 

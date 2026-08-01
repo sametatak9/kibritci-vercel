@@ -31,6 +31,7 @@ import {
   GuvenlikFotoSlot,
   isLikelyImageUrl,
   pickPrimaryFotoUrl,
+  formatEvrakGonderimLabel,
 } from '../lib/guvenlikEvrakFotolar';
 import {
   buildLeanGuvenlikEvrakFotoFields,
@@ -2191,7 +2192,7 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
             .filter(Boolean)
             .join(' · '),
           kategori: 'MICIR/STABILIZE',
-          tarih: e.tarih || e.islemTarihi || fis?.tarih || '',
+          tarih: formatEvrakGonderimLabel(e) || e.tarih || e.islemTarihi || fis?.tarih || '',
           durum,
           sourceType: 'micirFis',
           sourceId: micirFisId,
@@ -2205,7 +2206,7 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
         title: e.evrakNo || e.fileName || e.evrakTuru || 'Evrak',
         meta: [e.firma, e.evrakTuru, e.durum].filter(Boolean).join(' · '),
         kategori: e.evrakTuru || 'EVRAK',
-        tarih: e.tarih || e.islemTarihi || '',
+        tarih: formatEvrakGonderimLabel(e) || e.tarih || e.islemTarihi || '',
         durum: e.durum || 'BEKLEMEDE',
         sourceType: 'gelenEvrak',
         sourceId: e.id,
@@ -3281,7 +3282,7 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
                           <th className="p-3">Evrak Bilgisi / Dosya</th>
                           <th className="p-3">Tür</th>
                           <th className="p-3">Açıklama</th>
-                          <th className="p-3">Tarih / Saat</th>
+                          <th className="p-3">Gönderilme</th>
                           <th className="p-3">Durum</th>
                           <th className="p-3 text-center">İşlemler</th>
                         </tr>
@@ -3331,9 +3332,16 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
                               <td className="p-3 text-slate-600 max-w-[200px] truncate" title={e.aciklama}>
                                 {e.aciklama || '-'}
                               </td>
-                              <td className="p-3 text-slate-500 font-mono text-[10px]">
-                                <div>{e.tarih}</div>
-                                <div className="text-[9px] mt-0.5">{e.saat}</div>
+                              <td className="p-3 text-slate-600 font-mono text-[10px]">
+                                <div className="text-[8px] font-black uppercase tracking-wider text-slate-400 mb-0.5">
+                                  Kapı gönderimi
+                                </div>
+                                <div className="font-bold text-slate-700">{formatEvrakGonderimLabel(e)}</div>
+                                {(e.tarih || e.saat) && (
+                                  <div className="text-[9px] mt-0.5 text-slate-400">
+                                    İşlem günü: {e.tarih || '—'}{e.saat ? ` · ${e.saat}` : ''}
+                                  </div>
+                                )}
                               </td>
                               <td className="p-3">
                                 <div className="flex flex-col gap-1 items-start">

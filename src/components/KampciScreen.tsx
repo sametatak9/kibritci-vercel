@@ -14,12 +14,15 @@ import { buildWhatsAppUrl } from '../lib/mobilOnayUtils';
 import { KampHaftalikYoklamaTab } from './KampHaftalikYoklamaTab';
 import { KampGunlukYoklamaTab } from './KampGunlukYoklamaTab';
 import { KampVidanjorTab } from './KampVidanjorTab';
+import { AylikPuantajMobilPanel } from './AylikPuantajMobilPanel';
 import { collection, onSnapshot, doc, updateDoc, setDoc, query, orderBy } from 'firebase/firestore';
 import { applySahaMesaiToYoklama, normalizeMesaiHours } from '../lib/sahaFaaliyetUtils';
 import {
   CANONICAL_ANA_FIRMA_ADI,
   canonicalizeAnaFirmaAdi,
   isTaseronPersonel,
+  isKampciGorev,
+  isIdariPersonel,
 } from '../lib/yoklamaUtils';
 import { firmaEslesir } from '../lib/taseronUtils';
 import { validateTC } from '../lib/personelOdemeUtils';
@@ -78,8 +81,16 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
   isStandalone = false,
   addNotification
 }) => {
-  // Tabs: 'rooms' | 'placement' | 'warehouse' | 'activities' | 'haftalik_yoklama' | 'yoklama' | 'vidanjor' | ...
-  const [activeSubTab, setActiveSubTab] = useState<'rooms' | 'placement' | 'warehouse' | 'activities' | 'gunluk_akis' | 'personel_giris' | 'haftalik_yoklama' | 'yoklama' | 'vidanjor'>('placement');
+  // Tabs: 'rooms' | 'placement' | 'warehouse' | 'activities' | 'haftalik_yoklama' | 'yoklama' | 'aylik_puantaj' | 'vidanjor' | ...
+  const [activeSubTab, setActiveSubTab] = useState<'rooms' | 'placement' | 'warehouse' | 'activities' | 'gunluk_akis' | 'personel_giris' | 'haftalik_yoklama' | 'yoklama' | 'aylik_puantaj' | 'vidanjor'>('placement');
+
+  const filterKampciPersonel = React.useCallback(
+    (p: Personel) => {
+      if (isTaseronPersonel(p) || isIdariPersonel(p)) return false;
+      return isKampciGorev(p.gorev);
+    },
+    []
+  );
   const [sendingKampAkis, setSendingKampAkis] = useState(false);
   const [viewMode, setViewMode] = useState<'web' | 'mobile'>('web');
 
@@ -95,6 +106,11 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
     if (type !== 'info' && autoHideMs > 0) {
       statusHideTimer.current = setTimeout(() => setStatusMessage(null), autoHideMs);
     }
+  };
+
+  const showKampYoklamaStatus = (type: 'success' | 'error', text: string) => {
+    showStatus(type, text);
+    void addNotification?.(text);
   };
 
   // Kapı vidanjör girişi → kampçı her sekmedeyken bildirim + titreşim
@@ -1785,6 +1801,18 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
         </button>
 
         <button
+          onClick={() => setActiveSubTab('aylik_puantaj')}
+          className={`px-4 py-2.5 rounded-xl font-bold text-xs transition flex items-center space-x-2 border cursor-pointer ${
+            activeSubTab === 'aylik_puantaj'
+              ? 'bg-amber-500 border-amber-400 text-slate-950 shadow-md shadow-amber-500/20'
+              : 'bg-white border-slate-200/80 text-slate-500 hover:bg-slate-50'
+          }`}
+        >
+          <Calendar size={14} />
+          <span>📊 Aylık Puantaj</span>
+        </button>
+
+        <button
           onClick={() => setActiveSubTab('haftalik_yoklama')}
           className={`px-4 py-2.5 rounded-xl font-bold text-xs transition flex items-center space-x-2 border cursor-pointer ${
             activeSubTab === 'haftalik_yoklama'
@@ -2893,6 +2921,20 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
           saveYoklamalarNow={saveYoklamalarNow}
           currentUser={currentUser}
           addNotification={addNotification}
+        />
+      )}
+
+      {activeSubTab === 'aylik_puantaj' && setYoklamalar && saveYoklamalarNow && (
+        <AylikPuantajMobilPanel
+          personeller={personeller}
+          filterPersonel={filterKampciPersonel}
+          yoklamalar={yoklamalar}
+          setYoklamalar={setYoklamalar}
+          saveYoklamalarNow={saveYoklamalarNow}
+          currentUser={currentUser}
+          gonderenFallback="kampci"
+          title="KAMPÇI AYLIK PUANTAJ / MESAİ"
+          onStatus={showKampYoklamaStatus}
         />
       )}
 

@@ -111,3 +111,32 @@ export function createEmptyUploadPackage(): {
     ...emptyFotoPaket(),
   };
 }
+
+/** Kapı / güvenlik evrakının sisteme gönderildiği an (kayitZamani öncelikli) */
+export function formatEvrakGonderimLabel(e: {
+  kayitZamani?: string | null;
+  tarih?: string | null;
+  saat?: string | null;
+  islemTarihi?: string | null;
+} | null | undefined): string {
+  if (!e) return '—';
+  const iso = String(e.kayitZamani || '').trim();
+  if (iso) {
+    const d = new Date(iso);
+    if (!Number.isNaN(d.getTime())) {
+      return d.toLocaleString('tr-TR', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+    }
+  }
+  const tarih = String(e.tarih || e.islemTarihi || '').trim();
+  const saat = String(e.saat || '').trim();
+  if (tarih && saat) return `${tarih} · ${saat}`;
+  if (tarih) return tarih;
+  return '—';
+}
+
