@@ -287,7 +287,8 @@ function writePersonBlock(
   const yevmiye = resolveYevmiye(p, daysInMonth);
   const aylikMaas = Number(p.maas || 0);
 
-  for (let c = 1; c <= 7; c++) ws.mergeCells(row, c, row + 2, c);
+  // 2 satır: ÇALIŞMA GÜNÜ + MESAİ — günlük yevmiye satırı yok (maaş hesabı sağ özet + alt satırda)
+  for (let c = 1; c <= 7; c++) ws.mergeCells(row, c, row + 1, c);
   ws.getCell(row, 1).value = index;
   ws.getCell(row, 2).value = `${p.ad} ${p.soyad}`;
   ws.getCell(row, 3).value = p.tcNo || '-';
@@ -300,7 +301,6 @@ function writePersonBlock(
   ws.getCell(row, 7).font = { bold: true, color: { argb: 'FF166534' } };
   ws.getCell(row, 8).value = 'ÇALIŞMA GÜNÜ';
   ws.getCell(row + 1, 8).value = 'MESAİ (SAAT)';
-  ws.getCell(row + 2, 8).value = 'YEVMİYE';
 
   dayIndexes.forEach((day, idx) => {
     const col = baseCols + idx + 1;
@@ -325,33 +325,23 @@ function writePersonBlock(
 
     const statusCell = ws.getCell(row, col);
     const mesaiCell = ws.getCell(row + 1, col);
-    const yevmiyeCell = ws.getCell(row + 2, col);
     statusCell.value = active ? (emptyMode ? '' : toStatusSymbol(d.durum)) : '-';
 
     if (!active) {
       mesaiCell.value = '-';
-      yevmiyeCell.value = '-';
       statusCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF1F5F9' } };
       mesaiCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } };
-      yevmiyeCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF1F5F9' } };
     } else if (emptyMode) {
       mesaiCell.value = '';
-      yevmiyeCell.value = '';
     } else {
       mesaiCell.value = mesai > 0 ? mesai : '-';
       if (mesai > 0) mesaiCell.numFmt = '0.0';
-      const earn =
-        d.durum === 'Geldi' || d.durum === 'İzinli' || d.durum === 'Pazar' || d.durum === 'Tatil';
-      yevmiyeCell.value = earn ? Number(yevmiye.toFixed(2)) : '-';
-      if (typeof yevmiyeCell.value === 'number') yevmiyeCell.numFmt = '#,##0.00';
       if (d.durum === 'Geldi') {
         statusCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDCFCE7' } };
-        yevmiyeCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDCFCE7' } };
       } else if (d.durum === 'Yok') {
         statusCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFEE2E2' } };
       } else if (d.durum === 'Pazar' || d.durum === 'Tatil') {
         statusCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFEF3C7' } };
-        yevmiyeCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFEF3C7' } };
       }
     }
 
@@ -364,7 +354,6 @@ function writePersonBlock(
       };
       statusCell.border = b;
       mesaiCell.border = b;
-      yevmiyeCell.border = b;
     }
     if (exitDay === day) {
       const b = {
@@ -380,7 +369,6 @@ function writePersonBlock(
       };
       statusCell.border = b;
       mesaiCell.border = b;
-      yevmiyeCell.border = b;
     }
   });
 
@@ -408,7 +396,7 @@ function writePersonBlock(
   ws.mergeCells(row + 1, summaryStart, row + 1, summaryStart + SUMMARY_LABELS.length - 1);
   ws.getCell(row + 1, summaryStart).value = emptyMode
     ? ''
-    : `Yevmiye ${yevmiye.toFixed(2)} TL (${p.ucretTipi || 'Aylık'}) · Gün Hak ${tahminiMaas.toFixed(2)} · Mesai Hak ${tahminiMesai.toFixed(2)} · Toplam ${tahminiToplam.toFixed(2)} TL`;
+    : `Gün Hak ${tahminiMaas.toFixed(2)} · Mesai Hak ${tahminiMesai.toFixed(2)} · Toplam ${tahminiToplam.toFixed(2)} TL  |  İşe Giriş: ${p.iseGirisTarihi || '-'} | İşten Çıkış: ${p.istenCikisTarihi || '-'}`;
   ws.getCell(row + 1, summaryStart).font = { size: 8, color: { argb: 'FF166534' } };
   ws.getCell(row + 1, summaryStart).fill = {
     type: 'pattern',
@@ -416,20 +404,9 @@ function writePersonBlock(
     fgColor: { argb: 'FFF0FDF4' },
   };
 
-  ws.mergeCells(row + 2, summaryStart, row + 2, summaryStart + SUMMARY_LABELS.length - 1);
-  ws.getCell(row + 2, summaryStart).value =
-    `İşe Giriş: ${p.iseGirisTarihi || '-'} | İşten Çıkış: ${p.istenCikisTarihi || '-'}`;
-  ws.getCell(row + 2, summaryStart).font = { size: 8, color: { argb: 'FF166534' } };
-  ws.getCell(row + 2, summaryStart).fill = {
-    type: 'pattern',
-    pattern: 'solid',
-    fgColor: { argb: 'FFF0FDF4' },
-  };
-
   ws.getRow(row).height = 20;
   ws.getRow(row + 1).height = 16;
-  ws.getRow(row + 2).height = 16;
-  return row + 3;
+  return row + 2;
 }
 
 function writeSignAndPolish(
