@@ -122,11 +122,39 @@ function toStatusSymbol(durum: YoklamaDurum): string {
   return '-';
 }
 
+/**
+ * Günlük yevmiye.
+ * Yoklama ekranı ile aynı kural: aylık maaş → ay gününe böl.
+ * "Günlük" seçili ama tutar aylık gibi yüksekse (yaygın veri hatası) yine aylık sayılır —
+ * aksi halde 30.000 × 3 gün = 90.000 gibi şişirme oluşur.
+ */
 function resolveYevmiye(p: Personel, daysInMonth: number): number {
   const maas = Number(p.maas || 0);
-  if (p.ucretTipi === 'Günlük') return maas;
-  if (p.ucretTipi === 'Saatlik') return maas * 7.5;
-  return maas / Math.max(daysInMonth, 1);
+  if (!Number.isFinite(maas) || maas <= 0) return 0;
+
+  const tip = String(p.ucretTipi || 'Aylık')
+    .trim()
+    .toLocaleLowerCase('tr-TR')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+
+  const gunSayisi = Math.max(daysInMonth, 1);
+
+  if (tip === 'saatlik') {
+    return maas * 7.5;
+  }
+
+  if (tip === 'gunluk') {
+    // Gerçek günlük yevmiye bandı; üzeri → kartta "Günlük" ama maaş aylık girilmiş
+    const GUNLUK_UST_SINIR = 7500;
+    if (maas > GUNLUK_UST_SINIR) {
+      return maas / gunSayisi;
+    }
+    return maas;
+  }
+
+  // Aylık (varsayılan) — YoklamaScreen ile birebir
+  return maas / gunSayisi;
 }
 
 export type ModernPuantajExportOpts = {
