@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   Truck, Tent, Building2, FileText, Users, Mail, Package,
   Plus, Trash2, ShieldAlert, Award, FileUp, CheckCircle, Check, HelpCircle, ClipboardList,
@@ -916,6 +916,7 @@ export const IdariScreen: React.FC<IdariScreenProps> = ({
 
   // Saha PDF Report parameters
   const [sahaReportModal, setSahaReportModal] = useState(false);
+  const sahaReportPrintRef = useRef<HTMLDivElement | null>(null);
   const [sahaReportType, setSahaReportType] = useState<'GUNLUK' | 'AYLIK'>('GUNLUK');
   const [sahaReportDate, setSahaReportDate] = useState(new Date().toISOString().split('T')[0]);
   const [sahaReportMonth, setSahaReportMonth] = useState(6); // June
@@ -4866,10 +4867,72 @@ export const IdariScreen: React.FC<IdariScreenProps> = ({
 
                 <button
                   onClick={() => window.print()}
-                  className="bg-amber-500 hover:bg-amber-600 active:scale-95 text-slate-950 font-bold text-xs px-4 py-2 rounded-xl transition cursor-pointer shadow-sm"
+                  className="bg-amber-500 hover:bg-amber-600 active:scale-95 text-slate-950 font-bold text-xs px-4 py-2 rounded-xl transition cursor-pointer shadow-sm inline-flex items-center gap-1.5"
                 >
-                  🖨️ Yazdır / PDF Al
+                  <Printer size={13} />
+                  Yazdır / PDF Al
                 </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const root = sahaReportPrintRef.current;
+                    if (!root) {
+                      alert('Rapor içeriği hazır değil.');
+                      return;
+                    }
+                    const stamp =
+                      sahaReportType === 'GUNLUK'
+                        ? sahaReportDate
+                        : `2026-${String(sahaReportMonth).padStart(2, '0')}`;
+                    void import('../lib/faaliyetAylikReport').then(
+                      ({ downloadPrintableElementHtml }) => {
+                        downloadPrintableElementHtml(
+                          root,
+                          `Saha_Faaliyet_Raporu_${stamp}.html`,
+                          sahaReportType === 'GUNLUK'
+                            ? `Günlük Saha Faaliyet — ${sahaReportDate}`
+                            : `Aylık Saha Faaliyet — ${sahaReportMonth}. Ay 2026`
+                        );
+                      }
+                    );
+                  }}
+                  className="bg-emerald-500 hover:bg-emerald-600 active:scale-95 text-slate-950 font-bold text-xs px-4 py-2 rounded-xl transition cursor-pointer shadow-sm inline-flex items-center gap-1.5"
+                >
+                  <Download size={13} />
+                  Raporu İndir
+                </button>
+                {sahaReportType === 'AYLIK' && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void import('../lib/faaliyetAylikReport').then(
+                        ({
+                          buildFaaliyetAylikReportHtml,
+                          openFaaliyetAylikReport,
+                          downloadFaaliyetAylikReportHtml,
+                        }) => {
+                          const year = 2026;
+                          const html = buildFaaliyetAylikReportHtml({
+                            year,
+                            month: sahaReportMonth,
+                            sahaFaaliyetleri: tumSahaFaaliyetleri,
+                            personeller,
+                          });
+                          openFaaliyetAylikReport(
+                            html,
+                            `Aylık Personel-Blok — ${sahaReportMonth}. Ay ${year}`
+                          );
+                          downloadFaaliyetAylikReportHtml(html, year, sahaReportMonth);
+                        }
+                      );
+                    }}
+                    className="bg-sky-500 hover:bg-sky-600 active:scale-95 text-slate-950 font-bold text-xs px-4 py-2 rounded-xl transition cursor-pointer shadow-sm inline-flex items-center gap-1.5"
+                    title="Personel ve blok bazlı kapsamlı aylık rapor"
+                  >
+                    <FileText size={13} />
+                    Ayı Raporla
+                  </button>
+                )}
                 <button
                   onClick={() => setSahaReportModal(false)}
                   className="bg-slate-700 hover:bg-slate-800 text-white font-bold text-xs px-4 py-2 rounded-xl transition cursor-pointer"
@@ -4880,7 +4943,10 @@ export const IdariScreen: React.FC<IdariScreenProps> = ({
             </div>
 
             {/* Document Body (Landscape corporate style print) */}
-            <div className="flex-1 overflow-auto bg-white p-12 text-slate-900 printable-document font-sans">
+            <div
+              ref={sahaReportPrintRef}
+              className="flex-1 overflow-auto bg-white p-12 text-slate-900 printable-document font-sans"
+            >
               <CorporateReportLayout
                 orientation="landscape"
                 docCode={`RAPOR MODELİ: KBR-SH-2026-${sahaReportType}`}
@@ -5067,43 +5133,22 @@ export const IdariScreen: React.FC<IdariScreenProps> = ({
                 return (
                   <div className="mt-12 text-xs">
                     <div className="grid grid-cols-3 gap-0 text-center border-l border-t border-black">
-                      
-                      {/* 1. HAZIRLAYAN */}
-                      <div className="border-r border-b border-black p-4 bg-white flex flex-col justify-between min-h-[160px]">
-                        <div>
-                          <span className="font-extrabold text-black tracking-wider uppercase block mb-0.5 text-[11px]">HAZIRLAYAN</span>
+                      {(['Hazırlayan', 'Muhasebe', 'Şantiye Şefi'] as const).map((role) => (
+                        <div
+                          key={role}
+                          className="border-r border-b border-black p-4 bg-white flex flex-col justify-between min-h-[160px]"
+                        >
+                          <div>
+                            <span className="font-extrabold text-black tracking-wider uppercase block mb-0.5 text-[11px]">
+                              {role}
+                            </span>
+                          </div>
+                          <div className="my-auto">
+                            <div className="text-gray-400 italic text-[10px] my-4">(İmza / Kaşe)</div>
+                          </div>
+                          <div className="text-[10px] text-gray-600">Ad Soyad: ______________</div>
                         </div>
-                        <div className="my-auto">
-                           <div className="text-gray-400 italic text-[10px] my-4">
-                             (İmza)
-                           </div>
-                        </div>
-                      </div>
-
-                      {/* 2. ŞANTİYE ŞEFİ */}
-                      <div className="border-r border-b border-black p-4 bg-white flex flex-col justify-between min-h-[160px]">
-                        <div>
-                          <span className="font-extrabold text-black tracking-wider uppercase block mb-0.5 text-[11px]">ŞANTİYE ŞEFİ</span>
-                        </div>
-                        <div className="my-auto">
-                           <div className="text-gray-400 italic text-[10px] my-4">
-                             (İmza)
-                           </div>
-                        </div>
-                      </div>
-
-                      {/* 3. PROJE MÜDÜRÜ */}
-                      <div className="border-r border-b border-black p-4 bg-white flex flex-col justify-between min-h-[160px]">
-                        <div>
-                          <span className="font-extrabold text-black tracking-wider uppercase block mb-0.5 text-[11px]">PROJE MÜDÜRÜ</span>
-                        </div>
-                        <div className="my-auto">
-                           <div className="text-gray-400 italic text-[10px] my-4">
-                             (İmza)
-                           </div>
-                        </div>
-                      </div>
-
+                      ))}
                     </div>
                   </div>
                 );

@@ -141,6 +141,7 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
   const [soforSahaFaaliyetleri, setSoforSahaFaaliyetleri] = useState<SoforSahaFaaliyet[]>([]);
   const [operatorSahaFaaliyetleri, setOperatorSahaFaaliyetleri] = useState<OperatorSahaFaaliyet[]>([]);
   const [exportingExcel, setExportingExcel] = useState(false);
+  const [exportingAylikRapor, setExportingAylikRapor] = useState(false);
   const [programFocusPersonId, setProgramFocusPersonId] = useState<string | null>(null);
   const [faaliyetsizSearch, setFaaliyetsizSearch] = useState('');
   const [etiketFilter, setEtiketFilter] = useState('');
@@ -697,6 +698,37 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
     );
   };
 
+  const handleAyiRaporla = async () => {
+    if (exportingAylikRapor) return;
+    setExportingAylikRapor(true);
+    try {
+      const {
+        buildFaaliyetAylikReportHtml,
+        openFaaliyetAylikReport,
+        downloadFaaliyetAylikReportHtml,
+      } = await import('../lib/faaliyetAylikReport');
+      const html = buildFaaliyetAylikReportHtml({
+        year: selectedYear,
+        month: selectedMonth,
+        sahaFaaliyetleri: tumSahaFaaliyetleri,
+        kampFaaliyetleri,
+        personeller,
+        yoklamalar,
+      });
+      const label = new Date(selectedYear, selectedMonth - 1, 1).toLocaleDateString('tr-TR', {
+        month: 'long',
+        year: 'numeric',
+      });
+      openFaaliyetAylikReport(html, `Aylık Faaliyet — ${label}`);
+      downloadFaaliyetAylikReportHtml(html, selectedYear, selectedMonth);
+    } catch (err) {
+      console.error(err);
+      alert(err instanceof Error ? err.message : 'Aylık rapor oluşturulamadı.');
+    } finally {
+      setExportingAylikRapor(false);
+    }
+  };
+
   const handleDayExcelReport = async () => {
     if (!dayHasRecords) {
       alert('Bu gün için raporlanacak faaliyet kaydı yok.');
@@ -1004,6 +1036,22 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
                 >
                   <ChevronRight size={18} />
                 </button>
+                {(viewMode === 'personel' || viewMode === 'faaliyetsiz') && (
+                  <button
+                    type="button"
+                    onClick={() => void handleAyiRaporla()}
+                    disabled={exportingAylikRapor}
+                    className="ml-1 inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-[10px] font-black uppercase tracking-wide bg-amber-400 text-slate-900 hover:bg-amber-300 cursor-pointer disabled:opacity-60"
+                    title="Personel ve blok bazlı aylık faaliyet raporu"
+                  >
+                    {exportingAylikRapor ? (
+                      <Loader2 size={12} className="animate-spin" />
+                    ) : (
+                      <FileText size={12} />
+                    )}
+                    Ayı Raporla
+                  </button>
+                )}
               </div>
             ) : viewMode === 'gun' ? (
               <div className="flex items-center gap-2 bg-white/10 border border-white/15 rounded-2xl p-2">
