@@ -439,26 +439,60 @@ function writeSignAndPolish(
 ) {
   const signTitleRow = startRow + 1;
   ws.mergeCells(signTitleRow, 1, signTitleRow, totalCols);
-  ws.getCell(signTitleRow, 1).value = 'ONAY / İMZA ALANLARI';
-  ws.getCell(signTitleRow, 1).font = { bold: true, size: 10, color: { argb: 'FF0F172A' } };
+  ws.getCell(signTitleRow, 1).value = 'ONAY / İMZA BARLARI';
+  ws.getCell(signTitleRow, 1).font = { bold: true, size: 11, color: { argb: 'FFFFFFFF' } };
   ws.getCell(signTitleRow, 1).alignment = { horizontal: 'center', vertical: 'middle' };
   ws.getCell(signTitleRow, 1).fill = {
     type: 'pattern',
     pattern: 'solid',
-    fgColor: { argb: 'FFE2E8F0' },
+    fgColor: { argb: 'FF0F172A' },
   };
+  ws.getRow(signTitleRow).height = 22;
 
-  const signRoles = ['Muhasebe', 'İdari İşler', 'Şantiye Şefi', 'Proje Müdürü'];
-  const signStartRow = signTitleRow + 1;
+  const signRoles = ['Hazırlayan', 'Muhasebe', 'Şantiye Şefi'] as const;
+  const signStartRow = signTitleRow + 2;
+  const gap = 1;
+  const usable = totalCols - gap * (signRoles.length - 1);
+  const barWidth = Math.max(4, Math.floor(usable / signRoles.length));
+
   signRoles.forEach((role, idx) => {
-    const startCol = 1 + Math.floor((idx * totalCols) / signRoles.length);
-    const endCol = Math.floor(((idx + 1) * totalCols) / signRoles.length);
-    ws.mergeCells(signStartRow, startCol, signStartRow + 2, endCol);
-    const cell = ws.getCell(signStartRow, startCol);
-    cell.value = `${role}\n\nİmza: __________________`;
-    cell.font = { bold: true, size: 10, color: { argb: 'FF334155' } };
-    cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
-    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } };
+    const startCol = 1 + idx * (barWidth + gap);
+    const endCol = Math.min(totalCols, startCol + barWidth - 1);
+
+    // Rol başlığı
+    ws.mergeCells(signStartRow, startCol, signStartRow, endCol);
+    const titleCell = ws.getCell(signStartRow, startCol);
+    titleCell.value = role.toLocaleUpperCase('tr-TR');
+    titleCell.font = { bold: true, size: 11, color: { argb: 'FFFFFFFF' } };
+    titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
+    titleCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1D4ED8' } };
+    ws.getRow(signStartRow).height = 20;
+
+    // İmza alanı (boş bar)
+    ws.mergeCells(signStartRow + 1, startCol, signStartRow + 4, endCol);
+    const signCell = ws.getCell(signStartRow + 1, startCol);
+    signCell.value = '\n\n\nİmza / Kaşe\n______________________________';
+    signCell.font = { bold: true, size: 10, color: { argb: 'FF334155' } };
+    signCell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+    signCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } };
+    signCell.border = {
+      top: { style: 'medium', color: { argb: 'FF64748B' } },
+      left: { style: 'medium', color: { argb: 'FF64748B' } },
+      right: { style: 'medium', color: { argb: 'FF64748B' } },
+      bottom: { style: 'medium', color: { argb: 'FF64748B' } },
+    };
+    for (let r = signStartRow + 1; r <= signStartRow + 4; r++) {
+      ws.getRow(r).height = 18;
+    }
+
+    // Ad Soyad satırı
+    ws.mergeCells(signStartRow + 5, startCol, signStartRow + 5, endCol);
+    const nameCell = ws.getCell(signStartRow + 5, startCol);
+    nameCell.value = 'Ad Soyad: __________________';
+    nameCell.font = { size: 9, color: { argb: 'FF475569' } };
+    nameCell.alignment = { horizontal: 'center', vertical: 'middle' };
+    nameCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEEF2FF' } };
+    ws.getRow(signStartRow + 5).height = 18;
   });
 
   ws.eachRow((r: any) => {
@@ -732,6 +766,55 @@ export async function exportModernPuantajExcel(opts: ModernPuantajExportOpts): P
   });
   [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].forEach((c) => {
     summaryWs.getColumn(c).width = [6, 22, 16, 14, 12, 10, 8, 10, 10, 13][c - 1];
+  });
+
+  // Özet sayfası sonuna 3 imza barı
+  const ozetSignTitle = sRow + 1;
+  summaryWs.mergeCells(ozetSignTitle, 1, ozetSignTitle, 10);
+  summaryWs.getCell(ozetSignTitle, 1).value = 'ONAY / İMZA BARLARI';
+  summaryWs.getCell(ozetSignTitle, 1).font = { bold: true, size: 11, color: { argb: 'FFFFFFFF' } };
+  summaryWs.getCell(ozetSignTitle, 1).fill = {
+    type: 'pattern',
+    pattern: 'solid',
+    fgColor: { argb: 'FF0F172A' },
+  };
+  summaryWs.getCell(ozetSignTitle, 1).alignment = { horizontal: 'center', vertical: 'middle' };
+  summaryWs.getRow(ozetSignTitle).height = 22;
+
+  const ozetRoles = [
+    { label: 'Hazırlayan', cols: [1, 3] },
+    { label: 'Muhasebe', cols: [4, 6] },
+    { label: 'Şantiye Şefi', cols: [7, 10] },
+  ] as const;
+  const ozetBarRow = ozetSignTitle + 2;
+  ozetRoles.forEach(({ label, cols }) => {
+    const [c1, c2] = cols;
+    summaryWs.mergeCells(ozetBarRow, c1, ozetBarRow, c2);
+    const t = summaryWs.getCell(ozetBarRow, c1);
+    t.value = label.toLocaleUpperCase('tr-TR');
+    t.font = { bold: true, size: 10, color: { argb: 'FFFFFFFF' } };
+    t.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1D4ED8' } };
+    t.alignment = { horizontal: 'center', vertical: 'middle' };
+
+    summaryWs.mergeCells(ozetBarRow + 1, c1, ozetBarRow + 4, c2);
+    const s = summaryWs.getCell(ozetBarRow + 1, c1);
+    s.value = '\n\nİmza / Kaşe\n__________________';
+    s.font = { bold: true, size: 10, color: { argb: 'FF334155' } };
+    s.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+    s.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } };
+    s.border = {
+      top: { style: 'medium', color: { argb: 'FF64748B' } },
+      left: { style: 'medium', color: { argb: 'FF64748B' } },
+      right: { style: 'medium', color: { argb: 'FF64748B' } },
+      bottom: { style: 'medium', color: { argb: 'FF64748B' } },
+    };
+
+    summaryWs.mergeCells(ozetBarRow + 5, c1, ozetBarRow + 5, c2);
+    const n = summaryWs.getCell(ozetBarRow + 5, c1);
+    n.value = 'Ad Soyad: __________________';
+    n.font = { size: 9, color: { argb: 'FF475569' } };
+    n.alignment = { horizontal: 'center', vertical: 'middle' };
+    n.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEEF2FF' } };
   });
 
   const buffer = await wb.xlsx.writeBuffer();
