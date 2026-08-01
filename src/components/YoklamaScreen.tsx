@@ -657,13 +657,32 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
   }, [monthPersoneller, searchTerm]);
 
   const handleExportExcelTables = async (emptyMode: boolean = false) => {
+    // onClick={fn} event nesnesini 1. argüman yapar; yalnızca true boş şablon demektir.
+    const isEmptyTemplate = emptyMode === true;
+    const filled = countFilledDaysInMonth(draftYoklamalar, selectedYear, selectedMonth);
+    const periodLabel = new Date(selectedYear, selectedMonth - 1, 1).toLocaleDateString('tr-TR', {
+      month: 'long',
+      year: 'numeric',
+    });
+    if (
+      !window.confirm(
+        isEmptyTemplate
+          ? `${periodLabel} için BOŞ puantaj şablonu indirilsin mi?\n(Gün/mesai hücreleri boş kalır.)`
+          : `${periodLabel} dönemi Excel puantajı indirilsin mi?\n` +
+              `Personel: ${filteredPersonel.length} · Dolu gün kaydı: ${filled}\n` +
+              `Rapor seçili aya göredir (basım tarihi yalnızca yazdırma anıdır).`
+      )
+    ) {
+      return;
+    }
     await exportModernPuantajExcel({
       personeller: filteredPersonel,
       yoklamalar: draftYoklamalar,
       year: selectedYear,
       month: selectedMonth,
-      emptyMode,
-      filledDayCountInMonth: countFilledDaysInMonth(draftYoklamalar, selectedYear, selectedMonth),
+      emptyMode: isEmptyTemplate,
+      filledDayCountInMonth: filled,
+      skipEmptyConfirm: true,
     });
   };
 
@@ -780,12 +799,19 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
             </div>
 
             <button
-              onClick={handleExportExcelTables}
+              type="button"
+              onClick={() => void handleExportExcelTables(false)}
               className="text-[11px] bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg px-3 py-1.5 font-bold cursor-pointer transition flex items-center space-x-1 shadow-sm border border-emerald-800"
-              title="A3 yatay puantaj: Formen / Düz İşçi / Kampçı / Tesisatçı grupları ayrı, yevmiye sütunu dahil."
+              title={`Seçili dönem (${selectedMonth}/${selectedYear}) gün + mesai + hakediş Excel puantajı. Basım tarihi raporu etkilemez.`}
             >
               <FileText size={13} />
-              <span>Modern Excel Puantaj (Gruplu)</span>
+              <span>
+                Modern Excel —{' '}
+                {new Date(selectedYear, selectedMonth - 1, 1).toLocaleDateString('tr-TR', {
+                  month: 'long',
+                  year: 'numeric',
+                })}
+              </span>
             </button>
 
             {/* Quick bulk actions */}
@@ -871,7 +897,8 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
               <span>{isEditMode ? '🔓 Düzenleme Modu Açık' : '🔒 Yoklama Başlat'}</span>
             </button>
             <button
-              onClick={() => handleExportExcelTables(true)}
+              type="button"
+              onClick={() => void handleExportExcelTables(true)}
               className="text-[11px] bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg px-3 py-1.5 font-bold cursor-pointer transition flex items-center space-x-1 shadow-sm"
               title="Şantiyede günlük elle doldurmak için boş aylık puantaj cetvelini Excel olarak indirir."
             >

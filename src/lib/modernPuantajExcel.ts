@@ -114,8 +114,11 @@ export type ModernPuantajExportOpts = {
   yoklamalar: AylikYoklamaMap;
   year: number;
   month: number;
+  /** true = boş şablon; event nesnesi vb. truthy değerler boş sayılmaz */
   emptyMode?: boolean;
   filledDayCountInMonth?: number;
+  /** UI zaten dönem onayı aldıysa tekrar sorma */
+  skipEmptyConfirm?: boolean;
 };
 
 type SheetCtx = {
@@ -189,16 +192,16 @@ function writeSheetChrome(
   ws.getRow(1).height = 28;
 
   ws.getCell(2, 1).value =
-    `Rapor No: ${reportNo}  |  Basım: ${basimTarihi}  |  A3 Yatay  |  ${headerNote}`;
+    `RAPOR DÖNEMİ: ${monthLabel.toLocaleUpperCase('tr-TR')} (${year}-${String(month).padStart(2, '0')})  ·  ${headerNote}  ·  A3 Yatay`;
   ws.mergeCells(2, 1, 2, totalCols);
-  ws.getCell(2, 1).font = { bold: true, size: 9, color: { argb: 'FF0F172A' } };
+  ws.getCell(2, 1).font = { bold: true, size: 11, color: { argb: 'FFFFFFFF' } };
   ws.getCell(2, 1).alignment = { vertical: 'middle', horizontal: 'center' };
-  ws.getCell(2, 1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2E8F0' } };
+  ws.getCell(2, 1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1D4ED8' } };
 
   ws.getCell(3, 1).value =
-    `Dönem: ${monthLabel}  ·  G=Geldi Y=Yok İ=İzin R=Rapor P=Pazar T=Tatil  ·  Yeşil=İşe giriş  Kırmızı=İşten çıkış`;
+    `G=Geldi Y=Yok İ=İzin R=Rapor P=Pazar T=Tatil  ·  Yeşil=İşe giriş  Kırmızı=İşten çıkış  ·  Rapor No: ${reportNo}  ·  Yazdırma anı (dönem değil): ${basimTarihi}`;
   ws.mergeCells(3, 1, 3, totalCols);
-  ws.getCell(3, 1).font = { bold: true, size: 9, color: { argb: 'FF334155' } };
+  ws.getCell(3, 1).font = { bold: true, size: 8, color: { argb: 'FF334155' } };
   ws.getCell(3, 1).alignment = { vertical: 'middle', horizontal: 'center' };
   ws.getCell(3, 1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } };
 
@@ -555,18 +558,32 @@ function fillTumuSheet(
  * Sayfalar: Tumu + Formen / Duz Isci / Kampci / Tesisatci (+ Mermerci) + Ozet
  */
 export async function exportModernPuantajExcel(opts: ModernPuantajExportOpts): Promise<void> {
-  const { personeller, yoklamalar, year, month, emptyMode = false, filledDayCountInMonth } = opts;
+  const {
+    personeller,
+    yoklamalar,
+    year,
+    month,
+    filledDayCountInMonth,
+    skipEmptyConfirm = false,
+  } = opts;
+  // React onClick event'i truthy gelir — yalnızca strict true boş şablondur.
+  const emptyMode = opts.emptyMode === true;
   const daysInMonth = new Date(year, month, 0).getDate();
   const dayIndexes = Array.from({ length: daysInMonth }, (_, i) => i + 1);
+  const monthLabelEarly = new Date(year, month - 1, 1).toLocaleDateString('tr-TR', {
+    month: 'long',
+    year: 'numeric',
+  });
 
   if (
     !emptyMode &&
+    !skipEmptyConfirm &&
     typeof filledDayCountInMonth === 'number' &&
     filledDayCountInMonth === 0 &&
     typeof window !== 'undefined' &&
     !window.confirm(
-      `${month}. ay / ${year} için sistemde dolu yevmiye/mesai kaydı görünmüyor.\n` +
-        `Rapor hücreleri tire (-) ile iner. Yine de Excel indirilsin mi?\n\n` +
+      `${monthLabelEarly} için sistemde dolu yevmiye/mesai kaydı görünmüyor.\n` +
+        `Rapor yine de seçili ay (${month}/${year}) kolonlarıyla iner; hücreler tire (-) olabilir.\n\n` +
         `(Önce Yoklama Arşivi veya doğru dönemi kontrol edin.)`
     )
   ) {
@@ -633,8 +650,11 @@ export async function exportModernPuantajExcel(opts: ModernPuantajExportOpts): P
   summaryWs.getCell(1, 1).font = { bold: true, size: 13, color: { argb: 'FFFFFFFF' } };
   summaryWs.getCell(1, 1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0F172A' } };
   summaryWs.getCell(1, 1).alignment = { horizontal: 'center', vertical: 'middle' };
-  summaryWs.addRow([`Rapor No: ${reportNo}  |  Basım: ${basimTarihi}`]);
+  summaryWs.addRow([
+    `RAPOR DÖNEMİ: ${monthLabel.toLocaleUpperCase('tr-TR')} (${periodLabel})  |  Rapor No: ${reportNo}  |  Yazdırma anı: ${basimTarihi}`,
+  ]);
   summaryWs.mergeCells(2, 1, 2, 10);
+  summaryWs.getCell(2, 1).font = { bold: true, size: 10, color: { argb: 'FF1D4ED8' } };
 
   let sRow = 3;
   for (const { grup, list } of allList) {
@@ -724,7 +744,9 @@ export async function exportModernPuantajExcel(opts: ModernPuantajExportOpts): P
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `Yoklama_Modern_Rapor_${periodLabel}.xlsx`;
+  a.download = emptyMode
+    ? `Yoklama_Bos_Sablon_${periodLabel}.xlsx`
+    : `Yoklama_Puantaj_${periodLabel}_Donem.xlsx`;
   a.click();
   URL.revokeObjectURL(url);
 }
