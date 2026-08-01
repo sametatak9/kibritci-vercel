@@ -39,15 +39,15 @@ export type MicirSaMatch = {
 };
 
 /**
- * Açık Ento Maden (veya mıcır/stabilize kalemli) satın alma ile kapı fişini eşleştir.
- * Önce kalan miktarı olan SA, yoksa aynı malzeme kalemli açık SA.
+ * Açık Ento Maden (veya mıcır/stabilize kalemli) satın alma adayları.
+ * Sıra: kalan>0 önce · Ento önce · tarih yeni → eski.
  */
-export function findMatchingMicirSatinAlma(
+export function listMatchingMicirSatinAlma(
   satinAlmaTalepleri: SatinAlmaTalebi[] | null | undefined,
   irsaliyeler: Irsaliye[] | null | undefined,
   malzemeTipi: MicirMalzemeTipi,
   opts?: { preferredSaId?: string | null; preferredSaKalemId?: string | null }
-): MicirSaMatch | null {
+): MicirSaMatch[] {
   const list = satinAlmaTalepleri || [];
   const irs = irsaliyeler || [];
 
@@ -57,35 +57,16 @@ export function findMatchingMicirSatinAlma(
     kalan: kalanMiktarForSaKalem(sa, kalem, irs),
   });
 
-  if (opts?.preferredSaId) {
-    const sa = list.find(
-      (s) => s.saId === opts.preferredSaId || s.id === opts.preferredSaId
-    );
-    if (sa && isOpenMicirSatinAlma(sa)) {
-      const preferredKalem = opts.preferredSaKalemId
-        ? sa.kalemler.find((k) => k.id === opts.preferredSaKalemId)
-        : undefined;
-      const kalem =
-        preferredKalem && satinAlmaKalemMatchesMicir(preferredKalem.urunAdi, malzemeTipi)
-          ? preferredKalem
-          : sa.kalemler.find((k) => satinAlmaKalemMatchesMicir(k.urunAdi, malzemeTipi));
-      if (kalem) return scoreMatch(sa, kalem);
-    }
-  }
-
   const candidates: MicirSaMatch[] = [];
   for (const sa of list) {
     if (!isOpenMicirSatinAlma(sa)) continue;
     const ento = isEntoMadenFirma(sa.cariFirma);
     for (const kalem of sa.kalemler || []) {
       if (!satinAlmaKalemMatchesMicir(kalem.urunAdi, malzemeTipi)) continue;
-      // Ento dışı firmada yalnızca kalem adı net eşleşirse kabul
       if (!ento && !satinAlmaKalemMatchesMicir(kalem.urunAdi, malzemeTipi)) continue;
       candidates.push(scoreMatch(sa, kalem));
     }
   }
-
-  if (candidates.length === 0) return null;
 
   candidates.sort((a, b) => {
     const aEnto = isEntoMadenFirma(a.sa.cariFirma) ? 0 : 1;
@@ -94,10 +75,45 @@ export function findMatchingMicirSatinAlma(
     const aOpen = a.kalan > 0 ? 0 : 1;
     const bOpen = b.kalan > 0 ? 0 : 1;
     if (aOpen !== bOpen) return aOpen - bOpen;
-    return String(a.sa.tarih || '').localeCompare(String(b.sa.tarih || ''), 'tr');
+    // Yeni sipariş önce (eski SA-20241212… artık yanlışlıkla kazanmasın)
+    return String(b.sa.tarih || '').localeCompare(String(a.sa.tarih || ''), 'tr');
   });
 
-  return candidates[0];
+  if (opts?.preferredSaId) {
+    const preferred = candidates.find(
+      (c) =>
+        c.sa.saId === opts.preferredSaId ||
+        c.sa.id === opts.preferredSaId
+    );
+    if (preferred) {
+      if (opts.preferredSaKalemId) {
+        const kalem = preferred.sa.kalemler.find((k) => k.id === opts.preferredSaKalemId);
+        if (kalem && satinAlmaKalemMatchesMicir(kalem.urunAdi, malzemeTipi)) {
+          return [
+            scoreMatch(preferred.sa, kalem),
+            ...candidates.filter((c) => c.sa.saId !== preferred.sa.saId || c.kalem.id !== kalem.id),
+          ];
+        }
+      }
+      return [preferred, ...candidates.filter((c) => c !== preferred)];
+    }
+  }
+
+  return candidates;
+}
+
+/**
+ * Açık Ento Maden (veya mıcır/stabilize kalemli) satın alma ile kapı fişini eşleştir.
+ * Önce kalan miktarı olan SA, yoksa aynı malzeme kalemli açık SA (en yeni tarih).
+ */
+export function findMatchingMicirSatinAlma(
+  satinAlmaTalepleri: SatinAlmaTalebi[] | null | undefined,
+  irsaliyeler: Irsaliye[] | null | undefined,
+  malzemeTipi: MicirMalzemeTipi,
+  opts?: { preferredSaId?: string | null; preferredSaKalemId?: string | null }
+): MicirSaMatch | null {
+  const all = listMatchingMicirSatinAlma(satinAlmaTalepleri, irsaliyeler, malzemeTipi, opts);
+  return all[0] || null;
 }
 
 /** Büyük data URL’leri tekrar yazma — Firestore timeout / rollback kök nedeni */

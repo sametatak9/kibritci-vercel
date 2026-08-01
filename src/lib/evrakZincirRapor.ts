@@ -185,7 +185,13 @@ export function buildEvrakZincirRaporHtml(input: EvrakZincirRaporInput): string 
         sevk === 0
           ? `<p class="text-xs text-slate-600 border border-dashed border-slate-200 rounded-xl p-4">
               Bu satın almaya bağlı irsaliye bulunamadı.<br/>
-              <span class="text-slate-500">İrsaliye Giriş’te kayıt varsa SA bağını (saId / kalem) kontrol edin veya Satın Alma’dan «İrsaliye(ler) Oluştur» kullanın.</span>
+              <span class="text-slate-500">
+                Kapıdan girilen mıcır/stabilize fişi yalnızca <strong>yönetici onayı</strong> sonrası
+                «İrsaliyeler» koleksiyonuna yazılır ve SA bağı kurulursa burada görünür.
+                Onay panelinde yanlış / eski SA seçildiyse (ör. 2024 siparişi) bu SA altında 0 kalır —
+                <strong>Onay İşlemleri → Ento Maden İrsaliye</strong> ekranından doğru SA’yı seçip
+                «Onayla &amp; Cariye Kaydet» yapın. İrsaliye Giriş’te kayıt varsa üstteki SA bağını da kontrol edin.
+              </span>
             </p>`
           : `<div class="space-y-3">
         ${irs

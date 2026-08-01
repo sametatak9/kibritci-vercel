@@ -20,6 +20,7 @@ import {
   approveMicirFis,
   findMatchingMicirSatinAlma,
   isMicirFisPending,
+  listMatchingMicirSatinAlma,
   rejectMicirFis,
 } from '../lib/micirOnayUtils';
 
@@ -51,6 +52,7 @@ export const MicirFisOnayPanel: React.FC<MicirFisOnayPanelProps> = ({
   const [plaka, setPlaka] = useState('');
   const [kiloKg, setKiloKg] = useState('');
   const [malzemeTipi, setMalzemeTipi] = useState<MicirMalzemeTipi>('MICIR');
+  const [selectedSaId, setSelectedSaId] = useState('');
   const [saving, setSaving] = useState(false);
 
   const entoCari = useMemo(() => findEntoMadenCari(cariKartlar), [cariKartlar]);
@@ -67,13 +69,22 @@ export const MicirFisOnayPanel: React.FC<MicirFisOnayPanelProps> = ({
 
   const pending = useMemo(() => fisler.filter((f) => isMicirFisPending(f)), [fisler]);
 
+  const saCandidates = useMemo(() => {
+    if (!editing) return [];
+    return listMatchingMicirSatinAlma(satinAlmaTalepleri, irsaliyeler, malzemeTipi, {});
+  }, [editing, satinAlmaTalepleri, irsaliyeler, malzemeTipi]);
+
   const editingSaMatch = useMemo(() => {
     if (!editing) return null;
-    return findMatchingMicirSatinAlma(satinAlmaTalepleri, irsaliyeler, malzemeTipi, {
-      preferredSaId: editing.saId,
-      preferredSaKalemId: editing.saKalemId,
-    });
-  }, [editing, satinAlmaTalepleri, irsaliyeler, malzemeTipi]);
+    if (selectedSaId) {
+      return (
+        findMatchingMicirSatinAlma(satinAlmaTalepleri, irsaliyeler, malzemeTipi, {
+          preferredSaId: selectedSaId,
+        }) || null
+      );
+    }
+    return findMatchingMicirSatinAlma(satinAlmaTalepleri, irsaliyeler, malzemeTipi, {}) || null;
+  }, [editing, selectedSaId, satinAlmaTalepleri, irsaliyeler, malzemeTipi]);
 
   const openEdit = (f: MicirStabilizeFis) => {
     setEditing(f);
@@ -81,7 +92,16 @@ export const MicirFisOnayPanel: React.FC<MicirFisOnayPanelProps> = ({
     setIrsaliyeNo(f.irsaliyeNo);
     setPlaka(f.plaka);
     setKiloKg(String(resolveMicirKiloKg(f) || ''));
-    setMalzemeTipi(normalizeMicirMalzemeTipi(f.malzemeTipi));
+    const tip = normalizeMicirMalzemeTipi(f.malzemeTipi);
+    setMalzemeTipi(tip);
+    // Kapıda eski SA yazılmış olabilir — en yeni açık SA'yı öner, eskiyi listede tut
+    const best = findMatchingMicirSatinAlma(satinAlmaTalepleri, irsaliyeler, tip, {});
+    const prevStillOpen =
+      f.saId &&
+      listMatchingMicirSatinAlma(satinAlmaTalepleri, irsaliyeler, tip, {}).some(
+        (c) => c.sa.saId === f.saId
+      );
+    setSelectedSaId(best?.sa.saId || (prevStillOpen ? f.saId! : '') || f.saId || '');
   };
 
   const handleApprove = async (e: React.FormEvent) => {
@@ -119,8 +139,8 @@ export const MicirFisOnayPanel: React.FC<MicirFisOnayPanelProps> = ({
           fisGorselUrl: editing.fisGorselUrl,
           firmaUnvan: entoCari?.unvan || editing.firmaUnvan || ENTO_MADEN_UNVAN,
           cariKartId: entoCari?.id || editing.cariKartId,
-          saId: editing.saId || editingSaMatch?.sa.saId,
-          saKalemId: editing.saKalemId || editingSaMatch?.kalem.id,
+          saId: selectedSaId || editingSaMatch?.sa.saId,
+          saKalemId: editingSaMatch?.kalem.id,
         },
         onaylayan: currentUser?.email || 'yonetici',
         cariKartlar,
@@ -365,6 +385,30 @@ export const MicirFisOnayPanel: React.FC<MicirFisOnayPanelProps> = ({
                     </select>
                   </div>
                 </div>
+                <div className="space-y-1">
+                  <label className="text-[9px] font-black text-slate-500 uppercase">
+                    Satın alma (SA) bağı
+                  </label>
+                  <select
+                    value={selectedSaId}
+                    onChange={(e) => setSelectedSaId(e.target.value)}
+                    className="w-full bg-white border border-emerald-200 rounded-xl px-3 py-2 font-bold text-[11px]"
+                  >
+                    <option value="">— SA bağlama (sadece irsaliye) —</option>
+                    {saCandidates.map((c) => (
+                      <option key={`${c.sa.saId}-${c.kalem.id}`} value={c.sa.saId}>
+                        {c.sa.saId} · {c.kalem.urunAdi} · kalan{' '}
+                        {c.kalan.toLocaleString('tr-TR')} · {c.sa.tarih || '—'}
+                      </option>
+                    ))}
+                  </select>
+                  {editing?.saId && editing.saId !== selectedSaId && (
+                    <p className="text-[10px] text-amber-700 font-semibold">
+                      Kapıda önceki öneri: {editing.saId} — aşağıda güncel / seçtiğiniz SA
+                      kullanılacak.
+                    </p>
+                  )}
+                </div>
                 <p className="text-[10px] text-slate-600 bg-[#E3F2EE] border border-[#B9DBD2] rounded-xl px-3 py-2">
                   Kaydet → <strong>İrsaliye</strong> + <strong>{entoCari?.unvan || ENTO_MADEN_UNVAN}</strong>{' '}
                   cari kart altına irsaliye geçmişi oluşur.
@@ -377,7 +421,8 @@ export const MicirFisOnayPanel: React.FC<MicirFisOnayPanelProps> = ({
                     </span>
                   ) : (
                     <span className="block mt-1 text-amber-800 font-semibold">
-                      Açık mıcır/stabilize satın alma bulunamadı — irsaliye SA’sız oluşur.
+                      Açık mıcır/stabilize satın alma seçilmedi — irsaliye SA’sız oluşur; evrak
+                      zincirinde bu SA altında görünmez.
                     </span>
                   )}
                 </p>
