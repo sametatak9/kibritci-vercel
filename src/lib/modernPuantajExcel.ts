@@ -6,7 +6,7 @@ import {
   getYoklamaDay,
   isDayActiveForPersonel,
   isFormenGorev,
-  isKampciGorev,
+  isKampciYoklamaKapsami,
   isMermerciGorev,
   isOperatorGorev,
   isSoforGorev,
@@ -36,7 +36,8 @@ export const PUANTAJ_GRUP_ORDER: PuantajPersonelGrup[] = [
 
 export function resolvePuantajPersonelGrup(p: Personel): PuantajPersonelGrup {
   if (isFormenGorev(p.gorev)) return 'FORMEN';
-  if (isKampciGorev(p.gorev)) return 'KAMPCI';
+  // Şenör kampçı yoklama kapsanında → Kampçı grubu sayfasında
+  if (isKampciYoklamaKapsami(p.gorev)) return 'KAMPCI';
   if (isTesisatciGorev(p.gorev)) return 'TESISATCI';
   if (isMermerciGorev(p.gorev)) return 'MERMERCI';
   if (isSoforGorev(p.gorev)) return 'SOFOR';

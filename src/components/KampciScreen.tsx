@@ -21,7 +21,7 @@ import {
   CANONICAL_ANA_FIRMA_ADI,
   canonicalizeAnaFirmaAdi,
   isTaseronPersonel,
-  isKampciGorev,
+  isKampciYoklamaKapsami,
   isSoforGorev,
   isOperatorGorev,
   isIdariPersonel,
@@ -91,7 +91,8 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
       if (isTaseronPersonel(p) || isIdariPersonel(p)) return false;
       // Şöför / operatör kendi yoklamalarında; kampçı listesinde görünmez
       if (isSoforGorev(p.gorev) || isOperatorGorev(p.gorev)) return false;
-      return isKampciGorev(p.gorev);
+      // Kampçı + Şenör
+      return isKampciYoklamaKapsami(p.gorev);
     },
     []
   );

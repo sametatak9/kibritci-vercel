@@ -63,6 +63,17 @@ export function isKampciGorev(gorev?: string): boolean {
   );
 }
 
+/** Şenör (ölçüm / topograf yardımcı) — Kampçı yoklamasında takip edilir */
+export function isSenorGorev(gorev?: string): boolean {
+  const g = normalizeGorevKey(gorev);
+  return g.includes('SENOR') || g.includes('SENÖR') || g === 'CHAINMAN';
+}
+
+/** Kampçı günlük / aylık yoklama listesi: kampçı + şenör */
+export function isKampciYoklamaKapsami(gorev?: string): boolean {
+  return isKampciGorev(gorev) || isSenorGorev(gorev);
+}
+
 export function isFormenGorev(gorev?: string): boolean {
   const g = normalizeGorevKey(gorev);
   // FORMEN / FORMAN / "şantiye formeni" vb.
@@ -74,6 +85,7 @@ export function isKampciTesisatciMermerci(gorev?: string): boolean {
   if (!gorev) return false;
   return (
     isKampciGorev(gorev) ||
+    isSenorGorev(gorev) ||
     isTesisatciGorev(gorev) ||
     isMermerciGorev(gorev) ||
     isSoforGorev(gorev) ||

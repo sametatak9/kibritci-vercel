@@ -9,7 +9,7 @@ import {
   isDayActiveForPersonel, 
   isTaseronPersonel, 
   setYoklamaDay, 
-  isKampciGorev,
+  isKampciYoklamaKapsami,
   isTesisatciGorev,
   isMermerciGorev,
   isSoforGorev,
@@ -25,7 +25,7 @@ interface KampGunlukYoklamaTabProps {
   saveYoklamalarNow?: (next: AylikYoklamaMap) => Promise<void>;
   currentUser: any;
   addNotification?: (mesaj: string) => void;
-  /** Varsayılan: kampçı + şöför. Tesisatçı / mermerci / şöför / operatör kendi mobillerinde */
+  /** Varsayılan: kampçı + şenör. Tesisatçı / mermerci / şöför / operatör kendi mobillerinde */
   personelKapsami?: 'kamp' | 'tesisatci' | 'mermerci' | 'sofor' | 'operator';
 }
 
@@ -81,9 +81,9 @@ export const KampGunlukYoklamaTab: React.FC<KampGunlukYoklamaTabProps> = ({
       } else if (personelKapsami === 'operator') {
         if (!isOperatorGorev(p.gorev)) return false;
       } else {
-        // Kampçı yoklama: yalnızca kampçılar (şöför/operatör kendi ekranlarında)
+        // Kampçı yoklama: kampçılar + şenör (şöför/operatör kendi ekranlarında)
         if (isSoforGorev(p.gorev) || isOperatorGorev(p.gorev)) return false;
-        if (!isKampciGorev(p.gorev)) return false;
+        if (!isKampciYoklamaKapsami(p.gorev)) return false;
       }
       return isDayActiveForPersonel(p, year, month, day, yoklamalar[p.id] as any);
     });
