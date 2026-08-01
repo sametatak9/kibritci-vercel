@@ -85,6 +85,7 @@ export function createIrsaliyelerFromSatinAlma(
       kalemler: [item],
       eImzalar: [],
       fisEvrakUrl: d.plaka ? `Plaka: ${d.plaka}${d.not ? ` · ${d.not}` : ''}` : d.not,
+      donusumKaynagi: 'SA_DONUSUM',
     };
   });
 }

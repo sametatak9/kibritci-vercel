@@ -113,6 +113,8 @@ export type GuvenlikUploadPackage = {
   evrakNo: string;
   /** Araç plakası (taşıma) */
   plaka: string;
+  /** Kullanıcı onaylı SA bağı (boş = henüz seçilmedi) */
+  saId: string;
   /** Manuel / rehber kalemler (kg vb.) */
   kalemler: GuvenlikUploadKalem[];
 } & GuvenlikFotoPaket;
@@ -136,6 +138,7 @@ export function createEmptyUploadPackage(): GuvenlikUploadPackage {
     cariKartId: '',
     evrakNo: '',
     plaka: '',
+    saId: '',
     kalemler: [createEmptyUploadKalem()],
     ...emptyFotoPaket(),
   };

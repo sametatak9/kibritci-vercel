@@ -18,10 +18,12 @@ import {
   doubleCheckKapiMatch,
   formatKapiMatchLabel,
   suggestCariFromDb,
+  suggestSatinAlmaForKapiEvrak,
   suggestStokFromDb,
   upsertKapiDraftIrsaliye,
   finalizeKapiIrsaliyeApproval,
 } from '../lib/kapiIrsaliyeUtils';
+import { resolveGuvenlikEvrakProvenance } from '../lib/evrakProvenance';
 import { autoEnsureCari } from '../lib/evrakBatchImportUtils';
 import {
   countPaketFotolar,
@@ -655,6 +657,7 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
     hints?: {
       firmaHint?: string;
       cariKartId?: string;
+      saId?: string;
       kalemFotoUrl?: string;
       firmaFotoUrl?: string;
       faturaFotoUrl?: string;
@@ -801,11 +804,15 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
               cariKartlar: liveCari,
               stokKartlar: liveStok,
               kaydeden: currentUser?.email || 'nobetci_guvenlik',
+              saId: hints?.saId || undefined,
+              satinAlmaTalepleri: satinAlmaProp,
+              irsaliyeler: irsaliyelerProp,
             });
             updates.irsaliyeId = irsaliye.id;
             updates.cariKartId = summary.cariKartId || updates.cariKartId || '';
             updates.matchSummary = summary;
             updates.kalemler = irsaliye.kalemler;
+            if (hints?.saId) updates.saId = hints.saId;
             if (summary.cariUnvan) updates.firma = summary.cariUnvan;
 
             if (!summary.cariMatched) {
@@ -935,6 +942,44 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
       }
     }
 
+    // SA akıllı eşleşme: otomatik bağ yok — kullanıcı onayı
+    const resolvedSaByQueueId = new Map<string, string>();
+    for (const item of uploadQueue) {
+      if (item.evrakTuru !== 'İRSALİYE') continue;
+      let saId = String(item.saId || '').trim();
+      if (!saId) {
+        const oneriler = suggestSatinAlmaForKapiEvrak({
+          firma: item.firma,
+          cariKartId: item.cariKartId,
+          kalemler: item.kalemler || [],
+          satinAlmaTalepleri: satinAlmaProp,
+          irsaliyeler: irsaliyelerProp,
+          limit: 3,
+        });
+        const top = oneriler[0];
+        if (top && top.score >= 40) {
+          const kalemOzet =
+            top.matchedKalemler.length > 0
+              ? `\nKalem: ${top.matchedKalemler
+                  .slice(0, 3)
+                  .map((m) => `${m.kapiUrunAdi} ↔ ${m.saUrunAdi}`)
+                  .join(', ')}`
+              : '';
+          const ok = window.confirm(
+            `Akıllı eşleşme bulundu.\n\n` +
+              `Satın alma: ${top.saId}\n` +
+              `Firma: ${top.cariFirma}\n` +
+              `Skor: ${top.reason}${kalemOzet}\n\n` +
+              `İlgili satın alma talebine irsaliye bağlamak ister misiniz?\n` +
+              `• Evet → karşılaştırma zinciri (SA ↔ irsaliye)\n` +
+              `• Hayır → arşiv / doğrudan sevk`
+          );
+          if (ok) saId = top.saId;
+        }
+      }
+      if (saId) resolvedSaByQueueId.set(item.id, saId);
+    }
+
     sendInFlightRef.current = true;
     setLoadingIrsaliye(true);
     showStatus('success', 'Evraklar gönderiliyor, lütfen bekleyin…');
@@ -1026,6 +1071,7 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
 
           const evrakNo = String(item.evrakNo || '').trim();
           const plaka = String(item.plaka || '').trim();
+          const saIdBound = resolvedSaByQueueId.get(item.id) || String(item.saId || '').trim();
 
           const newEvrak = cleanUndefined({
             id: uniqueId,
@@ -1033,6 +1079,7 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
             evrakTuru: item.evrakTuru,
             firma: firmaAdi,
             cariKartId: cariKartId || '',
+            saId: saIdBound || '',
             plaka: plaka || '',
             tarih: islemTarihi,
             saat: new Date().toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' }),
@@ -1061,6 +1108,7 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
             kayitZamani: new Date().toISOString(),
             kapidaGirildi: true,
             kaynak: 'KAPI_EVRAK',
+            donusumKaynagi: saIdBound ? 'KAPI_SA_ESLESME' : 'KAPI_EVRAK',
           });
 
           await withTimeout(
@@ -1082,6 +1130,9 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
                 cariKartlar: liveCari,
                 stokKartlar: stokKartlarLive,
                 kaydeden: currentUser?.email || 'nobetci_guvenlik',
+                saId: saIdBound || undefined,
+                satinAlmaTalepleri: satinAlmaProp,
+                irsaliyeler: irsaliyelerProp,
               });
               await updateDoc(doc(db, 'guvenlikGelenEvraklar', uniqueId), cleanUndefined({
                 irsaliyeId: irsaliye.id,
@@ -1089,6 +1140,8 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
                 cariKartId: summary.cariKartId || cariKartId || '',
                 firma: summary.cariUnvan || firmaAdi,
                 kalemler: irsaliye.kalemler || matchedKalemler,
+                saId: saIdBound || '',
+                donusumKaynagi: saIdBound ? 'KAPI_SA_ESLESME' : 'KAPI_EVRAK',
               }));
             } catch (draftErr) {
               console.warn('[kapı] taslak irsaliye:', draftErr);
@@ -1103,6 +1156,7 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
               {
                 firmaHint: firmaAdi || undefined,
                 cariKartId: cariKartId || undefined,
+                saId: saIdBound || undefined,
                 kalemFotoUrl: lean.kalemFotolar[0]?.dataUrl,
                 firmaFotoUrl: lean.firmaFotolar[0]?.dataUrl,
                 faturaFotoUrl: lean.faturaFotolar[0]?.dataUrl,
@@ -3439,6 +3493,81 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
                           </div>
                         )}
 
+                        {item.evrakTuru === 'İRSALİYE' && (
+                          <div className="rounded-xl border border-teal-200 bg-teal-50/40 p-3 space-y-2">
+                            <p className="text-[9px] font-black uppercase tracking-wider text-teal-900">
+                              Satın alma eşleşmesi (karşılaştırma)
+                            </p>
+                            <p className="text-[9px] text-teal-800/80 font-semibold leading-snug">
+                              Eşleşirse zincire bağlanır; eşleşmezse arşiv / doğrudan sevk kalır. Otomatik bağlanmaz.
+                            </p>
+                            {item.saId ? (
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="text-[10px] font-extrabold text-teal-800">
+                                  ✓ SA bağlı · {item.saId}
+                                </span>
+                                <button
+                                  type="button"
+                                  className="text-[9px] font-bold text-slate-500 underline cursor-pointer"
+                                  onClick={() => {
+                                    const next = [...uploadQueue];
+                                    next[index] = { ...next[index], saId: '' };
+                                    setUploadQueue(next);
+                                  }}
+                                >
+                                  Kaldır
+                                </button>
+                              </div>
+                            ) : (
+                              <div className="flex flex-wrap gap-1.5">
+                                {suggestSatinAlmaForKapiEvrak({
+                                  firma: item.firma,
+                                  cariKartId: item.cariKartId,
+                                  kalemler: item.kalemler || [],
+                                  satinAlmaTalepleri: satinAlmaProp,
+                                  irsaliyeler: irsaliyelerProp,
+                                  limit: 4,
+                                }).map((o) => (
+                                  <button
+                                    key={o.saId}
+                                    type="button"
+                                    title={o.reason}
+                                    onClick={() => {
+                                      const ok = window.confirm(
+                                        `Satın alma ${o.saId} (${o.cariFirma}) ile irsaliye bağlansın mı?\n\n` +
+                                          `İlgili satın alma talebine irsaliye oluşturmak / bağlamak ister misiniz?`
+                                      );
+                                      if (!ok) return;
+                                      const next = [...uploadQueue];
+                                      next[index] = { ...next[index], saId: o.saId };
+                                      setUploadQueue(next);
+                                    }}
+                                    className="text-[9px] font-bold px-2 py-1 rounded-lg border border-teal-300 bg-white text-teal-900 hover:bg-teal-100 cursor-pointer"
+                                  >
+                                    {o.saId}
+                                    <span className="block text-[7px] font-semibold text-teal-600 truncate max-w-[140px]">
+                                      {o.cariFirma}
+                                    </span>
+                                  </button>
+                                ))}
+                                {suggestSatinAlmaForKapiEvrak({
+                                  firma: item.firma,
+                                  cariKartId: item.cariKartId,
+                                  kalemler: item.kalemler || [],
+                                  satinAlmaTalepleri: satinAlmaProp,
+                                  irsaliyeler: irsaliyelerProp,
+                                  limit: 1,
+                                }).length === 0 &&
+                                  String(item.firma || '').trim().length >= 2 && (
+                                    <span className="text-[9px] font-semibold text-slate-500 bg-slate-100 border border-slate-200 px-2 py-1 rounded-lg">
+                                      Açık SA yok → arşiv / doğrudan sevk
+                                    </span>
+                                  )}
+                              </div>
+                            )}
+                          </div>
+                        )}
+
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                           {([
                             ['KALEM', 'kalemFotolar'],
@@ -3676,6 +3805,11 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
                                   }`}>
                                     {e.durum}
                                   </span>
+                                  {resolveGuvenlikEvrakProvenance(e).map((b) => (
+                                    <span key={b.label} className={b.className} title={b.title}>
+                                      {b.label}
+                                    </span>
+                                  ))}
                                   {e.aiStatus === 'PARSING' && (
                                     <span className="text-[8px] font-bold text-indigo-600 animate-pulse">YZ okuyor…</span>
                                   )}

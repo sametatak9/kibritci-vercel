@@ -33,6 +33,7 @@ import { findStokMatch } from '../lib/evrakBatchImportUtils';
 import { listFaturasizIrsaliyeler } from '../lib/operasyonUyarilari';
 import { EvrakZincirBanner } from './EvrakZincirBanner';
 import { openEvrakZincirRaporu } from '../lib/evrakZincirRapor';
+import { resolveIrsaliyeProvenance } from '../lib/evrakProvenance';
 import {
   EvrakAiDropzone,
   EvrakPageShell,
@@ -1057,6 +1058,11 @@ export const IrsaliyeGirisScreen: React.FC<IrsaliyeGirisScreenProps> = ({
                             {(ir as any).kaynak === 'MICIR_STABILIZE_FIS' && (
                               <span className="ml-1 text-[8px] font-black uppercase bg-emerald-100 text-emerald-700 px-1 py-0.5 rounded">Mıcır/Stabilize</span>
                             )}
+                            {resolveIrsaliyeProvenance(ir).map((b) => (
+                              <span key={b.label} className={`ml-1 inline-block ${b.className}`} title={b.title}>
+                                {b.label}
+                              </span>
+                            ))}
                           </td>
                           <td className="px-2 py-1.5">
                             {ir.firma}

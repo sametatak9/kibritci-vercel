@@ -23,6 +23,7 @@ import { findStokMatch } from '../lib/evrakBatchImportUtils';
 import { syncFaturaIrsaliyeBaglari } from '../lib/evrakDonusum';
 import { openEvrakZincirRaporu } from '../lib/evrakZincirRapor';
 import { EvrakZincirBanner } from './EvrakZincirBanner';
+import { resolveFaturaProvenance } from '../lib/evrakProvenance';
 import {
   EvrakAiDropzone,
   EvrakPageShell,
@@ -961,6 +962,11 @@ export const FaturaGirisScreen: React.FC<FaturaGirisScreenProps> = ({
                               <span className={`text-[8px] font-black uppercase px-1.5 py-0.5 rounded w-fit ${linked ? 'bg-sky-50 text-sky-700' : 'bg-slate-100 text-slate-600'}`}>
                                 {linked ? 'Evrak bağlı' : 'Bağımsız'}
                               </span>
+                              {resolveFaturaProvenance(ft).map((b) => (
+                                <span key={b.label} className={b.className} title={b.title}>
+                                  {b.label}
+                                </span>
+                              ))}
                               <span className="text-[8px] font-black uppercase px-1.5 py-0.5 rounded w-fit bg-slate-50 text-slate-600">
                                 Stok {stokLink.linked}/{stokLink.total}
                               </span>

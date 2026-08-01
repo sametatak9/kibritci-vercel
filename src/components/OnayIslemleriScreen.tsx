@@ -38,6 +38,7 @@ import {
   doubleCheckKapiMatch,
   finalizeKapiIrsaliyeApproval,
   formatKapiMatchLabel,
+  suggestSatinAlmaForKapiEvrak,
   KAPI_EVRAK_KAYNAK,
 } from '../lib/kapiIrsaliyeUtils';
 import {
@@ -1548,11 +1549,31 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
     try {
       const matched = await rematchGateIrsaliye(docItem.firma || '', docItem.kalemler || []);
       const label = formatKapiMatchLabel(matched.summary);
+      let saId = String(docItem.saId || '').trim();
+      if (!saId) {
+        const oneriler = suggestSatinAlmaForKapiEvrak({
+          firma: matched.summary.cariUnvan || docItem.firma,
+          cariKartId: matched.summary.cariKartId || docItem.cariKartId,
+          kalemler: matched.kalemler,
+          satinAlmaTalepleri,
+          irsaliyeler,
+          limit: 3,
+        });
+        const top = oneriler[0];
+        if (top && top.score >= 40) {
+          const bind = window.confirm(
+            `Akıllı eşleşme: ${top.saId} · ${top.cariFirma}\n(${top.reason})\n\n` +
+              `İlgili satın alma talebine irsaliye bağlamak ister misiniz?\n` +
+              `• Evet → karşılaştırma · • Hayır → arşiv/doğrudan sevk`
+          );
+          if (bind) saId = top.saId;
+        }
+      }
       const ok = window.confirm(
         `Güvenlik irsaliyesini eşleştirip onaylayayım mı?\n\n` +
           `No: ${docItem.evrakNo || docItem.id}\n` +
           `Firma: ${matched.summary.cariUnvan || docItem.firma || '—'}\n` +
-          `${label}\n` +
+          `${label}${saId ? `\nSA: ${saId}` : ' (SA bağlı değil)'}\n` +
           (matched.summary.cariMatched
             ? '→ Mevcut cari kartın altına işlem kaydı yazılacak.\n'
             : '→ Cari bulunamadı; unvan serbest kaydedilecek (yeni kart açılmaz).\n') +
@@ -1578,6 +1599,9 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
         setCariIslemGecmisi,
         setStokKartlar,
         setStokIslemGecmisi,
+        saId: saId || undefined,
+        satinAlmaTalepleri,
+        irsaliyeler,
       });
 
       await updateDoc(doc(db, 'guvenlikGelenEvraklar', docItem.id), {
@@ -1591,6 +1615,8 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
         firma: summary.cariUnvan || docItem.firma || '',
         tarih: docItem.tarih || new Date().toISOString().split('T')[0],
         kalemler: matched.kalemler,
+        saId: saId || '',
+        donusumKaynagi: saId ? 'KAPI_SA_ESLESME' : 'KAPI_EVRAK',
         onayTarihi: new Date().toISOString(),
       });
 
@@ -1927,6 +1953,9 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
           setCariIslemGecmisi,
           setStokKartlar,
           setStokIslemGecmisi,
+          saId: String(activeGateDoc?.saId || '').trim() || undefined,
+          satinAlmaTalepleri,
+          irsaliyeler,
         });
 
         await updateDoc(doc(db, 'guvenlikGelenEvraklar', docId), {
@@ -1940,6 +1969,10 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
           firma: summary.cariUnvan || irsaliyeFirma,
           tarih: irsaliyeTarih,
           kalemler: rematched.kalemler,
+          saId: String(activeGateDoc?.saId || summary.saId || '').trim() || '',
+          donusumKaynagi: String(activeGateDoc?.saId || summary.saId || '').trim()
+            ? 'KAPI_SA_ESLESME'
+            : 'KAPI_EVRAK',
           onayTarihi: new Date().toISOString(),
         });
 

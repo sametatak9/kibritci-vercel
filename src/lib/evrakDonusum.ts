@@ -187,6 +187,7 @@ export function buildIrsaliyeFromSatinAlma(
     saId: sa.saId,
     onayDurumu: 'ONAY BEKLİYOR',
     kalemler,
+    donusumKaynagi: 'SA_DONUSUM',
   };
 
   let warning: string | undefined;
@@ -302,6 +303,7 @@ export function buildFaturaFromIrsaliyeler(
     durum: 'KONTROL BEKLEYOR',
     kalemler,
     bagliIrsaliyeler: irsaliyeler.map((ir) => ir.id),
+    donusumKaynagi: 'IR_FATURA',
   };
 
   let warning: string | undefined;

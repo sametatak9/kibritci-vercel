@@ -125,6 +125,11 @@ export interface Irsaliye {
   guvenlikEvrakId?: string;
   onaylayanYonetici?: string;
   onayTarihi?: string;
+  /**
+   * Dönüşüm / eşleşme kaynağı (görsel rozet + mutabakat).
+   * SA_DONUSUM | KAPI_SA_ESLESME | KAPI_EVRAK | MANUEL_BAGLAMA
+   */
+  donusumKaynagi?: string;
 }
 
 /** Kampçı — Şeker Vidanjör çekim fişi (yönetici onayından sonra irsaliye + cari) */
@@ -302,6 +307,8 @@ export interface Fatura {
   kalemler: FaturaItem[];
   bagliIrsaliyeler: string[];
   eImzalar?: string[];
+  /** IR_FATURA | SA_DONUSUM | MANUEL_BAGLAMA | ARSIV */
+  donusumKaynagi?: string;
 }
 
 export type KasaOdemeDurumu = 'BORC' | 'PERSONEL_ODEDI' | 'KASA_ODEDI';

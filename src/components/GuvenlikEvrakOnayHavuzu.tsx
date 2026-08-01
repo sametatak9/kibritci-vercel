@@ -11,6 +11,7 @@ import {
   pickPrimaryFotoUrl,
   formatEvrakGonderimLabel,
 } from '../lib/guvenlikEvrakFotolar';
+import { resolveGuvenlikEvrakProvenance } from '../lib/evrakProvenance';
 
 interface GuvenlikEvrakOnayHavuzuProps {
   pendingGateDocs: any[];
@@ -363,6 +364,18 @@ export const GuvenlikEvrakOnayHavuzu: React.FC<GuvenlikEvrakOnayHavuzuProps> = (
                             Stok {docItem.matchSummary.stokLinked || 0}/{docItem.matchSummary.stokTotal || 0}
                           </div>
                         )}
+                        <div className="mt-1.5 flex flex-wrap gap-1">
+                          {resolveGuvenlikEvrakProvenance(docItem).map((b) => (
+                            <span key={b.label} className={b.className} title={b.title}>
+                              {b.label}
+                            </span>
+                          ))}
+                          {!docItem.saId && docItem.evrakTuru === 'İRSALİYE' && (
+                            <span className="text-[8px] font-black uppercase px-1.5 py-0.5 rounded border bg-slate-50 text-slate-500 border-slate-200">
+                              SA yok · arşiv adayı
+                            </span>
+                          )}
+                        </div>
                       </div>
                     )}
                     {docItem.aiStatus === 'PARSING' && (
