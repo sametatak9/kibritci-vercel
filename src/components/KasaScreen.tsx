@@ -717,7 +717,7 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
   };
 
   return (
-    <div className="flex-grow p-3 sm:p-4 lg:p-6 h-full flex flex-col font-sans gap-4 lg:gap-6 select-none bg-slate-50">
+    <div className="flex-grow p-3 sm:p-4 lg:p-6 min-h-0 lg:h-full flex flex-col font-sans gap-4 lg:gap-6 select-none bg-slate-50">
       
       {/* Dynamic Module Header Section aligned with style */}
       <div className="flex items-center justify-between shrink-0 border-b pb-4 border-slate-200">
@@ -813,11 +813,11 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
         )}
       </div>
 
-      {/* Main split dashboard view */}
-      <div className="flex-1 flex flex-col lg:flex-row gap-4 lg:gap-6 min-h-0">
+      {/* Main split dashboard view — mobilde defter üstte (geçmiş işlemler görünür) */}
+      <div className="flex flex-col lg:flex-1 lg:flex-row gap-4 lg:gap-6 lg:min-h-0">
         
         {/* Left side Form creator */}
-        <div className="w-full lg:w-[380px] lg:shrink-0 bg-white border border-[#e2e8f0] rounded-2xl flex flex-col overflow-hidden shadow-sm min-h-0">
+        <div className="order-2 lg:order-1 w-full lg:w-[380px] lg:shrink-0 bg-white border border-[#e2e8f0] rounded-2xl flex flex-col overflow-hidden shadow-sm lg:min-h-0 lg:max-h-full">
           
           {/* Header styling exactly matching screenshot blue/amber block */}
           <div className={`p-4 shrink-0 shadow-sm flex items-center justify-between text-white ${editingId ? 'bg-amber-600' : 'bg-[#2563EB]'}`}>
@@ -837,7 +837,7 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
             )}
           </div>
 
-          <form onSubmit={handleSaveKasaHareketi} className="flex-grow overflow-y-auto p-5 space-y-4 text-xs">
+          <form onSubmit={handleSaveKasaHareketi} className="lg:flex-grow overflow-y-auto p-5 space-y-4 text-xs max-h-[70vh] lg:max-h-none">
             
             {/* Tarih Row */}
             <div className="space-y-1">
@@ -1070,8 +1070,8 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
           </form>
         </div>
 
-        {/* Right side Table history */}
-        <div className="flex-1 min-w-0 bg-white border border-[#e2e8f0] rounded-2xl flex flex-col overflow-hidden shadow-sm">
+        {/* Right side Table history — mobilde üstte + min yükseklik (geçmiş görünür) */}
+        <div className="order-1 lg:order-2 flex-1 min-w-0 min-h-[52vh] lg:min-h-0 bg-white border border-[#e2e8f0] rounded-2xl flex flex-col overflow-hidden shadow-sm">
           
           {/* Header toolbar exactly matching screenshot style */}
           <div className="px-5 py-4 border-b border-[#e2e8f0] bg-slate-50/50 flex flex-wrap items-center justify-between gap-3 shrink-0">
@@ -1085,26 +1085,26 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
           </div>
 
           {/* Filters and search input boxes */}
-          <div className="px-5 py-3 bg-slate-50 border-b border-slate-100 flex flex-wrap items-center justify-between gap-3 text-xs shrink-0 select-none">
-            <div className="flex items-center space-x-2">
-              <div className="flex items-center bg-white border border-slate-200 rounded-lg px-2 py-1 shadow-2xs space-x-2">
+          <div className="px-4 sm:px-5 py-3 bg-slate-50 border-b border-slate-100 flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-center justify-between gap-2 sm:gap-3 text-xs shrink-0 select-none">
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="flex items-center bg-white border border-slate-200 rounded-lg px-2 py-1 shadow-2xs space-x-2 flex-1 sm:flex-none min-w-0">
                 <span className="text-slate-400">📅</span>
                 <input 
                   type="date"
                   value={startDate}
                   onChange={(e) => setStartDate(e.target.value)}
-                  className="bg-transparent border-none text-[11px] font-semibold text-slate-700 focus:outline-none"
+                  className="bg-transparent border-none text-[11px] font-semibold text-slate-700 focus:outline-none w-full min-w-0"
                 />
               </div>
               
-              <span className="text-slate-400 font-bold">-</span>
+              <span className="text-slate-400 font-bold hidden sm:inline">-</span>
 
-              <div className="flex items-center bg-white border border-slate-200 rounded-lg px-2 py-1 shadow-2xs space-x-2">
+              <div className="flex items-center bg-white border border-slate-200 rounded-lg px-2 py-1 shadow-2xs space-x-2 flex-1 sm:flex-none min-w-0">
                 <input 
                   type="date"
                   value={endDate}
                   onChange={(e) => setEndDate(e.target.value)}
-                  className="bg-transparent border-none text-[11px] font-semibold text-slate-700 focus:outline-none"
+                  className="bg-transparent border-none text-[11px] font-semibold text-slate-700 focus:outline-none w-full min-w-0"
                 />
               </div>
 
@@ -1117,7 +1117,7 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
             </div>
 
             {/* Real Search Input Box */}
-            <div className="flex items-center bg-white border border-slate-200 rounded-lg px-2 py-1 shadow-2xs space-x-2 w-48">
+            <div className="flex items-center bg-white border border-slate-200 rounded-lg px-2 py-1 shadow-2xs space-x-2 w-full sm:w-48">
               <span className="text-slate-400">🔍</span>
               <input 
                 type="text"
@@ -1129,11 +1129,11 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
             </div>
           </div>
 
-          {/* List area customized exactly as visual table with custom headers */}
-          <div className="flex-1 overflow-auto flex flex-col min-w-0">
+          {/* List area — mobilde kaydırılabilir, min yükseklik garantili */}
+          <div className="flex-1 overflow-auto flex flex-col min-w-0 min-h-[240px]">
             
-            {/* Headers row exactly mimicking table headers */}
-            <div className="grid grid-cols-5 min-w-[720px] bg-slate-100/80 border-b border-slate-250 text-[10px] font-bold text-slate-500 uppercase tracking-wider py-2 px-4 shadow-3xs shrink-0 select-none">
+            {/* Headers row — masaüstü */}
+            <div className="hidden md:grid grid-cols-5 min-w-[720px] bg-slate-100/80 border-b border-slate-250 text-[10px] font-bold text-slate-500 uppercase tracking-wider py-2 px-4 shadow-3xs shrink-0 select-none">
               <div>Tarih</div>
               <div>Tip</div>
               <div>Tutar</div>
@@ -1153,9 +1153,124 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
                   const soforKasa = isSoforUzerindenKasaGideri(kh);
                   const odeme = resolveOdemeDurumu(kh);
                   return (
+                  <React.Fragment key={kh.id}>
+                  {/* Mobil kart görünümü */}
+                  <div
+                    className={`md:hidden p-3 space-y-2 ${
+                      editingId === kh.id
+                        ? 'bg-amber-50'
+                        : soforKasa
+                          ? 'bg-sky-50/50'
+                          : soforIade
+                            ? 'bg-rose-50/40'
+                            : sofor
+                              ? 'bg-indigo-50/40'
+                              : 'bg-white'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0 space-y-1.5">
+                        <div className="font-mono text-[11px] font-bold text-slate-500 flex items-center gap-1">
+                          <Calendar size={11} className="text-slate-400 shrink-0" />
+                          <span>{kh.tarih}</span>
+                        </div>
+                        <div className="flex flex-wrap gap-1">
+                          <span className={`inline-block py-0.5 px-2 rounded-full text-[10px] font-extrabold ${
+                            kh.hareketTipi === 'GİRİŞ' ? 'bg-emerald-50 text-emerald-700 border border-emerald-100' : 'bg-rose-50 text-rose-700 border border-rose-100'
+                          }`}>
+                            {kh.hareketTipi}
+                          </span>
+                          {soforIade && (
+                            <span className="inline-block py-0.5 px-2 rounded-full text-[9px] font-extrabold bg-rose-100 text-rose-800 border border-rose-200">ŞOFÖR İADE</span>
+                          )}
+                          {soforKasa && (
+                            <span className="inline-block py-0.5 px-2 rounded-full text-[9px] font-extrabold bg-sky-100 text-sky-800 border border-sky-200">KASA (ŞOFÖR)</span>
+                          )}
+                          {sofor && !soforIade && !soforKasa && (
+                            <span className="inline-block py-0.5 px-2 rounded-full text-[9px] font-extrabold bg-indigo-100 text-indigo-800 border border-indigo-200">ŞOFÖR FİŞ</span>
+                          )}
+                          {odeme === 'BORC' && (
+                            <span className="inline-block py-0.5 px-2 rounded-full text-[9px] font-extrabold bg-amber-100 text-amber-900 border border-amber-200">KASA BORCU</span>
+                          )}
+                          {odeme === 'PERSONEL_ODEDI' && (
+                            <span className="inline-block py-0.5 px-2 rounded-full text-[9px] font-extrabold bg-violet-100 text-violet-800 border border-violet-200">PERSONEL ÖDEDİ</span>
+                          )}
+                          {odeme === 'KASA_ODEDI' && (
+                            <span className="inline-block py-0.5 px-2 rounded-full text-[9px] font-extrabold bg-slate-100 text-slate-700 border border-slate-200">KASA ÖDEDİ</span>
+                          )}
+                        </div>
+                      </div>
+                      <span className={`font-mono text-sm font-black shrink-0 ${
+                        kh.hareketTipi === 'GİRİŞ' ? 'text-emerald-600' : 'text-rose-600'
+                      }`}>
+                        {kh.hareketTipi === 'GİRİŞ' ? '+' : '-'}₺{Number(kh.tutar || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-800 font-semibold leading-snug break-words">{kh.aciklama || '—'}</p>
+                    <p className="text-[9px] text-slate-500 font-semibold uppercase tracking-wide">
+                      {kh.referansTipi}{kh.referansId ? ` [${kh.referansId}]` : ''}
+                      {kh.personelAdi ? ` · ${kh.personelAdi}` : ''}
+                      {kh.surucu ? ` · ${kh.surucu}` : ''}
+                    </p>
+                    {kh.hareketTipi === 'ÇIKIŞ' && (
+                      <div className="flex flex-wrap gap-1">
+                        {ODEME_OPTIONS.map((opt) => (
+                          <button
+                            key={opt.id}
+                            type="button"
+                            disabled={savingKasa}
+                            onClick={() => void handleQuickOdemeDurumu(kh, opt.id)}
+                            className={`text-[8px] font-black uppercase px-1.5 py-0.5 rounded border cursor-pointer disabled:opacity-50 ${
+                              odeme === opt.id
+                                ? opt.id === 'KASA_ODEDI'
+                                  ? 'bg-slate-800 text-white border-slate-800'
+                                  : opt.id === 'BORC'
+                                    ? 'bg-amber-600 text-white border-amber-600'
+                                    : 'bg-violet-700 text-white border-violet-700'
+                                : 'bg-white text-slate-600 border-slate-200'
+                            }`}
+                          >
+                            → {opt.short}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    <div className="flex items-center justify-end gap-1 pt-1 border-t border-slate-100">
+                      {kh.fisEvrakUrl && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedReceiptUrl(kh.fisEvrakUrl || null);
+                            setSelectedReceiptName(kh.aciklama);
+                          }}
+                          className="p-2 hover:bg-sky-50 text-slate-400 hover:text-sky-600 rounded-lg cursor-pointer"
+                          title="Evrak Gör"
+                        >
+                          <Eye size={14} />
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => handleStartEdit(kh)}
+                        className="p-2 hover:bg-amber-50 text-slate-400 hover:text-amber-600 rounded-lg cursor-pointer"
+                        title="Düzenle"
+                      >
+                        <Edit3 size={14} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => handleDeleteKasaHareketi(kh.id, e)}
+                        className="p-2 hover:bg-rose-50 text-slate-400 hover:text-rose-600 rounded-lg cursor-pointer"
+                        title="Hareketi Sil"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Masaüstü satır */}
                   <div 
-                    key={kh.id} 
-                    className={`grid grid-cols-5 min-w-[720px] items-center py-2.5 px-4 text-xs transition cursor-default group ${
+                    className={`hidden md:grid grid-cols-5 min-w-[720px] items-center py-2.5 px-4 text-xs transition cursor-default group ${
                       editingId === kh.id
                         ? 'bg-amber-50'
                         : soforKasa
@@ -1287,6 +1402,7 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
                       </div>
                     </div>
                   </div>
+                  </React.Fragment>
                   );
                 })}
               </div>
