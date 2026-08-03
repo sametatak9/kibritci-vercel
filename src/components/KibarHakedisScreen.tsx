@@ -558,8 +558,6 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
   const analysisSummary = useMemo(() => {
     const roleMix = buildRoleMix(activeStaffRows);
     const days = daysInMonth(selectedYear, selectedMonth);
-    const ortalamaKisiBasiKar = activeStaffRows.length > 0 ? totalZerYapiHakedis / activeStaffRows.length : 0;
-    const gunBasiKar = totalPersonDays > 0 ? totalZerYapiHakedis / totalPersonDays : 0;
 
     let senaryoGunToplam = 0;
     let senaryoMesaiToplam = 0;
@@ -605,8 +603,12 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
     const senaryoToplamMasraf = senaryoGunToplam + senaryoMesaiToplam;
     const gunTasarrufu = senaryoGunToplam - totalGunKazanci;
     const mesaiTasarrufu = senaryoMesaiToplam - totalMesaiKazanci;
-    // Aylık şirket kârı = taban 6000 daha pahalı olsaydı ödenecek ekstra (gün + mesai)
-    const aylikSirketKari = senaryoToplamMasraf - totalMaasKazanci;
+    // +6.000 TL taban olsaydı ödenecek FAZLA maaş (gün + mesai birlikte artar)
+    const fazlaMaasOdemesi = senaryoToplamMasraf - totalMaasKazanci;
+    const aylikSirketKari = fazlaMaasOdemesi;
+    // ZER'den tahsil edilen (günlük 100 TL) + kaçılan fazla maaş = dönem toplam fayda
+    const zerGeliri = totalZerYapiHakedis;
+    const donemToplamFayda = fazlaMaasOdemesi + zerGeliri;
     const ortalamaMevcutTaban = activeStaffRows.length > 0 ? mevcutTabanToplam / activeStaffRows.length : 0;
     const ortalamaSenaryoTaban = activeStaffRows.length > 0 ? senaryoTabanToplam / activeStaffRows.length : 0;
     const ortalamaKisiKari = activeStaffRows.length > 0 ? aylikSirketKari / activeStaffRows.length : 0;
@@ -618,23 +620,27 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
       .filter((p) => p.sirketKari >= 1);
 
     const güçlüArgüman = [
-      `Kontrol: Taban +${formatMoney(TABAN_FARK_TL, 0)} olsaydı hem gün hem mesai artardı — mesai formülü (taban ÷ ${days} ÷ 7,5) × 1,5 × saat tabana bağlıdır.`,
-      `Bu dönemde mesai tasarrufu ${formatMoney(mesaiTasarrufu, 0)} (toplam kârın %${mesaiPayiPct.toFixed(1)}’i); gün tasarrufu ${formatMoney(gunTasarrufu, 0)}.`,
-      `Aylık şirket kârı (indirim sayesinde) = ${formatMoney(aylikSirketKari, 0)} = şuanki ${formatMoney(totalMaasKazanci, 0)} yerine +${formatMoney(TABAN_FARK_TL, 0)} senaryosu ${formatMoney(senaryoToplamMasraf, 0)} ödememek.`,
+      `+${formatMoney(TABAN_FARK_TL, 0)} taban olsaydı fazla maaş ödemesi ${formatMoney(fazlaMaasOdemesi, 0)} olurdu (gün ${formatMoney(gunTasarrufu, 0)} + mesai ${formatMoney(mesaiTasarrufu, 0)}).`,
+      `Mesai tabana bağlıdır: (taban ÷ ${days} ÷ 7,5) × 1,5 × saat — taban artınca mesai ücreti de artar.`,
+      `ZER YAPI tahsilat: ${totalPersonDays} gün × ₺${ZER_YAPI_GUNLUK} = ${formatMoney(zerGeliri, 0)}.`,
+      `Dönem toplam fayda (kaçınılan fazla maaş + ZER geliri) = ${formatMoney(donemToplamFayda, 0)}.`,
     ].join(' ');
 
     const shareableParagraphs = [
-      `KİBRİTÇİ · ZER YAPI +${formatMoney(TABAN_FARK_TL, 0)} TABAN KARŞILAŞTIRMASI — ${donemLabel}`,
-      `Şuanki: ${formatMoney(totalMaasKazanci, 0)}  |  +${formatMoney(TABAN_FARK_TL, 0)}: ${formatMoney(senaryoToplamMasraf, 0)}  |  Aylık şirket kârı: ${formatMoney(aylikSirketKari, 0)}`,
-      `Gün tasarrufu: ${formatMoney(gunTasarrufu, 0)}  ·  Mesai tasarrufu: ${formatMoney(mesaiTasarrufu, 0)} (mesai dahil ✓)`,
+      `KİBRİTÇİ · ZER YAPI KARŞILAŞTIRMA — ${donemLabel}`,
+      `Şuanki maaş masrafı: ${formatMoney(totalMaasKazanci, 0)}`,
+      `+${formatMoney(TABAN_FARK_TL, 0)} taban olsaydı: ${formatMoney(senaryoToplamMasraf, 0)}`,
+      `FAZLA MAAŞ ÖDEMESİ (gün+mesai): ${formatMoney(fazlaMaasOdemesi, 0)}  →  Gün ${formatMoney(gunTasarrufu, 0)} · Mesai ${formatMoney(mesaiTasarrufu, 0)}`,
+      `ZER YAPI geliri: ${totalPersonDays} gün × ₺${ZER_YAPI_GUNLUK} = ${formatMoney(zerGeliri, 0)}`,
+      `Dönem toplam fayda: ${formatMoney(donemToplamFayda, 0)}`,
       `Kapsam: ${activeStaffRows.length} personel · ${totalPersonDays} iş-günü · ${totalMesaiSaat.toLocaleString('tr-TR', { maximumFractionDigits: 1 })} sa mesai`,
       güçlüArgüman,
     ].join('\n');
 
     return {
       roleMix,
-      ortalamaKisiBasiKar,
-      gunBasiKar,
+      ortalamaKisiBasiKar: ortalamaKisiKari,
+      gunBasiKar: totalPersonDays > 0 ? fazlaMaasOdemesi / totalPersonDays : 0,
       güçlüArgüman,
       shareableParagraphs,
       days,
@@ -645,6 +651,9 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
       senaryoToplamMasraf,
       gunTasarrufu,
       mesaiTasarrufu,
+      fazlaMaasOdemesi,
+      zerGeliri,
+      donemToplamFayda,
       aylikSirketKari,
       mesaiPayiPct,
       // geriye uyum
@@ -1198,12 +1207,13 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
 
             <div className="bg-emerald-50 border-2 border-emerald-400 p-4 rounded-xl space-y-3">
               <span className="text-[9px] text-emerald-900 font-black block uppercase tracking-wide">
-                +{formatMoney(TABAN_FARK_TL, 0)} Taban — Aylık Şirket Kârı (Gün+Mesai)
+                +{formatMoney(TABAN_FARK_TL, 0)} Taban — Fazla Maaş Ödemesi (Gün+Mesai)
               </span>
               <p className="text-[8px] text-emerald-800 font-semibold leading-relaxed">
-                Taban {formatMoney(TABAN_FARK_TL, 0)} fazla olsaydı mesai de artardı. Bu indirim sayesinde şirket ayda
-                {' '}<span className="font-mono font-black">{formatMoney(analysisSummary.aylikSirketKari, 0)}</span> kâr ediyor
-                (gün {formatMoney(analysisSummary.gunTasarrufu, 0)} + mesai {formatMoney(analysisSummary.mesaiTasarrufu, 0)}).
+                Taban {formatMoney(TABAN_FARK_TL, 0)} fazla olsaydı hem gün hem mesai ücreti artardı.
+                Ödenecek fazla maaş:{' '}
+                <span className="font-mono font-black">{formatMoney(analysisSummary.fazlaMaasOdemesi, 0)}</span>
+                {' '}(gün {formatMoney(analysisSummary.gunTasarrufu, 0)} + mesai {formatMoney(analysisSummary.mesaiTasarrufu, 0)}).
               </p>
               <div className="grid grid-cols-3 gap-2 text-[8px]">
                 <div className="bg-white border border-slate-200 rounded-lg p-2 space-y-1">
@@ -1219,11 +1229,22 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
                   <div className="flex justify-between font-black border-t pt-1"><span>Toplam</span><span className="font-mono">{formatMoney(analysisSummary.senaryoToplamMasraf, 0)}</span></div>
                 </div>
                 <div className="bg-emerald-100 border border-emerald-400 rounded-lg p-2 space-y-1">
-                  <span className="font-black uppercase text-emerald-900 block">Şirket kârı</span>
+                  <span className="font-black uppercase text-emerald-900 block">Fazla ödeme</span>
                   <div className="flex justify-between"><span>Gün</span><span className="font-mono">{formatMoney(analysisSummary.gunTasarrufu, 0)}</span></div>
                   <div className="flex justify-between"><span>Mesai ✓</span><span className="font-mono">{formatMoney(analysisSummary.mesaiTasarrufu, 0)}</span></div>
-                  <div className="flex justify-between font-black border-t pt-1 text-emerald-950"><span>Aylık</span><span className="font-mono">{formatMoney(analysisSummary.aylikSirketKari, 0)}</span></div>
+                  <div className="flex justify-between font-black border-t pt-1 text-emerald-950"><span>Toplam</span><span className="font-mono">{formatMoney(analysisSummary.fazlaMaasOdemesi, 0)}</span></div>
                 </div>
+              </div>
+              <div className="bg-white border border-emerald-300 rounded-lg p-2 text-[8px] space-y-1">
+                <div className="flex justify-between font-bold">
+                  <span>ZER geliri ({totalPersonDays}×₺{ZER_YAPI_GUNLUK})</span>
+                  <span className="font-mono">{formatMoney(analysisSummary.zerGeliri, 0)}</span>
+                </div>
+                <div className="flex justify-between font-black text-emerald-900 border-t border-emerald-100 pt-1">
+                  <span>Dönem toplam fayda</span>
+                  <span className="font-mono">{formatMoney(analysisSummary.donemToplamFayda, 0)}</span>
+                </div>
+                <p className="text-[7px] text-emerald-700">Kaçınılan fazla maaş + ZER tahsilat (₺{ZER_YAPI_GUNLUK}/gün)</p>
               </div>
               <p className="text-[7px] text-emerald-700 font-mono">
                 Mesai payı: %{analysisSummary.mesaiPayiPct.toFixed(1)} · Formül: mesai = (taban÷{analysisSummary.days}÷7,5)×1,5×saat
@@ -1291,25 +1312,27 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
               <CorporateReportLayout orientation="landscape" docCode={`ZER-KAR-${donemKey}`}>
               <p className="rpt-antet-line">{CORPORATE_COMPANY.legalName}</p>
               <p className="text-[10px] text-slate-500 font-bold uppercase mb-2">
-                ZER YAPI · +{formatMoney(TABAN_FARK_TL, 0)} Taban Karşılaştırması / Aylık Şirket Kârı · {donemLabel}
+                ZER YAPI · +{formatMoney(TABAN_FARK_TL, 0)} Taban Karşılaştırması · Günlük ₺{ZER_YAPI_GUNLUK} · {donemLabel}
               </p>
               <div className="rpt-header-title mb-4">
-                Şuanki Masraf vs +{formatMoney(TABAN_FARK_TL, 0)} Taban — Gün + Mesai Dahil Şirket Kârı
+                Şuanki Masraf vs +{formatMoney(TABAN_FARK_TL, 0)} Taban — Fazla Maaş Ödemesi (Gün + Mesai)
               </div>
 
               <div className="rpt-zarar-box">
-                <h4>Kontrol sonucu — mesai dahil aylık şirket kârı</h4>
+                <h4>Kontrol sonucu — +{formatMoney(TABAN_FARK_TL, 0)} olsaydı fazla maaş ödemesi</h4>
                 <p className="rpt-zarar-msg">
-                  Taban maaşlar {formatMoney(TABAN_FARK_TL, 0)} fazla olsaydı mesai hakedişleri de artardı
-                  (mesai = taban ÷ {analysisSummary.days} ÷ 7,5 × 1,5 × saat). Hesap{' '}
-                  <strong>kişi bazlıdır</strong> — her personelin kendi maaş tabanı kullanılır; «ort. taban» yalnızca özet.
-                  Bu indirim sayesinde şirket bu ay <strong>{formatMoney(analysisSummary.aylikSirketKari, 0)}</strong> kâr ediyor:
-                  gün {formatMoney(analysisSummary.gunTasarrufu, 0)} + mesai {formatMoney(analysisSummary.mesaiTasarrufu, 0)}
-                  (mesai payı %{analysisSummary.mesaiPayiPct.toFixed(1)}).
+                  Taban maaşlar {formatMoney(TABAN_FARK_TL, 0)} fazla olsaydı <strong>gün ve mesai birlikte artardı</strong>
+                  (mesai = taban ÷ {analysisSummary.days} ÷ 7,5 × 1,5 × saat). Hesap <strong>kişi bazlıdır</strong>.
+                  Bu senaryoda ödenecek <strong>fazla maaş</strong>:{' '}
+                  <strong>{formatMoney(analysisSummary.fazlaMaasOdemesi, 0)}</strong>
+                  {' '}(gün {formatMoney(analysisSummary.gunTasarrufu, 0)} + mesai {formatMoney(analysisSummary.mesaiTasarrufu, 0)},
+                  mesai payı %{analysisSummary.mesaiPayiPct.toFixed(1)}).
+                  Bu tutar, tabanı düşük tutarak kaçınılan ekstra maaş ödemesidir (= şirket kârı / tasarruf).
                 </p>
                 <p className="rpt-math-formula">
                   Gün = (taban ÷ {analysisSummary.days}) × geldi · Mesai = (taban ÷ {analysisSummary.days} ÷ 7,5) × 1,5 × saat
                   · Senaryo tabanı = mevcut + {formatMoney(TABAN_FARK_TL, 0)}
+                  · ZER tahsilat = geldi × ₺{ZER_YAPI_GUNLUK}
                 </p>
                 <div className="rpt-math-grid">
                   <div className="rpt-math-col rpt-math-col--now">
@@ -1327,31 +1350,37 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
                     <div className="rpt-math-row"><span>Toplam masraf</span><span>{formatMoney(analysisSummary.senaryoToplamMasraf, 0)}</span></div>
                   </div>
                   <div className="rpt-math-col rpt-math-col--delta">
-                    <h5>3 · Aylık şirket kârı</h5>
-                    <div className="rpt-math-row"><span>Taban indirimi</span><span>+{formatMoney(TABAN_FARK_TL, 0)}/kişi</span></div>
-                    <div className="rpt-math-row"><span>Gün tasarrufu</span><span>{formatMoney(analysisSummary.gunTasarrufu, 0)}</span></div>
-                    <div className="rpt-math-row"><span>Mesai tasarrufu ✓</span><span>{formatMoney(analysisSummary.mesaiTasarrufu, 0)}</span></div>
-                    <div className="rpt-math-row"><span>Aylık kâr</span><span>{formatMoney(analysisSummary.aylikSirketKari, 0)}</span></div>
+                    <h5>3 · Fazla maaş ödemesi</h5>
+                    <div className="rpt-math-row"><span>Taban farkı</span><span>+{formatMoney(TABAN_FARK_TL, 0)}/kişi</span></div>
+                    <div className="rpt-math-row"><span>Gün farkı</span><span>{formatMoney(analysisSummary.gunTasarrufu, 0)}</span></div>
+                    <div className="rpt-math-row"><span>Mesai farkı ✓</span><span>{formatMoney(analysisSummary.mesaiTasarrufu, 0)}</span></div>
+                    <div className="rpt-math-row"><span>Toplam fazla</span><span>{formatMoney(analysisSummary.fazlaMaasOdemesi, 0)}</span></div>
                   </div>
                 </div>
-                <div className="rpt-zarar-hero">{formatMoney(analysisSummary.aylikSirketKari, 0)}</div>
+                <div className="rpt-zarar-hero">{formatMoney(analysisSummary.fazlaMaasOdemesi, 0)}</div>
                 <p className="rpt-zer-meta">
                   {activeStaffRows.length} personel · {totalPersonDays} iş-günü · {totalMesaiSaat.toLocaleString('tr-TR', { maximumFractionDigits: 1 })} sa mesai
-                  · kişi başı ortalama kâr {formatMoney(analysisSummary.ortalamaKisiMasrafArtisi, 0)}
+                  · kişi başı ortalama fazla ödeme {formatMoney(analysisSummary.ortalamaKisiMasrafArtisi, 0)}
                   · kişi bazlı maaş + mesai dahil ✓
+                </p>
+                <p className="rpt-zer-meta" style={{ marginTop: 8 }}>
+                  ZER YAPI geliri (₺{ZER_YAPI_GUNLUK}/gün): <strong>{formatMoney(analysisSummary.zerGeliri, 0)}</strong>
+                  {' '}· Dönem toplam fayda (kaçınılan fazla maaş + ZER):{' '}
+                  <strong>{formatMoney(analysisSummary.donemToplamFayda, 0)}</strong>
                 </p>
               </div>
 
               {/* —— ZER YAPI Hakediş Özeti —— */}
               <div className="rpt-zer-box">
-                <h4>ZER YAPI Hakediş (ayrı kalem — ₺{ZER_YAPI_GUNLUK}/gün)</h4>
+                <h4>ZER YAPI Hakediş / Gelir (₺{ZER_YAPI_GUNLUK}/gün · aylık ~₺{ZER_YAPI_GUNLUK * 30})</h4>
                 <p className="rpt-zer-formula">
                   Formül: Toplam çalışma günü × ₺{ZER_YAPI_GUNLUK}
                   &nbsp;|&nbsp; {totalPersonDays} gün × ₺{ZER_YAPI_GUNLUK} = {formatMoney(totalZerYapiHakedis, 0)}
                 </p>
                 <div className="rpt-zer-total">{formatMoney(totalZerYapiHakedis, 0)}</div>
                 <p className="rpt-zer-meta">
-                  Bu tutar +{formatMoney(TABAN_FARK_TL, 0)} taban kâr analizinden ayrıdır (hakediş kalemi).
+                  Tahsilat kalemi. +{formatMoney(TABAN_FARK_TL, 0)} fazla maaş hesabından ayrıdır.
+                  Dönem toplam fayda = fazla maaş kaçınılan + ZER = {formatMoney(analysisSummary.donemToplamFayda, 0)}.
                 </p>
               </div>
 
@@ -1586,17 +1615,24 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
               {/* —— Özet —— */}
               <div className="rpt-summary-grid">
                 <div className="rpt-summary-card rpt-summary-hakedis">
-                  <span>Aylık Şirket Kârı (+{formatMoney(TABAN_FARK_TL, 0)} indirim · gün+mesai)</span>
-                  <span className="rpt-summary-val">{formatMoney(analysisSummary.aylikSirketKari, 0)}</span>
+                  <span>Fazla maaş ödemesi (+{formatMoney(TABAN_FARK_TL, 0)} · gün+mesai)</span>
+                  <span className="rpt-summary-val">{formatMoney(analysisSummary.fazlaMaasOdemesi, 0)}</span>
                   <span className="rpt-summary-sub">
                     Gün {formatMoney(analysisSummary.gunTasarrufu, 0)} + Mesai {formatMoney(analysisSummary.mesaiTasarrufu, 0)}
                     {' '}· mesai payı %{analysisSummary.mesaiPayiPct.toFixed(1)}
                   </span>
                 </div>
                 <div className="rpt-summary-card">
-                  <span>ZER YAPI Hakediş (₺{ZER_YAPI_GUNLUK}/gün)</span>
+                  <span>ZER YAPI geliri (₺{ZER_YAPI_GUNLUK}/gün)</span>
                   <span className="rpt-summary-val">{formatMoney(totalZerYapiHakedis, 0)}</span>
                   <span className="rpt-summary-sub">{totalPersonDays} gün × ₺{ZER_YAPI_GUNLUK}</span>
+                </div>
+                <div className="rpt-summary-card rpt-summary-hakedis">
+                  <span>Dönem toplam fayda</span>
+                  <span className="rpt-summary-val">{formatMoney(analysisSummary.donemToplamFayda, 0)}</span>
+                  <span className="rpt-summary-sub">
+                    Kaçınılan fazla maaş {formatMoney(analysisSummary.fazlaMaasOdemesi, 0)} + ZER {formatMoney(analysisSummary.zerGeliri, 0)}
+                  </span>
                 </div>
               </div>
 
@@ -1607,19 +1643,22 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
                     Şuanki {formatMoney(totalMaasKazanci, 0)} · +{formatMoney(TABAN_FARK_TL, 0)} {formatMoney(analysisSummary.senaryoToplamMasraf, 0)}
                   </div>
                   <div style={{ marginTop: 4, fontSize: '9pt', color: '#047857', fontWeight: 900 }}>
-                    Aylık şirket kârı: {formatMoney(analysisSummary.aylikSirketKari, 0)}
+                    Fazla maaş ödemesi: {formatMoney(analysisSummary.fazlaMaasOdemesi, 0)}
                   </div>
                   <div style={{ marginTop: 4, fontSize: '7pt', color: '#047857' }}>
-                    Kişi bazlı maaş ✓ · Mesai dahil ✓ · {formatMoney(analysisSummary.mesaiTasarrufu, 0)}
+                    Kişi bazlı ✓ · Mesai dahil ✓ · Mesai farkı {formatMoney(analysisSummary.mesaiTasarrufu, 0)}
                   </div>
                 </div>
                 <div className="rpt-compare-card">
-                  <strong>ZER YAPI hakediş</strong>
+                  <strong>ZER YAPI + toplam fayda</strong>
                   <div style={{ marginTop: 6, fontSize: '9pt', color: '#047857', fontWeight: 900 }}>
-                    {formatMoney(totalZerYapiHakedis, 0)}
+                    ZER {formatMoney(totalZerYapiHakedis, 0)}
                   </div>
                   <div style={{ marginTop: 4, fontSize: '7.5pt', color: '#4b5563' }}>
                     {totalPersonDays} gün × ₺{ZER_YAPI_GUNLUK}
+                  </div>
+                  <div style={{ marginTop: 4, fontSize: '9pt', color: '#047857', fontWeight: 900 }}>
+                    Toplam fayda {formatMoney(analysisSummary.donemToplamFayda, 0)}
                   </div>
                 </div>
               </div>
