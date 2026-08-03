@@ -38,7 +38,8 @@ interface StaffHakedisRow {
   zerYapiHakedis: number;
 }
 
-const ZER_YAPI_GUNLUK = 200;
+/** ZER YAPI günlük hakediş: 3.000 TL / 30 gün = 100 TL/gün */
+const ZER_YAPI_GUNLUK = 100;
 /** Her personelin mevcut tabanına eklenen fark — «6.000 TL pahalıya çalışsaydı» */
 const TABAN_FARK_TL = 6_000;
 const DEFAULT_MAAS_TABANI = 30_000;
