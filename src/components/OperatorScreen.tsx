@@ -9,6 +9,9 @@ import { isOperatorGorev } from '../lib/yoklamaUtils';
 import { RolMobilFaaliyetYoklamaPanel } from './RolMobilFaaliyetYoklamaPanel';
 import { KampGunlukYoklamaTab } from './KampGunlukYoklamaTab';
 
+/** Ağustos 2026 ve sonrası: kanıt foto zorunlu. Temmuz ve öncesi geçmiş doldurma için opsiyonel. */
+const KANIT_FOTO_ZORUNLU_BASLANGIC = '2026-08-01';
+
 interface OperatorScreenProps {
   araclar: AracBakim[];
   personeller: Personel[];
@@ -159,8 +162,9 @@ export const OperatorScreen: React.FC<OperatorScreenProps> = ({
       alert('Firma adı girin veya cari karttan taşeron seçin.');
       return;
     }
-    if (!fotoUrl) {
-      alert('Taşeron kesinti kaydı için kanıt fotoğrafı zorunludur.');
+    const fotoZorunlu = String(tarih || '') >= KANIT_FOTO_ZORUNLU_BASLANGIC;
+    if (fotoZorunlu && !fotoUrl) {
+      alert('Taşeron kesinti kaydı için kanıt fotoğrafı zorunludur (Ağustos 2026 ve sonrası).');
       return;
     }
 
@@ -690,7 +694,9 @@ export const OperatorScreen: React.FC<OperatorScreenProps> = ({
               </div>
 
               <div>
-                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Kanıt Fotoğrafı *</label>
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+                  Kanıt Fotoğrafı{String(tarih || '') >= KANIT_FOTO_ZORUNLU_BASLANGIC ? ' *' : ' (opsiyonel — Temmuz ve öncesi)'}
+                </label>
                 <div className="flex items-center gap-2">
                   <label className="flex-1 bg-slate-50 border border-slate-200 border-dashed rounded-xl p-3 text-center cursor-pointer hover:bg-slate-100 transition">
                     <Camera size={16} className="mx-auto text-slate-400 mb-1" />
@@ -704,6 +710,11 @@ export const OperatorScreen: React.FC<OperatorScreenProps> = ({
                     </div>
                   )}
                 </div>
+                {String(tarih || '') < KANIT_FOTO_ZORUNLU_BASLANGIC && (
+                  <p className="text-[9px] text-amber-700 mt-1 font-semibold">
+                    Geçmiş dönem (Temmuz 2026 ve öncesi): fotoğraf olmadan kayıt açılabilir. Ağustos’tan itibaren zorunlu.
+                  </p>
+                )}
               </div>
 
               {firmaSecim === 'manuel' && manuelFirma && !cariKartlar.some(c => c.unvan.toLowerCase() === manuelFirma.toLowerCase()) && (
