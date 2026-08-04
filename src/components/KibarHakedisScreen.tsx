@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import {
   CreditCard, Calendar, Printer, ShieldCheck, CheckCircle2,
-  RefreshCw, UserX, BarChart3, Copy, Download, Users, FileSpreadsheet, X
+  RefreshCw, UserX, BarChart3, Copy, Download, Users, FileText, X
 } from 'lucide-react';
 import { db, parseYoklamaSnapshotData, saveDocument } from '../lib/firebase';
 import { collection, doc, getDoc, onSnapshot, query, where } from 'firebase/firestore';
@@ -19,6 +19,11 @@ import {
   formatPersonelSayisi,
 } from '../lib/kibarReportUtils';
 import { groupKolajFotolari, mergeAlbumFotolari } from '../lib/sahaKolajUtils';
+import {
+  buildKibritciReportHtml,
+  downloadKibritciReportHtml,
+  openKibritciReportPrint,
+} from '../lib/kibritciReportTemplate';
 
 interface KibarHakedisScreenProps {
   personeller: Personel[];
@@ -523,135 +528,6 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
     return { geldi, mesai, gunKaz, mesaiKaz, maas, zer, kisi: rows.length };
   };
 
-  const fillUstaSheet = (
-    ws: { addRow: (values?: any) => any },
-    baslik: string,
-    rows: StaffHakedisRow[]
-  ) => {
-    const o = summarizeRows(rows);
-    ws.addRow([baslik, donemLabel]);
-    ws.addRow([]);
-    ws.addRow(['Personel Sayısı', o.kisi]);
-    ws.addRow(['Toplam İş Günü', o.geldi]);
-    ws.addRow(['Toplam Mesai Saati', o.mesai]);
-    ws.addRow(['Gün Kazancı', formatMoney(o.gunKaz)]);
-    ws.addRow(['Mesai Kazancı', formatMoney(o.mesaiKaz)]);
-    ws.addRow(['Toplam Maaş', formatMoney(o.maas)]);
-    ws.addRow(['ZER YAPI Hakediş', formatMoney(o.zer, 0)]);
-    ws.addRow(['Formül', `${o.geldi} gün × ₺${ZER_YAPI_GUNLUK}`]);
-    ws.addRow([]);
-    const header = [
-      'Ad Soyad',
-      'Görev',
-      'Geldi Gün',
-      'Mesai Saat',
-      'Gün Kazancı',
-      'Mesai Kazancı',
-      'Toplam Maaş',
-      'ZER YAPI Hakedis',
-    ];
-    const headerRow = ws.addRow(header);
-    headerRow.font = { bold: true };
-    rows.forEach((row) => {
-      ws.addRow([
-        `${row.personel.ad} ${row.personel.soyad}`,
-        normalizeGorev(row.personel.gorev),
-        row.geldiGun,
-        row.mesaiSaat,
-        row.gunKazanci,
-        row.mesaiKazanci,
-        row.toplamKazanc,
-        row.zerYapiHakedis,
-      ]);
-    });
-  };
-
-  const openUstaHtmlReport = (baslik: string, rows: StaffHakedisRow[]) => {
-    const o = summarizeRows(rows);
-    const bodyRows = rows
-      .map(
-        (r) => `<tr>
-        <td>${r.personel.ad} ${r.personel.soyad}</td>
-        <td>${normalizeGorev(r.personel.gorev)}</td>
-        <td style="text-align:center">${r.geldiGun}</td>
-        <td style="text-align:center">${r.mesaiSaat}</td>
-        <td style="text-align:right">${formatMoney(r.gunKazanci)}</td>
-        <td style="text-align:right">${formatMoney(r.mesaiKazanci)}</td>
-        <td style="text-align:right">${formatMoney(r.toplamKazanc)}</td>
-        <td style="text-align:right;font-weight:700;color:#047857">${formatMoney(r.zerYapiHakedis, 0)}</td>
-      </tr>`
-      )
-      .join('');
-    const html = `<!DOCTYPE html><html lang="tr"><head><meta charset="utf-8"><title>${baslik}_${donemKey}</title>
-      <style>
-        body{font-family:'Segoe UI',Arial,sans-serif;margin:24px;color:#1f2937}
-        h1{font-size:16pt;margin:0 0 4px} .sub{color:#6b7280;font-size:10pt;margin-bottom:16px}
-        .cards{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px}
-        .card{border:1px solid #d1d5db;border-radius:8px;padding:10px 14px;min-width:120px;background:#f9fafb}
-        .card b{display:block;font-size:14pt;margin-top:4px}
-        table{width:100%;border-collapse:collapse;font-size:10pt}
-        th,td{border:1px solid #e5e7eb;padding:6px 8px;text-align:left}
-        th{background:#f3f4f6;font-size:8pt;text-transform:uppercase}
-        @media print{button{display:none}}
-      </style></head><body>
-      <button onclick="window.print()" style="margin-bottom:12px;padding:8px 14px;cursor:pointer">Yazdır / PDF</button>
-      <h1>${baslik}</h1>
-      <p class="sub">ZER YAPI Hakediş · ${donemLabel} · Günlük ₺${ZER_YAPI_GUNLUK}</p>
-      <div class="cards">
-        <div class="card">Personel<b>${o.kisi}</b></div>
-        <div class="card">İş günü<b>${o.geldi}</b></div>
-        <div class="card">Mesai saati<b>${o.mesai}</b></div>
-        <div class="card">ZER YAPI<b style="color:#047857">${formatMoney(o.zer, 0)}</b></div>
-        <div class="card">Toplam maaş<b>${formatMoney(o.maas)}</b></div>
-      </div>
-      <table><thead><tr>
-        <th>Ad Soyad</th><th>Görev</th><th>Geldi</th><th>Mesai</th>
-        <th>Gün Kaz.</th><th>Mesai Kaz.</th><th>Toplam</th><th>ZER YAPI</th>
-      </tr></thead><tbody>${bodyRows || '<tr><td colspan="8">Kayıt yok</td></tr>'}</tbody></table>
-      </body></html>`;
-    const win = window.open('', '_blank');
-    if (win) {
-      win.document.write(html);
-      win.document.close();
-    }
-  };
-
-  const handleUstaUstasizRaporlar = async () => {
-    setDownloadingReport(true);
-    try {
-      const { createExcelWorkbook } = await import('../lib/exceljsLoader');
-      const wb = await createExcelWorkbook();
-      const wsUstali = wb.addWorksheet('USTALI');
-      const wsUstasiz = wb.addWorksheet('USTASIZ');
-      fillUstaSheet(wsUstali, 'ZER YAPI — USTALI PERSONEL RAPORU', ustaliRows);
-      fillUstaSheet(wsUstasiz, 'ZER YAPI — USTASIZ PERSONEL RAPORU', ustasizRows);
-      const buffer = await wb.xlsx.writeBuffer();
-      const blob = new Blob([buffer as BlobPart], {
-        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `ZER_YAPI_Ustali_Ustasiz_${donemKey}.xlsx`;
-      a.click();
-      URL.revokeObjectURL(url);
-
-      openUstaHtmlReport(`ZER YAPI — USTALI RAPOR — ${donemLabel}`, ustaliRows);
-      setTimeout(() => {
-        openUstaHtmlReport(`ZER YAPI — USTASIZ RAPOR — ${donemLabel}`, ustasizRows);
-      }, 400);
-
-      showStatus(
-        'success',
-        `2 rapor üretildi: Ustalı ${ustaliRows.length} kişi · Ustasız ${ustasizRows.length} kişi (Excel + HTML).`
-      );
-    } catch (err: any) {
-      showStatus('error', `Ustalı/ustasız rapor oluşturulamadı: ${err?.message || err}`);
-    } finally {
-      setDownloadingReport(false);
-    }
-  };
-
   const monthlySahaFaaliyetleri = useMemo(
     () => filterByMonth(tumSahaFaaliyetleri, selectedYear, selectedMonth),
     [tumSahaFaaliyetleri, selectedYear, selectedMonth]
@@ -838,6 +714,304 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
   ]);
 
   const shareableSummary = analysisSummary.shareableParagraphs;
+
+  const escHtml = (s: unknown) =>
+    String(s ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+
+  const computeKarSlice = (rows: StaffHakedisRow[]) => {
+    let mevcut = 0;
+    let senaryo = 0;
+    let geldi = 0;
+    for (const row of rows) {
+      const taban = resolveMaasTabani(row.personel);
+      const senTaban = taban + TABAN_FARK_TL;
+      mevcut += row.toplamKazanc;
+      geldi += row.geldiGun;
+      senaryo +=
+        calcGunKazanciFromWage(senTaban, row.geldiGun, selectedYear, selectedMonth) +
+        calcMesaiKazanciFromWage(senTaban, row.mesaiSaat, selectedYear, selectedMonth);
+    }
+    const zarar = senaryo - mevcut;
+    const zer = rows.reduce((s, r) => s + r.zerYapiHakedis, 0);
+    return { mevcut, senaryo, zarar, zer, geldi, kisi: rows.length };
+  };
+
+  const buildPersonelHakedisBodyHtml = (opts: {
+    rows: StaffHakedisRow[];
+    varyant: 'ustasiz' | 'ustali';
+  }) => {
+    const o = summarizeRows(opts.rows);
+    const isHakedis = opts.varyant === 'ustasiz';
+    const accent = isHakedis ? '#0f766e' : '#b45309';
+    const accentBg = isHakedis ? '#ecfdf5' : '#fffbeb';
+    const accentBorder = isHakedis ? '#99f6e4' : '#fde68a';
+    const tipLabel = isHakedis ? 'USTASIZ HAKEDİŞ RAPORU' : 'USTALI PERSONEL RAPORU';
+    const tipNote = isHakedis
+      ? 'Bu rapor ZER YAPI’dan tahsilat / ödeme almak için hazırlanmıştır. Ustasız personel hakediş listesidir.'
+      : 'Usta görevli personelin dönem hakediş özetidir (bilgi / iç rapor).';
+
+    const rowsHtml = opts.rows
+      .map(
+        (r, i) => `<tr style="background:${i % 2 ? '#f8fafc' : '#fff'}">
+        <td style="padding:7px 8px;border-bottom:1px solid #e2e8f0;text-align:center;color:#64748b;font-size:11px">${i + 1}</td>
+        <td style="padding:7px 8px;border-bottom:1px solid #e2e8f0;font-weight:700;text-transform:uppercase">${escHtml(`${r.personel.ad} ${r.personel.soyad}`)}</td>
+        <td style="padding:7px 8px;border-bottom:1px solid #e2e8f0;font-size:11px;color:#475569">${escHtml(normalizeGorev(r.personel.gorev))}</td>
+        <td style="padding:7px 8px;border-bottom:1px solid #e2e8f0;text-align:center;font-family:Consolas,monospace">${r.geldiGun}</td>
+        <td style="padding:7px 8px;border-bottom:1px solid #e2e8f0;text-align:center;font-family:Consolas,monospace">${r.mesaiSaat}</td>
+        <td style="padding:7px 8px;border-bottom:1px solid #e2e8f0;text-align:right;font-family:Consolas,monospace;font-weight:800;color:${accent}">${formatMoney(r.zerYapiHakedis, 0)}</td>
+      </tr>`
+      )
+      .join('');
+
+    return `
+      <div style="border:2px solid ${accentBorder};background:${accentBg};border-radius:14px;padding:14px 16px;margin-bottom:16px">
+        <div style="font-size:10px;font-weight:900;letter-spacing:.08em;color:${accent};text-transform:uppercase">${tipLabel}</div>
+        <p style="margin:6px 0 0;font-size:12px;color:#334155;line-height:1.45">${tipNote}</p>
+        <p style="margin:8px 0 0;font-size:11px;color:#64748b">
+          Dönem: <strong>${escHtml(donemLabel)}</strong> · Formül: geldi gün × ₺${ZER_YAPI_GUNLUK}
+          (aylık ~₺${(ZER_YAPI_GUNLUK * 30).toLocaleString('tr-TR')})
+        </p>
+      </div>
+
+      <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:16px">
+        <div style="border:1px solid #e2e8f0;border-radius:12px;padding:12px;background:#fff;text-align:center">
+          <div style="font-size:10px;font-weight:800;color:#64748b;text-transform:uppercase">Personel</div>
+          <div style="font-size:20px;font-weight:900;margin-top:4px">${o.kisi}</div>
+        </div>
+        <div style="border:1px solid #e2e8f0;border-radius:12px;padding:12px;background:#fff;text-align:center">
+          <div style="font-size:10px;font-weight:800;color:#64748b;text-transform:uppercase">İş günü</div>
+          <div style="font-size:20px;font-weight:900;margin-top:4px">${o.geldi}</div>
+        </div>
+        <div style="border:1px solid #e2e8f0;border-radius:12px;padding:12px;background:#fff;text-align:center">
+          <div style="font-size:10px;font-weight:800;color:#64748b;text-transform:uppercase">Mesai</div>
+          <div style="font-size:20px;font-weight:900;margin-top:4px">${o.mesai.toLocaleString('tr-TR')}</div>
+        </div>
+        <div style="border:2px solid ${accentBorder};border-radius:12px;padding:12px;background:${accentBg};text-align:center">
+          <div style="font-size:10px;font-weight:800;color:${accent};text-transform:uppercase">${isHakedis ? 'Tahsil edilecek' : 'ZER toplam'}</div>
+          <div style="font-size:20px;font-weight:900;margin-top:4px;color:${accent}">${formatMoney(o.zer, 0)}</div>
+        </div>
+      </div>
+
+      ${
+        isHakedis
+          ? `<div style="border:1px solid #99f6e4;background:linear-gradient(135deg,#ecfdf5,#f0fdfa);border-radius:14px;padding:14px 16px;margin-bottom:16px">
+              <div style="font-size:11px;font-weight:800;color:#0f766e;text-transform:uppercase">Ödeme / Hakediş Özeti</div>
+              <p style="margin:8px 0 0;font-size:13px;color:#134e4a;line-height:1.5">
+                <strong>${o.kisi}</strong> ustasız personel · <strong>${o.geldi}</strong> iş-günü × ₺${ZER_YAPI_GUNLUK}
+                = <strong style="font-size:16px">${formatMoney(o.zer, 0)}</strong>
+              </p>
+              <p style="margin:6px 0 0;font-size:11px;color:#64748b">Bu tutar ZER YAPI hakediş tahsilatı için esas alınır.</p>
+            </div>`
+          : ''
+      }
+
+      <table style="width:100%;border-collapse:collapse;font-size:12px;border:1px solid #e2e8f0;border-radius:12px;overflow:hidden">
+        <thead>
+          <tr style="background:${isHakedis ? '#0f766e' : '#b45309'};color:#fff">
+            <th style="padding:8px;text-align:center;width:36px">#</th>
+            <th style="padding:8px;text-align:left">Ad Soyad</th>
+            <th style="padding:8px;text-align:left">Görev</th>
+            <th style="padding:8px;text-align:center">Geldi</th>
+            <th style="padding:8px;text-align:center">Mesai</th>
+            <th style="padding:8px;text-align:right">ZER Hakediş</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rowsHtml || `<tr><td colspan="6" style="padding:16px;text-align:center;color:#94a3b8">Kayıt yok</td></tr>`}
+        </tbody>
+        <tfoot>
+          <tr style="background:#f1f5f9;font-weight:800">
+            <td colspan="3" style="padding:10px 8px">TOPLAM</td>
+            <td style="padding:10px 8px;text-align:center;font-family:Consolas,monospace">${o.geldi}</td>
+            <td style="padding:10px 8px;text-align:center;font-family:Consolas,monospace">${o.mesai}</td>
+            <td style="padding:10px 8px;text-align:right;font-family:Consolas,monospace;color:${accent}">${formatMoney(o.zer, 0)}</td>
+          </tr>
+        </tfoot>
+      </table>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:22px">
+        <div style="border:1px solid #cbd5e1;border-radius:12px;padding:14px;min-height:110px;text-align:center;background:#fff">
+          <div style="font-size:11px;font-weight:800;text-transform:uppercase;color:#334155">Kibritçi İnşaat</div>
+          <div style="height:56px;border-bottom:1px solid #cbd5e1;margin:12px 18px 8px"></div>
+          <div style="font-size:10px;color:#94a3b8">İmza / Kaşe</div>
+        </div>
+        <div style="border:1px solid #cbd5e1;border-radius:12px;padding:14px;min-height:110px;text-align:center;background:#fff">
+          <div style="font-size:11px;font-weight:800;text-transform:uppercase;color:#334155">ZER YAPI</div>
+          <div style="height:56px;border-bottom:1px solid #cbd5e1;margin:12px 18px 8px"></div>
+          <div style="font-size:10px;color:#94a3b8">${isHakedis ? 'Ödeme onayı' : 'İmza / Kaşe'}</div>
+        </div>
+      </div>
+    `;
+  };
+
+  const buildKarAnaliziBodyHtml = () => {
+    const a = analysisSummary;
+    const ustasizKar = computeKarSlice(ustasizRows);
+    const ustaliKar = computeKarSlice(ustaliRows);
+    const topRows = (a.enCokEtkilenen || [])
+      .slice(0, 8)
+      .map(
+        (p: { adSoyad: string; gorev: string; mevcutToplam: number; senaryoToplam: number; sirketKari: number }, i: number) =>
+          `<tr style="background:${i % 2 ? '#fff7ed' : '#fff'}">
+            <td style="padding:6px 8px;border-bottom:1px solid #fed7aa;font-weight:700">${escHtml(p.adSoyad)}</td>
+            <td style="padding:6px 8px;border-bottom:1px solid #fed7aa;font-size:11px;color:#78716c">${escHtml(p.gorev)}</td>
+            <td style="padding:6px 8px;border-bottom:1px solid #fed7aa;text-align:right;font-family:Consolas,monospace">${formatMoney(p.mevcutToplam, 0)}</td>
+            <td style="padding:6px 8px;border-bottom:1px solid #fed7aa;text-align:right;font-family:Consolas,monospace">${formatMoney(p.senaryoToplam, 0)}</td>
+            <td style="padding:6px 8px;border-bottom:1px solid #fed7aa;text-align:right;font-family:Consolas,monospace;font-weight:800;color:#b91c1c">${formatMoney(p.sirketKari, 0)}</td>
+          </tr>`
+      )
+      .join('');
+
+    return `
+      <div style="border:2px solid #fecaca;background:linear-gradient(135deg,#fef2f2,#fff7ed);border-radius:14px;padding:16px;margin-bottom:16px">
+        <div style="font-size:10px;font-weight:900;letter-spacing:.08em;color:#b91c1c;text-transform:uppercase">Kar / Zarar Analizi · +₺${TABAN_FARK_TL.toLocaleString('tr-TR')} Taban Senaryosu</div>
+        <p style="margin:8px 0 0;font-size:13px;color:#7f1d1d;line-height:1.5;font-weight:600">
+          Personel tabanı +₺${TABAN_FARK_TL.toLocaleString('tr-TR')} olsaydı şirket
+          <strong style="font-size:18px">${formatMoney(a.fazlaMaasOdemesi, 0)}</strong> fazla maaş öderdi
+          (kaçınılan zarar / dönem tasarrufu).
+        </p>
+        <p style="margin:8px 0 0;font-size:11px;color:#9a3412;line-height:1.45">
+          Gün farkı ${formatMoney(a.gunTasarrufu, 0)} + mesai farkı ${formatMoney(a.mesaiTasarrufu, 0)}.
+          ZER tahsilat (₺${ZER_YAPI_GUNLUK}/gün): ${formatMoney(a.zerGeliri, 0)}.
+          Dönem toplam fayda: <strong>${formatMoney(a.donemToplamFayda, 0)}</strong>.
+        </p>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:16px">
+        <div style="border:1px solid #cbd5e1;border-radius:12px;padding:12px;background:#f8fafc">
+          <div style="font-size:10px;font-weight:800;color:#64748b;text-transform:uppercase">Şuanki maaş</div>
+          <div style="font-size:16px;font-weight:900;margin-top:6px;font-family:Consolas,monospace">${formatMoney(totalMaasKazanci, 0)}</div>
+          <div style="font-size:10px;color:#94a3b8;margin-top:4px">${activeStaffRows.length} personel · mevcut taban</div>
+        </div>
+        <div style="border:1px solid #fecaca;border-radius:12px;padding:12px;background:#fef2f2">
+          <div style="font-size:10px;font-weight:800;color:#b91c1c;text-transform:uppercase">+6.000 senaryo</div>
+          <div style="font-size:16px;font-weight:900;margin-top:6px;font-family:Consolas,monospace;color:#b91c1c">${formatMoney(a.senaryoToplamMasraf, 0)}</div>
+          <div style="font-size:10px;color:#9a3412;margin-top:4px">Her kişiye +₺${TABAN_FARK_TL.toLocaleString('tr-TR')} taban</div>
+        </div>
+        <div style="border:2px solid #86efac;border-radius:12px;padding:12px;background:#ecfdf5">
+          <div style="font-size:10px;font-weight:800;color:#047857;text-transform:uppercase">Kaçınılan zarar</div>
+          <div style="font-size:16px;font-weight:900;margin-top:6px;font-family:Consolas,monospace;color:#047857">${formatMoney(a.fazlaMaasOdemesi, 0)}</div>
+          <div style="font-size:10px;color:#065f46;margin-top:4px">Şirketin dönem tasarrufu</div>
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px">
+        <div style="border:1px solid #e2e8f0;border-radius:12px;padding:12px;background:#fff">
+          <div style="font-size:10px;font-weight:900;color:#b45309;text-transform:uppercase">Ustalı dilim</div>
+          <p style="margin:8px 0 0;font-size:12px;color:#334155;line-height:1.45">
+            ${ustaliKar.kisi} kişi · ZER ${formatMoney(ustaliKar.zer, 0)}<br/>
+            +6.000 olsaydı fazla ödeme: <strong style="color:#b91c1c">${formatMoney(ustaliKar.zarar, 0)}</strong>
+          </p>
+        </div>
+        <div style="border:1px solid #99f6e4;border-radius:12px;padding:12px;background:#f0fdfa">
+          <div style="font-size:10px;font-weight:900;color:#0f766e;text-transform:uppercase">Ustasız dilim (hakediş)</div>
+          <p style="margin:8px 0 0;font-size:12px;color:#334155;line-height:1.45">
+            ${ustasizKar.kisi} kişi · ZER hakediş <strong>${formatMoney(ustasizKar.zer, 0)}</strong><br/>
+            +6.000 olsaydı fazla ödeme: <strong style="color:#b91c1c">${formatMoney(ustasizKar.zarar, 0)}</strong>
+          </p>
+        </div>
+      </div>
+
+      <h3 style="margin:0 0 8px;font-size:12px;font-weight:900;text-transform:uppercase;color:#9a3412;letter-spacing:.04em">
+        En çok etkilenen personel (kaçınılan fazla maaş)
+      </h3>
+      <table style="width:100%;border-collapse:collapse;font-size:12px;border:1px solid #fed7aa;border-radius:12px;overflow:hidden;margin-bottom:12px">
+        <thead>
+          <tr style="background:#c2410c;color:#fff">
+            <th style="padding:8px;text-align:left">Ad Soyad</th>
+            <th style="padding:8px;text-align:left">Görev</th>
+            <th style="padding:8px;text-align:right">Mevcut</th>
+            <th style="padding:8px;text-align:right">+6.000</th>
+            <th style="padding:8px;text-align:right">Fark</th>
+          </tr>
+        </thead>
+        <tbody>${topRows || `<tr><td colspan="5" style="padding:12px;text-align:center;color:#94a3b8">Veri yok</td></tr>`}</tbody>
+      </table>
+      <p style="margin:0;font-size:11px;color:#78716c;line-height:1.45">${escHtml(a.güçlüArgüman)}</p>
+    `;
+  };
+
+  const publishHtmlReport = (opts: {
+    title: string;
+    subtitle: string;
+    meta: string[];
+    bodyHtml: string;
+    fileName: string;
+    openPrint?: boolean;
+  }) => {
+    const html = buildKibritciReportHtml({
+      title: opts.title,
+      subtitle: opts.subtitle,
+      meta: opts.meta,
+      bodyHtml: opts.bodyHtml,
+    });
+    downloadKibritciReportHtml(html, opts.fileName);
+    if (opts.openPrint) openKibritciReportPrint(html, opts.title);
+  };
+
+  const handleUstaUstasizRaporlar = () => {
+    setDownloadingReport(true);
+    try {
+      // 1) Ustasız = ana hakediş / tahsilat raporu
+      publishHtmlReport({
+        title: 'ZER YAPI HAKEDİŞ RAPORU',
+        subtitle: `Ustasız Personel · ${donemLabel}`,
+        meta: [
+          `Personel: ${ustasizRows.length}`,
+          `İş günü: ${summarizeRows(ustasizRows).geldi}`,
+          `Tahsil: ${formatMoney(summarizeRows(ustasizRows).zer, 0)}`,
+          `Günlük: ₺${ZER_YAPI_GUNLUK}`,
+        ],
+        bodyHtml: buildPersonelHakedisBodyHtml({ rows: ustasizRows, varyant: 'ustasiz' }),
+        fileName: `ZER_YAPI_Hakedis_Ustasiz_${donemKey}.html`,
+        openPrint: true,
+      });
+
+      // 2) Ustalı iç rapor
+      setTimeout(() => {
+        publishHtmlReport({
+          title: 'ZER YAPI USTALI PERSONEL',
+          subtitle: `Ustalı Liste · ${donemLabel}`,
+          meta: [
+            `Personel: ${ustaliRows.length}`,
+            `ZER: ${formatMoney(summarizeRows(ustaliRows).zer, 0)}`,
+          ],
+          bodyHtml: buildPersonelHakedisBodyHtml({ rows: ustaliRows, varyant: 'ustali' }),
+          fileName: `ZER_YAPI_Ustali_${donemKey}.html`,
+          openPrint: true,
+        });
+      }, 350);
+
+      // 3) Kar analizi (+6.000 zarar senaryosu)
+      setTimeout(() => {
+        publishHtmlReport({
+          title: 'ZER YAPI KAR ANALİZİ',
+          subtitle: `+₺${TABAN_FARK_TL.toLocaleString('tr-TR')} taban olsaydı · ${donemLabel}`,
+          meta: [
+            `Kaçınılan zarar: ${formatMoney(analysisSummary.fazlaMaasOdemesi, 0)}`,
+            `ZER gelir: ${formatMoney(analysisSummary.zerGeliri, 0)}`,
+            `Toplam fayda: ${formatMoney(analysisSummary.donemToplamFayda, 0)}`,
+          ],
+          bodyHtml: buildKarAnaliziBodyHtml(),
+          fileName: `ZER_YAPI_Kar_Analizi_6000_${donemKey}.html`,
+          openPrint: true,
+        });
+      }, 700);
+
+      showStatus(
+        'success',
+        `3 HTML rapor: Ustasız hakediş (${ustasizRows.length}) · Ustalı (${ustaliRows.length}) · Kar analizi (+6.000)`
+      );
+    } catch (err: any) {
+      showStatus('error', `HTML rapor oluşturulamadı: ${err?.message || err}`);
+    } finally {
+      setDownloadingReport(false);
+    }
+  };
 
   const handleCopySummary = async () => {
     try {
@@ -1234,10 +1408,10 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
             onClick={() => void handleUstaUstasizRaporlar()}
             disabled={downloadingReport || activeStaffRows.length === 0}
             className="bg-amber-500 hover:bg-amber-600 disabled:opacity-60 text-slate-950 font-bold text-xs px-4 py-2.5 rounded-xl transition shadow cursor-pointer flex items-center space-x-1"
-            title="Ustalı ve ustasız olmak üzere 2 ayrı hakediş raporu (Excel + HTML yazdırma)"
+            title="3 HTML rapor: Ustasız hakediş (tahsilat), Ustalı liste, +6.000 kar analizi"
           >
-            {downloadingReport ? <RefreshCw size={12} className="animate-spin" /> : <FileSpreadsheet size={12} />}
-            <span>Ustalı + Ustasız Rapor</span>
+            {downloadingReport ? <RefreshCw size={12} className="animate-spin" /> : <FileText size={12} />}
+            <span>HTML Raporlar (Hakediş + Kar)</span>
           </button>
           <button
             type="button"
@@ -1874,7 +2048,7 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
                 </h3>
                 <p className="text-[11px] text-slate-500 mt-0.5">
                   Aktif hakediş listesi (çıkarılanlar hariç) · Ustalı {ustaliRows.length} · Ustasız{' '}
-                  {ustasizRows.length}
+                  {ustasizRows.length} · HTML: ustasız hakediş + ustalı + kar analizi
                 </p>
               </div>
               <button
@@ -1922,7 +2096,7 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
               <div className="p-4 space-y-2">
                 <div className="flex items-center justify-between">
                   <h4 className="text-[11px] font-black uppercase text-slate-700 tracking-wider">
-                    Ustasız ({ustasizRows.length})
+                    Ustasız Hakediş ({ustasizRows.length})
                   </h4>
                   <span className="text-[10px] font-mono font-bold text-emerald-700">
                     ZER {formatMoney(summarizeRows(ustasizRows).zer, 0)}
@@ -1959,8 +2133,9 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
                 onClick={() => void handleUstaUstasizRaporlar()}
                 disabled={downloadingReport}
                 className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-[11px] font-bold bg-amber-500 text-slate-950 cursor-pointer disabled:opacity-60"
+                title="Ustasız hakediş + Ustalı + +6.000 kar analizi (HTML)"
               >
-                <FileSpreadsheet size={12} /> 2 Rapor Üret
+                <FileText size={12} /> 3 HTML Rapor Üret
               </button>
               <button
                 type="button"
