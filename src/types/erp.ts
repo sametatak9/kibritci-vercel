@@ -858,6 +858,8 @@ export interface CariKartIslem {
   tutar?: number;
   tarih: string;
   belgeNo?: string;
+  /** İş makinesi / sayaç kesinti kanıt fotoğrafı */
+  fotoUrl?: string;
 }
 
 export interface StokKartIslem {

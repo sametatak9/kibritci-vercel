@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { HardHat, Clock, Calendar, Building2, Camera, Save, Search, FileText, Trash2, CreditCard as Edit3, CircleCheck as CheckCircle, X, ChevronDown, ChevronUp, Truck, TriangleAlert as AlertTriangle, Download, Mail, ListFilter as Filter, Plus, Printer } from 'lucide-react';
-import { AracBakim, AylikYoklamaMap, CariKart, OperatorFaaliyet, TaseronKesintiRaporu, Personel } from '../types/erp';
+import { AracBakim, AylikYoklamaMap, CariKart, CariKartIslem, OperatorFaaliyet, TaseronKesintiRaporu, Personel } from '../types/erp';
 import { compressImage } from '../lib/imageCompress';
 import { getTaseronCariKartlar, buildOperatorIsKaydiEtiketi, makineEtiketi } from '../lib/taseronUtils';
 import { indirIsMakinesiRaporu } from '../lib/taseronReportUtils';
@@ -16,6 +16,7 @@ interface OperatorScreenProps {
   setOperatorFaaliyetleri: React.Dispatch<React.SetStateAction<OperatorFaaliyet[]>>;
   taseronKesintiRaporlari: TaseronKesintiRaporu[];
   setTaseronKesintiRaporlari: React.Dispatch<React.SetStateAction<TaseronKesintiRaporu[]>>;
+  setCariIslemGecmisi?: React.Dispatch<React.SetStateAction<CariKartIslem[]>>;
   currentUser: any;
   addNotification?: (mesaj: string) => void;
   yoklamalar?: AylikYoklamaMap;
@@ -23,6 +24,25 @@ interface OperatorScreenProps {
   saveYoklamalarNow?: (next: AylikYoklamaMap) => Promise<void>;
   onSignOut?: () => void;
   isStandalone?: boolean;
+}
+
+function cariIslemIdForFaaliyet(faaliyetId: string): string {
+  return `cari_islem_of_${faaliyetId}`;
+}
+
+function buildCariIslemFromOperatorFaaliyet(f: OperatorFaaliyet): CariKartIslem | null {
+  if (!f.firmaId) return null;
+  return {
+    id: cariIslemIdForFaaliyet(f.id),
+    cariKartId: f.firmaId,
+    islemTipi: 'OPERATOR_KESINTI',
+    islemId: f.id,
+    islemBaslik: `İş Makinesi Kesinti · ${f.firmaAdi}`,
+    islemDetay: `${f.tarih} · ${f.operatorIsim} · ${makineEtiketi(f)} · ${f.baslangicSaat}–${f.bitisSaat} (${f.calismaSuresi.toFixed(1)} sa) · ${f.yapilanIs}`,
+    tarih: f.tarih,
+    belgeNo: f.id,
+    fotoUrl: f.fotoUrl,
+  };
 }
 
 export const OperatorScreen: React.FC<OperatorScreenProps> = ({
@@ -33,6 +53,7 @@ export const OperatorScreen: React.FC<OperatorScreenProps> = ({
   setOperatorFaaliyetleri,
   taseronKesintiRaporlari,
   setTaseronKesintiRaporlari,
+  setCariIslemGecmisi,
   currentUser,
   addNotification,
   yoklamalar = {},
@@ -128,8 +149,8 @@ export const OperatorScreen: React.FC<OperatorScreenProps> = ({
   };
 
   const handleKaydet = () => {
-    if (!selectedPersonelId || !yapilanIs) {
-      alert('Lütfen operatör ve yapılan iş alanlarını doldurun.');
+    if (!selectedPersonelId || !yapilanIs.trim()) {
+      alert('Lütfen operatör ve yapılan iş (açıklama) alanlarını doldurun.');
       return;
     }
     if (makineKaynak === 'MANUEL' && !makineManuelAd.trim()) {
@@ -138,6 +159,18 @@ export const OperatorScreen: React.FC<OperatorScreenProps> = ({
     }
     if (makineKaynak !== 'MANUEL' && !selectedAracId) {
       alert('Lütfen iş makinesi seçin.');
+      return;
+    }
+    if (firmaSecim === 'cari' && !selectedCariId) {
+      alert('Taşeron firma seçin. Kesinti kaydı ilgili cari geçmişine yazılır.');
+      return;
+    }
+    if (firmaSecim === 'manuel' && !manuelFirma.trim()) {
+      alert('Firma adı girin veya cari karttan taşeron seçin.');
+      return;
+    }
+    if (!fotoUrl) {
+      alert('Taşeron kesinti kaydı için kanıt fotoğrafı zorunludur.');
       return;
     }
 
@@ -152,7 +185,7 @@ export const OperatorScreen: React.FC<OperatorScreenProps> = ({
 
     const firmaAdi = firmaSecim === 'cari' 
       ? (cariKartlar.find(c => c.id === selectedCariId)?.unvan || 'Bilinmeyen Firma')
-      : manuelFirma;
+      : manuelFirma.trim();
 
     const firmaId = firmaSecim === 'cari' ? selectedCariId : undefined;
 
@@ -178,7 +211,7 @@ export const OperatorScreen: React.FC<OperatorScreenProps> = ({
       baslangicSaat,
       bitisSaat,
       calismaSuresi: Math.round(calismaSuresi * 100) / 100,
-      yapilanIs,
+      yapilanIs: yapilanIs.trim(),
       firmaAdi,
       firmaId,
       isManualFirma: firmaSecim === 'manuel',
@@ -200,9 +233,18 @@ export const OperatorScreen: React.FC<OperatorScreenProps> = ({
       setOperatorFaaliyetleri(prev => [...prev, yeniFaaliyet]);
     }
 
+    const cariIslem = buildCariIslemFromOperatorFaaliyet(yeniFaaliyet);
+    if (cariIslem && setCariIslemGecmisi) {
+      setCariIslemGecmisi((prev) => {
+        const rest = (prev || []).filter((x) => x.id !== cariIslem.id && x.islemId !== yeniFaaliyet.id);
+        return [cariIslem, ...rest];
+      });
+    }
+
     if (addNotification) {
       addNotification(
-        `${isKaydiEtiketi} · ${personel?.ad} ${personel?.soyad} | ${calismaSuresi.toFixed(1)} sa · ${firmaAdi}`
+        `Taşeron kesinti: ${isKaydiEtiketi} · ${personel?.ad} ${personel?.soyad} | ${calismaSuresi.toFixed(1)} sa · ${firmaAdi}` +
+          (cariIslem ? ' (cari geçmişe yazıldı)' : '')
       );
     }
 
@@ -212,12 +254,22 @@ export const OperatorScreen: React.FC<OperatorScreenProps> = ({
     setTemsilciTc('');
     setFotoUrl('');
     setEditingId(null);
-    alert(editingId ? 'Faaliyet güncellendi!' : 'Faaliyet kaydedildi!');
+    alert(
+      editingId
+        ? 'Kesinti kaydı güncellendi!'
+        : cariIslem
+          ? 'Taşeron kesinti kaydı oluşturuldu; ilgili cari geçmişine eklendi.'
+          : 'Kesinti kaydı oluşturuldu. (Elle firma — cari kart yoksa geçmişe yazılmaz; cari kart ekleyip cari seçin.)'
+    );
   };
 
   const handleSil = (id: string) => {
-    if (confirm('Bu faaliyet kaydını silmek istediğinize emin misiniz?')) {
+    if (confirm('Bu taşeron kesinti kaydını silmek istediğinize emin misiniz?')) {
       setOperatorFaaliyetleri(prev => prev.filter(f => f.id !== id));
+      if (setCariIslemGecmisi) {
+        const cid = cariIslemIdForFaaliyet(id);
+        setCariIslemGecmisi((prev) => (prev || []).filter((x) => x.id !== cid && x.islemId !== id));
+      }
     }
   };
 
@@ -370,10 +422,33 @@ export const OperatorScreen: React.FC<OperatorScreenProps> = ({
       return f;
     }));
 
-    if (addNotification) {
-      addNotification(`${yeniRaporlar.length} adet taşeron kesinti raporu oluşturuldu (${selectedAy}/${selectedYil}).`);
+    // Aylık özet satırını cari geçmişe de yaz (firma kartı eşleşenler)
+    if (setCariIslemGecmisi) {
+      const ozetIslemler: CariKartIslem[] = yeniRaporlar
+        .filter((r) => r.taseronFirmaId)
+        .map((r) => ({
+          id: `cari_islem_tkr_${r.id}`,
+          cariKartId: r.taseronFirmaId!,
+          islemTipi: 'OPERATOR_KESINTI' as const,
+          islemId: r.id,
+          islemBaslik: `İş Makinesi Kesinti Raporu · ${r.donemAy}/${r.donemYil}`,
+          islemDetay: `${r.taseronFirmaAdi} · ${r.toplamSaat.toFixed(1)} sa · ${r.faaliyetler.length} kayıt · ücret onayı bekliyor`,
+          tarih: `${r.donemYil}-${r.donemAy}-01`,
+          belgeNo: r.id,
+        }));
+      if (ozetIslemler.length) {
+        setCariIslemGecmisi((prev) => {
+          const ids = new Set(ozetIslemler.map((x) => x.id));
+          const rest = (prev || []).filter((x) => !ids.has(x.id));
+          return [...ozetIslemler, ...rest];
+        });
+      }
     }
-    alert(`${yeniRaporlar.length} adet kesinti raporu Taşeron sekmesine gönderildi. Yönetici saat ücretini girecek.`);
+
+    if (addNotification) {
+      addNotification(`${yeniRaporlar.length} adet iş makinesi kesinti raporu oluşturuldu (${selectedAy}/${selectedYil}).`);
+    }
+    alert(`${yeniRaporlar.length} adet kesinti raporu oluşturuldu. Yönetici saat ücretini Taşeron Yönetimi’nden girecek; indirilen raporda firma/saat/açıklama/fotoğraf yer alır.`);
     setShowKesintiModal(false);
   };
 
@@ -416,13 +491,13 @@ export const OperatorScreen: React.FC<OperatorScreenProps> = ({
           <h2 className="text-sm font-black tracking-widest font-display flex items-center gap-2">
             <HardHat size={16} /> OPERATÖR FAALİYET TAKİP SİSTEMİ
           </h2>
-          <p className="text-[10px] text-slate-400">JCB, KATO, Kiralık ve diğer iş makinelerinin günlük faaliyet kayıtları, taşeron kesinti raporları ve arşiv.</p>
+          <p className="text-[10px] text-slate-400">Saha faaliyet · yoklama · taşeron kesinti kaydı · ay sonu iş makinesi kesinti raporu.</p>
         </div>
         <div className="flex flex-wrap gap-2 w-full md:w-auto">
           <button onClick={() => setActiveSubTab('saha_faaliyet')} className={`px-4 py-2 rounded-xl text-xs font-bold transition ${activeSubTab === 'saha_faaliyet' ? 'bg-amber-500 text-slate-950' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>Saha Faaliyet (N/M)</button>
           <button onClick={() => setActiveSubTab('yoklama')} className={`px-4 py-2 rounded-xl text-xs font-bold transition ${activeSubTab === 'yoklama' ? 'bg-emerald-500 text-slate-950' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>Operatör Yoklama</button>
-          <button onClick={() => setActiveSubTab('faaliyet')} className={`px-4 py-2 rounded-xl text-xs font-bold transition ${activeSubTab === 'faaliyet' ? 'bg-amber-500 text-slate-950' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>Makine Saat Kaydı</button>
-          <button onClick={() => setActiveSubTab('rapor')} className={`px-4 py-2 rounded-xl text-xs font-bold transition ${activeSubTab === 'rapor' ? 'bg-amber-500 text-slate-950' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>Kesinti Raporları</button>
+          <button onClick={() => setActiveSubTab('faaliyet')} className={`px-4 py-2 rounded-xl text-xs font-bold transition ${activeSubTab === 'faaliyet' ? 'bg-rose-500 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>Taşeron Kesinti</button>
+          <button onClick={() => setActiveSubTab('rapor')} className={`px-4 py-2 rounded-xl text-xs font-bold transition ${activeSubTab === 'rapor' ? 'bg-amber-500 text-slate-950' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>İş Makinesi Kesinti Raporu</button>
           <button onClick={() => setActiveSubTab('arsiv')} className={`px-4 py-2 rounded-xl text-xs font-bold transition ${activeSubTab === 'arsiv' ? 'bg-amber-500 text-slate-950' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>Arşiv</button>
         </div>
       </div>
@@ -463,9 +538,12 @@ export const OperatorScreen: React.FC<OperatorScreenProps> = ({
           {/* Form */}
           <div className="xl:col-span-1 bg-white border rounded-2xl p-5 shadow-sm space-y-4">
             <h3 className="font-display font-black text-slate-800 text-xs uppercase tracking-wider flex items-center gap-2">
-              <Plus size={14} className="text-amber-500" />
-              {editingId ? 'Faaliyet Düzenle' : 'Yeni Faaliyet Kaydı'}
+              <Plus size={14} className="text-rose-500" />
+              {editingId ? 'Kesinti Kaydı Düzenle' : 'Taşeron Kesinti Kaydı'}
             </h3>
+            <p className="text-[10px] text-slate-500 leading-snug">
+              Taşeron firmaya çalışıldığında: firma + saat + açıklama + fotoğraf. Kayıt ilgili carinin geçmiş işlemine düşer; ay sonunda maddi kesinti raporuna dönüşür.
+            </p>
 
             <div className="space-y-3">
               <div>
@@ -576,15 +654,15 @@ export const OperatorScreen: React.FC<OperatorScreenProps> = ({
               )}
 
               <div>
-                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Yapılan İş</label>
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Yapılan İş / Açıklama *</label>
                 <textarea value={yapilanIs} onChange={e => setYapilanIs(e.target.value)} placeholder="Örn: Parsel B zemin kazma ve hafriyat..." className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-semibold text-slate-700 outline-none focus:border-amber-500 resize-none" rows={2} />
               </div>
 
               <div>
-                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Firma Seçimi</label>
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Taşeron Firma *</label>
                 <div className="flex gap-2 mb-2">
-                  <button onClick={() => setFirmaSecim('cari')} className={`flex-1 py-1.5 rounded-lg border text-[10px] font-bold transition ${firmaSecim === 'cari' ? 'bg-emerald-500 text-white border-emerald-500' : 'bg-slate-50 text-slate-500 border-slate-200'}`}>Cari Karttan</button>
-                  <button onClick={() => setFirmaSecim('manuel')} className={`flex-1 py-1.5 rounded-lg border text-[10px] font-bold transition ${firmaSecim === 'manuel' ? 'bg-emerald-500 text-white border-emerald-500' : 'bg-slate-50 text-slate-500 border-slate-200'}`}>Elle Gir</button>
+                  <button type="button" onClick={() => setFirmaSecim('cari')} className={`flex-1 py-1.5 rounded-lg border text-[10px] font-bold transition ${firmaSecim === 'cari' ? 'bg-emerald-500 text-white border-emerald-500' : 'bg-slate-50 text-slate-500 border-slate-200'}`}>Cari Karttan</button>
+                  <button type="button" onClick={() => setFirmaSecim('manuel')} className={`flex-1 py-1.5 rounded-lg border text-[10px] font-bold transition ${firmaSecim === 'manuel' ? 'bg-emerald-500 text-white border-emerald-500' : 'bg-slate-50 text-slate-500 border-slate-200'}`}>Elle Gir</button>
                 </div>
                 {firmaSecim === 'cari' ? (
                   <select value={selectedCariId} onChange={e => setSelectedCariId(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-semibold text-slate-700 outline-none focus:border-amber-500">
@@ -614,7 +692,7 @@ export const OperatorScreen: React.FC<OperatorScreenProps> = ({
               </div>
 
               <div>
-                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Fotoğraf</label>
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Kanıt Fotoğrafı *</label>
                 <div className="flex items-center gap-2">
                   <label className="flex-1 bg-slate-50 border border-slate-200 border-dashed rounded-xl p-3 text-center cursor-pointer hover:bg-slate-100 transition">
                     <Camera size={16} className="mx-auto text-slate-400 mb-1" />
@@ -638,8 +716,8 @@ export const OperatorScreen: React.FC<OperatorScreenProps> = ({
               )}
 
               <div className="flex gap-2 pt-2">
-                <button onClick={handleKaydet} className="flex-1 bg-amber-500 hover:bg-amber-600 text-slate-950 font-black text-xs py-2.5 rounded-xl transition flex items-center justify-center gap-1.5">
-                  <Save size={14} /> {editingId ? 'Güncelle' : 'Kaydet'}
+                <button onClick={handleKaydet} className="flex-1 bg-rose-500 hover:bg-rose-600 text-white font-black text-xs py-2.5 rounded-xl transition flex items-center justify-center gap-1.5">
+                  <Save size={14} /> {editingId ? 'Güncelle' : 'Kesinti Kaydı Oluştur'}
                 </button>
                 {editingId && (
                   <button onClick={() => { setEditingId(null); setYapilanIs(''); setFotoUrl(''); }} className="px-4 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold text-xs py-2.5 rounded-xl transition">
@@ -655,7 +733,7 @@ export const OperatorScreen: React.FC<OperatorScreenProps> = ({
             <div className="flex flex-wrap justify-between items-center gap-2 border-b border-slate-100 pb-3">
               <h3 className="font-display font-black text-slate-800 text-xs uppercase tracking-wider flex items-center gap-2">
                 <FileText size={14} className="text-amber-500" />
-                Faaliyet Kayıtları
+                Taşeron Kesinti Kayıtları
               </h3>
               <div className="flex flex-wrap gap-2 w-full sm:w-auto">
                 <div className="relative w-full sm:w-auto">
@@ -733,21 +811,21 @@ export const OperatorScreen: React.FC<OperatorScreenProps> = ({
               </select>
             </div>
             <p className="text-[10px] text-slate-500 w-full">
-              Saat ücreti yönetici tarafından <strong>Taşeron Yönetimi</strong> sekmesinde girilir. Burada sadece saat özeti gönderilir.
+              Seçilen aydaki taşeron kesinti kayıtları firmaya göre toplanır. Saat ücreti yönetici tarafından <strong>Taşeron Yönetimi</strong> sekmesinde girilir; sonuç maddi kesinti raporudur (firma · saat · açıklama · fotoğraf).
             </p>
             <button onClick={() => setShowKesintiModal(true)} className="bg-amber-500 hover:bg-amber-600 text-slate-950 font-black text-xs py-2.5 px-5 rounded-xl transition flex items-center gap-1.5">
-              <FileText size={14} /> Kesinti Raporu Oluştur
+              <FileText size={14} /> İş Makinesi Kesinti Raporu Oluştur
             </button>
           </div>
 
           {showKesintiModal && (
             <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
               <div className="bg-white rounded-2xl p-6 max-w-md w-full space-y-4 shadow-2xl">
-                <h3 className="font-display font-black text-slate-800 text-sm">Taşeron Kesinti Raporu Oluştur</h3>
-                <p className="text-[11px] text-slate-500">{selectedAy}/{selectedYil} dönemine ait kesintiye tabi faaliyetler gruplanarak raporlanacaktır.</p>
+                <h3 className="font-display font-black text-slate-800 text-sm">İş Makinesi Kesinti Raporu</h3>
+                <p className="text-[11px] text-slate-500">{selectedAy}/{selectedYil} dönemine ait taşeron kesinti kayıtları firmaya göre gruplanıp maddi rapora dönüştürülür.</p>
                 <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-[10px] text-amber-800">
                   <p><strong>Dönem:</strong> {String(selectedAy).padStart(2, '0')}/{selectedYil}</p>
-                  <p className="mt-1">Rapor Taşeron sekmesine TASLAK olarak düşer; yönetici saat ücretini onaylar.</p>
+                  <p className="mt-1">Rapor Taşeron Yönetimi’ne TASLAK düşer; yönetici saat ücretini onaylayınca kesinti tutarı hesaplanır. İndirilen HTML’de fotoğraflar da yer alır.</p>
                 </div>
                 <div className="flex gap-2">
                   <button onClick={handleKesintiRaporuOlustur} className="flex-1 bg-amber-500 hover:bg-amber-600 text-slate-950 font-black text-xs py-2.5 rounded-xl transition">Oluştur</button>

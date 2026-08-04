@@ -3105,6 +3105,7 @@ export default function App() {
           setOperatorFaaliyetleri={setOperatorFaaliyetleriWithSync}
           taseronKesintiRaporlari={taseronKesintiRaporlari}
           setTaseronKesintiRaporlari={setTaseronKesintiRaporlariWithSync}
+          setCariIslemGecmisi={setCariIslemGecmisiWithSync}
           currentUser={currentUser}
           addNotification={addNotification}
           yoklamalar={yoklamalar}
@@ -3262,6 +3263,7 @@ export default function App() {
           setOperatorFaaliyetleri={setOperatorFaaliyetleriWithSync}
           taseronKesintiRaporlari={taseronKesintiRaporlari}
           setTaseronKesintiRaporlari={setTaseronKesintiRaporlariWithSync}
+          setCariIslemGecmisi={setCariIslemGecmisiWithSync}
           currentUser={currentUser}
           addNotification={addNotification}
           yoklamalar={yoklamalar}
@@ -3985,6 +3987,7 @@ export default function App() {
                     setOperatorFaaliyetleri={setOperatorFaaliyetleriWithSync}
                     taseronKesintiRaporlari={taseronKesintiRaporlari}
                     setTaseronKesintiRaporlari={setTaseronKesintiRaporlariWithSync}
+                    setCariIslemGecmisi={setCariIslemGecmisiWithSync}
                     currentUser={currentUser}
                     addNotification={addNotification}
                     yoklamalar={yoklamalar}

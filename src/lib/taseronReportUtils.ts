@@ -9,21 +9,37 @@ function fmt(n: number): string {
 export function buildIsMakinesiKesintiReportHtml(rapor: TaseronKesintiRaporu): string {
   const ayLabel = ayAdi(Number(rapor.donemAy));
   const rows = rapor.faaliyetler
-    .map(
-      (f) =>
-        `<tr>
+    .map((f) => {
+      const fotoCell = f.fotoUrl
+        ? `<a href="${f.fotoUrl}" target="_blank" rel="noopener"><img src="${f.fotoUrl}" alt="Kanıt" style="max-width:72px;max-height:54px;object-fit:cover;border-radius:6px;border:1px solid #cbd5e1"/></a>`
+        : '<span style="color:#94a3b8">—</span>';
+      return `<tr>
           <td>${f.tarih}</td>
           <td>${f.operatorIsim}</td>
           <td>${makineEtiketi(f)}</td>
           <td>${f.baslangicSaat}–${f.bitisSaat}</td>
           <td style="text-align:right;font-weight:bold">${f.calismaSuresi.toFixed(1)} sa</td>
           <td>${f.yapilanIs}</td>
-        </tr>`
+          <td style="text-align:center">${fotoCell}</td>
+        </tr>`;
+    })
+    .join('');
+
+  const fotoGaleri = rapor.faaliyetler
+    .filter((f) => f.fotoUrl)
+    .map(
+      (f) =>
+        `<div style="display:inline-block;margin:6px;text-align:center;vertical-align:top;width:120px">
+          <a href="${f.fotoUrl}" target="_blank" rel="noopener">
+            <img src="${f.fotoUrl}" alt="${f.tarih}" style="width:110px;height:80px;object-fit:cover;border-radius:8px;border:1px solid #cbd5e1"/>
+          </a>
+          <div style="font-size:9px;color:#64748b;margin-top:4px">${f.tarih}<br/>${f.calismaSuresi.toFixed(1)} sa</div>
+        </div>`
     )
     .join('');
 
   const bodyHtml = `
-    <p><strong>Taşeron:</strong> ${rapor.taseronFirmaAdi}</p>
+    <p><strong>Taşeron Firma:</strong> ${rapor.taseronFirmaAdi}</p>
     <p><strong>Dönem:</strong> ${ayLabel} ${rapor.donemYil}</p>
     <table style="width:100%;border-collapse:collapse;font-size:11px;margin-top:16px">
       <thead>
@@ -31,14 +47,21 @@ export function buildIsMakinesiKesintiReportHtml(rapor: TaseronKesintiRaporu): s
           <th style="padding:8px;text-align:left">Tarih</th>
           <th style="padding:8px;text-align:left">Operatör</th>
           <th style="padding:8px;text-align:left">Makine</th>
-          <th style="padding:8px;text-align:left">Saat</th>
+          <th style="padding:8px;text-align:left">Saat Aralığı</th>
           <th style="padding:8px;text-align:right">Süre</th>
           <th style="padding:8px;text-align:left">İş Açıklaması</th>
+          <th style="padding:8px;text-align:center">Foto</th>
         </tr>
       </thead>
       <tbody>${rows}</tbody>
     </table>
+    ${
+      fotoGaleri
+        ? `<div style="margin-top:18px"><p style="font-size:11px;font-weight:bold;color:#334155;margin-bottom:8px">Kanıt Fotoğrafları</p>${fotoGaleri}</div>`
+        : ''
+    }
     <div style="margin-top:20px;padding:12px;background:#f8fafc;border-radius:8px;font-size:12px">
+      <p><strong>Firma:</strong> ${rapor.taseronFirmaAdi}</p>
       <p><strong>Toplam Çalışma:</strong> ${rapor.toplamSaat.toFixed(1)} saat</p>
       <p><strong>Saatlik Ücret:</strong> ${fmt(rapor.saatlikUcret)} TL</p>
       <p style="color:#b91c1c;font-size:14px;font-weight:bold;margin-top:8px">

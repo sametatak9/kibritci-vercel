@@ -246,7 +246,8 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
   const loadHistoryData = async (type: 'cari' | 'stok', id: string, name: string, code: string) => {
     setHistoryLoading(true);
     setHistoryList([]);
-    setHistoryFilter('ALL');
+    // Cari kartta varsayılan: Geçmiş İrsaliyeler (seçip faturaya dönüştürme akışı)
+    setHistoryFilter(type === 'cari' ? 'İRSALİYE' : 'ALL');
     setSelectedIrsaliyeIds(new Set());
     try {
       const logs: HistoryLog[] = [];
@@ -360,12 +361,15 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
             tip === 'IRSALIYE' ||
             tip === 'FATURA' ||
             tip === 'KASA_HAREKETI';
+          const isOperatorKesinti = tip === 'OPERATOR_KESINTI';
 
-          if (!isPersonelIslem && !isMalzemeTeslim && !isEvrak) return;
+          if (!isPersonelIslem && !isMalzemeTeslim && !isEvrak && !isOperatorKesinti) return;
 
           const typeLabel = isMalzemeTeslim
             ? 'MALZEME TESLİM'
-            : isPersonelIslem
+            : isOperatorKesinti
+              ? 'İŞ MAKİNESİ KESİNTİ'
+              : isPersonelIslem
               ? 'TAŞERON PERSONEL'
               : tip === 'SATIN_ALMA'
                 ? 'SATIN ALMA (İŞLEM)'
@@ -383,6 +387,8 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
             date: data.tarih || '',
             badgeColor: isMalzemeTeslim
               ? 'bg-emerald-100 text-emerald-800'
+              : isOperatorKesinti
+                ? 'bg-amber-100 text-amber-900'
               : isEvrak
                 ? 'bg-blue-100 text-blue-800'
                 : 'bg-indigo-100 text-indigo-800',
@@ -683,7 +689,7 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
       if (!ok) return;
     } else if (
       !window.confirm(
-        `${withKalem.length} irsaliye tek taslak faturaya bağlansın mı?\n\n${nos}\n\nNot: Birim fiyatlar 0 gelebilir — Fatura sekmesinde düzenleyin.\nEvraklar kilitlenmez; bağ çıkarılabilir.`
+        `${withKalem.length} irsaliye tek taslak faturaya dönüştürülsün mü?\n\n${nos}\n\nNot: Birim fiyatlar 0 gelebilir — Fatura sekmesinde düzenleyin.\nEvraklar kilitlenmez; bağ çıkarılabilir.`
       )
     ) {
       return;
@@ -710,7 +716,7 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
 
     setSelectedIrsaliyeIds(new Set());
     const openRapor = window.confirm(
-      `Taslak fatura bağlandı.\nNo: ${fatura.faturaNo}\nİrsaliye: ${withKalem.length}\n\nEvraklar düzenlenebilir kaldı.\n\nZincir raporunu açmak ister misiniz?`
+      `Taslak fatura oluşturuldu.\nNo: ${fatura.faturaNo}\nBirleştirilen irsaliye: ${withKalem.length}\n\nEvraklar düzenlenebilir kaldı.\n\nZincir raporunu açmak ister misiniz?`
     );
     if (openRapor) {
       const saId = fatura.saId || withKalem.find((ir) => ir.saId)?.saId;
@@ -1699,7 +1705,7 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
                     date: h.date,
                   }))}
                 onOpenAll={() => {
-                  setHistoryFilter('ALL');
+                  setHistoryFilter('İRSALİYE');
                   document
                     .getElementById('cari-stok-history-panel')
                     ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -1767,10 +1773,22 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
                 <div>
                   <h3 className="text-xs font-black uppercase tracking-wider text-slate-800 flex items-center gap-2">
                     <ClipboardList size={14} className={accent === 'amber' ? 'text-amber-600' : 'text-teal-600'} />
-                    Alt işlemler / hareket geçmişi
+                    {selectedCari ? 'Geçmiş İrsaliyeler' : 'Alt işlemler / hareket geçmişi'}
                   </h3>
                   <p className="text-[11px] text-slate-500 mt-1">
-                    {historyList.length} kayıt · evrak varsa <strong>Detay</strong> ile kalemleri ve görselleri açın
+                    {selectedCari ? (
+                      <>
+                        İrsaliyeleri işaretleyip bir veya birden fazlasını tek faturaya dönüştürebilirsiniz
+                        {' · '}
+                        {historyList.filter((h) => h.collection === 'irsaliyeler').length} irsaliye
+                        {' · '}
+                        {historyList.length} toplam kayıt
+                      </>
+                    ) : (
+                      <>
+                        {historyList.length} kayıt · evrak varsa <strong>Detay</strong> ile kalemleri ve görselleri açın
+                      </>
+                    )}
                   </p>
                 </div>
                 <div className="flex flex-wrap gap-2">
@@ -1780,9 +1798,9 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
                         type="button"
                         onClick={handleBagSelectedIrsaliyelerToFatura}
                         className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-[10px] font-bold bg-violet-700 text-white cursor-pointer"
-                        title="Seçili irsaliyeleri tek taslak faturaya bağla (kilitlenmez)"
+                        title="Seçili irsaliyeleri birleştirip taslak faturaya dönüştür (kilitlenmez)"
                       >
-                        <Receipt size={12} /> Seçilenleri Faturaya Bağla ({selectedIrsaliyeIds.size})
+                        <Receipt size={12} /> Seçilenleri Faturaya Dönüştür ({selectedIrsaliyeIds.size})
                       </button>
                       <button
                         type="button"
@@ -1868,7 +1886,7 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
                             checked={selectedIrsaliyeIds.has(log.id)}
                             onChange={() => toggleIrsaliyeSelection(log.id)}
                             className="w-4 h-4 rounded border-slate-300 text-violet-700 cursor-pointer"
-                            title="Faturaya bağlamak için seç"
+                            title="Faturaya dönüştürmek için seç"
                           />
                         </label>
                       )}
