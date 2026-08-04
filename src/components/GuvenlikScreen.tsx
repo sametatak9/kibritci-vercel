@@ -33,10 +33,13 @@ import {
   GUVENLIK_FOTO_METOD_LABEL,
   GuvenlikFotoMetod,
   GuvenlikFotoSlot,
+  hasAnaFirmaUcFotograf,
   isLikelyImageUrl,
   pickPrimaryFotoUrl,
   formatEvrakGonderimLabel,
 } from '../lib/guvenlikEvrakFotolar';
+import { buildCariEvrakHistory } from '../lib/evrakCariStokSync';
+import { getTaseronCariKartlar } from '../lib/taseronUtils';
 import {
   buildLeanGuvenlikEvrakFotoFields,
   isPaketTooLargeForFirestore,
@@ -918,10 +921,24 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
     }
   };
 
+  const taseronCariler = useMemo(() => getTaseronCariKartlar(cariKartlarLive), [cariKartlarLive]);
+
   const isUploadPackageIncomplete = (x: any) => {
-    if (!String(x.aciklama || '').trim() || countPaketFotolar(x) === 0) return true;
-    if (x.evrakTuru !== 'İRSALİYE') return false;
-    if (!String(x.evrakNo || '').trim() || !String(x.firma || '').trim()) return true;
+    const kaynak = String(x.firmaKaynakTipi || '');
+    if (!kaynak) return true;
+    if (countPaketFotolar(x) === 0) return true;
+
+    if (kaynak === 'TASERON') {
+      if (!String(x.cariKartId || '').trim() || !String(x.firma || '').trim()) return true;
+      if (!String(x.evrakTuru || '').trim()) return true;
+      return false;
+    }
+
+    // ANA_FIRMA — tam bilgi + 3 foto zorunlu
+    if (!hasAnaFirmaUcFotograf(x)) return true;
+    if (!String(x.aciklama || '').trim()) return true;
+    if (!String(x.evrakTuru || '').trim()) return true;
+    if (!String(x.firma || '').trim()) return true; // gönderen firma
     const kalemler = Array.isArray(x.kalemler) ? x.kalemler : [];
     return !kalemler.some(
       (k: any) => String(k.urunAdi || '').trim() && Number(String(k.miktar || '').replace(',', '.')) > 0
@@ -940,18 +957,64 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
       showStatus('error', 'Gönderim kilidi açıldı. Tekrar «Yönetici onayına gönder»e basın.');
       return;
     }
-    const eksikFoto = uploadQueue.filter((item) => countPaketFotolar(item) === 0);
-    if (eksikFoto.length > 0) {
-      alert('Her evrak paketinde en az bir fotoğraf olmalı (kalem / firma / fatura yuvalarından).');
+    const eksikKaynak = uploadQueue.filter((item) => !String(item.firmaKaynakTipi || '').trim());
+    if (eksikKaynak.length > 0) {
+      alert('Her evrak paketinde önce firma türünü seçin: Ana Firma (Kibritçi) veya Taşeron Firma.');
       return;
     }
-    const eksikAciklama = uploadQueue.filter((item) => !String(item.aciklama || '').trim());
+
+    const eksikFoto = uploadQueue.filter((item) => countPaketFotolar(item) === 0);
+    if (eksikFoto.length > 0) {
+      alert('Her evrak paketinde en az bir fotoğraf olmalı.');
+      return;
+    }
+
+    const anaEksikUcFoto = uploadQueue.filter(
+      (item) => item.firmaKaynakTipi === 'ANA_FIRMA' && !hasAnaFirmaUcFotograf(item)
+    );
+    if (anaEksikUcFoto.length > 0) {
+      alert(
+        'Ana Firma (Kibritçi) evraklarında 3 foto zorunlu:\n1) Firma ismi görünen\n2) Ürünler görünen\n3) Tam hali'
+      );
+      return;
+    }
+
+    const taseronEksik = uploadQueue.filter(
+      (item) =>
+        item.firmaKaynakTipi === 'TASERON' &&
+        (!String(item.cariKartId || '').trim() || !String(item.firma || '').trim())
+    );
+    if (taseronEksik.length > 0) {
+      alert('Taşeron evraklarında listeden bir taşeron firma seçmelisiniz.');
+      return;
+    }
+
+    const anaEksik = uploadQueue.filter((item) => {
+      if (item.firmaKaynakTipi !== 'ANA_FIRMA') return false;
+      if (!String(item.aciklama || '').trim()) return true;
+      if (!String(item.firma || '').trim()) return true;
+      const kalemler = Array.isArray(item.kalemler) ? item.kalemler : [];
+      return !kalemler.some(
+        (k: any) => String(k.urunAdi || '').trim() && Number(String(k.miktar || '').replace(',', '.')) > 0
+      );
+    });
+    if (anaEksik.length > 0) {
+      alert(
+        'Ana Firma evraklarında zorunlu:\n• Evrak türü\n• Gönderen firma ismi\n• Kalemler (ürün adı + kilo)\n• 3 fotoğraf\n• Açıklama\n\nBu evraklar yönetici onayına gider.'
+      );
+      return;
+    }
+
+    const eksikAciklama = uploadQueue.filter(
+      (item) => item.firmaKaynakTipi === 'ANA_FIRMA' && !String(item.aciklama || '').trim()
+    );
     if (eksikAciklama.length > 0) {
-      alert('Her evrak paketinde açıklama zorunludur.');
+      alert('Ana Firma evraklarında açıklama zorunludur.');
       return;
     }
 
     const irsaliyeEksik = uploadQueue.filter((item) => {
+      if (item.firmaKaynakTipi !== 'ANA_FIRMA') return false;
       if (item.evrakTuru !== 'İRSALİYE') return false;
       if (!String(item.evrakNo || '').trim()) return true;
       if (!String(item.firma || '').trim()) return true;
@@ -962,14 +1025,15 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
     });
     if (irsaliyeEksik.length > 0) {
       alert(
-        'İRSALİYE paketlerinde zorunlu:\n• İrsaliye / taşıma no\n• Firma (cari seç veya yaz)\n• En az bir kalem (ürün + miktar / KG)\n\nFotoğrafla birlikte bu bilgileri girin; yönetici son kontrolü yapar.'
+        'Ana Firma İRSALİYE paketlerinde zorunlu:\n• İrsaliye / taşıma no\n• Gönderen firma\n• En az bir kalem (ürün + KG)\n• 3 fotoğraf'
       );
       return;
     }
 
-    // Cari yoksa oluşturulsun mu?
+    // Cari yoksa oluşturulsun mu? (yalnızca Ana Firma — gönderen tedarikçi)
     const yeniCariGereken = uploadQueue.filter(
       (item) =>
+        item.firmaKaynakTipi === 'ANA_FIRMA' &&
         (item.evrakTuru === 'İRSALİYE' || item.evrakTuru === 'FATURA') &&
         String(item.firma || '').trim() &&
         !item.cariKartId &&
@@ -986,9 +1050,10 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
       }
     }
 
-    // SA akıllı eşleşme: otomatik bağ yok — kullanıcı onayı
+    // SA akıllı eşleşme: yalnızca Ana Firma irsaliyeleri
     const resolvedSaByQueueId = new Map<string, string>();
     for (const item of uploadQueue) {
+      if (item.firmaKaynakTipi !== 'ANA_FIRMA') continue;
       if (item.evrakTuru !== 'İRSALİYE') continue;
       let saId = String(item.saId || '').trim();
       if (!saId) {
@@ -1070,7 +1135,7 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
           let cariKartId = String(item.cariKartId || '').trim();
           let liveCari = [...cariKartlarLive];
 
-          if (firmaAdi && !cariKartId) {
+          if (firmaAdi && !cariKartId && item.firmaKaynakTipi !== 'TASERON') {
             const hit = suggestCariFromDb(firmaAdi, liveCari, 1)[0];
             if (hit) {
               cariKartId = hit.id;
@@ -1117,13 +1182,16 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
           const plaka = String(item.plaka || '').trim();
           const saIdBound = resolvedSaByQueueId.get(item.id) || String(item.saId || '').trim();
 
+          const firmaKaynakTipi = item.firmaKaynakTipi === 'TASERON' ? 'TASERON' : 'ANA_FIRMA';
+          const isTaseronEvrak = firmaKaynakTipi === 'TASERON';
+
           const newEvrak = cleanUndefined({
             id: uniqueId,
             evrakNo: evrakNo || '',
             evrakTuru: item.evrakTuru,
             firma: firmaAdi,
             cariKartId: cariKartId || '',
-            saId: saIdBound || '',
+            saId: isTaseronEvrak ? '' : saIdBound || '',
             plaka: plaka || '',
             tarih: islemTarihi,
             saat: new Date().toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' }),
@@ -1132,13 +1200,18 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
             kalemFotolar: lean.kalemFotolar,
             firmaFotolar: lean.firmaFotolar,
             faturaFotolar: lean.faturaFotolar,
-            kalemler: matchedKalemler,
+            kalemler: isTaseronEvrak ? [] : matchedKalemler,
             fileName: primarySlot?.fileName || 'evrak_paketi',
             fileType: primarySlot?.fileType || 'image/jpeg',
-            durum: 'BEKLEMEDE',
+            durum: isTaseronEvrak ? 'ONAYLANDI' : 'BEKLEMEDE',
+            firmaKaynakTipi,
+            aliciFirma: isTaseronEvrak ? firmaAdi : 'Kibritçi İnşaat',
+            gonderenFirma: isTaseronEvrak ? '' : firmaAdi,
             aciklama:
               item.aciklama ||
-              `Güvenlik kapısı evrak teslim alımı (${item.evrakTuru}) · 3 yöntemli foto`,
+              (isTaseronEvrak
+                ? `Taşeron kapı evrakı · ${item.evrakTuru} · ${firmaAdi}`
+                : `Ana Firma kapı evrakı · ${item.evrakTuru} · gönderen: ${firmaAdi} · yönetici onayı bekliyor`),
             kaydeden: currentUser?.email || 'nobetci_guvenlik',
             fotoMetodOzet: {
               kalem: lean.kalemFotolar.length,
@@ -1152,7 +1225,11 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
             kayitZamani: new Date().toISOString(),
             kapidaGirildi: true,
             kaynak: 'KAPI_EVRAK',
-            donusumKaynagi: saIdBound ? 'KAPI_SA_ESLESME' : 'KAPI_EVRAK',
+            donusumKaynagi: isTaseronEvrak
+              ? 'KAPI_TASERON_DIREKT'
+              : saIdBound
+                ? 'KAPI_SA_ESLESME'
+                : 'KAPI_EVRAK',
           });
 
           await withTimeout(
@@ -1161,8 +1238,30 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
           );
           savedIds.add(item.id);
 
-          // İrsaliye: yönetici öncesi taslak oluştur (stok miktarı artmaz)
-          if (item.evrakTuru === 'İRSALİYE' && (evrakNo || matchedKalemler.length > 0)) {
+          // Taşeron: ilgili cari alt işlemlerine hemen işlenir (yönetici onayı gerekmez)
+          if (isTaseronEvrak && cariKartId) {
+            try {
+              const cariRow = buildCariEvrakHistory({
+                cariKartId,
+                islemTipi: 'DIGER',
+                islemId: uniqueId,
+                islemBaslik: `Kapı Evrak · Taşeron · ${item.evrakTuru}`,
+                islemDetay: `${firmaAdi} · geliş ${islemTarihi} · ${item.aciklama || item.evrakTuru}`,
+                tarih: islemTarihi,
+                belgeNo: evrakNo || uniqueId,
+              });
+              await saveDocument('cariIslemGecmisi', cariRow);
+            } catch (cariErr) {
+              console.warn('[kapı] taşeron cari işlem:', cariErr);
+            }
+          }
+
+          // Ana Firma irsaliye: yönetici öncesi taslak (stok artmaz)
+          if (
+            !isTaseronEvrak &&
+            item.evrakTuru === 'İRSALİYE' &&
+            (evrakNo || matchedKalemler.length > 0)
+          ) {
             try {
               const { irsaliye, summary } = await upsertKapiDraftIrsaliye({
                 guvenlikEvrakId: uniqueId,
@@ -1192,7 +1291,7 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
             }
           }
 
-          if (lean.fotoUrl) {
+          if (!isTaseronEvrak && lean.fotoUrl) {
             void triggerBackgroundAiParsing(
               uniqueId,
               lean.fotoUrl,
@@ -3254,15 +3353,16 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
                 silDisabled={seciliGunEvraklar.length === 0}
               />
               
-              {/* 1. YENİ EVRAK YÜKLEME ALANI — 3 yöntemli foto */}
+              {/* 1. YENİ EVRAK YÜKLEME ALANI — önce firma türü */}
               <div className="bg-white p-5 border border-slate-200 rounded-3xl space-y-4 shadow-sm">
                 <span className="font-display font-black text-xs text-slate-800 uppercase tracking-widest block border-b pb-2">
-                  📄 KAPIDA İRSALİYE / EVRAK GİRİŞİ (3 FOTO YÖNTEMİ)
+                  📄 KAPIDA EVRAK GİRİŞİ
                 </span>
                 <p className="text-[10px] text-slate-600 -mt-2 bg-teal-50 border border-teal-200 rounded-xl px-3 py-2 leading-relaxed">
-                  <strong>Kapı personeli evrakı işler:</strong> Foto çekin + evraktaki{' '}
-                  <strong>firma adını</strong> ve <strong>stok kalemlerini (ürün + KG/adet)</strong> elle yazın.
-                  YZ okuma yedektir; foto bulanıksa bile elle girilen bilgi silinmez. Yönetici son onayı yapar.
+                  <strong>1. adım:</strong> Evrak <strong>Ana Firma (Kibritçi İnşaat)</strong> mı yoksa{' '}
+                  <strong>Taşeron Firma</strong> mı? Taşeron için geliş tarihi + evrak cinsi + foto yeter;
+                  cariye işlenir. Ana Firma için gönderen firma, kalem/kilo ve <strong>3 foto</strong> zorunlu;
+                  yönetici onayına gider.
                 </p>
 
                 <div className="flex flex-wrap gap-2">
@@ -3318,9 +3418,223 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
                           <X size={14} />
                         </button>
 
+                        {/* 1) Firma türü — Ana Firma / Taşeron */}
+                        <div className="pr-6 space-y-2">
+                          <label className="text-[8px] font-black text-slate-500 uppercase block">
+                            Evrak hangi firmaya? *
+                          </label>
+                          <div className="grid grid-cols-2 gap-2">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const next = [...uploadQueue];
+                                next[index] = {
+                                  ...next[index],
+                                  firmaKaynakTipi: 'ANA_FIRMA',
+                                  firma: '',
+                                  cariKartId: '',
+                                  evrakTuru: 'İRSALİYE',
+                                  kalemler: next[index].kalemler?.length
+                                    ? next[index].kalemler
+                                    : [createEmptyUploadKalem()],
+                                };
+                                setUploadQueue(next);
+                              }}
+                              className={`py-2.5 rounded-xl text-[10px] font-black border-2 cursor-pointer ${
+                                item.firmaKaynakTipi === 'ANA_FIRMA'
+                                  ? 'bg-amber-500 text-slate-950 border-amber-600'
+                                  : 'bg-white text-slate-700 border-slate-200 hover:bg-amber-50'
+                              }`}
+                            >
+                              Ana Firma · Kibritçi İnşaat
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const next = [...uploadQueue];
+                                next[index] = {
+                                  ...next[index],
+                                  firmaKaynakTipi: 'TASERON',
+                                  firma: '',
+                                  cariKartId: '',
+                                  kalemler: [],
+                                  saId: '',
+                                  evrakNo: '',
+                                };
+                                setUploadQueue(next);
+                              }}
+                              className={`py-2.5 rounded-xl text-[10px] font-black border-2 cursor-pointer ${
+                                item.firmaKaynakTipi === 'TASERON'
+                                  ? 'bg-teal-600 text-white border-teal-700'
+                                  : 'bg-white text-slate-700 border-slate-200 hover:bg-teal-50'
+                              }`}
+                            >
+                              Taşeron Firma
+                            </button>
+                          </div>
+                        </div>
+
+                        {!item.firmaKaynakTipi ? (
+                          <p className="text-[10px] text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 font-semibold">
+                            Devam etmek için yukarıdan Ana Firma veya Taşeron seçin.
+                          </p>
+                        ) : item.firmaKaynakTipi === 'TASERON' ? (
+                          <div className="space-y-3 rounded-xl border border-teal-200 bg-teal-50/40 p-3">
+                            <p className="text-[9px] font-black uppercase text-teal-900 tracking-wider">
+                              Taşeron evrak · geliş {islemTarihi}
+                            </p>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                              <div className="space-y-1">
+                                <label className="text-[8px] font-black text-slate-500 uppercase block">
+                                  Taşeron firma *
+                                </label>
+                                <select
+                                  value={item.cariKartId || ''}
+                                  onChange={(e) => {
+                                    const id = e.target.value;
+                                    const c = taseronCariler.find((x) => x.id === id);
+                                    const next = [...uploadQueue];
+                                    next[index] = {
+                                      ...next[index],
+                                      cariKartId: id,
+                                      firma: c?.unvan || '',
+                                    };
+                                    setUploadQueue(next);
+                                  }}
+                                  className="w-full bg-white border border-teal-200 p-1.5 rounded-lg text-xs font-bold"
+                                >
+                                  <option value="">Taşeron seçin…</option>
+                                  {taseronCariler.map((c) => (
+                                    <option key={c.id} value={c.id}>
+                                      {c.unvan} ({c.kod})
+                                    </option>
+                                  ))}
+                                </select>
+                                {taseronCariler.length === 0 && (
+                                  <p className="text-[9px] text-rose-600 font-semibold">
+                                    Taşeron cari kartı yok — Cari/Stok’tan TASERON ekleyin.
+                                  </p>
+                                )}
+                              </div>
+                              <div className="space-y-1">
+                                <label className="text-[8px] font-black text-slate-500 uppercase block">
+                                  Evrak cinsi *
+                                </label>
+                                <select
+                                  value={item.evrakTuru}
+                                  onChange={(e) => {
+                                    const next = [...uploadQueue];
+                                    next[index] = { ...next[index], evrakTuru: e.target.value as any };
+                                    setUploadQueue(next);
+                                  }}
+                                  className="w-full bg-white border border-teal-200 p-1.5 rounded-lg text-xs"
+                                >
+                                  <option value="İRSALİYE">İrsaliye / Taşıma</option>
+                                  <option value="FATURA">Fatura</option>
+                                  <option value="MAKBUZ">Makbuz</option>
+                                  <option value="GENEL_EVRAK">Genel evrak / Teslim</option>
+                                </select>
+                              </div>
+                            </div>
+                            <div className="space-y-1 text-xs">
+                              <label className="text-[8px] font-black text-slate-500 uppercase block">
+                                Not (opsiyonel)
+                              </label>
+                              <input
+                                type="text"
+                                value={item.aciklama}
+                                onChange={(e) => {
+                                  const next = [...uploadQueue];
+                                  next[index] = { ...next[index], aciklama: e.target.value };
+                                  setUploadQueue(next);
+                                }}
+                                placeholder="Kısa not…"
+                                className="w-full bg-white border border-teal-200 p-1.5 rounded-lg text-xs"
+                              />
+                            </div>
+                            <p className="text-[9px] text-teal-800 font-semibold">
+                              Kaydıyla seçili taşeron carinin alt işlemlerine işlenir. En az 1 foto yeterlidir.
+                            </p>
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                              {([
+                                ['FIRMA', 'firmaFotolar'],
+                                ['KALEM', 'kalemFotolar'],
+                                ['FATURA', 'faturaFotolar'],
+                              ] as const).map(([metod, key]) => {
+                                const list = (item[key] || []) as GuvenlikFotoSlot[];
+                                return (
+                                  <div
+                                    key={metod}
+                                    className="rounded-xl border border-teal-100 bg-white p-2.5 space-y-2"
+                                  >
+                                    <div>
+                                      <p className="text-[9px] font-black uppercase text-teal-800 tracking-wide">
+                                        {GUVENLIK_FOTO_METOD_LABEL[metod]}
+                                      </p>
+                                      <p className="text-[8px] text-slate-400 font-semibold">
+                                        {GUVENLIK_FOTO_METOD_HINT[metod]}
+                                      </p>
+                                    </div>
+                                    <label className="flex flex-col items-center justify-center gap-1 border border-dashed border-teal-200 rounded-lg py-3 cursor-pointer hover:bg-teal-50/50 transition">
+                                      <FileUp size={16} className="text-teal-600" />
+                                      <span className="text-[9px] font-bold text-teal-800">Foto ekle</span>
+                                      <input
+                                        type="file"
+                                        multiple
+                                        accept="image/*,application/pdf"
+                                        className="hidden"
+                                        onChange={(e) => handleAddFotosToPackage(item.id, metod, e)}
+                                      />
+                                    </label>
+                                    {list.length > 0 && (
+                                      <div className="grid grid-cols-3 gap-1">
+                                        {list.map((f) => (
+                                          <div key={f.id} className="relative group">
+                                            {String(f.fileType || '').startsWith('image/') ||
+                                            isLikelyImageUrl(f.dataUrl) ? (
+                                              <img
+                                                src={f.dataUrl}
+                                                alt={f.fileName}
+                                                className="w-full h-14 object-cover rounded-md border border-slate-200"
+                                              />
+                                            ) : (
+                                              <div className="h-14 rounded-md border border-slate-200 bg-slate-50 flex items-center justify-center text-[9px] font-bold text-slate-500">
+                                                PDF
+                                              </div>
+                                            )}
+                                            <button
+                                              type="button"
+                                              onClick={() =>
+                                                handleRemoveFotoFromPackage(item.id, metod, f.id)
+                                              }
+                                              className="absolute -top-1 -right-1 bg-rose-500 text-white rounded-full w-4 h-4 text-[9px] leading-none opacity-90 cursor-pointer"
+                                              title="Kaldır"
+                                            >
+                                              ×
+                                            </button>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    )}
+                                    <p className="text-[8px] text-slate-400 font-bold">{list.length} foto</p>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                            <p className="text-[9px] text-slate-500 font-semibold">
+                              Toplam foto: {countPaketFotolar(item)}
+                              {!countPaketFotolar(item) ? ' — en az bir foto ekleyin' : ''}
+                            </p>
+                          </div>
+                        ) : (
+                          <>
+                        <div className="rounded-xl border border-amber-300 bg-amber-50/60 px-3 py-2 text-[9px] text-amber-950 font-semibold leading-relaxed">
+                          <strong>Ana Firma · Kibritçi İnşaat</strong> — Gönderen firma, kalem/kilo ve 3 foto
+                          (firma ismi · ürünler · tam hali) zorunlu. Yönetici onayına gider.
+                        </div>
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs pr-6">
                           <div className="space-y-1">
-                            <label className="text-[8px] font-black text-slate-500 uppercase block">Evrak Türü</label>
+                            <label className="text-[8px] font-black text-slate-500 uppercase block">Evrak Türü *</label>
                             <select
                               value={item.evrakTuru}
                               onChange={(e) => {
@@ -3328,7 +3642,7 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
                                 const tur = e.target.value;
                                 next[index] = {
                                   ...next[index],
-                                  evrakTuru: tur,
+                                  evrakTuru: tur as any,
                                   kalemler:
                                     tur === 'İRSALİYE' && !(next[index].kalemler || []).length
                                       ? [createEmptyUploadKalem()]
@@ -3406,11 +3720,11 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
 
                         <div className="space-y-1 text-xs">
                           <label className="text-[8px] font-black text-slate-500 uppercase block">
-                            Firma / Cari {item.evrakTuru === 'İRSALİYE' ? '*' : ''}
+                            Gönderen firma ismi *
                           </label>
                           <input
                             type="text"
-                            placeholder="Firma adını yazın — DB’de varsa önerilir…"
+                            placeholder="Evraktaki gönderen firma unvanı…"
                             value={item.firma || ''}
                             onChange={(e) => {
                               const next = [...uploadQueue];
@@ -3464,7 +3778,7 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
                           <div className="space-y-2 rounded-xl border border-indigo-100 bg-white p-3">
                             <div className="flex items-center justify-between gap-2">
                               <p className="text-[9px] font-black uppercase text-indigo-700 tracking-wider">
-                                Kalemler / KG *
+                                Gönderilen kalemler · isim + kilo *
                               </p>
                               <button
                                 type="button"
@@ -3662,8 +3976,8 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
 
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                           {([
-                            ['KALEM', 'kalemFotolar'],
                             ['FIRMA', 'firmaFotolar'],
+                            ['KALEM', 'kalemFotolar'],
                             ['FATURA', 'faturaFotolar'],
                           ] as const).map(([metod, key]) => {
                             const list = (item[key] || []) as GuvenlikFotoSlot[];
@@ -3726,8 +4040,12 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
 
                         <p className="text-[9px] text-slate-500 font-semibold">
                           Toplam foto: {countPaketFotolar(item)}
-                          {!countPaketFotolar(item) ? ' — en az bir yuvaya foto ekleyin' : ''}
+                          {!hasAnaFirmaUcFotograf(item)
+                            ? ' — 3 yuvanın her birine en az 1 foto ekleyin'
+                            : ' — 3 foto tamam ✓'}
                         </p>
+                          </>
+                        )}
                       </div>
                     ))}
 
@@ -3740,7 +4058,7 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
                       >
                         {loadingIrsaliye
                           ? 'Gönderiliyor... (iptal için tekrar basın)'
-                          : '🚀 YÖNETİCİ ONAYINA GÖNDER'}
+                          : '🚀 KAYDET / ONAYA GÖNDER'}
                       </button>
                     </div>
                   </div>
