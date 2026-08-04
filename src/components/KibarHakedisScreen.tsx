@@ -748,9 +748,12 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
   const buildPersonelHakedisBodyHtml = (opts: {
     rows: StaffHakedisRow[];
     varyant: 'ustasiz' | 'ustali';
+    /** true: saha/kamp ek + +6.000 kar analizi (ustasız tahsilat raporu) */
+    eklerDahil?: boolean;
   }) => {
     const o = summarizeRows(opts.rows);
     const isHakedis = opts.varyant === 'ustasiz';
+    const ekler = Boolean(opts.eklerDahil && isHakedis);
     const accent = isHakedis ? '#0f766e' : '#b45309';
     const accentBg = isHakedis ? '#ecfdf5' : '#fffbeb';
     const accentBorder = isHakedis ? '#99f6e4' : '#fde68a';
@@ -771,6 +774,126 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
       </tr>`
       )
       .join('');
+
+    let karEkHtml = '';
+    let faaliyetEkHtml = '';
+    if (ekler) {
+      const kar = computeKarSlice(opts.rows);
+      const toplamFayda = kar.zarar + kar.zer;
+      const aylik6000Senaryo = opts.rows.reduce((s, r) => {
+        const gunluk6000 = TABAN_FARK_TL / daysInMonth(selectedYear, selectedMonth);
+        return s + r.geldiGun * gunluk6000;
+      }, 0);
+      karEkHtml = `
+        <section style="margin-top:22px;page-break-inside:avoid">
+          <div style="border:2px solid #fecaca;background:linear-gradient(135deg,#fef2f2,#fff7ed);border-radius:14px;padding:16px;margin-bottom:12px">
+            <div style="font-size:10px;font-weight:900;letter-spacing:.08em;color:#b91c1c;text-transform:uppercase">
+              Proje yararı · +₺${TABAN_FARK_TL.toLocaleString('tr-TR')} taban olsaydı
+            </div>
+            <p style="margin:8px 0 0;font-size:13px;color:#7f1d1d;line-height:1.5;font-weight:600">
+              Bu ustasız personel grubu tabanına +₺${TABAN_FARK_TL.toLocaleString('tr-TR')} eklenerek çalışsaydı
+              dönem maaş maliyeti <strong>${formatMoney(kar.senaryo, 0)}</strong> olurdu
+              (şu anki: ${formatMoney(kar.mevcut, 0)}).
+              Şirketin kaçındığı fazla ödeme:
+              <strong style="font-size:17px">${formatMoney(kar.zarar, 0)}</strong>.
+            </p>
+            <p style="margin:8px 0 0;font-size:12px;color:#9a3412;line-height:1.45">
+              Ayrıca ZER hakediş tahsilatı <strong>${formatMoney(kar.zer, 0)}</strong>
+              (₺${ZER_YAPI_GUNLUK}/gün). Dönem toplam proje yararı
+              (kaçınılan fazla maaş + ZER tahsilat):
+              <strong style="font-size:16px;color:#047857">${formatMoney(toplamFayda, 0)}</strong>.
+            </p>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:8px">
+            <div style="border:1px solid #e2e8f0;border-radius:12px;padding:12px;background:#fff;text-align:center">
+              <div style="font-size:9px;font-weight:800;color:#64748b;text-transform:uppercase">Mevcut maaş (ustasız)</div>
+              <div style="font-size:15px;font-weight:900;margin-top:4px;font-family:Consolas,monospace">${formatMoney(kar.mevcut, 0)}</div>
+            </div>
+            <div style="border:1px solid #fecaca;border-radius:12px;padding:12px;background:#fef2f2;text-align:center">
+              <div style="font-size:9px;font-weight:800;color:#b91c1c;text-transform:uppercase">+6.000 senaryo</div>
+              <div style="font-size:15px;font-weight:900;margin-top:4px;font-family:Consolas,monospace;color:#b91c1c">${formatMoney(kar.senaryo, 0)}</div>
+            </div>
+            <div style="border:2px solid #86efac;border-radius:12px;padding:12px;background:#ecfdf5;text-align:center">
+              <div style="font-size:9px;font-weight:800;color:#047857;text-transform:uppercase">Aylık proje yararı</div>
+              <div style="font-size:15px;font-weight:900;margin-top:4px;font-family:Consolas,monospace;color:#047857">${formatMoney(toplamFayda, 0)}</div>
+            </div>
+          </div>
+          <p style="margin:0;font-size:11px;color:#78716c;line-height:1.45">
+            Referans: kişi başına aylık ~₺${TABAN_FARK_TL.toLocaleString('tr-TR')} ek taban yükü
+            (~₺${Math.round(TABAN_FARK_TL / daysInMonth(selectedYear, selectedMonth)).toLocaleString('tr-TR')}/gün × ${kar.geldi} iş-günü ≈ ${formatMoney(aylik6000Senaryo, 0)} ek gün maliyeti payı).
+            Bu blok şirket sahiplerine projenin ${escHtml(donemLabel)} dönemindeki net faydasını göstermek içindir.
+          </p>
+        </section>`;
+
+      const saha = prepareSahaFaaliyetRaporu(monthlySahaFaaliyetleri as any);
+      const kamp = prepareKampFaaliyetRaporu(monthlyKampFaaliyetleri);
+      const sahaLimit = saha.slice(0, 80);
+      const kampLimit = kamp.slice(0, 40);
+      const sahaRows = sahaLimit
+        .map(
+          (sf, i) => `<tr style="background:${i % 2 ? '#fffbeb' : '#fff'}">
+          <td style="padding:5px 6px;border-bottom:1px solid #fde68a;font-size:10px;white-space:nowrap">${escHtml(sf.tarihDate)}</td>
+          <td style="padding:5px 6px;border-bottom:1px solid #fde68a;font-size:10px">${escHtml(sf.parselKisa)}</td>
+          <td style="padding:5px 6px;border-bottom:1px solid #fde68a;font-size:10px">${escHtml(sf.blokKisa)}</td>
+          <td style="padding:5px 6px;border-bottom:1px solid #fde68a;font-size:10px">${escHtml(faaliyetIsTanimi(sf))}</td>
+          <td style="padding:5px 6px;border-bottom:1px solid #fde68a;font-size:10px;white-space:nowrap">${escHtml(formatPersonelSayisi(sf))}</td>
+        </tr>`
+        )
+        .join('');
+      const kampRows = kampLimit
+        .map(
+          (k, i) => `<tr style="background:${i % 2 ? '#f0f9ff' : '#fff'}">
+          <td style="padding:5px 6px;border-bottom:1px solid #bae6fd;font-size:10px;white-space:nowrap">${escHtml(k.tarihDate || k.tarih)}</td>
+          <td style="padding:5px 6px;border-bottom:1px solid #bae6fd;font-size:10px">${escHtml(k.faaliyetTipi || 'Kamp')}</td>
+          <td style="padding:5px 6px;border-bottom:1px solid #bae6fd;font-size:10px">${escHtml(k.aciklama || '—')}</td>
+        </tr>`
+        )
+        .join('');
+
+      faaliyetEkHtml = `
+        <section style="margin-top:22px;page-break-before:always">
+          <h3 style="margin:0 0 8px;font-size:12px;font-weight:900;text-transform:uppercase;color:#b45309;letter-spacing:.04em">
+            Ek · Saha faaliyetleri (${saha.length}${saha.length > sahaLimit.length ? ` · ilk ${sahaLimit.length}` : ''})
+          </h3>
+          <p style="margin:0 0 10px;font-size:11px;color:#78716c">
+            ${escHtml(donemLabel)} dönemine ait saha / personel faaliyet kayıtları (rapor eki).
+          </p>
+          ${
+            sahaLimit.length === 0
+              ? `<p style="font-size:11px;color:#94a3b8;margin:0 0 14px">Bu dönem saha kaydı yok.</p>`
+              : `<table style="width:100%;border-collapse:collapse;border:1px solid #fde68a;border-radius:12px;overflow:hidden;margin-bottom:18px">
+                  <thead>
+                    <tr style="background:#b45309;color:#fff">
+                      <th style="padding:7px;text-align:left">Tarih</th>
+                      <th style="padding:7px;text-align:left">Parsel</th>
+                      <th style="padding:7px;text-align:left">Blok</th>
+                      <th style="padding:7px;text-align:left">İş tanımı</th>
+                      <th style="padding:7px;text-align:left">Personel</th>
+                    </tr>
+                  </thead>
+                  <tbody>${sahaRows}</tbody>
+                </table>`
+          }
+
+          <h3 style="margin:0 0 8px;font-size:12px;font-weight:900;text-transform:uppercase;color:#0369a1;letter-spacing:.04em">
+            Ek · Kamp faaliyetleri (${kamp.length}${kamp.length > kampLimit.length ? ` · ilk ${kampLimit.length}` : ''})
+          </h3>
+          ${
+            kampLimit.length === 0
+              ? `<p style="font-size:11px;color:#94a3b8;margin:0">Bu dönem kamp kaydı yok.</p>`
+              : `<table style="width:100%;border-collapse:collapse;border:1px solid #bae6fd;border-radius:12px;overflow:hidden">
+                  <thead>
+                    <tr style="background:#0369a1;color:#fff">
+                      <th style="padding:7px;text-align:left">Tarih</th>
+                      <th style="padding:7px;text-align:left">Tip</th>
+                      <th style="padding:7px;text-align:left">Açıklama</th>
+                    </tr>
+                  </thead>
+                  <tbody>${kampRows}</tbody>
+                </table>`
+          }
+        </section>`;
+    }
 
     return `
       <div style="border:2px solid ${accentBorder};background:${accentBg};border-radius:14px;padding:14px 16px;margin-bottom:16px">
@@ -837,6 +960,9 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
           </tr>
         </tfoot>
       </table>
+
+      ${karEkHtml}
+      ${faaliyetEkHtml}
 
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:22px">
         <div style="border:1px solid #cbd5e1;border-radius:12px;padding:14px;min-height:110px;text-align:center;background:#fff">
@@ -961,17 +1087,23 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
   const handleUstaUstasizRaporlar = () => {
     setDownloadingReport(true);
     try {
-      // 1) Ustasız = ana hakediş / tahsilat raporu
+      // 1) Ustasız = ana hakediş / tahsilat raporu (+ saha/kamp ek + 6.000 fayda analizi)
+      const ustasizOzet = summarizeRows(ustasizRows);
+      const ustasizKar = computeKarSlice(ustasizRows);
       publishHtmlReport({
         title: 'ZER YAPI HAKEDİŞ RAPORU',
         subtitle: `Ustasız Personel · ${donemLabel}`,
         meta: [
           `Personel: ${ustasizRows.length}`,
-          `İş günü: ${summarizeRows(ustasizRows).geldi}`,
-          `Tahsil: ${formatMoney(summarizeRows(ustasizRows).zer, 0)}`,
-          `Günlük: ₺${ZER_YAPI_GUNLUK}`,
+          `İş günü: ${ustasizOzet.geldi}`,
+          `Tahsil: ${formatMoney(ustasizOzet.zer, 0)}`,
+          `Proje yararı: ${formatMoney(ustasizKar.zarar + ustasizKar.zer, 0)}`,
         ],
-        bodyHtml: buildPersonelHakedisBodyHtml({ rows: ustasizRows, varyant: 'ustasiz' }),
+        bodyHtml: buildPersonelHakedisBodyHtml({
+          rows: ustasizRows,
+          varyant: 'ustasiz',
+          eklerDahil: true,
+        }),
         fileName: `ZER_YAPI_Hakedis_Ustasiz_${donemKey}.html`,
         openPrint: true,
       });
@@ -1009,7 +1141,7 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
 
       showStatus(
         'success',
-        `3 HTML rapor: Ustasız hakediş (${ustasizRows.length}) · Ustalı (${ustaliRows.length}) · Kar analizi (+6.000)`
+        `HTML raporlar: Ustasız hakediş+saha/kamp+fayda · Ustalı · Kar analizi`
       );
     } catch (err: any) {
       showStatus('error', `HTML rapor oluşturulamadı: ${err?.message || err}`);
