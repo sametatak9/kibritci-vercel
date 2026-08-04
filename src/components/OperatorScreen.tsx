@@ -142,8 +142,12 @@ export const OperatorScreen: React.FC<OperatorScreenProps> = ({
   };
 
   const handleKaydet = () => {
-    if (!selectedPersonelId || !yapilanIs.trim()) {
-      alert('Lütfen operatör ve yapılan iş (açıklama) alanlarını doldurun.');
+    if (makineKaynak !== 'KIRALIK' && !selectedPersonelId) {
+      alert('Lütfen operatör seçin.');
+      return;
+    }
+    if (!yapilanIs.trim()) {
+      alert('Lütfen yapılan iş (açıklama) alanını doldurun.');
       return;
     }
     if (makineKaynak === 'MANUEL' && !makineManuelAd.trim()) {
@@ -169,7 +173,8 @@ export const OperatorScreen: React.FC<OperatorScreenProps> = ({
     }
 
     const arac = araclar.find(a => a.id === selectedAracId);
-    const personel = personeller.find(p => p.id === selectedPersonelId);
+    const personel =
+      makineKaynak === 'KIRALIK' ? undefined : personeller.find((p) => p.id === selectedPersonelId);
     const calismaSuresi = hesaplaCalismaSuresi(baslangicSaat, bitisSaat);
 
     if (calismaSuresi <= 0) {
@@ -198,8 +203,11 @@ export const OperatorScreen: React.FC<OperatorScreenProps> = ({
       id: editingId || `of_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
       aracId: makineKaynak === 'MANUEL' ? `manuel_${Date.now()}` : selectedAracId,
       aracPlaka,
-      operatorPersonelId: selectedPersonelId,
-      operatorIsim: `${personel?.ad} ${personel?.soyad}`,
+      operatorPersonelId: makineKaynak === 'KIRALIK' ? undefined : selectedPersonelId,
+      operatorIsim:
+        makineKaynak === 'KIRALIK'
+          ? 'Kiralık makine'
+          : `${personel?.ad || ''} ${personel?.soyad || ''}`.trim() || 'Operatör',
       operatorTipi,
       tarih,
       baslangicSaat,
@@ -558,7 +566,10 @@ export const OperatorScreen: React.FC<OperatorScreenProps> = ({
                     <button
                       key={k}
                       type="button"
-                      onClick={() => setMakineKaynak(k)}
+                      onClick={() => {
+                        setMakineKaynak(k);
+                        if (k === 'KIRALIK') setSelectedPersonelId('');
+                      }}
                       className={`py-1.5 rounded-lg border text-[9px] font-bold ${makineKaynak === k ? 'bg-slate-900 text-white border-slate-900' : 'bg-slate-50 border-slate-200'}`}
                     >
                       {k === 'DEMIRBAS' ? 'Demirbaş' : k === 'KIRALIK' ? 'Kiralık' : 'Elle Giriş'}
@@ -594,6 +605,7 @@ export const OperatorScreen: React.FC<OperatorScreenProps> = ({
                 )}
               </div>
 
+              {makineKaynak !== 'KIRALIK' && (
               <div>
                 <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Operatör (Personel)</label>
                 <select value={selectedPersonelId} onChange={e => setSelectedPersonelId(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-semibold text-slate-700 outline-none focus:border-amber-500">
@@ -607,6 +619,7 @@ export const OperatorScreen: React.FC<OperatorScreenProps> = ({
                   )}
                 </select>
               </div>
+              )}
 
               <div>
                 <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
