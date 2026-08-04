@@ -52,6 +52,7 @@ export interface Kullanici {
     | 'MERMERCİ'
     | 'GÜVENLİK'
     | 'LOJİSTİK'
+    | 'OPERATÖR'
     | 'DEPOCU'
     | 'ANAHTARCI'
     | 'MİSAFİR';
@@ -842,6 +843,7 @@ export const AdminPanelScreen: React.FC<AdminPanelScreenProps> = ({
                                   <option value="MERMERCİ">🪨 MERMERCİ — Yalnızca Mermerci Mobil</option>
                                   <option value="GÜVENLİK">👮 GÜVENLİK — Yalnızca Güvenlik Mobil</option>
                                   <option value="LOJİSTİK">🚚 ŞÖFÖR — Yalnızca Şöför Mobil Paneli</option>
+                                  <option value="OPERATÖR">🚜 OPERATÖR — Yalnızca Operatör Faaliyetleri</option>
                                   <option value="DEPOCU">📦 DEPOCU — Yalnızca Depocu Mobil</option>
                                   <option value="ANAHTARCI">🔑 ANAHTARCI — Yalnızca İmalat Terminali</option>
                                   <option value="MİSAFİR">⏳ MİSAFİR (Erişimsiz)</option>
@@ -967,6 +969,7 @@ export const AdminPanelScreen: React.FC<AdminPanelScreenProps> = ({
                           <option value="FORMEN">FORMEN</option>
                           <option value="GÜVENLİK">GÜVENLİK</option>
                           <option value="LOJİSTİK">ŞÖFÖR</option>
+                          <option value="OPERATÖR">OPERATÖR</option>
                           <option value="DEPOCU">DEPOCU</option>
                           <option value="ANAHTARCI">ANAHTARCI</option>
                           <option value="MİSAFİR">MİSAFİR</option>
@@ -1076,6 +1079,7 @@ export const AdminPanelScreen: React.FC<AdminPanelScreenProps> = ({
                   <option value="FORMEN">FORMEN</option>
                   <option value="GÜVENLİK">GÜVENLİK</option>
                   <option value="LOJİSTİK">ŞÖFÖR</option>
+                  <option value="OPERATÖR">OPERATÖR</option>
                   <option value="DEPOCU">DEPOCU</option>
                   <option value="ANAHTARCI">ANAHTARCI</option>
                   <option value="KAMPÇI">KAMPÇI</option>
@@ -1444,6 +1448,7 @@ export const AdminPanelScreen: React.FC<AdminPanelScreenProps> = ({
                   <option value="MERMERCİ">🪨 MERMERCİ (Mobil)</option>
                   <option value="GÜVENLİK">👮 GÜVENLİK (Mobil)</option>
                   <option value="LOJİSTİK">🚚 ŞÖFÖR (Mobil)</option>
+                  <option value="OPERATÖR">🚜 OPERATÖR (Mobil)</option>
                   <option value="DEPOCU">📦 DEPOCU (Mobil)</option>
                   <option value="ANAHTARCI">🔑 ANAHTARCI (Mobil)</option>
                   <option value="MİSAFİR">⏳ MİSAFİR (Erişimsiz)</option>

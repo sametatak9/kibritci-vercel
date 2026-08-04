@@ -49,7 +49,21 @@ service cloud.firestore {
 
     function isMobileRole() {
       return hasPortalAccess()
-        && role() in ['FORMEN', 'GÜVENLİK', 'KAMPCI', 'KAMPÇI', 'LOJİSTİK', 'DEPOCU', 'ANAHTARCI'];
+        && role() in [
+          'FORMEN',
+          'GÜVENLİK',
+          'KAMPCI',
+          'KAMPÇI',
+          'TESİSATÇI',
+          'TESISATCI',
+          'MERMERCİ',
+          'MERMERCI',
+          'LOJİSTİK',
+          'OPERATÖR',
+          'OPERATOR',
+          'DEPOCU',
+          'ANAHTARCI'
+        ];
     }
 
     // Geçiş: e-posta ile giriş yapmış ama henüz claim atanmamış (ilk sync öncesi)

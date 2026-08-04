@@ -207,6 +207,7 @@ export const YETKI_ROLLER = [
   'MERMERCİ',
   'GÜVENLİK',
   'LOJİSTİK',
+  'OPERATÖR',
   'DEPOCU',
   'ANAHTARCI',
   'MİSAFİR',
@@ -276,6 +277,9 @@ export function guessRoleFromEmail(email: string): string {
   }
   if (norm.includes('sofor') || norm.includes('driver')) {
     return 'LOJİSTİK';
+  }
+  if (norm.includes('operator') || norm.includes('operatör') || norm.includes('is makine')) {
+    return 'OPERATÖR';
   }
   if (norm.includes('anahtar') || norm.includes('key')) {
     return 'ANAHTARCI';

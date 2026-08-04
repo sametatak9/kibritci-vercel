@@ -1,6 +1,16 @@
 /** Firebase Auth custom claims + Firestore rules ile paylaşılan rol sabitleri */
 
-export const MOBILE_ROLES = ['FORMEN', 'GÜVENLİK', 'KAMPÇI', 'LOJİSTİK', 'DEPOCU', 'ANAHTARCI'] as const;
+export const MOBILE_ROLES = [
+  'FORMEN',
+  'GÜVENLİK',
+  'KAMPÇI',
+  'TESİSATÇI',
+  'MERMERCİ',
+  'LOJİSTİK',
+  'OPERATÖR',
+  'DEPOCU',
+  'ANAHTARCI',
+] as const;
 
 export const FINANCE_DESK_ROLES = [
   'YÖNETİCİ',
@@ -48,6 +58,11 @@ export function normalizeClaimRole(yetki?: string | null): string {
     SOFÖR: 'LOJİSTİK',
     SOFOR: 'LOJİSTİK',
     DRIVER: 'LOJİSTİK',
+    TESISATCI: 'TESİSATÇI',
+    TESİSATCI: 'TESİSATÇI',
+    MERMERCI: 'MERMERCİ',
+    OPERATOR: 'OPERATÖR',
+    OPERATÖR: 'OPERATÖR',
   };
   return aliases[v] ?? v;
 }
