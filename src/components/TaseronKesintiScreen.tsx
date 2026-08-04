@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   Building2, HardHat, Zap, UtensilsCrossed, Archive, Mail, Printer,
-  Download, CheckCircle2, Plus, Users, LogIn, MessageCircle,
+  Download, CheckCircle2, Plus, Users, LogIn, MessageCircle, Trash2,
 } from 'lucide-react';
 import {
   CariKart,
@@ -19,6 +19,9 @@ import {
   faaliyetlerForTaseron,
   ilkOkumaFromOncekiAy,
   enerjiToplamTutar,
+  enerjiKalemOzet,
+  sayacFarki,
+  sayacTutari,
   yemekAylikOzet,
   hesaplaKesintiTutari,
   ayAdi,
@@ -27,6 +30,7 @@ import {
   firmaEslesir,
   buildTaseronFirmaEnvanteri,
   taseronEnvanterOzet,
+  type EnerjiKalem,
 } from '../lib/taseronUtils';
 import {
   buildEnerjiKesintiReportHtml,
@@ -190,18 +194,53 @@ export const TaseronKesintiScreen: React.FC<TaseronKesintiScreenProps> = ({
   const [elek, setElek] = useState({ ilk: 0, son: 0, birim: 3.5 });
   const [su, setSu] = useState({ ilk: 0, son: 0, birim: 12 });
   const [gaz, setGaz] = useState({ ilk: 0, son: 0, birim: 8.5 });
+  const [aktifEnerji, setAktifEnerji] = useState<Record<EnerjiKalem, boolean>>({
+    ELEKTRIK: true,
+    SU: false,
+    DOGALGAZ: false,
+  });
+  const [enerjiAciklama, setEnerjiAciklama] = useState('');
 
   useEffect(() => {
     if (!selectedTaseronId) return;
     if (mevcutEnerji) {
-      setElek({ ilk: mevcutEnerji.elektrik.ilkOkuma, son: mevcutEnerji.elektrik.sonOkuma, birim: mevcutEnerji.elektrik.birimFiyat });
-      setSu({ ilk: mevcutEnerji.su.ilkOkuma, son: mevcutEnerji.su.sonOkuma, birim: mevcutEnerji.su.birimFiyat });
-      setGaz({ ilk: mevcutEnerji.dogalgaz.ilkOkuma, son: mevcutEnerji.dogalgaz.sonOkuma, birim: mevcutEnerji.dogalgaz.birimFiyat });
+      setElek({
+        ilk: mevcutEnerji.elektrik.ilkOkuma,
+        son: mevcutEnerji.elektrik.sonOkuma,
+        birim: mevcutEnerji.elektrik.birimFiyat,
+      });
+      setSu({
+        ilk: mevcutEnerji.su.ilkOkuma,
+        son: mevcutEnerji.su.sonOkuma,
+        birim: mevcutEnerji.su.birimFiyat,
+      });
+      setGaz({
+        ilk: mevcutEnerji.dogalgaz.ilkOkuma,
+        son: mevcutEnerji.dogalgaz.sonOkuma,
+        birim: mevcutEnerji.dogalgaz.birimFiyat,
+      });
+      const aktif = mevcutEnerji.aktifKalemler;
+      if (aktif && aktif.length > 0) {
+        setAktifEnerji({
+          ELEKTRIK: aktif.includes('ELEKTRIK'),
+          SU: aktif.includes('SU'),
+          DOGALGAZ: aktif.includes('DOGALGAZ'),
+        });
+      } else {
+        setAktifEnerji({
+          ELEKTRIK: true,
+          SU: sayacFarki(mevcutEnerji.su) > 0,
+          DOGALGAZ: sayacFarki(mevcutEnerji.dogalgaz) > 0,
+        });
+      }
+      setEnerjiAciklama(mevcutEnerji.aciklama || '');
     } else {
       const prev = ilkOkumaFromOncekiAy(taseronEnerjiKayitlari, selectedTaseronId, selectedAy, selectedYil);
       setElek({ ilk: prev.elektrik, son: prev.elektrik, birim: 3.5 });
       setSu({ ilk: prev.su, son: prev.su, birim: 12 });
       setGaz({ ilk: prev.dogalgaz, son: prev.dogalgaz, birim: 8.5 });
+      setAktifEnerji({ ELEKTRIK: true, SU: false, DOGALGAZ: false });
+      setEnerjiAciklama('');
     }
   }, [selectedTaseronId, selectedAy, selectedYil, mevcutEnerji, taseronEnerjiKayitlari]);
 
@@ -266,24 +305,67 @@ export const TaseronKesintiScreen: React.FC<TaseronKesintiScreenProps> = ({
   };
 
   const handleEnerjiKaydet = () => {
-    if (!selectedTaseron) return;
+    if (!selectedTaseron) {
+      alert('Önce taşeron seçin.');
+      return;
+    }
+    const aktifKalemler = (Object.keys(aktifEnerji) as EnerjiKalem[]).filter((k) => aktifEnerji[k]);
+    if (aktifKalemler.length === 0) {
+      alert('En az bir sayaç kalemi seçin (ör. yalnızca Elektrik).');
+      return;
+    }
+    const buildOlcum = (
+      state: { ilk: number; son: number; birim: number },
+      aktif: boolean
+    ) => {
+      // Pasif kalemde fark oluşmasın: son = ilk
+      const son = aktif ? state.son : state.ilk;
+      return { ilkOkuma: state.ilk, sonOkuma: son, birimFiyat: state.birim };
+    };
+    const elektrik = buildOlcum(elek, aktifEnerji.ELEKTRIK);
+    const suO = buildOlcum(su, aktifEnerji.SU);
+    const dogalgaz = buildOlcum(gaz, aktifEnerji.DOGALGAZ);
+    const draft = { elektrik, su: suO, dogalgaz, aktifKalemler };
+    const hasFark = aktifKalemler.some((k) => {
+      if (k === 'ELEKTRIK') return sayacFarki(elektrik) > 0;
+      if (k === 'SU') return sayacFarki(suO) > 0;
+      return sayacFarki(dogalgaz) > 0;
+    });
+    if (!hasFark) {
+      alert('Seçili kalemde son okuma ilk okumadan büyük olmalı (kesinti farkı).');
+      return;
+    }
     const kayit: TaseronEnerjiKaydi = {
       id: mevcutEnerji?.id || `ten_${Date.now()}`,
       taseronCariId: selectedTaseron.id,
       taseronFirmaAdi: selectedTaseron.unvan,
       donemAy: donemAyStr,
       donemYil: donemYilStr,
-      elektrik: { ilkOkuma: elek.ilk, sonOkuma: elek.son, birimFiyat: elek.birim },
-      su: { ilkOkuma: su.ilk, sonOkuma: su.son, birimFiyat: su.birim },
-      dogalgaz: { ilkOkuma: gaz.ilk, sonOkuma: gaz.son, birimFiyat: gaz.birim },
-      olusturmaTarihi: new Date().toISOString(),
+      elektrik,
+      su: suO,
+      dogalgaz,
+      aktifKalemler,
+      aciklama: enerjiAciklama.trim() || undefined,
+      olusturmaTarihi: mevcutEnerji?.olusturmaTarihi || new Date().toISOString(),
       olusturanKullanici: currentUser?.email,
     };
     setTaseronEnerjiKayitlari((prev) => {
       const rest = prev.filter((k) => k.id !== kayit.id);
-      return [kayit, ...rest.filter((k) => !(k.taseronCariId === kayit.taseronCariId && k.donemAy === kayit.donemAy && k.donemYil === kayit.donemYil))];
+      return [
+        kayit,
+        ...rest.filter(
+          (k) =>
+            !(
+              k.taseronCariId === kayit.taseronCariId &&
+              k.donemAy === kayit.donemAy &&
+              k.donemYil === kayit.donemYil
+            )
+        ),
+      ];
     });
-    alert('Sayaç kaydı kaydedildi. Son okuma bir sonraki ayın ilk okuması olacaktır.');
+    alert(
+      `Sayaç kesintisi kaydedildi.\nTaşeron: ${selectedTaseron.unvan}\n${enerjiKalemOzet(draft)}\nToplam: ${enerjiToplamTutar(draft).toLocaleString('tr-TR')} TL`
+    );
   };
 
   const handleEnerjiRapor = () => {
@@ -311,6 +393,19 @@ export const TaseronKesintiScreen: React.FC<TaseronKesintiScreenProps> = ({
     setTaseronKesintiRaporlari((prev) => [rapor, ...prev]);
     const html = buildEnerjiKesintiReportHtml(selectedTaseron.unvan, selectedAy, selectedYil, mevcutEnerji);
     downloadKibritciReportHtml(html, `Kibritci_Enerji_${selectedTaseron.unvan}_${donemAyStr}_${donemYilStr}.html`);
+  };
+
+  const enerjiKesintiListesi = useMemo(() => {
+    return [...taseronEnerjiKayitlari].sort((a, b) => {
+      const ka = `${a.donemYil}-${a.donemAy}`;
+      const kb = `${b.donemYil}-${b.donemAy}`;
+      return kb.localeCompare(ka);
+    });
+  }, [taseronEnerjiKayitlari]);
+
+  const handleEnerjiSil = (id: string) => {
+    if (!window.confirm('Bu sayaç kesinti kaydı silinsin mi?')) return;
+    setTaseronEnerjiKayitlari((prev) => prev.filter((k) => k.id !== id));
   };
 
   const handleYemekKaydet = () => {
@@ -561,26 +656,70 @@ export const TaseronKesintiScreen: React.FC<TaseronKesintiScreenProps> = ({
     state,
     setState,
     unit,
+    aktif,
+    onAktifChange,
   }: {
     label: string;
     icon: string;
     state: { ilk: number; son: number; birim: number };
     setState: React.Dispatch<React.SetStateAction<{ ilk: number; son: number; birim: number }>>;
     unit: string;
+    aktif: boolean;
+    onAktifChange: (v: boolean) => void;
   }) => (
-    <div className="bg-slate-50 border rounded-2xl p-3 space-y-2">
-      <div className="flex justify-between text-[10px] font-bold">
-        <span>{icon} {label}</span>
-        <span>Fark: {Math.max(0, state.son - state.ilk)} {unit}</span>
+    <div
+      className={`border rounded-2xl p-3 space-y-2 transition ${
+        aktif ? 'bg-slate-50 border-slate-200' : 'bg-slate-100/60 border-slate-100 opacity-70'
+      }`}
+    >
+      <div className="flex justify-between items-center gap-2 text-[10px] font-bold">
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={aktif}
+            onChange={(e) => onAktifChange(e.target.checked)}
+            className="rounded border-slate-300"
+          />
+          <span>
+            {icon} {label}
+          </span>
+        </label>
+        <span className={aktif ? 'text-slate-700' : 'text-slate-400'}>
+          {aktif ? `Fark: ${Math.max(0, state.son - state.ilk)} ${unit}` : 'Kesintiye dahil değil'}
+        </span>
       </div>
       <div className="grid grid-cols-3 gap-2">
-        <input type="number" placeholder="İlk" value={state.ilk || ''} onChange={(e) => setState((s) => ({ ...s, ilk: Number(e.target.value) }))} className="p-2 border rounded-lg text-center text-xs" />
-        <input type="number" placeholder="Son" value={state.son || ''} onChange={(e) => setState((s) => ({ ...s, son: Number(e.target.value) }))} className="p-2 border rounded-lg text-center text-xs" />
-        <input type="number" step="0.01" placeholder="Birim ₺" value={state.birim || ''} onChange={(e) => setState((s) => ({ ...s, birim: Number(e.target.value) }))} className="p-2 border rounded-lg text-center text-xs" />
+        <input
+          type="number"
+          placeholder="İlk"
+          disabled={!aktif}
+          value={state.ilk || ''}
+          onChange={(e) => setState((s) => ({ ...s, ilk: Number(e.target.value) }))}
+          className="p-2 border rounded-lg text-center text-xs disabled:bg-slate-100 disabled:text-slate-400"
+        />
+        <input
+          type="number"
+          placeholder="Son"
+          disabled={!aktif}
+          value={state.son || ''}
+          onChange={(e) => setState((s) => ({ ...s, son: Number(e.target.value) }))}
+          className="p-2 border rounded-lg text-center text-xs disabled:bg-slate-100 disabled:text-slate-400"
+        />
+        <input
+          type="number"
+          step="0.01"
+          placeholder="Birim ₺"
+          disabled={!aktif}
+          value={state.birim || ''}
+          onChange={(e) => setState((s) => ({ ...s, birim: Number(e.target.value) }))}
+          className="p-2 border rounded-lg text-center text-xs disabled:bg-slate-100 disabled:text-slate-400"
+        />
       </div>
-      <p className="text-[9px] text-right font-bold text-slate-600">
-        Tutar: {(Math.max(0, state.son - state.ilk) * state.birim).toLocaleString('tr-TR')} TL
-      </p>
+      {aktif && (
+        <p className="text-[9px] text-right font-bold text-slate-600">
+          Tutar: {(Math.max(0, state.son - state.ilk) * state.birim).toLocaleString('tr-TR')} TL
+        </p>
+      )}
     </div>
   );
 
@@ -616,7 +755,7 @@ export const TaseronKesintiScreen: React.FC<TaseronKesintiScreenProps> = ({
             ))}
           </select>
           <select value={selectedYil} onChange={(e) => setSelectedYil(Number(e.target.value))} className="text-xs p-2.5 bg-slate-800 border border-slate-700 rounded-xl">
-            {[2025, 2026, 2027].map((y) => <option key={y} value={y}>{y}</option>)}
+            {[2024, 2025, 2026, 2027].map((y) => <option key={y} value={y}>{y}</option>)}
           </select>
         </div>
       </div>
@@ -644,7 +783,7 @@ export const TaseronKesintiScreen: React.FC<TaseronKesintiScreenProps> = ({
         ))}
       </div>
 
-      {!selectedTaseron && subPage !== 'envanter' ? (
+      {!selectedTaseron && subPage !== 'envanter' && subPage !== 'enerji' ? (
         <div className="bg-white border rounded-2xl p-12 text-center text-slate-500 text-sm">
           Taşeron seçmek için önce cari kartlara <strong>kartTipi: TASERON</strong> ile firma ekleyin.
           Firma listesi için <strong>Firma Envanteri</strong> sekmesine bakın.
@@ -784,15 +923,225 @@ export const TaseronKesintiScreen: React.FC<TaseronKesintiScreenProps> = ({
             </div>
           )}
 
-          {subPage === 'enerji' && selectedTaseron && (
-            <div className="bg-white border rounded-2xl p-5 space-y-4 max-w-2xl">
-              <p className="text-[10px] text-slate-500">Aylık tek kayıt. Son okuma, sonraki ayın ilk okuması olur.</p>
-              <SayacBlock label="Elektrik (kWh)" icon="⚡" state={elek} setState={setElek} unit="kWh" />
-              <SayacBlock label="Su (m³)" icon="💧" state={su} setState={setSu} unit="m³" />
-              <SayacBlock label="Doğalgaz (m³)" icon="🔥" state={gaz} setState={setGaz} unit="m³" />
-              <div className="flex gap-2">
-                <button type="button" onClick={handleEnerjiKaydet} className="flex-1 py-2.5 bg-slate-900 text-white text-xs font-bold rounded-xl cursor-pointer">Kaydet</button>
-                <button type="button" onClick={handleEnerjiRapor} className="flex-1 py-2.5 bg-indigo-600 text-white text-xs font-bold rounded-xl cursor-pointer">Ay Sonu Rapor + Arşiv</button>
+          {subPage === 'enerji' && (
+            <div className="grid lg:grid-cols-2 gap-4">
+              <div className="bg-white border rounded-2xl p-5 space-y-4">
+                <div>
+                  <h3 className="text-xs font-black uppercase text-slate-800 flex items-center gap-2">
+                    <Zap size={14} className="text-amber-600" /> Sayaç Kesintisi Girişi
+                  </h3>
+                  <p className="text-[10px] text-slate-500 mt-1">
+                    Yalnızca işaretlediğiniz kalemler kesilir. Su / doğalgaz zorunlu değildir — sadece elektrik
+                    kesebilirsiniz. Son okuma, sonraki ayın ilk okuması olur.
+                  </p>
+                </div>
+
+                <label className="block space-y-1">
+                  <span className="text-[9px] font-black uppercase text-slate-500">Taşeron (kime kesilecek) *</span>
+                  <select
+                    value={selectedTaseronId}
+                    onChange={(e) => setSelectedTaseronId(e.target.value)}
+                    className="w-full text-xs font-bold p-2.5 bg-amber-50 border border-amber-200 rounded-xl"
+                  >
+                    {taseronlar.length === 0 ? (
+                      <option value="">Taşeron cari kartı yok</option>
+                    ) : (
+                      taseronlar.map((t) => (
+                        <option key={t.id} value={t.id}>
+                          {t.unvan} ({t.kod})
+                        </option>
+                      ))
+                    )}
+                  </select>
+                </label>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <label className="block space-y-1">
+                    <span className="text-[9px] font-black uppercase text-slate-500">Dönem ay</span>
+                    <select
+                      value={selectedAy}
+                      onChange={(e) => setSelectedAy(Number(e.target.value))}
+                      className="w-full text-xs p-2.5 border rounded-xl"
+                    >
+                      {Array.from({ length: 12 }, (_, i) => (
+                        <option key={i + 1} value={i + 1}>
+                          {ayAdi(i + 1)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="block space-y-1">
+                    <span className="text-[9px] font-black uppercase text-slate-500">Yıl</span>
+                    <select
+                      value={selectedYil}
+                      onChange={(e) => setSelectedYil(Number(e.target.value))}
+                      className="w-full text-xs p-2.5 border rounded-xl"
+                    >
+                      {[2024, 2025, 2026, 2027].map((y) => (
+                        <option key={y} value={y}>
+                          {y}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+
+                {!selectedTaseron ? (
+                  <p className="text-xs text-rose-600 font-semibold">Kesinti için taşeron seçin.</p>
+                ) : (
+                  <>
+                    <p className="text-[10px] font-bold text-amber-900 bg-amber-50 border border-amber-100 rounded-xl px-3 py-2">
+                      Seçili: {selectedTaseron.unvan} · {ayAdi(selectedAy)} {selectedYil}
+                    </p>
+                    <SayacBlock
+                      label="Elektrik (kWh)"
+                      icon="⚡"
+                      state={elek}
+                      setState={setElek}
+                      unit="kWh"
+                      aktif={aktifEnerji.ELEKTRIK}
+                      onAktifChange={(v) => setAktifEnerji((s) => ({ ...s, ELEKTRIK: v }))}
+                    />
+                    <SayacBlock
+                      label="Su (m³)"
+                      icon="💧"
+                      state={su}
+                      setState={setSu}
+                      unit="m³"
+                      aktif={aktifEnerji.SU}
+                      onAktifChange={(v) => setAktifEnerji((s) => ({ ...s, SU: v }))}
+                    />
+                    <SayacBlock
+                      label="Doğalgaz (m³)"
+                      icon="🔥"
+                      state={gaz}
+                      setState={setGaz}
+                      unit="m³"
+                      aktif={aktifEnerji.DOGALGAZ}
+                      onAktifChange={(v) => setAktifEnerji((s) => ({ ...s, DOGALGAZ: v }))}
+                    />
+                    <label className="block space-y-1">
+                      <span className="text-[9px] font-black uppercase text-slate-500">
+                        Açıklama / neden (isteğe bağlı)
+                      </span>
+                      <textarea
+                        value={enerjiAciklama}
+                        onChange={(e) => setEnerjiAciklama(e.target.value)}
+                        rows={2}
+                        placeholder="Örn. Ağustos elektrik tüketimi — şantiye barakası"
+                        className="w-full text-xs p-2.5 border rounded-xl"
+                      />
+                    </label>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={handleEnerjiKaydet}
+                        className="flex-1 py-2.5 bg-slate-900 text-white text-xs font-bold rounded-xl cursor-pointer"
+                      >
+                        Kaydet
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleEnerjiRapor}
+                        className="flex-1 py-2.5 bg-indigo-600 text-white text-xs font-bold rounded-xl cursor-pointer"
+                      >
+                        Ay Sonu Rapor + Arşiv
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+
+              <div className="bg-white border rounded-2xl p-5 space-y-3">
+                <div>
+                  <h3 className="text-xs font-black uppercase text-slate-800">Kesinti Listesi</h3>
+                  <p className="text-[10px] text-slate-500 mt-0.5">
+                    Kime, hangi dönem, hangi kalem, tutar — yapılan sayaç kesintileri
+                  </p>
+                </div>
+                <div className="space-y-2 max-h-[560px] overflow-y-auto pr-1">
+                  {enerjiKesintiListesi.length === 0 ? (
+                    <p className="text-xs text-slate-400 italic py-8 text-center">Henüz sayaç kesintisi yok.</p>
+                  ) : (
+                    enerjiKesintiListesi.map((k) => {
+                      const tutar = enerjiToplamTutar(k);
+                      const ozet = enerjiKalemOzet(k);
+                      const isSelected =
+                        k.taseronCariId === selectedTaseronId &&
+                        k.donemAy === donemAyStr &&
+                        k.donemYil === donemYilStr;
+                      return (
+                        <div
+                          key={k.id}
+                          className={`border rounded-xl p-3 space-y-1.5 ${
+                            isSelected ? 'border-amber-300 bg-amber-50/50' : 'border-slate-100 bg-slate-50/50'
+                          }`}
+                        >
+                          <div className="flex justify-between gap-2 items-start">
+                            <div>
+                              <p className="text-xs font-black text-slate-800">{k.taseronFirmaAdi}</p>
+                              <p className="text-[10px] text-slate-500 font-semibold">
+                                {ayAdi(Number(k.donemAy))} {k.donemYil} · Sayaç kesintisi
+                              </p>
+                            </div>
+                            <span className="text-xs font-black text-rose-700 whitespace-nowrap">
+                              {tutar.toLocaleString('tr-TR')} TL
+                            </span>
+                          </div>
+                          <p className="text-[10px] text-slate-700 font-medium">{ozet}</p>
+                          {k.aciklama && (
+                            <p className="text-[10px] text-slate-500 italic">Neden: {k.aciklama}</p>
+                          )}
+                          <p className="text-[9px] text-slate-400">
+                            {k.olusturanKullanici || '—'} ·{' '}
+                            {k.olusturmaTarihi
+                              ? new Date(k.olusturmaTarihi).toLocaleString('tr-TR')
+                              : ''}
+                          </p>
+                          <div className="flex gap-1.5 pt-1">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelectedTaseronId(k.taseronCariId);
+                                setSelectedAy(Number(k.donemAy));
+                                setSelectedYil(Number(k.donemYil));
+                              }}
+                              className="flex-1 py-1.5 text-[10px] font-bold rounded-lg bg-white border cursor-pointer"
+                            >
+                              Düzenle
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                downloadKibritciReportHtml(
+                                  buildEnerjiKesintiReportHtml(
+                                    k.taseronFirmaAdi,
+                                    Number(k.donemAy),
+                                    Number(k.donemYil),
+                                    k
+                                  ),
+                                  `enerji_${k.id}.html`
+                                )
+                              }
+                              className="p-1.5 border rounded-lg cursor-pointer"
+                              title="Rapor"
+                            >
+                              <Download size={12} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleEnerjiSil(k.id)}
+                              className="p-1.5 border border-rose-200 text-rose-600 rounded-lg cursor-pointer"
+                              title="Sil"
+                            >
+                              <Trash2 size={12} />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
               </div>
             </div>
           )}

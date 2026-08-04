@@ -1,5 +1,5 @@
 import { OperatorFaaliyet, TaseronEnerjiKaydi, TaseronKesintiRaporu } from '../types/erp';
-import { ayAdi, enerjiToplamTutar, makineEtiketi, sayacFarki, sayacTutari } from './taseronUtils';
+import { ayAdi, enerjiAktifKalemler, enerjiToplamTutar, makineEtiketi, sayacFarki, sayacTutari } from './taseronUtils';
 import { buildKibritciReportHtml, downloadKibritciReportHtml, openKibritciReportPrint } from './kibritciReportTemplate';
 
 function fmt(n: number): string {
@@ -88,10 +88,33 @@ export function buildEnerjiKesintiReportHtml(
   const s = kayit.su;
   const g = kayit.dogalgaz;
   const toplam = enerjiToplamTutar(kayit);
+  const aktif = new Set(enerjiAktifKalemler(kayit));
+  // Eski kayıt: aktif boşsa hepsini göster
+  const showAll = aktif.size === 0 && !kayit.aktifKalemler;
+  const rows: string[] = [];
+  if (showAll || aktif.has('ELEKTRIK')) {
+    rows.push(
+      `<tr><td>⚡ Elektrik (kWh)</td><td style="text-align:right">${e.ilkOkuma}</td><td style="text-align:right">${e.sonOkuma}</td><td style="text-align:right">${sayacFarki(e)}</td><td style="text-align:right">${fmt(e.birimFiyat)}</td><td style="text-align:right;font-weight:bold">${fmt(sayacTutari(e))}</td></tr>`
+    );
+  }
+  if (showAll || aktif.has('SU')) {
+    rows.push(
+      `<tr><td>💧 Su (m³)</td><td style="text-align:right">${s.ilkOkuma}</td><td style="text-align:right">${s.sonOkuma}</td><td style="text-align:right">${sayacFarki(s)}</td><td style="text-align:right">${fmt(s.birimFiyat)}</td><td style="text-align:right;font-weight:bold">${fmt(sayacTutari(s))}</td></tr>`
+    );
+  }
+  if (showAll || aktif.has('DOGALGAZ')) {
+    rows.push(
+      `<tr><td>🔥 Doğalgaz (m³)</td><td style="text-align:right">${g.ilkOkuma}</td><td style="text-align:right">${g.sonOkuma}</td><td style="text-align:right">${sayacFarki(g)}</td><td style="text-align:right">${fmt(g.birimFiyat)}</td><td style="text-align:right;font-weight:bold">${fmt(sayacTutari(g))}</td></tr>`
+    );
+  }
+  const aciklamaHtml = kayit.aciklama
+    ? `<p style="margin-top:12px"><strong>Açıklama / neden:</strong> ${String(kayit.aciklama).replace(/</g, '&lt;')}</p>`
+    : '';
 
   const bodyHtml = `
     <p><strong>Taşeron:</strong> ${taseronAdi}</p>
     <p><strong>Dönem:</strong> ${ayLabel} ${yil}</p>
+    ${aciklamaHtml}
     <table style="width:100%;border-collapse:collapse;font-size:11px;margin-top:16px">
       <thead>
         <tr style="background:#1e3a5f;color:#fff">
@@ -104,9 +127,7 @@ export function buildEnerjiKesintiReportHtml(
         </tr>
       </thead>
       <tbody>
-        <tr><td>⚡ Elektrik (kWh)</td><td style="text-align:right">${e.ilkOkuma}</td><td style="text-align:right">${e.sonOkuma}</td><td style="text-align:right">${sayacFarki(e)}</td><td style="text-align:right">${fmt(e.birimFiyat)}</td><td style="text-align:right;font-weight:bold">${fmt(sayacTutari(e))}</td></tr>
-        <tr><td>💧 Su (m³)</td><td style="text-align:right">${s.ilkOkuma}</td><td style="text-align:right">${s.sonOkuma}</td><td style="text-align:right">${sayacFarki(s)}</td><td style="text-align:right">${fmt(s.birimFiyat)}</td><td style="text-align:right;font-weight:bold">${fmt(sayacTutari(s))}</td></tr>
-        <tr><td>🔥 Doğalgaz (m³)</td><td style="text-align:right">${g.ilkOkuma}</td><td style="text-align:right">${g.sonOkuma}</td><td style="text-align:right">${sayacFarki(g)}</td><td style="text-align:right">${fmt(g.birimFiyat)}</td><td style="text-align:right;font-weight:bold">${fmt(sayacTutari(g))}</td></tr>
+        ${rows.join('\n') || '<tr><td colspan="6">Kesinti kalemi yok</td></tr>'}
         <tr style="background:#fef2f2;font-weight:bold"><td colspan="5" style="text-align:right;padding:8px">GENEL TOPLAM</td><td style="text-align:right;padding:8px;color:#b91c1c">${fmt(toplam)} TL</td></tr>
       </tbody>
     </table>`;

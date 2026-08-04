@@ -165,8 +165,49 @@ export function sayacTutari(o: TaseronSayacOlcum): number {
   return Math.round(sayacFarki(o) * (o.birimFiyat || 0) * 100) / 100;
 }
 
-export function enerjiToplamTutar(kayit: Pick<TaseronEnerjiKaydi, 'elektrik' | 'su' | 'dogalgaz'>): number {
-  return sayacTutari(kayit.elektrik) + sayacTutari(kayit.su) + sayacTutari(kayit.dogalgaz);
+export type EnerjiKalem = 'ELEKTRIK' | 'SU' | 'DOGALGAZ';
+
+/** Dahil edilen kalemlerin tutar toplamı (aktifKalemler yoksa fark>0 olanlar) */
+export function enerjiAktifKalemler(
+  kayit: Pick<TaseronEnerjiKaydi, 'elektrik' | 'su' | 'dogalgaz' | 'aktifKalemler'>
+): EnerjiKalem[] {
+  if (kayit.aktifKalemler && kayit.aktifKalemler.length > 0) {
+    return kayit.aktifKalemler;
+  }
+  const out: EnerjiKalem[] = [];
+  if (sayacFarki(kayit.elektrik) > 0) out.push('ELEKTRIK');
+  if (sayacFarki(kayit.su) > 0) out.push('SU');
+  if (sayacFarki(kayit.dogalgaz) > 0) out.push('DOGALGAZ');
+  return out;
+}
+
+export function enerjiToplamTutar(
+  kayit: Pick<TaseronEnerjiKaydi, 'elektrik' | 'su' | 'dogalgaz' | 'aktifKalemler'>
+): number {
+  const aktif = new Set(enerjiAktifKalemler(kayit));
+  // Eski kayıtlar: aktif boşsa tüm kalemleri topla (geriye uyum)
+  if (aktif.size === 0 && !kayit.aktifKalemler) {
+    return sayacTutari(kayit.elektrik) + sayacTutari(kayit.su) + sayacTutari(kayit.dogalgaz);
+  }
+  let t = 0;
+  if (aktif.has('ELEKTRIK')) t += sayacTutari(kayit.elektrik);
+  if (aktif.has('SU')) t += sayacTutari(kayit.su);
+  if (aktif.has('DOGALGAZ')) t += sayacTutari(kayit.dogalgaz);
+  return t;
+}
+
+export function enerjiKalemOzet(
+  kayit: Pick<TaseronEnerjiKaydi, 'elektrik' | 'su' | 'dogalgaz' | 'aktifKalemler'>
+): string {
+  const aktif = enerjiAktifKalemler(kayit);
+  if (aktif.length === 0) return 'Kesinti kalemi yok';
+  return aktif
+    .map((k) => {
+      if (k === 'ELEKTRIK') return `Elektrik ${sayacFarki(kayit.elektrik)} kWh`;
+      if (k === 'SU') return `Su ${sayacFarki(kayit.su)} m³`;
+      return `Doğalgaz ${sayacFarki(kayit.dogalgaz)} m³`;
+    })
+    .join(' · ');
 }
 
 export function oncekiDonem(ay: number, yil: number): { ay: number; yil: number } {

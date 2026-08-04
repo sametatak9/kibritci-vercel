@@ -783,6 +783,10 @@ export interface TaseronEnerjiKaydi {
   elektrik: TaseronSayacOlcum;
   su: TaseronSayacOlcum;
   dogalgaz: TaseronSayacOlcum;
+  /** Hangi kalemler kesintiye dahil (yoksa fark>0 olanlar) */
+  aktifKalemler?: Array<'ELEKTRIK' | 'SU' | 'DOGALGAZ'>;
+  /** Neden / açıklama (kime neden kesildi) */
+  aciklama?: string;
   olusturmaTarihi: string;
   olusturanKullanici?: string;
 }
