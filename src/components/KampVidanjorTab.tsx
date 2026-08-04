@@ -568,28 +568,64 @@ export const KampVidanjorTab: React.FC<KampVidanjorTabProps> = ({
             onClick={handleAyFaturayaBagla}
             className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl bg-violet-600 hover:bg-violet-700 text-white text-[11px] font-black uppercase tracking-wide cursor-pointer"
           >
-            Bu ayın {ayFaturasizIrsaliyeler.length} irsaliyesini taslak faturaya bağla
+            Bu ayın {ayFaturasizIrsaliyeler.length} irsaliyesini aylık taslak bağa al
+            {eslesme.fisToplam > 0 ? ` (${eslesme.fisToplam} çekim)` : ''}
           </button>
         )}
+        <p className="text-[10px] text-slate-500 leading-relaxed">
+          Onaylı fişler <strong>irsaliye</strong> olarak kalır. Taslak bağ gerçek fatura girişi değildir;
+          mutabakat sonrası Cari Kartlar → Geçmiş İrsaliyeler’den fiyatlı faturaya dönüştürün.
+        </p>
       </div>
 
-      {/* Cari altındaki tüm fişler */}
-      <div className="bg-white border border-slate-200 rounded-2xl p-4 space-y-2 shadow-sm">
+      {/* Cari altındaki tüm fişler — aylık */}
+      <div className="bg-white border border-slate-200 rounded-2xl p-4 space-y-3 shadow-sm">
         <h4 className="text-[10px] font-black uppercase tracking-wider text-slate-700">
-          {firmaUnvan} — Tüm Fişler ({fisler.filter((f) => isSekerVidanjorFirma(f.firmaUnvan) || f.firmaUnvan === firmaUnvan).length})
+          {firmaUnvan} — Aylık Fiş / Çekim Özeti
         </h4>
-        <div className="max-h-[240px] overflow-y-auto space-y-1.5">
-          {fisler
-            .filter((f) => isSekerVidanjorFirma(f.firmaUnvan) || f.firmaUnvan === firmaUnvan)
-            .slice(0, 80)
-            .map((f) => (
-              <div key={f.id} className="text-[10px] flex justify-between gap-2 border-b border-slate-100 py-1.5">
-                <span className="font-mono text-slate-600">{f.tarih}</span>
-                <span className="font-bold text-slate-800 truncate">{f.fisNo}</span>
-                <span className="font-mono">{f.plaka}</span>
-                <span className="font-black text-indigo-700">{f.cekimAdedi}</span>
-              </div>
-            ))}
+        <div className="max-h-[320px] overflow-y-auto space-y-3">
+          {(() => {
+            const list = fisler.filter(
+              (f) => isSekerVidanjorFirma(f.firmaUnvan) || f.firmaUnvan === firmaUnvan
+            );
+            const byMonth = new Map<string, typeof list>();
+            for (const f of list) {
+              const mk = String(f.tarih || '').slice(0, 7) || '0000-00';
+              if (!byMonth.has(mk)) byMonth.set(mk, []);
+              byMonth.get(mk)!.push(f);
+            }
+            const keys = [...byMonth.keys()].sort((a, b) => b.localeCompare(a));
+            if (!keys.length) {
+              return <p className="text-[10px] text-slate-400">Fiş yok.</p>;
+            }
+            return keys.map((mk) => {
+              const items = byMonth.get(mk)!;
+              const toplam = items.reduce((s, f) => s + (Number(f.cekimAdedi) || 0), 0);
+              return (
+                <div key={mk} className="border border-slate-100 rounded-xl overflow-hidden">
+                  <div className="px-3 py-2 bg-indigo-50/80 flex justify-between gap-2 text-[10px] font-black uppercase text-indigo-900">
+                    <span>{mk === '0000-00' ? 'Tarihsiz' : mk}</span>
+                    <span>
+                      {items.length} fiş · {toplam.toLocaleString('tr-TR')} çekim
+                    </span>
+                  </div>
+                  <div className="px-2 py-1 max-h-[140px] overflow-y-auto">
+                    {items.slice(0, 40).map((f) => (
+                      <div
+                        key={f.id}
+                        className="text-[10px] flex justify-between gap-2 border-b border-slate-50 py-1.5"
+                      >
+                        <span className="font-mono text-slate-600">{f.tarih}</span>
+                        <span className="font-bold text-slate-800 truncate">{f.fisNo}</span>
+                        <span className="font-mono">{f.plaka}</span>
+                        <span className="font-black text-indigo-700">{f.cekimAdedi}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            });
+          })()}
         </div>
       </div>
     </div>

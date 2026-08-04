@@ -10,7 +10,7 @@ import { warnIfDuplicateCari, warnIfDuplicateStok } from '../lib/duplicateNameUt
 import { exportHistoryReport } from '../lib/reportExport';
 import { firmaEslesir, personelForCariKart } from '../lib/taseronUtils';
 import { displayPersonelGorev, isPersonelActiveOnDate } from '../lib/guvenlikHelpers';
-import { todayDateKey } from '../lib/dateKeyUtils';
+import { formatDateLabelTr, normalizeDateKey, todayDateKey } from '../lib/dateKeyUtils';
 import { EvrakDetayModal, EvrakDetayPayload } from './EvrakDetayModal';
 import { openBase64InNewTab } from '../lib/fileViewerUtils';
 import { CariTimeline } from './CariTimeline';
@@ -32,6 +32,8 @@ import {
 import {
   assertSameCariIrsaliyeler,
   buildFaturaFromIrsaliyeler,
+  irsaliyeHizmetMiktari,
+  isTaslakMaliBagFatura,
   linkIrsaliyelerToFatura,
 } from '../lib/evrakDonusum';
 import { appendCariIslemOnce, buildCariEvrakHistory } from '../lib/evrakCariStokSync';
@@ -86,6 +88,10 @@ type HistoryLog = {
   badgeColor: string;
   collection?: HistoryCollection;
   kalemler?: HistoryLogKalem[];
+  /** Aylık gruplama için YYYY-MM */
+  monthKey?: string;
+  hizmetMiktar?: number;
+  hizmetEtiket?: string;
 };
 
 type GenericDetail = {
@@ -101,6 +107,7 @@ const TYPE_ICON: Record<string, React.ReactNode> = {
   'İRSALİYE': <Truck size={14} />,
   'İRSALİYE GİRİŞİ': <Truck size={14} />,
   'FATURA': <Receipt size={14} />,
+  'TASLAK BAĞ': <Receipt size={14} />,
   'LOJMAN KONAKLAMA': <Home size={14} />,
   'PERSONEL ZİMMET': <User size={14} />,
   'PERSONEL': <Users size={14} />,
@@ -300,19 +307,24 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
           const firmaMatch = firmaEslesir(String(data.firma || ''), name);
           const cariIdMatch = Boolean(data.cariKartId && data.cariKartId === id);
           if (firmaMatch || cariIdMatch) {
+            const tarihKey = normalizeDateKey(data.tarih) || String(data.tarih || '');
+            const hizmet = irsaliyeHizmetMiktari(data as Irsaliye);
             logs.push({
               id: docSnap.id,
               type: 'İRSALİYE',
               title: `İrsaliye: ${data.irsaliyeNo || 'İRS-KOD'}`,
               desc: `Durum: ${data.onayDurumu}${data.kaynak ? ` · Kaynak: ${data.kaynak}` : ''}${
                 data.plaka ? ` · ${data.plaka}` : ''
-              }${data.cekimAdedi != null ? ` · ${data.cekimAdedi} çekim` : ''}${
+              }${hizmet.miktar > 0 ? ` · ${hizmet.miktar} ${hizmet.etiket}` : ''}${
                 Array.isArray(data.kalemler) && data.kalemler.length ? ` · ${data.kalemler.length} kalem` : ''
               }${data.toplamTutar ? ` · ₺${Number(data.toplamTutar).toLocaleString('tr-TR')}` : ''}`,
-              date: data.tarih || '',
+              date: tarihKey,
               badgeColor: 'bg-amber-100 text-amber-800',
               collection: 'irsaliyeler',
               kalemler: mapKalemler(data.kalemler),
+              monthKey: tarihKey ? tarihKey.slice(0, 7) : undefined,
+              hizmetMiktar: hizmet.miktar,
+              hizmetEtiket: hizmet.etiket,
             });
           }
         });
@@ -321,15 +333,23 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
         invoicesSnap.forEach((docSnap) => {
           const data = docSnap.data();
           if (firmaEslesir(String(data.cariUnvan || ''), name) || Boolean(data.cariKartId && data.cariKartId === id)) {
+            const taslak = isTaslakMaliBagFatura(data as Fatura);
+            const tarihKey = normalizeDateKey(data.tarih) || String(data.tarih || '');
+            const bagliSayisi = Array.isArray(data.bagliIrsaliyeler) ? data.bagliIrsaliyeler.length : 0;
             logs.push({
               id: docSnap.id,
-              type: 'FATURA',
-              title: `Fatura: ${data.faturaNo || 'FAT-KOD'}`,
-              desc: `Matrah: ₺${Number(data.toplamTutar || 0).toLocaleString('tr-TR')} · ${data.durum}`,
-              date: data.tarih || '',
-              badgeColor: 'bg-stone-200 text-stone-800',
+              type: taslak ? 'TASLAK BAĞ' : 'FATURA',
+              title: taslak
+                ? `Taslak bağ (fatura değil): ${data.faturaNo || 'FAT-KOD'}`
+                : `Fatura: ${data.faturaNo || 'FAT-KOD'}`,
+              desc: taslak
+                ? `${bagliSayisi} irsaliye · matrah ₺0 · gerçek fatura girişi bekleniyor · ${data.durum || ''}`
+                : `Matrah: ₺${Number(data.toplamTutar || data.genelToplam || 0).toLocaleString('tr-TR')} · ${data.durum}`,
+              date: tarihKey,
+              badgeColor: taslak ? 'bg-slate-100 text-slate-700' : 'bg-stone-200 text-stone-800',
               collection: 'faturalar',
               kalemler: mapKalemler(data.kalemler),
+              monthKey: tarihKey ? tarihKey.slice(0, 7) : undefined,
             });
           }
         });
@@ -645,6 +665,31 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
     if (historyFilter === 'ALL') return historyList;
     return historyList.filter((h) => h.type === historyFilter);
   }, [historyList, historyFilter]);
+
+  const historyByMonth = useMemo(() => {
+    const AY = ['', 'Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran', 'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'];
+    const map = new Map<string, HistoryLog[]>();
+    for (const h of filteredHistory) {
+      const mk =
+        h.monthKey ||
+        (normalizeDateKey(h.date) ? normalizeDateKey(h.date).slice(0, 7) : '') ||
+        '0000-00';
+      if (!map.has(mk)) map.set(mk, []);
+      map.get(mk)!.push(h);
+    }
+    return [...map.entries()]
+      .sort((a, b) => b[0].localeCompare(a[0]))
+      .map(([mk, items]) => {
+        const [y, m] = mk.split('-');
+        const label =
+          mk === '0000-00' || !y || !m
+            ? 'Tarihsiz'
+            : `${AY[Number(m)] || m} ${y}`;
+        const hizmetToplam = items.reduce((s, it) => s + (Number(it.hizmetMiktar) || 0), 0);
+        const etiket = items.find((it) => it.hizmetEtiket)?.hizmetEtiket || 'çekim';
+        return { monthKey: mk, label, items, hizmetToplam, etiket };
+      });
+  }, [filteredHistory]);
 
   const historyTypeCounts = useMemo(() => {
     const map: Record<string, number> = {};
@@ -1755,15 +1800,14 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
                   .filter(
                     (h) =>
                       h.type === 'İRSALİYE' ||
-                      h.type === 'İRSALİYE GİRİŞİ' ||
-                      h.type === 'FATURA'
+                      h.type === 'İRSALİYE GİRİŞİ'
                   )
                   .map((h) => ({
                     id: h.id,
                     type: h.type,
                     title: h.title,
                     desc: h.desc,
-                    date: h.date,
+                    date: formatDateLabelTr(h.date),
                   }))}
                 onOpenAll={() => {
                   setHistoryFilter('İRSALİYE');
@@ -1935,7 +1979,7 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
                 ))}
               </div>
 
-              <div className="p-5 max-h-[48vh] overflow-y-auto space-y-2.5">
+              <div className="p-5 max-h-[48vh] overflow-y-auto space-y-4">
                 {historyLoading ? (
                   <div className="flex items-center justify-center gap-2 py-16 text-slate-400 text-xs font-bold">
                     <RefreshCw size={16} className="animate-spin" /> İşlem geçmişi yükleniyor…
@@ -1945,7 +1989,20 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
                     Bu filtrede / kartta işlem kaydı yok.
                   </div>
                 ) : (
-                  filteredHistory.map((log, idx) => (
+                  historyByMonth.map((group) => (
+                    <div key={group.monthKey} className="space-y-2.5">
+                      <div className="sticky top-0 z-[1] flex flex-wrap items-center justify-between gap-2 bg-white/95 backdrop-blur-sm py-1.5 border-b border-slate-100">
+                        <h4 className="text-[10px] font-black uppercase tracking-wider text-indigo-800">
+                          {group.label}
+                        </h4>
+                        <span className="text-[10px] font-bold text-slate-500">
+                          {group.items.length} kayıt
+                          {group.hizmetToplam > 0
+                            ? ` · ${group.hizmetToplam.toLocaleString('tr-TR')} ${group.etiket}`
+                            : ''}
+                        </span>
+                      </div>
+                      {group.items.map((log, idx) => (
                     <div
                       key={`${log.id}-${idx}`}
                       className="flex gap-3 p-3.5 rounded-xl border border-slate-100 bg-slate-50/80 hover:border-slate-300 transition"
@@ -1971,7 +2028,12 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
                           >
                             {log.type}
                           </span>
-                          <span className="text-[10px] font-mono font-bold text-slate-400">{log.date}</span>
+                          <span className="text-[10px] font-mono font-bold text-slate-400">
+                            {formatDateLabelTr(log.date)}
+                            {normalizeDateKey(log.date) ? (
+                              <span className="text-slate-300"> · {normalizeDateKey(log.date)}</span>
+                            ) : null}
+                          </span>
                         </div>
                         <p className="text-xs font-black text-slate-900 mt-1">{log.title}</p>
                         <p className="text-[11px] text-slate-600 mt-0.5 leading-relaxed">{log.desc}</p>
@@ -1991,6 +2053,8 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
                           Detay
                         </button>
                       )}
+                    </div>
+                      ))}
                     </div>
                   ))
                 )}

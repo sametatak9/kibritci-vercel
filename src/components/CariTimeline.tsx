@@ -45,10 +45,10 @@ export const CariTimeline: React.FC<Props> = ({
             className="text-base font-extrabold tracking-tight text-slate-900"
             style={{ fontFamily: '"Barlow Condensed", sans-serif' }}
           >
-            İrsaliye &amp; Fatura akışı
+            Geçmiş İrsaliyeler
           </h3>
           <p className="text-[11px] text-slate-500 mt-0.5 truncate max-w-[280px]">
-            {cariUnvan} · son kayıtlar
+            {cariUnvan} · seçerek faturaya dönüştürülebilir
           </p>
         </div>
         {onOpenAll && (
@@ -57,7 +57,7 @@ export const CariTimeline: React.FC<Props> = ({
             onClick={onOpenAll}
             className="text-[10px] font-bold text-[#0F6C5C] hover:underline cursor-pointer shrink-0"
           >
-            Tüm geçmiş
+            Listeye git
           </button>
         )}
       </div>
@@ -65,8 +65,8 @@ export const CariTimeline: React.FC<Props> = ({
       {top.length === 0 ? (
         <EmptyState
           icon={FileText}
-          title="Henüz irsaliye / fatura yok"
-          description="Bu cariye bağlı evrak oluşunca burada zaman çizelgesi olarak görünür."
+          title="Henüz irsaliye yok"
+          description="Yıldırım / Vidanjör vb. onaylanınca irsaliye olarak buraya düşer; istenirse seçilip faturaya dönüştürülür."
           className="py-6 border-slate-100"
         />
       ) : (

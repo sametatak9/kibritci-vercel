@@ -12,7 +12,7 @@ import {
   isYildirimFisPending,
   rejectYildirimTankerFis,
 } from '../lib/yildirimTankerOnayUtils';
-import { findMatchingYildirimSatinAlma, softBindIrsaliyelerToDraftFatura } from '../lib/tankerEvrakDonusum';
+import { findMatchingYildirimSatinAlma } from '../lib/tankerEvrakDonusum';
 
 interface YildirimTankerFisOnayPanelProps {
   currentUser: any;
@@ -20,7 +20,9 @@ interface YildirimTankerFisOnayPanelProps {
   setCariKartlar?: React.Dispatch<React.SetStateAction<CariKart[]>>;
   setIrsaliyeler?: React.Dispatch<React.SetStateAction<Irsaliye[]>>;
   setCariIslemGecmisi?: React.Dispatch<React.SetStateAction<CariKartIslem[]>>;
+  /** @deprecated Onayda fatura oluşturulmaz; Cari Kartlar → Geçmiş İrsaliyeler'den dönüştürülür. */
   faturalar?: Fatura[];
+  /** @deprecated Onayda fatura oluşturulmaz. */
   setFaturalar?: React.Dispatch<React.SetStateAction<Fatura[]>>;
   satinAlmaTalepleri?: SatinAlmaTalebi[];
   irsaliyeler?: Irsaliye[];
@@ -33,8 +35,6 @@ export const YildirimTankerFisOnayPanel: React.FC<YildirimTankerFisOnayPanelProp
   setCariKartlar,
   setIrsaliyeler,
   setCariIslemGecmisi,
-  faturalar = [],
-  setFaturalar,
   satinAlmaTalepleri = [],
   irsaliyeler = [],
   addNotification,
@@ -124,30 +124,9 @@ export const YildirimTankerFisOnayPanel: React.FC<YildirimTankerFisOnayPanelProp
         setCariIslemGecmisi,
       });
 
-      let faturaNo = '';
-      if (
-        setFaturalar &&
-        setIrsaliyeler &&
-        window.confirm(
-          `İrsaliye oluştu: ${result.irsaliye.irsaliyeNo}${
-            result.saMatch ? `\nSA bağlandı: ${result.saMatch.sa.saId}` : '\n(Eşleşen SA bulunamadı)'
-          }\n\nTaslak fatura da oluşturulsun mu?\n(Evraklar kilitlenmez; fiyat sonra doldurulur.)`
-        )
-      ) {
-        const bound = softBindIrsaliyelerToDraftFatura({
-          irsaliyeler: [result.irsaliye],
-          faturalar,
-          cariKartlar,
-          setFaturalar,
-          setIrsaliyeler,
-          setCariIslemGecmisi,
-          baslik: 'Yıldırım İrsaliyesinden Taslak Fatura',
-        });
-        faturaNo = bound.fatura.faturaNo;
-      }
-
+      // Giriş her zaman irsaliye olarak kalır; fatura Cari Kartlar → Geçmiş İrsaliyeler'den seçilerek birleştirilir.
       await addNotification?.(
-        `Yıldırım Tanker irsaliyesi onaylandı: ${result.fis.fisNo}${faturaNo ? ` · fatura ${faturaNo}` : ''}`,
+        `Yıldırım Tanker irsaliyesi onaylandı: ${result.fis.fisNo}`,
         {
           tip: 'YILDIRIM_TANKER_FIS_ONAYLANDI',
           hedefRol: 'TESİSATÇI',
@@ -156,14 +135,13 @@ export const YildirimTankerFisOnayPanel: React.FC<YildirimTankerFisOnayPanelProp
           irsaliyeId: result.irsaliye.id,
           cariKartId: result.cariIslem.cariKartId,
           saId: result.saMatch?.sa.saId,
-          faturaNo: faturaNo || undefined,
         }
       );
 
       alert(
-        `Onaylandı.\n\n1) İrsaliye: ${result.irsaliye.irsaliyeNo}\n2) Cari: ${result.fis.firmaUnvan}${
+        `Onaylandı — irsaliye olarak kaydedildi.\n\n1) İrsaliye: ${result.irsaliye.irsaliyeNo}\n2) Cari: ${result.fis.firmaUnvan}${
           result.saMatch ? `\n3) SA: ${result.saMatch.sa.saId}` : ''
-        }${faturaNo ? `\n4) Taslak fatura: ${faturaNo}` : ''}`
+        }\n\nFatura için: Cari Kartlar → ${result.fis.firmaUnvan || 'Yıldırım Tanker'} → Geçmiş İrsaliyeler listesinden bir veya birden fazla irsaliye seçip faturaya dönüştürebilirsiniz.`
       );
       setEditing(null);
     } catch (err: any) {
