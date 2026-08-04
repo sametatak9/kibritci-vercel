@@ -3696,6 +3696,7 @@ export default function App() {
                   setTaseronEnerjiKayitlari={setTaseronEnerjiKayitlariWithSync}
                   taseronYemekKayitlari={taseronYemekKayitlari}
                   setTaseronYemekKayitlari={setTaseronYemekKayitlariWithSync}
+                  setCariIslemGecmisi={setCariIslemGecmisiWithSync}
                   addNotification={addNotification}
                   currentUser={currentUser}
                 />

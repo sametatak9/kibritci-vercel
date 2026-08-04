@@ -1,4 +1,4 @@
-import { CariKart, CariKartIslem, KampKaydi, KampOdasi, OperatorFaaliyet, Personel, TaseronEnerjiKaydi, TaseronSayacOlcum, TaseronYemekKaydi } from '../types/erp';
+import { CariKart, CariKartIslem, KampKaydi, KampOdasi, OperatorFaaliyet, Personel, TaseronEnerjiKaydi, TaseronKesintiRaporu, TaseronSayacOlcum, TaseronYemekKaydi } from '../types/erp';
 
 export function getTaseronCariKartlar(cariKartlar: CariKart[]): CariKart[] {
   return cariKartlar.filter(
@@ -326,6 +326,32 @@ export function buildCariIslemFromOperatorFaaliyet(f: OperatorFaaliyet): CariKar
     tarih: f.tarih,
     belgeNo: f.id,
     fotoUrl: f.fotoUrl,
+  };
+}
+
+export function cariIslemIdForMakineKesintiRaporu(raporId: string): string {
+  return `cari_islem_tkr_${raporId}`;
+}
+
+/** Dönemlik iş makinesi kesinti raporunu taşeron cari geçmişine çevirir */
+export function buildCariIslemFromMakineKesintiRaporu(
+  rapor: TaseronKesintiRaporu
+): CariKartIslem | null {
+  const cariId = rapor.taseronFirmaId;
+  if (!cariId) return null;
+  const ay = Number(rapor.donemAy);
+  const yil = Number(rapor.donemYil);
+  const tarih = `${rapor.donemYil}-${String(rapor.donemAy).padStart(2, '0')}-01`;
+  return {
+    id: cariIslemIdForMakineKesintiRaporu(rapor.id),
+    cariKartId: cariId,
+    islemTipi: 'OPERATOR_KESINTI',
+    islemId: rapor.id,
+    islemBaslik: `İş Makinesi Kesinti · ${rapor.taseronFirmaAdi}`,
+    islemDetay: `${ayAdi(ay)} ${yil} · ${rapor.toplamSaat.toFixed(1)} sa × ${Number(rapor.saatlikUcret || 0).toLocaleString('tr-TR')} TL/sa = ${Number(rapor.kesintiTutari || 0).toLocaleString('tr-TR')} TL · ${rapor.faaliyetler?.length || 0} faaliyet`,
+    tutar: rapor.kesintiTutari,
+    tarih,
+    belgeNo: rapor.id,
   };
 }
 
