@@ -11,6 +11,7 @@ import { CorporateReportLayout } from './CorporateReportLayout';
 import { KibritciLogo } from './KibritciLogo';
 import { RolMobilFaaliyetYoklamaPanel } from './RolMobilFaaliyetYoklamaPanel';
 import { KampGunlukYoklamaTab } from './KampGunlukYoklamaTab';
+import { matchSoforPersonel } from '../lib/personelUnvanUtils';
 
 interface LojistikScreenProps {
   irsaliyeler: any[];
@@ -191,26 +192,25 @@ export const LojistikScreen: React.FC<LojistikScreenProps> = ({
     setTimeout(() => setStatusMessage(null), 4000);
   };
 
-  const currentChauffeurName =
-    currentUser?.ad || currentUser?.soyad
-      ? `${currentUser?.ad || ''} ${currentUser?.soyad || ''}`.trim()
-      : currentUser?.displayName || currentUser?.email || 'Şöför';
-
-  const matchedSoforPersonel = React.useMemo(() => {
-    const byId = currentUser?.matchedPersonelId
-      ? personeller.find((p) => p.id === currentUser.matchedPersonelId)
-      : undefined;
-    if (byId) return byId;
-    const tc = String(currentUser?.tcNo || '').trim();
-    if (tc) {
-      return personeller.find((p) => String(p.tcNo || '').trim() === tc);
-    }
-    return undefined;
-  }, [currentUser?.matchedPersonelId, currentUser?.tcNo, personeller]);
+  const matchedSoforPersonel = React.useMemo(
+    () => matchSoforPersonel(currentUser, personeller),
+    [currentUser, personeller]
+  );
 
   const soforPersonelAdi = matchedSoforPersonel
     ? `${matchedSoforPersonel.ad} ${matchedSoforPersonel.soyad}`.trim()
-    : currentChauffeurName;
+    : '';
+
+  /** Personel kartı / ad-soyad öncelikli; e-posta unvan olarak kullanılmaz */
+  const currentChauffeurName =
+    soforPersonelAdi ||
+    (currentUser?.ad || currentUser?.soyad
+      ? `${currentUser?.ad || ''} ${currentUser?.soyad || ''}`.trim()
+      : '') ||
+    (currentUser?.displayName && !String(currentUser.displayName).includes('@')
+      ? String(currentUser.displayName).trim()
+      : '') ||
+    'Şöför';
 
   // ==========================================
   // TAB 1: GÜNLÜK RUTIN (SABAH / AKŞAM KM)

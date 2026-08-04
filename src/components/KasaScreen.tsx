@@ -19,6 +19,7 @@ import {
   resolveKasaRaporMasrafTipi,
   syncApprovedYolHarcamalariToKasa,
 } from '../lib/yolHarcamaUtils';
+import { resolvePersonelUnvan } from '../lib/personelUnvanUtils';
 import { collection, getDocs } from 'firebase/firestore';
 
 type HarcamaKaynagi = 'KASA_HARCAMA' | 'PERSONEL_HARCAMA';
@@ -356,20 +357,21 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
         add('kasa-odedi', 'KASA ÖDEDİ', 'KASA_ODEDI', tutar);
         continue;
       }
+      const unvan = resolvePersonelUnvan(
+        {
+          personelId: kh.personelId,
+          personelAdi: kh.personelAdi,
+          surucu: kh.surucu,
+        },
+        personeller
+      );
       if (durum === 'BORC') {
-        const name = String(kh.personelAdi || kh.surucu || 'Personel (adsız)').trim();
-        add(
-          `borc:${kh.personelId || name}`,
-          `KASA BORCU · ${name}`,
-          'BORC',
-          tutar
-        );
+        add(`borc:${unvan.key}`, `KASA BORCU · ${unvan.label}`, 'BORC', tutar);
         continue;
       }
-      const name = String(kh.personelAdi || kh.surucu || 'Personel (adsız)').trim();
       add(
-        `podedi:${kh.personelId || name}`,
-        `${name} · PERSONEL ÖDEDİ`,
+        `podedi:${unvan.key}`,
+        `${unvan.label} · PERSONEL ÖDEDİ`,
         'PERSONEL_ODEDI',
         tutar
       );
@@ -382,7 +384,7 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
     });
 
     return { satirlar, totals };
-  }, [filteredHareketler]);
+  }, [filteredHareketler, personeller]);
 
   const personelSecenekleri = useMemo(() => {
     const q = personelArama.trim().toLocaleLowerCase('tr-TR');
