@@ -26,6 +26,9 @@ import { hasSubstantialYoklamaData, isProductionLive } from './productionDataGua
 export const YOKLAMA_DOC_ID = 'global_yoklama_map';
 export const YOKLAMA_ARCHIVE_COLLECTION = 'yoklamaArsivleri';
 const MAX_ARCHIVES = 80;
+/** Tek mega-belge (tüm aylar) — yavaş ağda 45s yetmeyebilir */
+export const YOKLAMA_SERVER_READ_TIMEOUT_MS = 75_000;
+export const YOKLAMA_WRITE_TIMEOUT_MS = 60_000;
 /** Arşiv budama en fazla bu kadar saniyede bir çalışır (her kayıtta tam tarama yok) */
 const ARCHIVE_PRUNE_MIN_INTERVAL_MS = 10 * 60 * 1000;
 
@@ -92,13 +95,32 @@ export async function fetchYoklamaMapFromServer(): Promise<{
   dataJson: string | null;
 }> {
   const docRef = doc(db, 'yoklamalar', YOKLAMA_DOC_ID);
-  const docSnap = await withTimeout(getDocFromServer(docRef), 45000);
+  const docSnap = await withTimeout(getDocFromServer(docRef), YOKLAMA_SERVER_READ_TIMEOUT_MS);
   if (!docSnap.exists()) return { map: {}, dataJson: null };
   const raw = docSnap.data() as Record<string, unknown>;
   return {
     map: parseYoklamaDataJson(raw),
     dataJson: typeof raw.dataJson === 'string' ? raw.dataJson : null,
   };
+}
+
+/** Sunucu okuması: timeout / ağ kopmasında birkaç kez dene. */
+export async function fetchYoklamaMapFromServerWithRetry(retries = 3): Promise<{
+  map: AylikYoklamaMap;
+  dataJson: string | null;
+}> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < retries; attempt++) {
+    try {
+      return await fetchYoklamaMapFromServer();
+    } catch (err) {
+      lastError = err;
+      if (attempt < retries - 1) {
+        await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
+      }
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error('Yoklama sunucudan okunamadı');
 }
 
 async function fetchYoklamaMapWithRetry(retries = 3): Promise<AylikYoklamaMap> {
@@ -120,7 +142,7 @@ async function writeYoklamaMap(map: AylikYoklamaMap): Promise<void> {
   const docRef = doc(db, 'yoklamalar', YOKLAMA_DOC_ID);
   await withTimeout(
     setDoc(docRef, cleanUndefined(buildYoklamaFirestorePayload(map)), { merge: false }),
-    45000
+    YOKLAMA_WRITE_TIMEOUT_MS
   );
 }
 
@@ -231,7 +253,7 @@ export async function persistYoklamaDocument(
   try {
     // Kalıcı koruma: yazmadan önce mümkünse sunucu gerçeğini al (IndexedDB sapması)
     try {
-      remote = (await fetchYoklamaMapFromServer()).map;
+      remote = (await fetchYoklamaMapFromServerWithRetry(2)).map;
     } catch {
       remote = await fetchYoklamaMapWithRetry(isProductionLive() ? 3 : 2);
     }
@@ -254,17 +276,21 @@ export async function persistYoklamaDocument(
   if (remoteNonEmpty) {
     const guard = shouldBlockYoklamaMassWrite(remote, payload);
     if (guard.blocked) {
-      await archiveYoklamaSnapshot(remote, kaynak, `Engellenen yazma: ${guard.reason}`);
+      void archiveYoklamaSnapshot(remote, kaynak, `Engellenen yazma: ${guard.reason}`).catch((e) =>
+        console.warn('Engellenen yazma arşivi atlandı:', e)
+      );
       return { ok: false, blocked: true, error: guard.reason };
     }
   }
 
-  if (remoteNonEmpty) {
-    await archiveYoklamaSnapshot(remote, kaynak, 'Kayıt öncesi otomatik yedek');
-  }
-
   try {
     await writeYoklamaMap(payload);
+    // Arşiv kritik yolda bekletmesin (timeout zincirini kısaltır)
+    if (remoteNonEmpty) {
+      void archiveYoklamaSnapshot(remote, kaynak, 'Kayıt sonrası otomatik yedek').catch((e) =>
+        console.warn('Yoklama arşivi atlandı:', e)
+      );
+    }
     return {
       ok: true,
       map: payload,

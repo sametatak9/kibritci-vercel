@@ -132,7 +132,7 @@ import {
   removeSahaFaaliyetSafe,
   type SahaFaaliyetSaveSource,
 } from './lib/sahaFaaliyetPersistence';
-import { fetchYoklamaMapFromServer } from './lib/yoklamaPersistence';
+import { fetchYoklamaMapFromServerWithRetry } from './lib/yoklamaPersistence';
 import { LoginScreen } from './components/LoginScreen';
 const YetkiVermeScreen = lazy(() => import('./components/YetkiVermeScreen').then(m => ({ default: m.YetkiVermeScreen })));
 const OperatorScreen = lazy(() => import('./components/OperatorScreen').then(m => ({ default: m.OperatorScreen })));
@@ -1429,10 +1429,13 @@ export default function App() {
       }
     );
 
-    // Açılışta sunucudan zorla oku — telefon/PC önbellek farkını kapat
+    // Açılışta sunucudan oku (retry). Cache zaten büyükse UI'yi bloklamadan arka planda yenile.
     void (async () => {
       try {
-        const { map, dataJson } = await fetchYoklamaMapFromServer();
+        await new Promise((r) => setTimeout(r, 400));
+        const seenLen = yoklamaJsonSeenRef.current?.length || 0;
+        const retries = seenLen > 80_000 ? 2 : 3;
+        const { map, dataJson } = await fetchYoklamaMapFromServerWithRetry(retries);
         const serverFilled = countYoklamaFilledDays(map);
         setYoklamalar((prev) => {
           const prevFilled = countYoklamaFilledDays(prev);
@@ -2567,7 +2570,7 @@ export default function App() {
 
   /** Masaüstü IndexedDB sapması: sunucudan oku, state güncelle (Firestore'a yazmaz). */
   const reloadYoklamalarFromServer = async () => {
-    const { map, dataJson } = await fetchYoklamaMapFromServer();
+    const { map, dataJson } = await fetchYoklamaMapFromServerWithRetry(3);
     if (dataJson) yoklamaJsonSeenRef.current = dataJson;
     setYoklamalar(map);
     if (hasSubstantialYoklamaData(map)) markProductionLive();

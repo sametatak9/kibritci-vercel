@@ -6,41 +6,33 @@ import {
   getYoklamaDay,
   isDayActiveForPersonel,
   isFormenGorev,
-  isKampciYoklamaKapsami,
   isMermerciGorev,
   isOperatorGorev,
-  isSoforGorev,
   isTesisatciGorev,
 } from './yoklamaUtils';
 
 export type PuantajPersonelGrup =
   | 'FORMEN'
   | 'DUZ_ISCI'
-  | 'KAMPCI'
   | 'TESISATCI'
   | 'MERMERCI'
-  | 'SOFOR'
   | 'OPERATOR'
   | 'DIGER';
 
 export const PUANTAJ_GRUP_ORDER: PuantajPersonelGrup[] = [
   'FORMEN',
   'DUZ_ISCI',
-  'KAMPCI',
   'TESISATCI',
   'MERMERCI',
-  'SOFOR',
   'OPERATOR',
   'DIGER',
 ];
 
 export function resolvePuantajPersonelGrup(p: Personel): PuantajPersonelGrup {
   if (isFormenGorev(p.gorev)) return 'FORMEN';
-  // Şenör kampçı yoklama kapsanında → Kampçı grubu sayfasında
-  if (isKampciYoklamaKapsami(p.gorev)) return 'KAMPCI';
+  // Kampçı / Şenör / Şoför ayrı grup değil — ana (Düz İşçi) listede
   if (isTesisatciGorev(p.gorev)) return 'TESISATCI';
   if (isMermerciGorev(p.gorev)) return 'MERMERCI';
-  if (isSoforGorev(p.gorev)) return 'SOFOR';
   if (isOperatorGorev(p.gorev)) return 'OPERATOR';
   return 'DUZ_ISCI';
 }
@@ -51,14 +43,10 @@ export function puantajGrupLabel(grup: PuantajPersonelGrup): string {
       return 'FORMEN GRUBU';
     case 'DUZ_ISCI':
       return 'DÜZ İŞÇİ GRUBU';
-    case 'KAMPCI':
-      return 'KAMPÇI GRUBU';
     case 'TESISATCI':
       return 'TESİSATÇI GRUBU';
     case 'MERMERCI':
       return 'MERMERCİ GRUBU';
-    case 'SOFOR':
-      return 'ŞÖFÖR GRUBU';
     case 'OPERATOR':
       return 'OPERATÖR GRUBU';
     default:
@@ -72,14 +60,10 @@ function sheetNameForGrup(grup: PuantajPersonelGrup): string {
       return 'Formen';
     case 'DUZ_ISCI':
       return 'Duz Isci';
-    case 'KAMPCI':
-      return 'Kampci';
     case 'TESISATCI':
       return 'Tesisatci';
     case 'MERMERCI':
       return 'Mermerci';
-    case 'SOFOR':
-      return 'Sofor';
     case 'OPERATOR':
       return 'Operator';
     default:
@@ -93,14 +77,10 @@ function groupColor(grup: PuantajPersonelGrup): string {
       return 'FF7C3AED';
     case 'DUZ_ISCI':
       return 'FF1D4ED8';
-    case 'KAMPCI':
-      return 'FF0F766E';
     case 'TESISATCI':
       return 'FFC2410C';
     case 'MERMERCI':
       return 'FFBE185D';
-    case 'SOFOR':
-      return 'FF0369A1';
     case 'OPERATOR':
       return 'FFB45309';
     default:
@@ -597,7 +577,7 @@ function fillTumuSheet(
     ws,
     ctx,
     'TÜM GRUPLAR',
-    `Formen · Düz İşçi · Kampçı · Tesisatçı  |  ${totalPeople} kişi`
+    `Formen · Düz İşçi (Kampçı/Şoför dahil) · Tesisatçı  |  ${totalPeople} kişi`
   );
   let row = 6;
   let globalIndex = 0;
@@ -615,7 +595,7 @@ function fillTumuSheet(
 
 /**
  * A3 yatay maaş/puantaj.
- * Sayfalar: Tumu + Formen / Duz Isci / Kampci / Tesisatci (+ Mermerci) + Ozet
+ * Sayfalar: Tumu + Formen / Duz Isci (Kampçı+Şoför dahil) / Tesisatci (+ Mermerci) + Ozet
  */
 export async function exportModernPuantajExcel(opts: ModernPuantajExportOpts): Promise<void> {
   const {
