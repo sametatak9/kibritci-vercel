@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import {
   CreditCard, Calendar, Printer, ShieldCheck, CheckCircle2,
-  RefreshCw, UserX, BarChart3, Copy, Download, Users, FileText, X
+  RefreshCw, UserX, BarChart3, Copy, Download, Users, FileText, X, Layers
 } from 'lucide-react';
 import { db, parseYoklamaSnapshotData, saveDocument } from '../lib/firebase';
 import { collection, doc, getDoc, onSnapshot, query, where } from 'firebase/firestore';
@@ -370,6 +370,11 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
   const [copiedSummary, setCopiedSummary] = useState(false);
   const [downloadingReport, setDownloadingReport] = useState(false);
   const [showUstaListeModal, setShowUstaListeModal] = useState(false);
+  const [showTopluAyModal, setShowTopluAyModal] = useState(false);
+  const [topluAyYil, setTopluAyYil] = useState(now.getFullYear());
+  /** Varsayılan: Şubat–Temmuz (sık kullanılan tahsilat aralığı) */
+  const [topluAySecimler, setTopluAySecimler] = useState<number[]>([2, 3, 4, 5, 6, 7]);
+  const [topluAyBusy, setTopluAyBusy] = useState(false);
 
   const donemLabel = `${TURKISH_MONTHS[selectedMonth - 1]} ${selectedYear}`;
   const donemKey = `${selectedYear}-${String(selectedMonth).padStart(2, '0')}`;
@@ -1013,6 +1018,264 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
     }
   };
 
+  const toggleTopluAy = (ay: number) => {
+    setTopluAySecimler((prev) =>
+      prev.includes(ay) ? prev.filter((x) => x !== ay) : [...prev, ay].sort((a, b) => a - b)
+    );
+  };
+
+  const handleTopluAyUstasizRapor = () => {
+    const aylar = [...topluAySecimler].sort((a, b) => a - b);
+    if (!aylar.length) {
+      showStatus('error', 'En az bir ay seçin.');
+      return;
+    }
+    setTopluAyBusy(true);
+    try {
+      type AyBlok = {
+        ay: number;
+        label: string;
+        rows: StaffHakedisRow[];
+        ozet: ReturnType<typeof summarizeRows>;
+        saha: ReturnType<typeof prepareSahaFaaliyetRaporu>;
+        kamp: ReturnType<typeof prepareKampFaaliyetRaporu>;
+      };
+
+      const bloklar: AyBlok[] = aylar.map((ay) => {
+        const all = buildRowsForMonth(topluAyYil, ay).filter(
+          (r) => !excludedStaffIds.includes(r.personel.id) && !isUstaGorev(r.personel.gorev)
+        );
+        const saha = prepareSahaFaaliyetRaporu(
+          filterByMonth(tumSahaFaaliyetleri, topluAyYil, ay) as any
+        );
+        const kamp = prepareKampFaaliyetRaporu(filterByMonth(kampFaaliyetleri, topluAyYil, ay));
+        return {
+          ay,
+          label: `${TURKISH_MONTHS[ay - 1]} ${topluAyYil}`,
+          rows: all,
+          ozet: summarizeRows(all),
+          saha,
+          kamp,
+        };
+      });
+
+      const genelZer = bloklar.reduce((s, b) => s + b.ozet.zer, 0);
+      const genelGun = bloklar.reduce((s, b) => s + b.ozet.geldi, 0);
+      const genelKisiMax = Math.max(0, ...bloklar.map((b) => b.ozet.kisi));
+      const donemAralik = bloklar.map((b) => TURKISH_MONTHS[b.ay - 1]).join(' · ');
+      const fileKey = `${topluAyYil}_${aylar.map((a) => String(a).padStart(2, '0')).join('-')}`;
+
+      const ayOdemeTablosu = bloklar
+        .map(
+          (b, i) => `<tr style="background:${i % 2 ? '#f0fdfa' : '#fff'}">
+          <td style="padding:8px;border-bottom:1px solid #ccfbf1;font-weight:800">${escHtml(b.label)}</td>
+          <td style="padding:8px;border-bottom:1px solid #ccfbf1;text-align:center;font-family:Consolas,monospace">${b.ozet.kisi}</td>
+          <td style="padding:8px;border-bottom:1px solid #ccfbf1;text-align:center;font-family:Consolas,monospace">${b.ozet.geldi}</td>
+          <td style="padding:8px;border-bottom:1px solid #ccfbf1;text-align:center;font-family:Consolas,monospace">${b.ozet.mesai}</td>
+          <td style="padding:8px;border-bottom:1px solid #ccfbf1;text-align:right;font-family:Consolas,monospace;font-weight:900;color:#0f766e">${formatMoney(b.ozet.zer, 0)}</td>
+          <td style="padding:8px;border-bottom:1px solid #ccfbf1;text-align:center;font-size:11px;color:#64748b">${b.saha.length} saha · ${b.kamp.length} kamp</td>
+        </tr>`
+        )
+        .join('');
+
+      const ayDetayHtml = bloklar
+        .map((b) => {
+          const personelRows = b.rows
+            .map(
+              (r, i) => `<tr style="background:${i % 2 ? '#f8fafc' : '#fff'}">
+              <td style="padding:5px 6px;border-bottom:1px solid #e2e8f0;text-align:center;color:#94a3b8;font-size:10px">${i + 1}</td>
+              <td style="padding:5px 6px;border-bottom:1px solid #e2e8f0;font-weight:700;text-transform:uppercase;font-size:11px">${escHtml(`${r.personel.ad} ${r.personel.soyad}`)}</td>
+              <td style="padding:5px 6px;border-bottom:1px solid #e2e8f0;font-size:10px;color:#64748b">${escHtml(normalizeGorev(r.personel.gorev))}</td>
+              <td style="padding:5px 6px;border-bottom:1px solid #e2e8f0;text-align:center;font-family:Consolas,monospace;font-size:11px">${r.geldiGun}</td>
+              <td style="padding:5px 6px;border-bottom:1px solid #e2e8f0;text-align:center;font-family:Consolas,monospace;font-size:11px">${r.mesaiSaat}</td>
+              <td style="padding:5px 6px;border-bottom:1px solid #e2e8f0;text-align:right;font-family:Consolas,monospace;font-weight:800;color:#0f766e;font-size:11px">${formatMoney(r.zerYapiHakedis, 0)}</td>
+            </tr>`
+            )
+            .join('');
+
+          const sahaLimit = b.saha.slice(0, 60);
+          const sahaRows = sahaLimit
+            .map(
+              (sf, i) => `<tr style="background:${i % 2 ? '#fffbeb' : '#fff'}">
+              <td style="padding:4px 6px;border-bottom:1px solid #fde68a;font-size:10px;white-space:nowrap">${escHtml(sf.tarihDate)}</td>
+              <td style="padding:4px 6px;border-bottom:1px solid #fde68a;font-size:10px">${escHtml(sf.parselKisa)}</td>
+              <td style="padding:4px 6px;border-bottom:1px solid #fde68a;font-size:10px">${escHtml(sf.blokKisa)}</td>
+              <td style="padding:4px 6px;border-bottom:1px solid #fde68a;font-size:10px">${escHtml(faaliyetIsTanimi(sf))}</td>
+              <td style="padding:4px 6px;border-bottom:1px solid #fde68a;font-size:10px;white-space:nowrap">${escHtml(formatPersonelSayisi(sf))}</td>
+            </tr>`
+            )
+            .join('');
+
+          return `
+            <section style="margin:22px 0;page-break-inside:avoid">
+              <div style="display:flex;flex-wrap:wrap;justify-content:space-between;gap:8px;align-items:center;margin-bottom:10px;padding:10px 12px;border-radius:12px;background:linear-gradient(135deg,#ecfdf5,#f0fdfa);border:1px solid #99f6e4">
+                <div>
+                  <div style="font-size:10px;font-weight:900;letter-spacing:.06em;color:#0f766e;text-transform:uppercase">Aylık ustasız hakediş</div>
+                  <div style="font-size:16px;font-weight:900;color:#134e4a">${escHtml(b.label)}</div>
+                </div>
+                <div style="text-align:right">
+                  <div style="font-size:10px;font-weight:800;color:#64748b;text-transform:uppercase">Ay ödemesi</div>
+                  <div style="font-size:18px;font-weight:900;color:#0f766e;font-family:Consolas,monospace">${formatMoney(b.ozet.zer, 0)}</div>
+                  <div style="font-size:10px;color:#64748b">${b.ozet.kisi} kişi · ${b.ozet.geldi} gün × ₺${ZER_YAPI_GUNLUK}</div>
+                </div>
+              </div>
+
+              <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-bottom:12px">
+                <div style="border:1px solid #e2e8f0;border-radius:10px;padding:8px;text-align:center;background:#fff"><div style="font-size:9px;font-weight:800;color:#64748b;text-transform:uppercase">Personel</div><div style="font-size:15px;font-weight:900">${b.ozet.kisi}</div></div>
+                <div style="border:1px solid #e2e8f0;border-radius:10px;padding:8px;text-align:center;background:#fff"><div style="font-size:9px;font-weight:800;color:#64748b;text-transform:uppercase">İş günü</div><div style="font-size:15px;font-weight:900">${b.ozet.geldi}</div></div>
+                <div style="border:1px solid #e2e8f0;border-radius:10px;padding:8px;text-align:center;background:#fff"><div style="font-size:9px;font-weight:800;color:#64748b;text-transform:uppercase">Mesai</div><div style="font-size:15px;font-weight:900">${b.ozet.mesai}</div></div>
+                <div style="border:1px solid #e2e8f0;border-radius:10px;padding:8px;text-align:center;background:#fff"><div style="font-size:9px;font-weight:800;color:#64748b;text-transform:uppercase">Saha kaydı</div><div style="font-size:15px;font-weight:900">${b.saha.length}</div></div>
+              </div>
+
+              <h4 style="margin:0 0 6px;font-size:11px;font-weight:900;text-transform:uppercase;color:#0f766e;letter-spacing:.04em">Ustasız personel hakediş listesi</h4>
+              <table style="width:100%;border-collapse:collapse;margin-bottom:14px;border:1px solid #e2e8f0;border-radius:10px;overflow:hidden">
+                <thead>
+                  <tr style="background:#0f766e;color:#fff">
+                    <th style="padding:6px;width:28px">#</th>
+                    <th style="padding:6px;text-align:left">Ad Soyad</th>
+                    <th style="padding:6px;text-align:left">Görev</th>
+                    <th style="padding:6px;text-align:center">Geldi</th>
+                    <th style="padding:6px;text-align:center">Mesai</th>
+                    <th style="padding:6px;text-align:right">ZER</th>
+                  </tr>
+                </thead>
+                <tbody>${personelRows || `<tr><td colspan="6" style="padding:12px;text-align:center;color:#94a3b8">Bu ay ustasız kayıt yok</td></tr>`}</tbody>
+                <tfoot>
+                  <tr style="background:#ecfdf5;font-weight:800">
+                    <td colspan="3" style="padding:8px">AY TOPLAMI</td>
+                    <td style="padding:8px;text-align:center;font-family:Consolas,monospace">${b.ozet.geldi}</td>
+                    <td style="padding:8px;text-align:center;font-family:Consolas,monospace">${b.ozet.mesai}</td>
+                    <td style="padding:8px;text-align:right;font-family:Consolas,monospace;color:#0f766e">${formatMoney(b.ozet.zer, 0)}</td>
+                  </tr>
+                </tfoot>
+              </table>
+
+              <h4 style="margin:0 0 6px;font-size:11px;font-weight:900;text-transform:uppercase;color:#b45309;letter-spacing:.04em">
+                Saha faaliyet kayıtları (${b.saha.length}${b.saha.length > sahaLimit.length ? ` · ilk ${sahaLimit.length}` : ''})
+              </h4>
+              ${
+                sahaLimit.length === 0
+                  ? `<p style="font-size:11px;color:#94a3b8;margin:0 0 8px">Bu ay saha kaydı yok.</p>`
+                  : `<table style="width:100%;border-collapse:collapse;border:1px solid #fde68a;border-radius:10px;overflow:hidden;margin-bottom:8px">
+                      <thead>
+                        <tr style="background:#b45309;color:#fff">
+                          <th style="padding:6px;text-align:left">Tarih</th>
+                          <th style="padding:6px;text-align:left">Parsel</th>
+                          <th style="padding:6px;text-align:left">Blok</th>
+                          <th style="padding:6px;text-align:left">İş tanımı</th>
+                          <th style="padding:6px;text-align:left">Personel</th>
+                        </tr>
+                      </thead>
+                      <tbody>${sahaRows}</tbody>
+                    </table>`
+              }
+              ${
+                b.kamp.length
+                  ? `<p style="margin:0;font-size:11px;color:#64748b">Kamp faaliyet: <strong>${b.kamp.length}</strong> kayıt (özet).</p>`
+                  : ''
+              }
+            </section>`;
+        })
+        .join('');
+
+      const bodyHtml = `
+        <div style="border:2px solid #99f6e4;background:linear-gradient(135deg,#ecfdf5,#f8fafc);border-radius:14px;padding:16px;margin-bottom:16px">
+          <div style="font-size:10px;font-weight:900;letter-spacing:.08em;color:#0f766e;text-transform:uppercase">Toplu ay · Ustasız ZER YAPI Hakediş</div>
+          <p style="margin:8px 0 0;font-size:13px;color:#134e4a;line-height:1.5;font-weight:600">
+            Seçilen dönem: <strong>${escHtml(donemAralik)} ${topluAyYil}</strong>
+          </p>
+          <p style="margin:6px 0 0;font-size:12px;color:#64748b;line-height:1.45">
+            Formül: geldi gün × ₺${ZER_YAPI_GUNLUK}. Bu rapor tahsilat / ödeme için ustasız personeli kapsar;
+            her ayın saha kayıtları ve ay ödemesi ayrıca listelenir.
+          </p>
+        </div>
+
+        <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-bottom:18px">
+          <div style="border:1px solid #e2e8f0;border-radius:12px;padding:12px;background:#fff;text-align:center">
+            <div style="font-size:10px;font-weight:800;color:#64748b;text-transform:uppercase">Ay sayısı</div>
+            <div style="font-size:22px;font-weight:900;margin-top:4px">${bloklar.length}</div>
+          </div>
+          <div style="border:1px solid #e2e8f0;border-radius:12px;padding:12px;background:#fff;text-align:center">
+            <div style="font-size:10px;font-weight:800;color:#64748b;text-transform:uppercase">Toplam iş günü</div>
+            <div style="font-size:22px;font-weight:900;margin-top:4px">${genelGun}</div>
+          </div>
+          <div style="border:2px solid #99f6e4;border-radius:12px;padding:12px;background:#ecfdf5;text-align:center">
+            <div style="font-size:10px;font-weight:800;color:#0f766e;text-transform:uppercase">Genel tahsilat</div>
+            <div style="font-size:22px;font-weight:900;margin-top:4px;color:#0f766e">${formatMoney(genelZer, 0)}</div>
+          </div>
+        </div>
+
+        <h3 style="margin:0 0 8px;font-size:12px;font-weight:900;text-transform:uppercase;color:#0f766e;letter-spacing:.04em">
+          Ay bazlı ödeme özeti
+        </h3>
+        <table style="width:100%;border-collapse:collapse;border:1px solid #99f6e4;border-radius:12px;overflow:hidden;margin-bottom:8px">
+          <thead>
+            <tr style="background:#0f766e;color:#fff">
+              <th style="padding:8px;text-align:left">Ay</th>
+              <th style="padding:8px;text-align:center">Kişi</th>
+              <th style="padding:8px;text-align:center">Gün</th>
+              <th style="padding:8px;text-align:center">Mesai</th>
+              <th style="padding:8px;text-align:right">Ay ödemesi</th>
+              <th style="padding:8px;text-align:center">Saha / Kamp</th>
+            </tr>
+          </thead>
+          <tbody>${ayOdemeTablosu}</tbody>
+          <tfoot>
+            <tr style="background:#134e4a;color:#ecfdf5;font-weight:900">
+              <td style="padding:10px 8px" colspan="2">GENEL TOPLAM ÖDEME</td>
+              <td style="padding:10px 8px;text-align:center;font-family:Consolas,monospace">${genelGun}</td>
+              <td style="padding:10px 8px;text-align:center">—</td>
+              <td style="padding:10px 8px;text-align:right;font-family:Consolas,monospace;font-size:15px">${formatMoney(genelZer, 0)}</td>
+              <td style="padding:10px 8px;text-align:center;font-size:11px">max ${genelKisiMax} kişi/ay</td>
+            </tr>
+          </tfoot>
+        </table>
+        <p style="margin:0 0 18px;font-size:11px;color:#64748b">
+          Genel toplam = seçilen ayların ustasız ZER hakedişlerinin toplamı (${genelGun} gün × ₺${ZER_YAPI_GUNLUK}).
+        </p>
+
+        ${ayDetayHtml}
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:24px;page-break-inside:avoid">
+          <div style="border:1px solid #cbd5e1;border-radius:12px;padding:14px;min-height:110px;text-align:center;background:#fff">
+            <div style="font-size:11px;font-weight:800;text-transform:uppercase;color:#334155">Kibritçi İnşaat</div>
+            <div style="height:56px;border-bottom:1px solid #cbd5e1;margin:12px 18px 8px"></div>
+            <div style="font-size:10px;color:#94a3b8">İmza / Kaşe</div>
+          </div>
+          <div style="border:1px solid #cbd5e1;border-radius:12px;padding:14px;min-height:110px;text-align:center;background:#fff">
+            <div style="font-size:11px;font-weight:800;text-transform:uppercase;color:#334155">ZER YAPI</div>
+            <div style="height:56px;border-bottom:1px solid #cbd5e1;margin:12px 18px 8px"></div>
+            <div style="font-size:10px;color:#94a3b8">Toplu ödeme onayı · ${formatMoney(genelZer, 0)}</div>
+          </div>
+        </div>
+      `;
+
+      publishHtmlReport({
+        title: 'ZER YAPI TOPLU HAKEDİŞ',
+        subtitle: `Ustasız · ${donemAralik} ${topluAyYil}`,
+        meta: [
+          `${bloklar.length} ay`,
+          `Toplam gün: ${genelGun}`,
+          `Genel ödeme: ${formatMoney(genelZer, 0)}`,
+          `Günlük: ₺${ZER_YAPI_GUNLUK}`,
+        ],
+        bodyHtml,
+        fileName: `ZER_YAPI_Toplu_Ustasiz_${fileKey}.html`,
+        openPrint: true,
+      });
+
+      setShowTopluAyModal(false);
+      showStatus(
+        'success',
+        `Toplu ustasız hakediş: ${bloklar.length} ay · genel ${formatMoney(genelZer, 0)}`
+      );
+    } catch (err: any) {
+      showStatus('error', `Toplu ay raporu oluşturulamadı: ${err?.message || err}`);
+    } finally {
+      setTopluAyBusy(false);
+    }
+  };
+
   const handleCopySummary = async () => {
     try {
       await navigator.clipboard.writeText(shareableSummary);
@@ -1412,6 +1675,18 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
           >
             {downloadingReport ? <RefreshCw size={12} className="animate-spin" /> : <FileText size={12} />}
             <span>HTML Raporlar (Hakediş + Kar)</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setTopluAyYil(selectedYear);
+              setShowTopluAyModal(true);
+            }}
+            className="bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs px-4 py-2.5 rounded-xl transition shadow cursor-pointer flex items-center space-x-1"
+            title="Birden fazla ay seçip ustasız ZER hakediş + saha kayıtları + ay/genel ödeme HTML raporu üretir"
+          >
+            <Layers size={12} />
+            <span>Toplu Ay Raporla</span>
           </button>
           <button
             type="button"
@@ -2143,6 +2418,124 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
                 className="px-4 py-2 rounded-xl text-[11px] font-bold bg-slate-900 text-white cursor-pointer"
               >
                 Kapat
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showTopluAyModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/50">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-lg overflow-hidden flex flex-col">
+            <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-black text-slate-900 uppercase tracking-wide flex items-center gap-2">
+                  <Layers size={16} className="text-teal-600" /> Toplu Ay Raporla
+                </h3>
+                <p className="text-[11px] text-slate-500 mt-0.5">
+                  Seçilen ayların ustasız ZER hakedişi + saha kayıtları + ay / genel ödeme (HTML)
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowTopluAyModal(false)}
+                className="p-2 rounded-xl bg-slate-100 text-slate-600 hover:bg-slate-200 cursor-pointer"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4">
+              <label className="block space-y-1">
+                <span className="text-[9px] font-black uppercase text-slate-500">Yıl</span>
+                <select
+                  value={topluAyYil}
+                  onChange={(e) => setTopluAyYil(Number(e.target.value))}
+                  className="w-full text-xs font-bold p-2.5 border border-slate-200 rounded-xl"
+                >
+                  {[2025, 2026, 2027].map((y) => (
+                    <option key={y} value={y}>
+                      {y}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-[9px] font-black uppercase text-slate-500">Aylar</span>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setTopluAySecimler([2, 3, 4, 5, 6, 7])}
+                      className="text-[10px] font-bold text-teal-700 hover:underline cursor-pointer"
+                    >
+                      Şub–Tem
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setTopluAySecimler([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12])}
+                      className="text-[10px] font-bold text-slate-600 hover:underline cursor-pointer"
+                    >
+                      Tümü
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setTopluAySecimler([])}
+                      className="text-[10px] font-bold text-rose-600 hover:underline cursor-pointer"
+                    >
+                      Temizle
+                    </button>
+                  </div>
+                </div>
+                <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+                  {TURKISH_MONTHS.map((m, i) => {
+                    const ay = i + 1;
+                    const on = topluAySecimler.includes(ay);
+                    return (
+                      <button
+                        key={m}
+                        type="button"
+                        onClick={() => toggleTopluAy(ay)}
+                        className={`px-2 py-2 rounded-xl text-[11px] font-bold border cursor-pointer transition ${
+                          on
+                            ? 'bg-teal-600 text-white border-teal-600'
+                            : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                        }`}
+                      >
+                        {m}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="rounded-xl bg-teal-50 border border-teal-100 p-3 text-[11px] text-teal-900 leading-relaxed">
+                Seçili: <strong>{topluAySecimler.map((a) => TURKISH_MONTHS[a - 1]).join(', ') || '—'}</strong>
+                {' · '}
+                {topluAyYil}
+                <br />
+                Raporda her ay için ustasız personel listesi, saha kayıtları ve ay ödemesi; sonda genel toplam
+                tahsilat yer alır.
+              </div>
+            </div>
+
+            <div className="px-5 py-3 border-t border-slate-100 flex flex-wrap gap-2 justify-end">
+              <button
+                type="button"
+                onClick={() => setShowTopluAyModal(false)}
+                className="px-4 py-2 rounded-xl text-[11px] font-bold bg-slate-100 text-slate-700 cursor-pointer"
+              >
+                Vazgeç
+              </button>
+              <button
+                type="button"
+                onClick={handleTopluAyUstasizRapor}
+                disabled={topluAyBusy || topluAySecimler.length === 0}
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-[11px] font-bold bg-teal-600 text-white cursor-pointer disabled:opacity-60"
+              >
+                {topluAyBusy ? <RefreshCw size={12} className="animate-spin" /> : <FileText size={12} />}
+                Ustasız Toplu Hakediş Üret
               </button>
             </div>
           </div>
