@@ -8,7 +8,8 @@ import {
   getPersonFaaliyetleriInPeriod,
 } from '../lib/faaliyetPersonelUtils';
 import { CorporateReportLayout } from './CorporateReportLayout';
-import { buildPersonelListForMonth, findPersonelByName, getBoundaryDayInMonth, getYoklamaDay, isDayActiveForPersonel, isPersonelVisibleInMonth, normalizeTurkishName, setYoklamaDay } from '../lib/yoklamaUtils';
+import { loadKibritciLogoDataUrl } from '../lib/kibritciBrand';
+import { buildPersonelListForMonth, findPersonelByName, getBoundaryDayInMonth, getYoklamaDay, isDayActiveForPersonel, isPersonelVisibleInMonth, normalizeTurkishName, parseFlexibleDateParts, setYoklamaDay } from '../lib/yoklamaUtils';
 import { exportModernPuantajExcel } from '../lib/modernPuantajExcel';
 import { importAllLegacyExcelMonths, importLegacyExcelMonth, aiMonthlyDataToLegacyMonth, resolveStubPersonelFromLegacyId } from '../lib/legacyYoklamaImport';
 import { LEGACY_EXCEL_MONTHS } from '../data/legacyExcelYoklama';

@@ -50,7 +50,12 @@ function normalizeClaimRole(yetki) {
     \u015EOF\u00D6R: "LOJ\u0130ST\u0130K",
     SOF\u00D6R: "LOJ\u0130ST\u0130K",
     SOFOR: "LOJ\u0130ST\u0130K",
-    DRIVER: "LOJ\u0130ST\u0130K"
+    DRIVER: "LOJ\u0130ST\u0130K",
+    TESISATCI: "TES\u0130SAT\xC7I",
+    TES\u0130SATCI: "TES\u0130SAT\xC7I",
+    MERMERCI: "MERMERC\u0130",
+    OPERATOR: "OPERAT\xD6R",
+    OPERAT\u00D6R: "OPERAT\xD6R"
   };
   return aliases[v] ?? v;
 }
@@ -178,6 +183,7 @@ var init_yetkiUtils = __esm({
       TES\u0130SAT\u00C7I: ["tesisatci_ekrani"],
       MERMERC\u0130: ["mermerci_ekrani"],
       LOJ\u0130ST\u0130K: ["lojistik_ekrani"],
+      OPERAT\u00D6R: ["operator"],
       DEPOCU: ["depocu_ekrani"],
       ANAHTARCI: ["imalat_terminali"]
     };

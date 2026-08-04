@@ -189,7 +189,7 @@ export function personHasGeldiInMonth(
   return found;
 }
 
-function parseFlexibleDateParts(
+export function parseFlexibleDateParts(
   raw?: string
 ): { year: number; month: number; day: number } | null {
   if (!raw) return null;

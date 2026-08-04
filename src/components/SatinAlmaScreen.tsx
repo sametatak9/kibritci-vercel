@@ -22,6 +22,7 @@ import {
 } from '../lib/evrakCariStokSync';
 import {
   buildIrsaliyeFromSatinAlma,
+  buildMultiIrsaliyeFromSatinAlma,
   describeEvrakZinciri,
   ensureIrsaliyeSaBaglari,
   findIrsaliyelerForSa,
@@ -410,6 +411,34 @@ export const SatinAlmaScreen: React.FC<SatinAlmaScreenProps> = ({
       alert('İrsaliye kaydı için sistem bağlantısı yok. Sayfayı yenileyip tekrar deneyin.');
       return;
     }
+    // Mevcut irsaliye sayısı
+    const mevcutSayisi = findIrsaliyelerForSa(sa, irsaliyeler).length;
+
+    // Kullanıcıdan kaç irsaliye üreteceğini sor
+    const rawInput = window.prompt(
+      `"${sa.saId}" siparışi için kaç adet sevk irsaliyesi üretilsin?\n` +
+        `(Firma: ${sa.cariFirma} · ${sa.kalemler.length} kalem)\n` +
+        (mevcutSayisi > 0 ? `\nBu siparış için halihazırda ${mevcutSayisi} irsaliye var.\n` : '') +
+        `\nÖrnek: 20 araba mıcır için 20 girin.`,
+      '1'
+    );
+    if (rawInput === null) return; // iptal
+
+    const adet = parseInt(rawInput.trim(), 10);
+    if (!Number.isFinite(adet) || adet < 1 || adet > 500) {
+      alert('Geçersiz sayı. 1 ile 500 arasında bir değer girin.');
+      return;
+    }
+
+    // Miktar bölünüsümü sorusu (sadece >1 irsaliye için)
+    let bolunmuslu = false;
+    if (adet > 1) {
+      bolunmuslu = window.confirm(
+        `Toplam miktarlar ${adet} irsaliyeye bölünsün mü?\n\n` +
+          `EVET: Her irsaliyede miktar = Toplam / ${adet} (tonaj bölümü)\n` +
+          `HAYIR: Her irsaliyede siparişteki tam miktar bulunur (siz düzenlersiniz)`
+      );
+    }
     if (!sa.kalemler?.length) {
       alert('Bu siparişte kalem yok.');
       return;
@@ -424,62 +453,60 @@ export const SatinAlmaScreen: React.FC<SatinAlmaScreenProps> = ({
 
   const handleCreateMultiIrsaliye = () => {
     if (!irsaliyeModalSa || !setIrsaliyeler) return;
-    const kalem = irsaliyeModalSa.kalemler.find((k) => k.id === irsaliyeKalemId);
-    if (!kalem) {
-      alert('Kalem seçin.');
-      return;
+    const sa = irsaliyeModalSa;
+    const { irsaliyeler: yeniIrsaliyeler, alreadyExists, warning } =
+      buildMultiIrsaliyeFromSatinAlma(sa, irsaliyeAdet, {
+        irsaliyeler,
+        cariKartlar,
+        stokKartlar,
+        bolunmuslu: false, // Varsayılan tutum
+      });
+
+    if (alreadyExists.length > 0 && warning) {
+      const devam = window.confirm(`${warning}\n\nDevam etmek istiyor musunuz?`);
+      if (!devam) return;
     }
-    const kalan = kalanMiktarForSaKalem(irsaliyeModalSa, kalem, irsaliyeler);
-    const totalQty = irsaliyeAdet * irsaliyeMiktarEach;
-    if (totalQty <= 0) {
-      alert('Adet ve miktar 0’dan büyük olmalı.');
-      return;
-    }
-    if (totalQty > kalan + 1e-9) {
-      const ok = window.confirm(
-        `Toplam teslim (${totalQty}) kalan miktardan (${kalan}) fazla.\nYine de oluşturulsun mu?`
+
+    setIrsaliyeler((prev) => [...yeniIrsaliyeler, ...prev]);
+
+    // Her irsaliye için cari güncelle (ilk irsaliye yeterli, tekrar etme)
+    const firstWithCari = yeniIrsaliyeler.find((ir) => ir.cariKartId);
+    if (firstWithCari?.cariKartId) {
+      appendCariIslemOnce(
+        setCariIslemGecmisi,
+        buildCariEvrakHistory({
+          cariKartId: firstWithCari.cariKartId,
+          islemTipi: 'IRSALIYE',
+          islemId: firstWithCari.id,
+          islemBaslik: 'Siparışten Çoklu İrsaliye',
+          islemDetay:
+            `${sa.saId} → ${irsaliyeAdet} irsaliye ` +
+            `(${yeniIrsaliyeler[0].irsaliyeNo}${irsaliyeAdet > 1 ? ` – ${yeniIrsaliyeler[irsaliyeAdet - 1].irsaliyeNo}` : ''}) · ${sa.cariFirma}`,
+          tarih: firstWithCari.tarih,
+          belgeNo: yeniIrsaliyeler[0].irsaliyeNo,
+        })
       );
-      if (!ok) return;
     }
-    const deliveries = buildNDeliveryTemplates(
-      irsaliyeModalSa,
-      irsaliyeKalemId,
-      irsaliyeAdet,
-      irsaliyeMiktarEach
-    );
-    const created = createIrsaliyelerFromSatinAlma(irsaliyeModalSa, deliveries, {
-      tarih: new Date().toISOString().split('T')[0],
-      firma: irsaliyeModalSa.cariFirma,
-    });
-    setIrsaliyeler((prev) => [...created, ...prev]);
-    for (const ir of created) {
-      const cariResolved = resolveCariKartId(irsaliyeModalSa.cariFirma || '', cariKartlar);
-      if (cariResolved.matched && cariResolved.cariKartId) {
-        appendCariIslemOnce(
-          setCariIslemGecmisi,
-          buildCariEvrakHistory({
-            cariKartId: cariResolved.cariKartId,
-            islemTipi: 'IRSALIYE',
-            islemId: ir.id,
-            islemBaslik: 'SA çoklu irsaliye',
-            islemDetay: `${irsaliyeModalSa.saId} → ${ir.irsaliyeNo} · ${kalem.urunAdi}`,
-            tarih: ir.tarih,
-            belgeNo: ir.irsaliyeNo,
-          })
-        );
-      }
-    }
+
     if (addNotification) {
+      const nos = yeniIrsaliyeler.map((ir) => ir.irsaliyeNo).join(', ');
       addNotification(
-        `${irsaliyeModalSa.saId}: ${created.length} irsaliye üretildi (${kalem.urunAdi}). Fatura bağlama ile devam edebilirsiniz.`
+        `${sa.saId} → ${irsaliyeAdet} irsaliye üretildi (${nos.length > 80 ? nos.slice(0, 80) + '…' : nos})`
       );
     }
-    const saForRapor = irsaliyeModalSa;
+    
+    const saForRapor = sa;
     setIrsaliyeModalSa(null);
     setTalepTab('DONUSTURULDU');
+    
     const openRapor = window.confirm(
-      `${created.length} irsaliye oluşturuldu (SA → sevk dönüşümü).\nİlk no: ${created[0]?.irsaliyeNo || '—'}\n\nDönüşüm zincir raporunu açmak ister misiniz?`
+      `${yeniIrsaliyeler.length} adet irsaliye oluşturuldu!\n` +
+        `Sipariş: ${sa.saId}\n` +
+        `İlk: ${yeniIrsaliyeler[0].irsaliyeNo}\n` +
+        (yeniIrsaliyeler.length > 1 ? `Son: ${yeniIrsaliyeler[yeniIrsaliyeler.length - 1].irsaliyeNo}\n` : '') +
+        `\nSipariş «Dönüştürüldü» listesine alındı. Dönüşüm zincir raporunu açmak ister misiniz?`
     );
+    
     if (openRapor) {
       openEvrakZincirRaporu({
         sa: saForRapor,

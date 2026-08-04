@@ -22,7 +22,7 @@ import {
   resolveAkvizyonGorev,
 } from '../lib/guvenlikHelpers';
 import { CANONICAL_ANA_FIRMA_ADI, isTaseronPersonel } from '../lib/yoklamaUtils';
-import { getPersonelMissingDocs } from '../lib/personelMissingDocs';
+import { getPersonelMissingDocs, getPersonellerWithMissingTcIban } from '../lib/personelMissingDocs';
 import { listOdemeEngelleri, validateIBAN, validateTC } from '../lib/personelOdemeUtils';
 
 const MAX_PERSONEL_INLINE_MEDIA = 120_000;
@@ -135,6 +135,7 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
   const [exportFormat, setExportFormat] = useState<'html' | 'csv'>('csv');
   const [gorevReportMode, setGorevReportMode] = useState<'SIRALA' | 'AYRI_RAPOR'>('SIRALA');
   const [showOnlyActive, setShowOnlyActive] = useState(false);
+  const [showOnlyMissingTcIban, setShowOnlyMissingTcIban] = useState(false);
 
   // SGK PDF parsing states
   const [regMethod, setRegMethod] = useState<'manual' | 'sgk_pdf'>('manual');
@@ -829,10 +830,16 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
     return new Set(listOdemeEngelleri(personeller).map((e) => e.personel.id));
   }, [personeller]);
 
+  const missingTcIbanIds = useMemo(
+    () => new Set(getPersonellerWithMissingTcIban(personeller).map((r) => r.personel.id)),
+    [personeller]
+  );
+
   const filteredPersonel = personeller.filter((p) => {
     // Kampçının eklediği, yönetici onayı bekleyen personeller listede görünmez (Onay Havuzu'nda onaylanır)
     if (p.onayDurumu === 'ONAY BEKLİYOR' && p.kaynak === 'KAMPCI') return false;
     if (showOnlyActive && !is_aktif_status(p.durum)) return false;
+    if (showOnlyMissingTcIban && !missingTcIbanIds.has(p.id)) return false;
     if (!matchesFirmaFilter(p, firmaFilters)) return false;
     if (odemeFilter === 'TC' && validateTC(p.tcNo || '')) return false;
     if (odemeFilter === 'IBAN' && validateIBAN(p.ibanNo || '')) return false;
@@ -1812,6 +1819,19 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
               className={`text-[10px] font-bold px-3 py-2 rounded-xl border cursor-pointer ${showOnlyActive ? 'bg-emerald-600 text-white border-emerald-700' : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'}`}
             >
               {showOnlyActive ? 'Sadece Aktifler: AÇIK' : 'Sadece Aktifleri Göster'}
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowOnlyMissingTcIban((prev) => !prev)}
+              title={`TC veya IBAN bilgisi eksik/hatalı ${missingTcIbanIds.size} personeli göster`}
+              className={`text-[10px] font-bold px-3 py-2 rounded-xl border cursor-pointer flex items-center gap-1.5 ${
+                showOnlyMissingTcIban
+                  ? 'bg-red-600 text-white border-red-700'
+                  : 'bg-white text-red-600 border-red-200 hover:bg-red-50'
+              }`}
+            >
+              <AlertCircle size={12} />
+              Eksik TC/IBAN {missingTcIbanIds.size > 0 && `(${missingTcIbanIds.size})`}
             </button>
             <select
               value={exportFormat}

@@ -11,7 +11,8 @@ import {
   getDocs, 
   onSnapshot,
   writeBatch,
-  query
+  query,
+  enableIndexedDbPersistence
 } from 'firebase/firestore';
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 import { getStorage } from 'firebase/storage';
@@ -104,20 +105,46 @@ if (typeof window !== 'undefined') {
 }
 
 /**
- * Helper to wrap any promise with a timeout
+ * Helper to wrap any promise with a timeout and automatic retry logic
+ * to prevent transient FIRESTORE_TIMEOUT crashes without breaking existing calls.
  */
-export async function withTimeout<T>(promise: Promise<T>, ms = 18000): Promise<T> {
-  let timeoutId: ReturnType<typeof setTimeout>;
-  const timeoutPromise = new Promise<never>((_, reject) => {
-    timeoutId = setTimeout(() => {
-      reject(new Error('FIRESTORE_TIMEOUT'));
-    }, ms);
-  });
-  try {
-    return await Promise.race([promise, timeoutPromise]);
-  } finally {
-    clearTimeout(timeoutId!);
+export async function withTimeout<T>(
+  promiseFnOrPromise: Promise<T> | (() => Promise<T>), 
+  ms = 25000, 
+  retries = 2
+): Promise<T> {
+  let attempt = 0;
+
+  while (attempt <= retries) {
+    attempt++;
+    let timeoutId: ReturnType<typeof setTimeout>;
+
+    const promise = typeof promiseFnOrPromise === 'function' 
+      ? promiseFnOrPromise() 
+      : (attempt === 1 ? promiseFnOrPromise : Promise.reject(new Error('FIRESTORE_TIMEOUT')));
+
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timeoutId = setTimeout(() => {
+        reject(new Error('FIRESTORE_TIMEOUT'));
+      }, ms);
+    });
+
+    try {
+      return await Promise.race([promise, timeoutPromise]);
+    } catch (err: any) {
+      const isTimeout = err?.message === 'FIRESTORE_TIMEOUT' || err?.code === 'unavailable';
+      if (isTimeout && attempt <= retries && typeof promiseFnOrPromise === 'function') {
+        console.warn(`[Firestore] Zaman aşımı denemesi ${attempt}/${retries} başarısız oldu, yeniden deneniyor...`);
+        await new Promise((r) => setTimeout(r, 800 * attempt));
+        continue;
+      }
+      throw err;
+    } finally {
+      clearTimeout(timeoutId!);
+    }
   }
+
+  throw new Error('FIRESTORE_TIMEOUT');
 }
 
 /**

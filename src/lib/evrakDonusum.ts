@@ -198,6 +198,91 @@ export function buildIrsaliyeFromSatinAlma(
   return { irsaliye, alreadyExists: existing, warning };
 }
 
+/**
+ * Satın alma (sipariş) → N adet irsaliye üretir.
+ * Her irsaliye aynı kalemleri içerir (tonaj/yük birimi durumunda
+ * kullanıcı miktarı irsaliye ekranında günceller).
+ *
+ * Örnek kullanım: 20 araç mıcır siparişi → 20 adet irsaliye
+ */
+export function buildMultiIrsaliyeFromSatinAlma(
+  sa: SatinAlmaTalebi,
+  adet: number,
+  opts?: {
+    irsaliyeler?: Irsaliye[];
+    cariKartlar?: CariKart[];
+    stokKartlar?: StokKart[];
+    tarih?: string;
+    /** Her irsaliyeye bölünmüş miktar mı kullanılsın? Varsayılan: false (tam miktar) */
+    bolunmuslu?: boolean;
+  }
+): { irsaliyeler: Irsaliye[]; alreadyExists: Irsaliye[]; warning?: string } {
+  if (adet < 1) throw new Error('En az 1 irsaliye üretilmelidir.');
+  if (adet > 500) throw new Error('Tek seferde en fazla 500 irsaliye üretilebilir.');
+
+  const tarih = opts?.tarih || todayIso();
+  const cari =
+    sa.cariKartId ||
+    resolveCariKartId(sa.cariFirma, opts?.cariKartlar || []).cariKartId ||
+    undefined;
+
+  const existing = findIrsaliyelerForSa(sa, opts?.irsaliyeler || []);
+
+  const dateK = dateKey(tarih);
+  // Sıralı token üret: IRS-20250725-001, IRS-20250725-002 ...
+  const existingNos = new Set((opts?.irsaliyeler || []).map((ir) => ir.irsaliyeNo));
+  const baseNo = `IRS-${dateK}`;
+  let seqStart = 1;
+  while (existingNos.has(`${baseNo}-${String(seqStart).padStart(3, '0')}`)) {
+    seqStart++;
+  }
+
+  const irsaliyeler: Irsaliye[] = [];
+  for (let i = 0; i < adet; i++) {
+    const seq = seqStart + i;
+    const irsaliyeNo = `${baseNo}-${String(seq).padStart(3, '0')}`;
+
+    const rawKalemler: IrsaliyeItem[] = (sa.kalemler || []).map((k: SatinAlmaItem, idx) => {
+      let miktar = Number(k.miktar) || 0;
+      // Bölünmüş mod: toplam miktarı irsaliye sayısına böl (tam sayı bölümü)
+      if (opts?.bolunmuslu && adet > 1) {
+        miktar = Math.ceil(miktar / adet);
+      }
+      return {
+        id: `iri_multi_${sa.id}_${seq}_${idx}_${shortToken()}`,
+        saKalemId: k.id,
+        stokKartId: k.stokKartId,
+        urunAdi: k.urunAdi,
+        miktar,
+        birim: k.birim || 'ADET',
+      };
+    });
+
+    const kalemler = opts?.stokKartlar
+      ? linkIrsaliyeKalemler(rawKalemler, opts.stokKartlar)
+      : rawKalemler;
+
+    irsaliyeler.push({
+      id: `ir_multi_${sa.id}_${seq}_${Date.now() + i}`,
+      irsaliyeId: `IR-${dateK}-${String(seq).padStart(3, '0')}`,
+      irsaliyeNo,
+      tarih,
+      firma: sa.cariFirma,
+      cariKartId: cari,
+      saId: sa.saId,
+      onayDurumu: 'ONAY BEKLİYOR',
+      kalemler,
+    });
+  }
+
+  let warning: string | undefined;
+  if (existing.length > 0) {
+    warning = `Bu sipariş için zaten ${existing.length} irsaliye var. ${adet} yeni irsaliye eklenecek.`;
+  }
+
+  return { irsaliyeler, alreadyExists: existing, warning };
+}
+
 export type IrsaliyeToFaturaResult = {
   fatura: Fatura;
   alreadyExists: Fatura[];
