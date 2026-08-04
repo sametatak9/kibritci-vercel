@@ -336,8 +336,17 @@ export const RolMobilFaaliyetYoklamaPanel: React.FC<RolMobilFaaliyetYoklamaPanel
 
       await setDoc(doc(db, collectionName, id), cleanUndefined(payload));
 
-      // Operatör: mesai yoklamaya ancak onay sonrası yazılır (şimdilik beklet)
-      if (rol !== 'OPERATOR' && (faaliyetGrubu === 'MESAI' || existing?.faaliyetGrubu === 'MESAI')) {
+      // Operatör: mesai yoklamaya ancak onay sonrası yazılır.
+      // Onaylı kayıt yeniden düzenlenirse eski mesaiyi geri al (tekrar onaya düşer).
+      if (rol === 'OPERATOR') {
+        if (
+          existing?.durum === 'ONAYLANDI' &&
+          existing.faaliyetGrubu === 'MESAI' &&
+          existing.personelMesaiSaatleri
+        ) {
+          await syncMesai(String(existing.tarih), undefined, existing.personelMesaiSaatleri);
+        }
+      } else if (faaliyetGrubu === 'MESAI' || existing?.faaliyetGrubu === 'MESAI') {
         await syncMesai(
           String(payload.tarih),
           faaliyetGrubu === 'MESAI' && mesaiMap ? mesaiMap : undefined,
@@ -397,7 +406,11 @@ export const RolMobilFaaliyetYoklamaPanel: React.FC<RolMobilFaaliyetYoklamaPanel
           /* ignore */
         }
       }
-      if (rol !== 'OPERATOR' && f.faaliyetGrubu === 'MESAI' && f.personelMesaiSaatleri) {
+      if (
+        f.faaliyetGrubu === 'MESAI' &&
+        f.personelMesaiSaatleri &&
+        (rol !== 'OPERATOR' || f.durum === 'ONAYLANDI')
+      ) {
         await syncMesai(f.tarih, undefined, f.personelMesaiSaatleri);
       }
       if (editingFaaliyetId === f.id) resetFaaliyetForm();

@@ -824,6 +824,27 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
     );
   };
 
+  const approveOperatorKesintiCore = async (id: string, role: string, silent = false) => {
+    const raw = operatorKesintiFaaliyetler.find((x) => x.id === id);
+    if (!raw) {
+      if (!silent) alert('Kayıt bulunamadı.');
+      return false;
+    }
+    const updateData = {
+      ...buildSingleApprovalUpdate(currentUser?.email || 'yonetici@kibritci.com', role),
+      onayDurumu: 'ONAYLANDI',
+    };
+    await updateDoc(doc(db, 'operatorFaaliyetleri', id), updateData);
+    const cariIslem = buildCariIslemFromOperatorFaaliyet({ ...raw, ...updateData } as OperatorFaaliyet);
+    if (cariIslem && setCariIslemGecmisi) {
+      setCariIslemGecmisi((prev) => {
+        const rest = (prev || []).filter((x) => x.id !== cariIslem.id && x.islemId !== id);
+        return [cariIslem, ...rest];
+      });
+    }
+    return true;
+  };
+
   const handleApproveOperatorKesinti = async (id: string) => {
     try {
       const matchedUser = kullanicilar.find((u) => u.email?.toLowerCase() === currentUser?.email?.toLowerCase());
@@ -832,43 +853,56 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
         alert('Bu belgeyi onaylama yetkiniz bulunmuyor.');
         return;
       }
-      const raw = operatorKesintiFaaliyetler.find((x) => x.id === id);
-      if (!raw) {
-        alert('Kayıt bulunamadı.');
-        return;
-      }
-      const updateData = {
-        ...buildSingleApprovalUpdate(currentUser?.email || 'yonetici@kibritci.com', role),
-        onayDurumu: 'ONAYLANDI',
-      };
-      await updateDoc(doc(db, 'operatorFaaliyetleri', id), updateData);
-      const cariIslem = buildCariIslemFromOperatorFaaliyet({ ...raw, ...updateData } as OperatorFaaliyet);
-      if (cariIslem && setCariIslemGecmisi) {
-        setCariIslemGecmisi((prev) => {
-          const rest = (prev || []).filter((x) => x.id !== cariIslem.id && x.islemId !== id);
-          return [cariIslem, ...rest];
-        });
-      }
-      alert('Operatör taşeron kesinti kaydı onaylandı; cari geçmişe işlendi.');
+      const ok = await approveOperatorKesintiCore(id, role);
+      if (ok) alert('Operatör taşeron kesinti kaydı onaylandı; cari geçmişe işlendi.');
     } catch (err) {
       console.error(err);
       alert('Onaylama sırasında hata oluştu.');
     }
   };
 
+  const rejectOperatorKesintiCore = async (id: string) => {
+    await updateDoc(doc(db, 'operatorFaaliyetleri', id), {
+      onayDurumu: 'REDDEDİLDİ',
+      durum: 'REDDEDİLDİ',
+      onaylayanYonetici: currentUser?.email || 'yonetici',
+      onayTarihi: new Date().toISOString(),
+    });
+  };
+
   const handleRejectOperatorKesinti = async (id: string) => {
     if (!window.confirm('Bu kesinti kaydını reddetmek istediğinize emin misiniz?')) return;
     try {
-      await updateDoc(doc(db, 'operatorFaaliyetleri', id), {
-        onayDurumu: 'REDDEDİLDİ',
-        durum: 'REDDEDİLDİ',
-        onaylayanYonetici: currentUser?.email || 'yonetici',
-        onayTarihi: new Date().toISOString(),
-      });
+      await rejectOperatorKesintiCore(id);
       alert('Kesinti kaydı reddedildi.');
     } catch (err) {
       console.error(err);
       alert('Reddetme başarısız.');
+    }
+  };
+
+  const syncOperatorSahaMesaiOnApprove = async (saha: any) => {
+    const mesaiMap = saha?.personelMesaiSaatleri as Record<string, number> | undefined;
+    if (saha?.faaliyetGrubu !== 'MESAI' || !mesaiMap || Object.keys(mesaiMap).length === 0) return;
+    const { fetchYoklamaMap, persistYoklamaDocument } = await import('../lib/yoklamaPersistence');
+    const { applySahaMesaiToYoklama } = await import('../lib/sahaFaaliyetUtils');
+    const { getYoklamaDay, setYoklamaDay } = await import('../lib/yoklamaUtils');
+    const { normalizeDateKey } = await import('../lib/dateKeyUtils');
+    const tarih = normalizeDateKey(saha.tarih);
+    const gonderen = String(saha.kaydeden || currentUser?.email || 'operator');
+    let draft = await fetchYoklamaMap();
+    draft = applySahaMesaiToYoklama(draft, tarih, mesaiMap, gonderen, 'add');
+    const [y, m, d] = tarih.split('-').map(Number);
+    const sparse: Record<string, unknown> = {};
+    for (const pid of Object.keys(mesaiMap)) {
+      const cell = getYoklamaDay(draft[pid], y, m, d);
+      if (!cell) continue;
+      sparse[pid] = setYoklamaDay({}, y, m, d, cell) as any;
+    }
+    if (Object.keys(sparse).length === 0) return;
+    const result = await persistYoklamaDocument(sparse as any, 'sync');
+    if (!result.ok) {
+      console.warn('Operatör mesai yoklama yazılamadı:', result.error);
     }
   };
 
@@ -880,14 +914,24 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
         alert('Bu belgeyi onaylama yetkiniz bulunmuyor.');
         return;
       }
+      const saha = operatorSahaFaaliyetler.find((x) => x.id === id);
       const updateData = buildSingleApprovalUpdate(currentUser?.email || 'yonetici@kibritci.com', role);
       await updateDoc(doc(db, 'operatorSahaFaaliyetleri', id), updateData);
-      // Bağlı kesinti kaydı varsa onu da onayla
-      const saha = operatorSahaFaaliyetler.find((x) => x.id === id);
-      if (saha?.bagliOperatorFaaliyetId) {
-        await handleApproveOperatorKesinti(String(saha.bagliOperatorFaaliyetId));
+      if (saha) {
+        try {
+          await syncOperatorSahaMesaiOnApprove(saha);
+        } catch (mesaiErr) {
+          console.warn('Mesai yoklama senkronu:', mesaiErr);
+        }
       }
-      alert('Operatör saha faaliyeti onaylandı (reel kayıt).');
+      if (saha?.bagliOperatorFaaliyetId) {
+        await approveOperatorKesintiCore(String(saha.bagliOperatorFaaliyetId), role, true);
+      }
+      alert(
+        saha?.bagliOperatorFaaliyetId
+          ? 'Operatör saha faaliyeti ve bağlı taşeron kesinti onaylandı (reel kayıt).'
+          : 'Operatör saha faaliyeti onaylandı (reel kayıt).'
+      );
     } catch (err) {
       console.error(err);
       alert('Onaylama sırasında hata oluştu.');
@@ -897,11 +941,19 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
   const handleRejectOperatorSaha = async (id: string) => {
     if (!window.confirm('Bu operatör faaliyetini reddetmek istediğinize emin misiniz?')) return;
     try {
+      const saha = operatorSahaFaaliyetler.find((x) => x.id === id);
       await updateDoc(doc(db, 'operatorSahaFaaliyetleri', id), {
         durum: 'REDDEDİLDİ',
         onaylayanYonetici: currentUser?.email || 'yonetici',
         onayTarihi: new Date().toISOString(),
       });
+      if (saha?.bagliOperatorFaaliyetId) {
+        try {
+          await rejectOperatorKesintiCore(String(saha.bagliOperatorFaaliyetId));
+        } catch {
+          /* ignore */
+        }
+      }
       alert('Faaliyet reddedildi.');
     } catch (err) {
       console.error(err);
@@ -1319,15 +1371,24 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
     return canApproveMobilDocuments(currentUserRole, currentUser?.email);
   });
 
-  const pendingOperatorKesintiler = operatorKesintiFaaliyetler.filter((doc) => {
-    if (!isOperatorKesintiPending(doc)) return false;
-    return canApproveMobilDocuments(currentUserRole, currentUser?.email);
-  });
-
   const pendingOperatorSaha = operatorSahaFaaliyetler.filter((doc) => {
     if (!isMobilDocPending(doc)) return false;
     // Eski kayıtlar durum boşsa onaylı say — yalnızca açık ONAY BEKLİYOR / BEKLEMEDE
     if (!doc.durum || doc.durum === 'KAYITLI') return false;
+    return canApproveMobilDocuments(currentUserRole, currentUser?.email);
+  });
+
+  const linkedKesintiIds = new Set(
+    pendingOperatorSaha
+      .map((s) => s.bagliOperatorFaaliyetId)
+      .filter(Boolean)
+      .map((id) => String(id))
+  );
+
+  const pendingOperatorKesintiler = operatorKesintiFaaliyetler.filter((doc) => {
+    if (!isOperatorKesintiPending(doc)) return false;
+    // Saha faaliyetine bağlı kesinti saha kartından onaylanır (çift listeleme yok)
+    if (linkedKesintiIds.has(String(doc.id))) return false;
     return canApproveMobilDocuments(currentUserRole, currentUser?.email);
   });
 
