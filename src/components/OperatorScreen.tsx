@@ -154,8 +154,8 @@ export const OperatorScreen: React.FC<OperatorScreenProps> = ({
       alert('Elle giriş için makine adı/plaka girin.');
       return;
     }
-    if (makineKaynak !== 'MANUEL' && !selectedAracId) {
-      alert('Lütfen iş makinesi seçin.');
+    if (makineKaynak === 'DEMIRBAS' && !selectedAracId) {
+      alert('Lütfen demirbaş iş makinesi seçin.');
       return;
     }
     if (firmaSecim === 'cari' && !selectedCariId) {
@@ -191,17 +191,28 @@ export const OperatorScreen: React.FC<OperatorScreenProps> = ({
     // Makine kaynağı kullanıcı seçimiyle kalır; tip yalnızca etiket (JCB/KATO/…)
     const kaynak: OperatorFaaliyet['makineKaynak'] = makineKaynak;
     const aracPlaka =
-      makineKaynak === 'MANUEL' ? makineManuelAd : arac?.plaka;
+      makineKaynak === 'MANUEL'
+        ? makineManuelAd
+        : makineKaynak === 'KIRALIK'
+          ? arac?.plaka || makineManuelAd.trim() || undefined
+          : arac?.plaka;
     const isKaydiEtiketi = buildOperatorIsKaydiEtiketi({
       makineKaynak: kaynak,
       operatorTipi,
-      makineManuelAd: makineKaynak === 'MANUEL' ? makineManuelAd : undefined,
+      makineManuelAd: makineKaynak === 'MANUEL' || (makineKaynak === 'KIRALIK' && !arac)
+        ? makineManuelAd || undefined
+        : undefined,
       aracPlaka,
     });
 
     const yeniFaaliyet: OperatorFaaliyet = {
       id: editingId || `of_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
-      aracId: makineKaynak === 'MANUEL' ? `manuel_${Date.now()}` : selectedAracId,
+      aracId:
+        makineKaynak === 'MANUEL'
+          ? `manuel_${Date.now()}`
+          : makineKaynak === 'KIRALIK' && !selectedAracId
+            ? `kiralik_${Date.now()}`
+            : selectedAracId,
       aracPlaka,
       operatorPersonelId: makineKaynak === 'KIRALIK' ? undefined : selectedPersonelId,
       operatorIsim:
@@ -222,7 +233,10 @@ export const OperatorScreen: React.FC<OperatorScreenProps> = ({
       temsilciTc: temsilciTc || undefined,
       operatorTc: personel?.tcNo,
       makineKaynak: kaynak,
-      makineManuelAd: makineKaynak === 'MANUEL' ? makineManuelAd : undefined,
+      makineManuelAd:
+        makineKaynak === 'MANUEL' || (makineKaynak === 'KIRALIK' && makineManuelAd.trim())
+          ? makineManuelAd.trim() || undefined
+          : undefined,
       isKaydiEtiketi,
       onayDurumu: 'BEKLEMEDE',
       durum: 'ONAY BEKLİYOR',
@@ -568,7 +582,10 @@ export const OperatorScreen: React.FC<OperatorScreenProps> = ({
                       type="button"
                       onClick={() => {
                         setMakineKaynak(k);
-                        if (k === 'KIRALIK') setSelectedPersonelId('');
+                        if (k === 'KIRALIK') {
+                          setSelectedPersonelId('');
+                          setSelectedAracId('');
+                        }
                       }}
                       className={`py-1.5 rounded-lg border text-[9px] font-bold ${makineKaynak === k ? 'bg-slate-900 text-white border-slate-900' : 'bg-slate-50 border-slate-200'}`}
                     >
@@ -584,6 +601,19 @@ export const OperatorScreen: React.FC<OperatorScreenProps> = ({
                     placeholder="Makine adı / plaka (elle)"
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-semibold"
                   />
+                ) : makineKaynak === 'KIRALIK' ? (
+                  <div className="space-y-2">
+                    <input
+                      type="text"
+                      value={makineManuelAd}
+                      onChange={(e) => setMakineManuelAd(e.target.value)}
+                      placeholder="Kiralık makine adı / plaka (opsiyonel)"
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-semibold"
+                    />
+                    <p className="text-[9px] text-slate-400 font-semibold">
+                      İş makinesi seçimi kiralıkta zorunlu değil — etiket (JCB/KATO) yeterli.
+                    </p>
+                  </div>
                 ) : (
                   <select
                     value={selectedAracId}
@@ -597,7 +627,7 @@ export const OperatorScreen: React.FC<OperatorScreenProps> = ({
                     }}
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-semibold text-slate-700 outline-none focus:border-amber-500"
                   >
-                    <option value="">İş Makinesi Seçiniz</option>
+                    <option value="">İş Makinesi Seçiniz *</option>
                     {ismakineAraclari.map(a => (
                       <option key={a.id} value={a.id}>{a.plaka} - {a.markaModel}</option>
                     ))}
