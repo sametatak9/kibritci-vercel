@@ -781,7 +781,7 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
       setFaturalar(next.faturalar);
       if (setCariIslemGecmisi) setCariIslemGecmisi(next.cariIslemGecmisi);
       setSelectedIrsaliyeIds(new Set());
-      setHistoryFilter('IRSALIYE');
+      setHistoryFilter('İRSALİYE');
       alert(
         `Sıfırlandı.\n\n${plan.linkedIrsaliyeler.length} irsaliye faturasız\n${plan.faturalarToDelete.length} fatura silindi\n${plan.cariIslemIdsToDelete.length} cari işlem silindi\n\nŞimdi İRSALİYE sekmesinden mutabakat yapabilirsiniz.`
       );
