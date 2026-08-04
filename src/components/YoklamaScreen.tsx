@@ -176,14 +176,17 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
       setDraftYoklamalar(stats.map);
       if (addNotification) {
         addNotification(
-          `Yoklama sunucudan yenilendi: ${stats.personCount} personel · ${stats.filledDayCount} dolu gün.`
+          `Yoklama yenilendi: ${stats.personCount} personel · ${stats.filledDayCount} dolu gün.`
         );
       }
       alert(
-        `Sunucudan yüklendi.\nPersonel: ${stats.personCount}\nDolu gün: ${stats.filledDayCount}\n\nHâlâ boşsa üstten «Yoklama Arşivi» ile yedek geri yükleyin.`
+        `Yoklama yüklendi.\nPersonel: ${stats.personCount}\nDolu gün: ${stats.filledDayCount}\n\nHâlâ boşsa «Yoklama Arşivi» ile yedek geri yükleyin. (PC önce önbellek/ay yedeği kullanır.)`
       );
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Sunucu yenilemesi başarısız';
+      const raw = err instanceof Error ? err.message : 'Sunucu yenilemesi başarısız';
+      const msg = /FIRESTORE_TIMEOUT/i.test(raw)
+        ? 'Bağlantı zaman aşımı. PC önbelleği veya ay yedeklerinden yüklenmeye çalışıldı; hâlâ boşsa «Yoklama Arşivi»nden geri yükleyin.'
+        : raw;
       alert(msg);
     } finally {
       setServerRefreshLoading(false);

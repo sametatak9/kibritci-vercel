@@ -132,7 +132,7 @@ import {
   removeSahaFaaliyetSafe,
   type SahaFaaliyetSaveSource,
 } from './lib/sahaFaaliyetPersistence';
-import { fetchYoklamaMapFromServerWithRetry } from './lib/yoklamaPersistence';
+import { fetchYoklamaMapPreferFast, scheduleYoklamaMonthShardSync } from './lib/yoklamaPersistence';
 import { LoginScreen } from './components/LoginScreen';
 const YetkiVermeScreen = lazy(() => import('./components/YetkiVermeScreen').then(m => ({ default: m.YetkiVermeScreen })));
 const OperatorScreen = lazy(() => import('./components/OperatorScreen').then(m => ({ default: m.OperatorScreen })));
@@ -261,13 +261,20 @@ export default function App() {
 
   // Global State Engine
   
-  // --- Toast Override ---
+  // --- Toast Override (FIRESTORE_TIMEOUT ham metin göstermesin) ---
   useEffect(() => {
     const originalAlert = window.alert;
     window.alert = (message) => {
-      window.dispatchEvent(new CustomEvent('app-toast', { detail: { message } }));
+      const raw = String(message ?? '');
+      const friendly =
+        /FIRESTORE_TIMEOUT/i.test(raw)
+          ? 'Bağlantı zaman aşımı. Yoklama büyük belge olduğu için PC’de yavaş gelebilir — «Sunucudan Yenile» ile tekrar deneyin veya sayfayı yenileyin (önbellekten açılabilir).'
+          : raw;
+      window.dispatchEvent(new CustomEvent('app-toast', { detail: { message: friendly } }));
     };
-    return () => { window.alert = originalAlert; };
+    return () => {
+      window.alert = originalAlert;
+    };
   }, []);
 
   const [personeller, setPersoneller] = useState<Personel[]>([]);
@@ -1429,31 +1436,41 @@ export default function App() {
       }
     );
 
-    // Açılışta sunucudan oku (retry). Cache zaten büyükse UI'yi bloklamadan arka planda yenile.
+    // Açılış: PC'de getDocFromServer mega-belgeyi timeout'a düşürüyordu.
+    // Cache + ay shard öncelikli; sunucu sadece zayıfsa (PreferFast içinde).
     void (async () => {
       try {
-        await new Promise((r) => setTimeout(r, 400));
-        const seenLen = yoklamaJsonSeenRef.current?.length || 0;
-        const retries = seenLen > 80_000 ? 2 : 3;
-        const { map, dataJson } = await fetchYoklamaMapFromServerWithRetry(retries);
+        await new Promise((r) => setTimeout(r, 600));
+        const now = new Date();
+        const ym = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+        const prev = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+        const prevYm = `${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, '0')}`;
+        const { map, dataJson, source } = await fetchYoklamaMapPreferFast({
+          yearMonths: [prevYm, ym],
+          allowServerForce: true,
+        });
         const serverFilled = countYoklamaFilledDays(map);
-        setYoklamalar((prev) => {
-          const prevFilled = countYoklamaFilledDays(prev);
+        setYoklamalar((prevMap) => {
+          const prevFilled = countYoklamaFilledDays(prevMap);
           if (serverFilled >= prevFilled || prevFilled < 30) {
             return map;
           }
-          console.warn('[yoklama] Sunucu zayıf, mevcut daha dolu korunuyor', {
+          console.warn('[yoklama] Yüklenen paket zayıf, mevcut daha dolu korunuyor', {
             prevFilled,
             serverFilled,
+            source,
           });
-          return prev;
+          return prevMap;
         });
         if (dataJson && (serverFilled >= 30 || !yoklamaJsonSeenRef.current)) {
           yoklamaJsonSeenRef.current = dataJson;
         }
-        if (hasSubstantialYoklamaData(map)) markProductionLive();
+        if (hasSubstantialYoklamaData(map)) {
+          markProductionLive();
+          scheduleYoklamaMonthShardSync(map);
+        }
       } catch (err) {
-        console.warn('Yoklama sunucu yenilemesi atlandı:', err);
+        console.warn('Yoklama hızlı yükleme atlandı (canlı dinleyici devam eder):', err);
       }
     })();
 
@@ -2568,12 +2585,25 @@ export default function App() {
     return result;
   };
 
-  /** Masaüstü IndexedDB sapması: sunucudan oku, state güncelle (Firestore'a yazmaz). */
+  /** Masaüstü: cache + ay shard öncelikli; mega-belge sunucu yalnızca gerekirse. */
   const reloadYoklamalarFromServer = async () => {
-    const { map, dataJson } = await fetchYoklamaMapFromServerWithRetry(3);
+    const now = new Date();
+    const months: string[] = [];
+    for (let i = -3; i <= 1; i++) {
+      const d = new Date(now.getFullYear(), now.getMonth() + i, 1);
+      months.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+    }
+    const { map, dataJson, source } = await fetchYoklamaMapPreferFast({
+      yearMonths: months,
+      allowServerForce: true,
+    });
     if (dataJson) yoklamaJsonSeenRef.current = dataJson;
     setYoklamalar(map);
-    if (hasSubstantialYoklamaData(map)) markProductionLive();
+    if (hasSubstantialYoklamaData(map)) {
+      markProductionLive();
+      scheduleYoklamaMonthShardSync(map);
+    }
+    console.info('[yoklama] yenileme kaynağı:', source);
     return {
       personCount: Object.keys(map || {}).length,
       filledDayCount: countYoklamaFilledDays(map),
