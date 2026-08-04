@@ -276,6 +276,24 @@ export function makineKaynakLabel(kaynak?: OperatorFaaliyet['makineKaynak'] | nu
   return 'Demirbaş';
 }
 
+/** İcmal / kesinti ayrımı: Ana Firma makinesi vs Kiralık (karışmaz) */
+export type MakineKaynakGrup = 'ANA_FIRMA' | 'KIRALIK';
+
+export function resolveMakineKaynakGrup(
+  f: Pick<OperatorFaaliyet, 'makineKaynak' | 'operatorTipi'> | null | undefined
+): MakineKaynakGrup {
+  if (!f) return 'ANA_FIRMA';
+  if (f.makineKaynak === 'KIRALIK') return 'KIRALIK';
+  if (f.makineKaynak === 'DEMIRBAS' || f.makineKaynak === 'MANUEL') return 'ANA_FIRMA';
+  const tip = String(f.operatorTipi || '').toLocaleUpperCase('tr-TR');
+  if (tip === 'KİRALIK' || tip === 'KIRALIK') return 'KIRALIK';
+  return 'ANA_FIRMA';
+}
+
+export function makineKaynakGrupLabel(g: MakineKaynakGrup): string {
+  return g === 'KIRALIK' ? 'Kiralık Makine' : 'Ana Firma Makinesi';
+}
+
 /**
  * İş kaydı etiketi — örn. "Demirbaş JCB makinesi iş kaydı"
  * Makine kaynağı (Demirbaş/Kiralık/Elle) + makine tipi etiketi (JCB/KATO/…) birleşir.

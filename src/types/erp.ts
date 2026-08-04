@@ -817,6 +817,8 @@ export interface TaseronKesintiRaporu {
   faaliyetler: OperatorFaaliyet[];
   enerjiDetay?: TaseronEnerjiKaydi;
   yemekOzet?: { sabah: number; ogle: number; aksam: number; gunSayisi: number };
+  /** Ana firma (demirbaş) vs kiralık makine kesintisi — karışmasın */
+  makineKaynakGrup?: 'ANA_FIRMA' | 'KIRALIK';
   onayDurumu: 'TASLAK' | 'ONAYLANDI' | 'GONDERILDI';
   olusturanKullanici: string;
   olusturmaTarihi: string;

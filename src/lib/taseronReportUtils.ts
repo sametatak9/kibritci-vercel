@@ -1,5 +1,5 @@
 import { OperatorFaaliyet, TaseronEnerjiKaydi, TaseronKesintiRaporu } from '../types/erp';
-import { ayAdi, enerjiAktifKalemler, enerjiToplamTutar, makineEtiketi, sayacFarki, sayacTutari } from './taseronUtils';
+import { ayAdi, enerjiAktifKalemler, enerjiToplamTutar, makineEtiketi, makineKaynakGrupLabel, resolveMakineKaynakGrup, sayacFarki, sayacTutari } from './taseronUtils';
 import { buildKibritciReportHtml, downloadKibritciReportHtml, openKibritciReportPrint } from './kibritciReportTemplate';
 
 function fmt(n: number): string {
@@ -8,6 +8,10 @@ function fmt(n: number): string {
 
 export function buildIsMakinesiKesintiReportHtml(rapor: TaseronKesintiRaporu): string {
   const ayLabel = ayAdi(Number(rapor.donemAy));
+  const kaynakEtiket = makineKaynakGrupLabel(
+    rapor.makineKaynakGrup ||
+      (rapor.faaliyetler?.[0] ? resolveMakineKaynakGrup(rapor.faaliyetler[0]) : 'ANA_FIRMA')
+  );
   const rows = rapor.faaliyetler
     .map((f) => {
       const fotoCell = f.fotoUrl
@@ -40,6 +44,7 @@ export function buildIsMakinesiKesintiReportHtml(rapor: TaseronKesintiRaporu): s
 
   const bodyHtml = `
     <p><strong>Taşeron Firma:</strong> ${rapor.taseronFirmaAdi}</p>
+    <p><strong>Makine kaynağı:</strong> ${kaynakEtiket}</p>
     <p><strong>Dönem:</strong> ${ayLabel} ${rapor.donemYil}</p>
     <table style="width:100%;border-collapse:collapse;font-size:11px;margin-top:16px">
       <thead>
@@ -71,8 +76,8 @@ export function buildIsMakinesiKesintiReportHtml(rapor: TaseronKesintiRaporu): s
 
   return buildKibritciReportHtml({
     title: 'KİBRİTÇİ İNŞAAT',
-    subtitle: `${ayLabel} ${rapor.donemYil} — İŞ MAKİNESİ KESİNTİ RAPORU`,
-    meta: [`Taşeron: ${rapor.taseronFirmaAdi}`, `Oluşturan: ${rapor.olusturanKullanici}`],
+    subtitle: `${ayLabel} ${rapor.donemYil} — İŞ MAKİNESİ KESİNTİ · ${kaynakEtiket.toLocaleUpperCase('tr-TR')}`,
+    meta: [`Taşeron: ${rapor.taseronFirmaAdi}`, kaynakEtiket, `Oluşturan: ${rapor.olusturanKullanici}`],
     bodyHtml,
   });
 }

@@ -34,6 +34,8 @@ import {
   buildCariIslemFromMakineKesintiRaporu,
   makineEtiketi,
   type EnerjiKalem,
+  resolveMakineKaynakGrup,
+  makineKaynakGrupLabel,
 } from '../lib/taseronUtils';
 import {
   buildEnerjiKesintiReportHtml,
@@ -361,24 +363,38 @@ export const TaseronKesintiScreen: React.FC<TaseronKesintiScreenProps> = ({
       alert('Bu dönem için yansıtılmamış faaliyet yok.');
       return;
     }
-    const toplamSaat = faaliyetler.reduce((s, f) => s + f.calismaSuresi, 0);
-    const rapor: TaseronKesintiRaporu = {
-      id: `tkr_${Date.now()}`,
-      kesintiTipi: 'IS_MAKINESI',
-      taseronFirmaAdi: selectedTaseron.unvan,
-      taseronFirmaId: selectedTaseron.id,
-      donemAy: donemAyStr,
-      donemYil: donemYilStr,
-      toplamSaat,
-      saatlikUcret: 0,
-      kesintiTutari: 0,
-      ucretOnayBekliyor: true,
-      faaliyetler,
-      onayDurumu: 'TASLAK',
-      olusturanKullanici: currentUser?.email || 'yönetici',
-      olusturmaTarihi: new Date().toISOString(),
+    const ana = faaliyetler.filter((f) => resolveMakineKaynakGrup(f) === 'ANA_FIRMA');
+    const kiralik = faaliyetler.filter((f) => resolveMakineKaynakGrup(f) === 'KIRALIK');
+    const stamp = Date.now();
+    const yeniRaporlar: TaseronKesintiRaporu[] = [];
+    const pushRapor = (
+      list: typeof faaliyetler,
+      makineKaynakGrup: 'ANA_FIRMA' | 'KIRALIK',
+      idx: number
+    ) => {
+      if (!list.length) return;
+      const toplamSaat = list.reduce((s, f) => s + f.calismaSuresi, 0);
+      yeniRaporlar.push({
+        id: `tkr_${stamp}_${idx}`,
+        kesintiTipi: 'IS_MAKINESI',
+        taseronFirmaAdi: selectedTaseron.unvan,
+        taseronFirmaId: selectedTaseron.id,
+        donemAy: donemAyStr,
+        donemYil: donemYilStr,
+        toplamSaat,
+        saatlikUcret: 0,
+        kesintiTutari: 0,
+        ucretOnayBekliyor: true,
+        faaliyetler: list,
+        makineKaynakGrup,
+        onayDurumu: 'TASLAK',
+        olusturanKullanici: currentUser?.email || 'yönetici',
+        olusturmaTarihi: new Date().toISOString(),
+      });
     };
-    setTaseronKesintiRaporlari((prev) => [rapor, ...prev]);
+    pushRapor(ana, 'ANA_FIRMA', 1);
+    pushRapor(kiralik, 'KIRALIK', 2);
+    setTaseronKesintiRaporlari((prev) => [...yeniRaporlar, ...prev]);
     if (setOperatorFaaliyetleri) {
       const ids = new Set(faaliyetler.map((f) => f.id));
       setOperatorFaaliyetleri((prev) =>
@@ -394,7 +410,9 @@ export const TaseronKesintiScreen: React.FC<TaseronKesintiScreenProps> = ({
         )
       );
     }
-    addNotification?.('Taslak rapor oluşturuldu — saat ücretini girip onaylayın (cariye otomatik işlenir).');
+    addNotification?.(
+      `${yeniRaporlar.length} taslak (Ana Firma: ${ana.length}, Kiralık: ${kiralik.length} kayıt) — saat ücretini ayrı onaylayın.`
+    );
   };
 
   const handleEnerjiKaydet = () => {
@@ -982,8 +1000,8 @@ export const TaseronKesintiScreen: React.FC<TaseronKesintiScreenProps> = ({
                       İş Makinesi İcmali · {ayAdi(selectedAy)} {selectedYil}
                     </h3>
                     <p className="text-[10px] text-slate-500 mt-1 max-w-2xl">
-                      Firma satırları × makine tipi kolonları. HTML/Yazdır raporunda önce özet icmal,
-                      ardından her firmanın kayıt kayıt kesinti açıklamaları (tarih, makine, süre, iş) yer alır.
+                      Ana firma makinesi ile kiralık makine kayıtları ayrı tutulur. Operatörde «Kiralık»
+                      seçerek girdiğiniz saatler kiralık icmaline düşer; kesinti raporları da ayrı üretilir.
                     </p>
                     <div className="mt-3 flex flex-wrap gap-2 items-end">
                       <label className="block space-y-1">
@@ -1068,13 +1086,16 @@ export const TaseronKesintiScreen: React.FC<TaseronKesintiScreenProps> = ({
 
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                   {[
-                    ['Firma', String(makineIcmal.firmaSayisi)],
+                    [
+                      'Ana Firma sa',
+                      `${makineIcmal.anaFirma.genelToplamSaat.toLocaleString('tr-TR', { maximumFractionDigits: 1 })}`,
+                    ],
+                    [
+                      'Kiralık sa',
+                      `${makineIcmal.kiralik.genelToplamSaat.toLocaleString('tr-TR', { maximumFractionDigits: 1 })}`,
+                    ],
                     ['Toplam saat', `${makineIcmal.genelToplamSaat.toLocaleString('tr-TR', { maximumFractionDigits: 1 })} sa`],
                     ['Kayıt', String(makineIcmal.genelKayitSayisi)],
-                    [
-                      'Onaylı / Bekleyen',
-                      `${makineIcmal.genelOnayliSaat.toLocaleString('tr-TR', { maximumFractionDigits: 1 })} / ${makineIcmal.genelBekleyenSaat.toLocaleString('tr-TR', { maximumFractionDigits: 1 })}`,
-                    ],
                   ].map(([label, val]) => (
                     <div key={String(label)} className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
                       <span className="text-[9px] font-black uppercase text-slate-500 block">{label}</span>
@@ -1084,91 +1105,122 @@ export const TaseronKesintiScreen: React.FC<TaseronKesintiScreenProps> = ({
                 </div>
               </div>
 
-              <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
-                <div className="overflow-x-auto max-h-[640px] overflow-y-auto">
-                  <table className="w-full text-left text-xs min-w-[720px]">
-                    <thead className="bg-slate-900 text-white sticky top-0 z-10">
-                      <tr className="text-[9px] uppercase tracking-wide">
-                        <th className="px-3 py-2.5 text-left">Açıklama (Firma)</th>
-                        {IS_MAKINESI_ICMAL_TIPLER.map((t) => (
-                          <th key={t} className="px-3 py-2.5 text-right">
-                            {t}
-                          </th>
-                        ))}
-                        <th className="px-3 py-2.5 text-right">Toplam</th>
-                        <th className="px-3 py-2.5 text-center">Kayıt</th>
-                        <th className="px-3 py-2.5 text-right"></th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {makineIcmal.satirlar.length === 0 ? (
-                        <tr>
-                          <td colSpan={7} className="px-3 py-10 text-center text-slate-400 italic">
-                            {icmalOnlyOnayli
-                              ? 'Bu dönem için onaylı iş makinesi faaliyeti yok. Onay Havuzu’ndan onaylayın veya «Yalnızca onaylı» filtresini kaldırın.'
-                              : 'Bu dönem için operatör faaliyet kaydı yok.'}
-                          </td>
+              {([makineIcmal.anaFirma, makineIcmal.kiralik] as const).map((blok) => (
+                <div
+                  key={blok.kaynakGrup}
+                  className={`bg-white border rounded-2xl overflow-hidden ${
+                    blok.kaynakGrup === 'KIRALIK' ? 'border-teal-200' : 'border-amber-200'
+                  }`}
+                >
+                  <div
+                    className={`px-4 py-3 border-b flex flex-wrap items-center justify-between gap-2 ${
+                      blok.kaynakGrup === 'KIRALIK' ? 'bg-teal-50 border-teal-100' : 'bg-amber-50 border-amber-100'
+                    }`}
+                  >
+                    <div>
+                      <h4
+                        className={`text-xs font-black uppercase ${
+                          blok.kaynakGrup === 'KIRALIK' ? 'text-teal-900' : 'text-amber-950'
+                        }`}
+                      >
+                        {blok.etiket}
+                      </h4>
+                      <p className="text-[10px] text-slate-500 mt-0.5">
+                        {blok.firmaSayisi} firma ·{' '}
+                        {blok.genelToplamSaat.toLocaleString('tr-TR', { maximumFractionDigits: 1 })} sa ·{' '}
+                        {blok.genelKayitSayisi} kayıt — kesinti raporları bu grupla ayrı üretilir
+                      </p>
+                    </div>
+                  </div>
+                  <div className="overflow-x-auto max-h-[420px] overflow-y-auto">
+                    <table className="w-full text-left text-xs min-w-[640px]">
+                      <thead
+                        className={`sticky top-0 z-10 text-white ${
+                          blok.kaynakGrup === 'KIRALIK' ? 'bg-teal-800' : 'bg-slate-900'
+                        }`}
+                      >
+                        <tr className="text-[9px] uppercase tracking-wide">
+                          <th className="px-3 py-2.5 text-left">Açıklama (Firma)</th>
+                          {IS_MAKINESI_ICMAL_TIPLER.map((t) => (
+                            <th key={t} className="px-3 py-2.5 text-right">
+                              {t}
+                            </th>
+                          ))}
+                          <th className="px-3 py-2.5 text-right">Toplam</th>
+                          <th className="px-3 py-2.5 text-center">Kayıt</th>
+                          <th className="px-3 py-2.5 text-right"></th>
                         </tr>
-                      ) : (
-                        makineIcmal.satirlar.map((row) => (
-                          <tr key={row.key} className="border-t border-slate-100 hover:bg-amber-50/40">
-                            <td className="px-3 py-2.5 font-bold text-slate-800 uppercase">{row.firmaAdi}</td>
+                      </thead>
+                      <tbody>
+                        {blok.satirlar.length === 0 ? (
+                          <tr>
+                            <td colSpan={6} className="px-3 py-8 text-center text-slate-400 italic">
+                              Bu grupta henüz kayıt yok.
+                              {blok.kaynakGrup === 'KIRALIK'
+                                ? ' Operatörde makine kaynağını «Kiralık» seçerek girin.'
+                                : ''}
+                            </td>
+                          </tr>
+                        ) : (
+                          blok.satirlar.map((row) => (
+                            <tr key={`${blok.kaynakGrup}_${row.key}`} className="border-t border-slate-100 hover:bg-slate-50/80">
+                              <td className="px-3 py-2.5 font-bold text-slate-800 uppercase">{row.firmaAdi}</td>
+                              {IS_MAKINESI_ICMAL_TIPLER.map((t) => (
+                                <td key={t} className="px-3 py-2.5 text-right font-mono text-slate-700">
+                                  {row.saatler[t] > 0
+                                    ? row.saatler[t].toLocaleString('tr-TR', { maximumFractionDigits: 1 })
+                                    : '—'}
+                                </td>
+                              ))}
+                              <td className="px-3 py-2.5 text-right font-mono font-black text-slate-900">
+                                {row.toplamSaat.toLocaleString('tr-TR', { maximumFractionDigits: 1 })}
+                              </td>
+                              <td className="px-3 py-2.5 text-center font-mono text-slate-500">{row.kayitSayisi}</td>
+                              <td className="px-3 py-2.5 text-right">
+                                {row.firmaId && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setSelectedTaseronId(row.firmaId!);
+                                      setSubPage('makine');
+                                    }}
+                                    className="text-[10px] font-bold text-amber-700 hover:underline cursor-pointer"
+                                  >
+                                    Kesinti →
+                                  </button>
+                                )}
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                      {blok.satirlar.length > 0 && (
+                        <tfoot>
+                          <tr
+                            className={`font-black text-white ${
+                              blok.kaynakGrup === 'KIRALIK' ? 'bg-teal-900' : 'bg-slate-900'
+                            }`}
+                          >
+                            <td className="px-3 py-3">TOPLAM · {blok.etiket}</td>
                             {IS_MAKINESI_ICMAL_TIPLER.map((t) => (
-                              <td key={t} className="px-3 py-2.5 text-right font-mono text-slate-700">
-                                {row.saatler[t] > 0
-                                  ? row.saatler[t].toLocaleString('tr-TR', { maximumFractionDigits: 1 })
+                              <td key={t} className="px-3 py-3 text-right font-mono">
+                                {blok.tipToplamlari[t] > 0
+                                  ? blok.tipToplamlari[t].toLocaleString('tr-TR', { maximumFractionDigits: 1 })
                                   : '—'}
                               </td>
                             ))}
-                            <td className="px-3 py-2.5 text-right font-mono font-black text-slate-900">
-                              {row.toplamSaat.toLocaleString('tr-TR', { maximumFractionDigits: 1 })}
+                            <td className="px-3 py-3 text-right font-mono text-amber-200">
+                              {blok.genelToplamSaat.toLocaleString('tr-TR', { maximumFractionDigits: 1 })} sa
                             </td>
-                            <td className="px-3 py-2.5 text-center font-mono text-slate-500">{row.kayitSayisi}</td>
-                            <td className="px-3 py-2.5 text-right">
-                              {row.firmaId && (
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setSelectedTaseronId(row.firmaId!);
-                                    setSubPage('makine');
-                                  }}
-                                  className="text-[10px] font-bold text-amber-700 hover:underline cursor-pointer"
-                                >
-                                  Kesinti →
-                                </button>
-                              )}
-                            </td>
+                            <td className="px-3 py-3 text-center font-mono">{blok.genelKayitSayisi}</td>
+                            <td />
                           </tr>
-                        ))
+                        </tfoot>
                       )}
-                    </tbody>
-                    {makineIcmal.satirlar.length > 0 && (
-                      <tfoot>
-                        <tr className="bg-slate-900 text-white font-black">
-                          <td className="px-3 py-3">TOPLAM</td>
-                          {IS_MAKINESI_ICMAL_TIPLER.map((t) => (
-                            <td key={t} className="px-3 py-3 text-right font-mono">
-                              {makineIcmal.tipToplamlari[t] > 0
-                                ? makineIcmal.tipToplamlari[t].toLocaleString('tr-TR', {
-                                    maximumFractionDigits: 1,
-                                  })
-                                : '—'}
-                            </td>
-                          ))}
-                          <td className="px-3 py-3 text-right font-mono text-amber-300">
-                            {makineIcmal.genelToplamSaat.toLocaleString('tr-TR', {
-                              maximumFractionDigits: 1,
-                            })}{' '}
-                            sa
-                          </td>
-                          <td className="px-3 py-3 text-center font-mono">{makineIcmal.genelKayitSayisi}</td>
-                          <td />
-                        </tr>
-                      </tfoot>
-                    )}
-                  </table>
+                    </table>
+                  </div>
                 </div>
-              </div>
+              ))}
             </div>
           )}
 
@@ -1378,8 +1430,8 @@ export const TaseronKesintiScreen: React.FC<TaseronKesintiScreenProps> = ({
                       >
                         <div className="min-w-0">
                           <p className="text-xs font-bold text-slate-800">
-                            {r.taseronFirmaAdi} · {r.faaliyetler?.length || 0} faaliyet ·{' '}
-                            {r.toplamSaat.toFixed(1)} sa
+                            {r.taseronFirmaAdi} · {makineKaynakGrupLabel(r.makineKaynakGrup || resolveMakineKaynakGrup(r.faaliyetler?.[0]))} ·{' '}
+                            {r.faaliyetler?.length || 0} faaliyet · {r.toplamSaat.toFixed(1)} sa
                           </p>
                           <p className="text-[10px] text-slate-500">
                             {r.ucretOnayBekliyor || r.onayDurumu === 'TASLAK'

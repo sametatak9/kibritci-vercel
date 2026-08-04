@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { HardHat, Clock, Calendar, Building2, Camera, Save, Search, FileText, Trash2, CreditCard as Edit3, CircleCheck as CheckCircle, X, ChevronDown, ChevronUp, Truck, TriangleAlert as AlertTriangle, Download, Mail, ListFilter as Filter, Plus, Printer } from 'lucide-react';
 import { AracBakim, AylikYoklamaMap, CariKart, CariKartIslem, OperatorFaaliyet, TaseronKesintiRaporu, Personel } from '../types/erp';
 import { compressImage } from '../lib/imageCompress';
-import { getTaseronCariKartlar, buildOperatorIsKaydiEtiketi, makineEtiketi, cariIslemIdForOperatorFaaliyet } from '../lib/taseronUtils';
+import { getTaseronCariKartlar, buildOperatorIsKaydiEtiketi, makineEtiketi, cariIslemIdForOperatorFaaliyet, resolveMakineKaynakGrup, makineKaynakGrupLabel } from '../lib/taseronUtils';
 import { indirIsMakinesiRaporu } from '../lib/taseronReportUtils';
 import { kibritciLogoHtml } from '../lib/kibritciBrand';
 import { isOperatorGorev } from '../lib/yoklamaUtils';
@@ -378,15 +378,21 @@ export const OperatorScreen: React.FC<OperatorScreenProps> = ({
       return;
     }
 
-    // Group by firm
-    const firmaGruplari: { [firma: string]: OperatorFaaliyet[] } = {};
-    aylikFaaliyetler.forEach(f => {
-      if (!firmaGruplari[f.firmaAdi]) firmaGruplari[f.firmaAdi] = [];
-      firmaGruplari[f.firmaAdi].push(f);
+    // Firma + makine kaynağı (Ana Firma / Kiralık) — karışmasın
+    const gruplar: { [key: string]: OperatorFaaliyet[] } = {};
+    aylikFaaliyetler.forEach((f) => {
+      const kaynak = resolveMakineKaynakGrup(f);
+      const key = `${f.firmaAdi}||${kaynak}`;
+      if (!gruplar[key]) gruplar[key] = [];
+      gruplar[key].push(f);
     });
 
     const yeniRaporlar: TaseronKesintiRaporu[] = [];
-    Object.entries(firmaGruplari).forEach(([firmaAdi, faaliyetler]) => {
+    Object.entries(gruplar).forEach(([key, faaliyetler]) => {
+      const [firmaAdi, kaynakRaw] = key.split('||');
+      const makineKaynakGrup = (kaynakRaw === 'KIRALIK' ? 'KIRALIK' : 'ANA_FIRMA') as
+        | 'ANA_FIRMA'
+        | 'KIRALIK';
       const toplamSaat = faaliyetler.reduce((s, f) => s + f.calismaSuresi, 0);
       const cari = taseronCariler.find((c) => c.unvan === firmaAdi) || cariKartlar.find((c) => c.unvan === firmaAdi);
       const rapor: TaseronKesintiRaporu = {
@@ -401,6 +407,7 @@ export const OperatorScreen: React.FC<OperatorScreenProps> = ({
         saatlikUcret: 0,
         ucretOnayBekliyor: true,
         faaliyetler,
+        makineKaynakGrup,
         onayDurumu: 'TASLAK',
         olusturanKullanici: currentUser?.email || 'Sistem',
         olusturmaTarihi: new Date().toISOString(),
@@ -427,8 +434,8 @@ export const OperatorScreen: React.FC<OperatorScreenProps> = ({
           cariKartId: r.taseronFirmaId!,
           islemTipi: 'OPERATOR_KESINTI' as const,
           islemId: r.id,
-          islemBaslik: `İş Makinesi Kesinti Raporu · ${r.donemAy}/${r.donemYil}`,
-          islemDetay: `${r.taseronFirmaAdi} · ${r.toplamSaat.toFixed(1)} sa · ${r.faaliyetler.length} kayıt · ücret onayı bekliyor`,
+          islemBaslik: `İş Makinesi Kesinti · ${makineKaynakGrupLabel(r.makineKaynakGrup || 'ANA_FIRMA')} · ${r.donemAy}/${r.donemYil}`,
+          islemDetay: `${r.taseronFirmaAdi} · ${makineKaynakGrupLabel(r.makineKaynakGrup || 'ANA_FIRMA')} · ${r.toplamSaat.toFixed(1)} sa · ${r.faaliyetler.length} kayıt · ücret onayı bekliyor`,
           tarih: `${r.donemYil}-${r.donemAy}-01`,
           belgeNo: r.id,
         }));
@@ -442,9 +449,9 @@ export const OperatorScreen: React.FC<OperatorScreenProps> = ({
     }
 
     if (addNotification) {
-      addNotification(`${yeniRaporlar.length} adet iş makinesi kesinti raporu oluşturuldu (${selectedAy}/${selectedYil}).`);
+      addNotification(`${yeniRaporlar.length} adet iş makinesi kesinti raporu oluşturuldu (${selectedAy}/${selectedYil}) — Ana Firma / Kiralık ayrı.`);
     }
-    alert(`${yeniRaporlar.length} adet kesinti raporu oluşturuldu. Yönetici saat ücretini Taşeron Yönetimi’nden girecek; indirilen raporda firma/saat/açıklama/fotoğraf yer alır.`);
+    alert(`${yeniRaporlar.length} adet kesinti raporu oluşturuldu (Ana Firma ve Kiralık ayrı). Yönetici saat ücretini Taşeron Yönetimi’nden girecek.`);
     setShowKesintiModal(false);
   };
 
@@ -884,6 +891,9 @@ export const OperatorScreen: React.FC<OperatorScreenProps> = ({
                       <div className="flex-1">
                         <div className="flex items-center gap-2 mb-1">
                           <span className="bg-slate-100 text-slate-800 text-[9px] font-black px-2 py-0.5 rounded-full">{rapor.taseronFirmaAdi}</span>
+                          <span className={`text-[9px] font-black px-2 py-0.5 rounded-full ${rapor.makineKaynakGrup === 'KIRALIK' ? 'bg-teal-100 text-teal-800' : 'bg-amber-100 text-amber-900'}`}>
+                            {makineKaynakGrupLabel(rapor.makineKaynakGrup || resolveMakineKaynakGrup(rapor.faaliyetler?.[0]))}
+                          </span>
                           <span className="text-[10px] text-slate-400 font-mono">{rapor.donemAy}/{rapor.donemYil}</span>
                           <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full ${rapor.ucretOnayBekliyor ? 'bg-amber-100 text-amber-800' : rapor.onayDurumu === 'ONAYLANDI' ? 'bg-emerald-100 text-emerald-700' : rapor.onayDurumu === 'GONDERILDI' ? 'bg-purple-100 text-purple-700' : 'bg-slate-100 text-slate-800'}`}>
                             {rapor.ucretOnayBekliyor ? 'ÜCRET BEKLİYOR' : rapor.onayDurumu}
