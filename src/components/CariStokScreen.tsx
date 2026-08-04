@@ -3,7 +3,7 @@ import {
   Building2, Package, Plus, Search, Trash2, Pencil, Download,
   ClipboardList, X, RefreshCw, FileText, Truck, Receipt, Home, User, Users, Eye, UserX, Upload, Archive, Printer
 } from 'lucide-react';
-import { collection, doc, getDoc, getDocs } from 'firebase/firestore';
+import { collection, deleteField, doc, getDoc, getDocs, updateDoc } from 'firebase/firestore';
 import { CariKart, Fatura, Irsaliye, Personel, SatinAlmaTalebi, StokKart, StokKartIslem, CariKartIslem } from '../types/erp';
 import { db, removeDocument } from '../lib/firebase';
 import { warnIfDuplicateCari, warnIfDuplicateStok } from '../lib/duplicateNameUtils';
@@ -36,6 +36,11 @@ import {
 } from '../lib/evrakDonusum';
 import { appendCariIslemOnce, buildCariEvrakHistory } from '../lib/evrakCariStokSync';
 import { openEvrakZincirRaporu } from '../lib/evrakZincirRapor';
+import {
+  applySekerVidanjorFaturaResetInMemory,
+  planSekerVidanjorFaturaReset,
+} from '../lib/sekerVidanjorFaturaReset';
+import { isSekerVidanjorFirma } from '../lib/vidanjorUtils';
 
 interface CariStokScreenProps {
   cariKartlar: CariKart[];
@@ -727,6 +732,62 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
         faturalar: [fatura, ...faturalar],
         focusIrsaliyeIds: withKalem.map((ir) => ir.id),
       });
+    }
+  };
+
+  const handleResetSekerVidanjorFaturaBaglari = async () => {
+    if (!selectedCari || !setFaturalar || !setIrsaliyeler) {
+      alert('Cari / fatura bağlantısı yok.');
+      return;
+    }
+    if (!isSekerVidanjorFirma(selectedCari.unvan)) {
+      alert('Bu işlem yalnızca Şeker Vidanjör cari kartı için.');
+      return;
+    }
+    const plan = planSekerVidanjorFaturaReset({
+      cariKartlar,
+      irsaliyeler,
+      faturalar,
+      cariIslemGecmisi,
+      cariKartId: selectedCari.id,
+    });
+    if (plan.linkedIrsaliyeler.length === 0 && plan.faturalarToDelete.length === 0) {
+      alert(
+        `Sıfırlanacak fatura bağı yok.\n\n${plan.ozet}\n\nİrsaliyeler zaten faturasız görünüyor; mutabakata geçebilirsiniz.`
+      );
+      return;
+    }
+    const ok = window.confirm(
+      `Şeker Vidanjör fatura bağları sıfırlansın mı?\n\n${plan.ozet}\n\n• Bağlı irsaliyelerin faturaNo temizlenir\n• Taslak/bağlı faturalar silinir\n• Cari geçmişteki ilgili FATURA işlemleri silinir\n\nSonra irsaliyeleri seçip gerçek mutabakat faturasını oluşturabilirsiniz.`
+    );
+    if (!ok) return;
+    try {
+      for (const ir of plan.linkedIrsaliyeler) {
+        await updateDoc(doc(db, 'irsaliyeler', ir.id), { faturaNo: deleteField() });
+      }
+      for (const ft of plan.faturalarToDelete) {
+        await removeDocument('faturalar', ft.id);
+      }
+      for (const id of plan.cariIslemIdsToDelete) {
+        await removeDocument('cariIslemGecmisi', id);
+      }
+      const next = applySekerVidanjorFaturaResetInMemory({
+        irsaliyeler,
+        faturalar,
+        cariIslemGecmisi,
+        plan,
+      });
+      setIrsaliyeler(next.irsaliyeler);
+      setFaturalar(next.faturalar);
+      if (setCariIslemGecmisi) setCariIslemGecmisi(next.cariIslemGecmisi);
+      setSelectedIrsaliyeIds(new Set());
+      setHistoryFilter('IRSALIYE');
+      alert(
+        `Sıfırlandı.\n\n${plan.linkedIrsaliyeler.length} irsaliye faturasız\n${plan.faturalarToDelete.length} fatura silindi\n${plan.cariIslemIdsToDelete.length} cari işlem silindi\n\nŞimdi İRSALİYE sekmesinden mutabakat yapabilirsiniz.`
+      );
+    } catch (err: any) {
+      console.error(err);
+      alert('Sıfırlama başarısız: ' + (err?.message || err));
     }
   };
 
@@ -1792,6 +1853,16 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
                   </p>
                 </div>
                 <div className="flex flex-wrap gap-2">
+                  {selectedCari && isSekerVidanjorFirma(selectedCari.unvan) && (
+                    <button
+                      type="button"
+                      onClick={() => void handleResetSekerVidanjorFaturaBaglari()}
+                      className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-[10px] font-bold bg-rose-700 text-white cursor-pointer"
+                      title="Vidanjör irsaliyelerindeki taslak fatura bağlarını temizle — mutabakat öncesi"
+                    >
+                      <RefreshCw size={12} /> Fatura Bağlarını Sıfırla (Mutabakat)
+                    </button>
+                  )}
                   {selectedIrsaliyeIds.size > 0 && (
                     <>
                       <button
