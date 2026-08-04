@@ -1,4 +1,4 @@
-import { CariKart, KampKaydi, KampOdasi, OperatorFaaliyet, Personel, TaseronEnerjiKaydi, TaseronSayacOlcum, TaseronYemekKaydi } from '../types/erp';
+import { CariKart, CariKartIslem, KampKaydi, KampOdasi, OperatorFaaliyet, Personel, TaseronEnerjiKaydi, TaseronSayacOlcum, TaseronYemekKaydi } from '../types/erp';
 
 export function getTaseronCariKartlar(cariKartlar: CariKart[]): CariKart[] {
   return cariKartlar.filter(
@@ -266,6 +266,26 @@ export function makineEtiketi(f: OperatorFaaliyet): string {
     makineManuelAd: f.makineManuelAd,
     aracPlaka: f.aracPlaka,
   });
+}
+
+export function cariIslemIdForOperatorFaaliyet(faaliyetId: string): string {
+  return `cari_islem_of_${faaliyetId}`;
+}
+
+/** Onaylanmış iş makinesi kesintisini cari geçmiş kaydına çevirir */
+export function buildCariIslemFromOperatorFaaliyet(f: OperatorFaaliyet): CariKartIslem | null {
+  if (!f.firmaId) return null;
+  return {
+    id: cariIslemIdForOperatorFaaliyet(f.id),
+    cariKartId: f.firmaId,
+    islemTipi: 'OPERATOR_KESINTI',
+    islemId: f.id,
+    islemBaslik: `İş Makinesi Kesinti · ${f.firmaAdi}`,
+    islemDetay: `${f.tarih} · ${f.operatorIsim} · ${makineEtiketi(f)} · ${f.baslangicSaat}–${f.bitisSaat} (${f.calismaSuresi.toFixed(1)} sa) · ${f.yapilanIs}`,
+    tarih: f.tarih,
+    belgeNo: f.id,
+    fotoUrl: f.fotoUrl,
+  };
 }
 
 export function hesaplaKesintiTutari(toplamSaat: number, saatlikUcret: number): number {

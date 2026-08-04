@@ -316,6 +316,11 @@ export interface OperatorSahaFaaliyet {
   kaynakEkran?: 'OPERATOR_MOBIL';
   olusturulma?: string;
   guncellenme?: string;
+  /** Mesai taşeron kesintisi */
+  taseronKesinti?: boolean;
+  taseronFirmaId?: string;
+  taseronFirmaAdi?: string;
+  bagliOperatorFaaliyetId?: string;
 }
 
 export interface FaturaItem {
@@ -746,6 +751,8 @@ export interface OperatorFaaliyet {
   /** Örn. "Demirbaş JCB makinesi iş kaydı" — arşiv/liste etiketı */
   isKaydiEtiketi?: string;
   onayDurumu: 'BEKLEMEDE' | 'ONAYLANDI' | 'REDDEDİLDİ';
+  /** Onay havuzu ile uyum (isMobilDocPending) */
+  durum?: 'ONAY BEKLİYOR' | 'BEKLEMEDE' | 'ONAYLANDI' | 'REDDEDİLDİ' | string;
   kaydedenKullanici?: string;
   kayitTarihi?: string;
 }

@@ -2,9 +2,10 @@ import React, { useState, useMemo } from 'react';
 import { HardHat, Clock, Calendar, Building2, Camera, Save, Search, FileText, Trash2, CreditCard as Edit3, CircleCheck as CheckCircle, X, ChevronDown, ChevronUp, Truck, TriangleAlert as AlertTriangle, Download, Mail, ListFilter as Filter, Plus, Printer } from 'lucide-react';
 import { AracBakim, AylikYoklamaMap, CariKart, CariKartIslem, OperatorFaaliyet, TaseronKesintiRaporu, Personel } from '../types/erp';
 import { compressImage } from '../lib/imageCompress';
-import { getTaseronCariKartlar, buildOperatorIsKaydiEtiketi, makineEtiketi } from '../lib/taseronUtils';
+import { getTaseronCariKartlar, buildOperatorIsKaydiEtiketi, makineEtiketi, cariIslemIdForOperatorFaaliyet } from '../lib/taseronUtils';
 import { indirIsMakinesiRaporu } from '../lib/taseronReportUtils';
 import { kibritciLogoHtml } from '../lib/kibritciBrand';
+import { isOperatorGorev } from '../lib/yoklamaUtils';
 import { RolMobilFaaliyetYoklamaPanel } from './RolMobilFaaliyetYoklamaPanel';
 import { KampGunlukYoklamaTab } from './KampGunlukYoklamaTab';
 
@@ -24,25 +25,6 @@ interface OperatorScreenProps {
   saveYoklamalarNow?: (next: AylikYoklamaMap) => Promise<void>;
   onSignOut?: () => void;
   isStandalone?: boolean;
-}
-
-function cariIslemIdForFaaliyet(faaliyetId: string): string {
-  return `cari_islem_of_${faaliyetId}`;
-}
-
-function buildCariIslemFromOperatorFaaliyet(f: OperatorFaaliyet): CariKartIslem | null {
-  if (!f.firmaId) return null;
-  return {
-    id: cariIslemIdForFaaliyet(f.id),
-    cariKartId: f.firmaId,
-    islemTipi: 'OPERATOR_KESINTI',
-    islemId: f.id,
-    islemBaslik: `İş Makinesi Kesinti · ${f.firmaAdi}`,
-    islemDetay: `${f.tarih} · ${f.operatorIsim} · ${makineEtiketi(f)} · ${f.baslangicSaat}–${f.bitisSaat} (${f.calismaSuresi.toFixed(1)} sa) · ${f.yapilanIs}`,
-    tarih: f.tarih,
-    belgeNo: f.id,
-    fotoUrl: f.fotoUrl,
-  };
 }
 
 export const OperatorScreen: React.FC<OperatorScreenProps> = ({
@@ -90,6 +72,14 @@ export const OperatorScreen: React.FC<OperatorScreenProps> = ({
   const [raporFiltreYil, setRaporFiltreYil] = useState(new Date().getFullYear());
 
   const taseronCariler = useMemo(() => getTaseronCariKartlar(cariKartlar), [cariKartlar]);
+
+  const operatorPersoneller = useMemo(
+    () =>
+      personeller
+        .filter((p) => p.durum !== false && isOperatorGorev(p.gorev))
+        .sort((a, b) => `${a.ad} ${a.soyad}`.localeCompare(`${b.ad} ${b.soyad}`, 'tr')),
+    [personeller]
+  );
 
   const canliIsKaydiEtiketi = useMemo(() => {
     const arac = araclar.find((a) => a.id === selectedAracId);
@@ -222,7 +212,8 @@ export const OperatorScreen: React.FC<OperatorScreenProps> = ({
       makineKaynak: kaynak,
       makineManuelAd: makineKaynak === 'MANUEL' ? makineManuelAd : undefined,
       isKaydiEtiketi,
-      onayDurumu: 'ONAYLANDI',
+      onayDurumu: 'BEKLEMEDE',
+      durum: 'ONAY BEKLİYOR',
       kaydedenKullanici: currentUser?.email,
       kayitTarihi: new Date().toISOString()
     };
@@ -233,18 +224,15 @@ export const OperatorScreen: React.FC<OperatorScreenProps> = ({
       setOperatorFaaliyetleri(prev => [...prev, yeniFaaliyet]);
     }
 
-    const cariIslem = buildCariIslemFromOperatorFaaliyet(yeniFaaliyet);
-    if (cariIslem && setCariIslemGecmisi) {
-      setCariIslemGecmisi((prev) => {
-        const rest = (prev || []).filter((x) => x.id !== cariIslem.id && x.islemId !== yeniFaaliyet.id);
-        return [cariIslem, ...rest];
-      });
+    // Cari geçmişe yalnızca Onay Havuzu onayı sonrası yazılır
+    if (setCariIslemGecmisi) {
+      const cid = cariIslemIdForOperatorFaaliyet(yeniFaaliyet.id);
+      setCariIslemGecmisi((prev) => (prev || []).filter((x) => x.id !== cid && x.islemId !== yeniFaaliyet.id));
     }
 
     if (addNotification) {
       addNotification(
-        `Taşeron kesinti: ${isKaydiEtiketi} · ${personel?.ad} ${personel?.soyad} | ${calismaSuresi.toFixed(1)} sa · ${firmaAdi}` +
-          (cariIslem ? ' (cari geçmişe yazıldı)' : '')
+        `Taşeron kesinti (onay bekliyor): ${isKaydiEtiketi} · ${personel?.ad} ${personel?.soyad} | ${calismaSuresi.toFixed(1)} sa · ${firmaAdi}`
       );
     }
 
@@ -256,10 +244,8 @@ export const OperatorScreen: React.FC<OperatorScreenProps> = ({
     setEditingId(null);
     alert(
       editingId
-        ? 'Kesinti kaydı güncellendi!'
-        : cariIslem
-          ? 'Taşeron kesinti kaydı oluşturuldu; ilgili cari geçmişine eklendi.'
-          : 'Kesinti kaydı oluşturuldu. (Elle firma — cari kart yoksa geçmişe yazılmaz; cari kart ekleyip cari seçin.)'
+        ? 'Kesinti kaydı güncellendi ve yeniden onay havuzuna düştü.'
+        : 'Taşeron kesinti kaydı oluşturuldu. Onay Havuzu’nda onaylanınca cari geçmişe işlenir.'
     );
   };
 
@@ -267,7 +253,7 @@ export const OperatorScreen: React.FC<OperatorScreenProps> = ({
     if (confirm('Bu taşeron kesinti kaydını silmek istediğinize emin misiniz?')) {
       setOperatorFaaliyetleri(prev => prev.filter(f => f.id !== id));
       if (setCariIslemGecmisi) {
-        const cid = cariIslemIdForFaaliyet(id);
+        const cid = cariIslemIdForOperatorFaaliyet(id);
         setCariIslemGecmisi((prev) => (prev || []).filter((x) => x.id !== cid && x.islemId !== id));
       }
     }
@@ -374,11 +360,17 @@ export const OperatorScreen: React.FC<OperatorScreenProps> = ({
   const handleKesintiRaporuOlustur = () => {
     const aylikFaaliyetler = operatorFaaliyetleri.filter(f => {
       const d = new Date(f.tarih);
-      return d.getMonth() + 1 === selectedAy && d.getFullYear() === selectedYil && !f.kesintiYansitildi;
+      const onayli = f.onayDurumu === 'ONAYLANDI' || f.durum === 'ONAYLANDI';
+      return (
+        d.getMonth() + 1 === selectedAy &&
+        d.getFullYear() === selectedYil &&
+        !f.kesintiYansitildi &&
+        onayli
+      );
     });
 
     if (aylikFaaliyetler.length === 0) {
-      alert('Seçilen ay için kesintiye tabi faaliyet bulunamadı.');
+      alert('Seçilen ay için onaylanmış ve henüz rapora alınmamış kesinti kaydı bulunamadı.');
       return;
     }
 
@@ -507,6 +499,7 @@ export const OperatorScreen: React.FC<OperatorScreenProps> = ({
           <RolMobilFaaliyetYoklamaPanel
             rol="OPERATOR"
             personeller={personeller}
+            cariKartlar={cariKartlar}
             yoklamalar={yoklamalar}
             setYoklamalar={setYoklamalar}
             saveYoklamalarNow={saveYoklamalarNow}
@@ -592,10 +585,14 @@ export const OperatorScreen: React.FC<OperatorScreenProps> = ({
               <div>
                 <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Operatör (Personel)</label>
                 <select value={selectedPersonelId} onChange={e => setSelectedPersonelId(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-semibold text-slate-700 outline-none focus:border-amber-500">
-                  <option value="">Seçiniz</option>
-                  {personeller.map(p => (
-                    <option key={p.id} value={p.id}>{p.ad} {p.soyad} ({p.gorev})</option>
-                  ))}
+                  <option value="">Operatör seçiniz</option>
+                  {operatorPersoneller.length === 0 ? (
+                    <option value="" disabled>Personel kartında OPERATÖR görevli kayıt yok</option>
+                  ) : (
+                    operatorPersoneller.map(p => (
+                      <option key={p.id} value={p.id}>{p.ad} {p.soyad} ({p.gorev})</option>
+                    ))
+                  )}
                 </select>
               </div>
 
@@ -762,8 +759,21 @@ export const OperatorScreen: React.FC<OperatorScreenProps> = ({
                             {f.isKaydiEtiketi || makineEtiketi(f)}
                           </span>
                           <span className="text-[10px] text-slate-400 font-mono">{f.tarih}</span>
+                          <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full ${
+                            f.onayDurumu === 'ONAYLANDI' || f.durum === 'ONAYLANDI'
+                              ? 'bg-emerald-100 text-emerald-700'
+                              : f.onayDurumu === 'REDDEDİLDİ' || f.durum === 'REDDEDİLDİ'
+                                ? 'bg-rose-100 text-rose-700'
+                                : 'bg-amber-100 text-amber-800'
+                          }`}>
+                            {f.onayDurumu === 'ONAYLANDI' || f.durum === 'ONAYLANDI'
+                              ? 'Onaylandı'
+                              : f.onayDurumu === 'REDDEDİLDİ' || f.durum === 'REDDEDİLDİ'
+                                ? 'Reddedildi'
+                                : 'Onay bekliyor'}
+                          </span>
                           <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full ${f.kesintiYansitildi ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-800'}`}>
-                            {f.kesintiYansitildi ? 'Kesintiye Yansıtıldı' : 'Bekliyor'}
+                            {f.kesintiYansitildi ? 'Kesintiye Yansıtıldı' : 'Rapor bekliyor'}
                           </span>
                         </div>
                         <p className="text-xs font-bold text-slate-800">{f.yapilanIs}</p>

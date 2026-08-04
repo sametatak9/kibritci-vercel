@@ -204,7 +204,14 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
       ...tesisatciFaaliyetleri.map(tesisatciToSaha),
       ...mermerciFaaliyetleri.map(mermerciToSaha),
       ...soforSahaFaaliyetleri.map(soforToSaha),
-      ...operatorSahaFaaliyetleri.map(operatorToSaha),
+      ...operatorSahaFaaliyetleri
+        .filter((f) => {
+          const d = String(f.durum || '').toLocaleUpperCase('tr-TR');
+          if (d.includes('RED')) return false;
+          if (d.includes('ONAY BEKL') || d === 'BEKLEMEDE') return false;
+          return true;
+        })
+        .map(operatorToSaha),
     ],
     [
       sahaFaaliyetleri,

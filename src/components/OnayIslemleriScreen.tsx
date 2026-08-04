@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { 
   ShieldCheck, CheckCircle, Clock, Send, Users, AlertCircle, FileText, ShoppingCart, 
   Truck, CreditCard, ChevronRight, PenTool, Check, CheckCircle2, UserCheck, Eye, Trash2,
-  FileUp, ExternalLink, MessageSquare, AlertTriangle, Sparkles, Package, Tent, X
+  FileUp, ExternalLink, MessageSquare, AlertTriangle, Sparkles, Package, Tent, X, HardHat
 } from 'lucide-react';
 import { SatinAlmaTalebi, Irsaliye, Fatura, CariKart, CariKartIslem, StokKart, StokKartIslem } from '../types/erp';
 import { db, saveDocument } from '../lib/firebase';
@@ -46,6 +46,11 @@ import {
   buildCariEvrakHistory,
   resolveCariKartId,
 } from '../lib/evrakCariStokSync';
+import {
+  buildCariIslemFromOperatorFaaliyet,
+  makineEtiketi,
+} from '../lib/taseronUtils';
+import type { OperatorFaaliyet } from '../types/erp';
 import { pickPrimaryFotoUrl } from '../lib/guvenlikEvrakFotolar';
 import { toAiParsePayload } from '../lib/guvenlikFotoStorage';
 
@@ -88,7 +93,7 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
   setStokKartlar,
   setStokIslemGecmisi,
 }) => {
-  const [activeTab, setActiveTab] = useState<'satin_alma' | 'guvenlik_belgeleri' | 'kampci_belgeleri' | 'tesisat_mermer_belgeleri' | 'formen_belgeleri' | 'gunluk_loglar' | 'sofor_talepleri' | 'depocu_talepleri' | 'gecmis' | 'imzalar' | 'anahtarci_tutanaklari'>('satin_alma');
+  const [activeTab, setActiveTab] = useState<'satin_alma' | 'guvenlik_belgeleri' | 'kampci_belgeleri' | 'tesisat_mermer_belgeleri' | 'operator_belgeleri' | 'formen_belgeleri' | 'gunluk_loglar' | 'sofor_talepleri' | 'depocu_talepleri' | 'gecmis' | 'imzalar' | 'anahtarci_tutanaklari'>('satin_alma');
   const [selectedYoneticiEmail, setSelectedYoneticiEmail] = useState<string>('');
   const [stampText, setStampText] = useState<string>('🔵 ŞİRKET GENEL MÜDÜRÜ (E-İMZA)');
   const [customStamp, setCustomStamp] = useState<string>('');
@@ -109,6 +114,8 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
   const [kampFaaliyetler, setKampFaaliyetler] = useState<any[]>([]);
   const [tesisatciFaaliyetler, setTesisatciFaaliyetler] = useState<any[]>([]);
   const [mermerciFaaliyetler, setMermerciFaaliyetler] = useState<any[]>([]);
+  const [operatorKesintiFaaliyetler, setOperatorKesintiFaaliyetler] = useState<any[]>([]);
+  const [operatorSahaFaaliyetler, setOperatorSahaFaaliyetler] = useState<any[]>([]);
   const [bekleyenKampPersonelleri, setBekleyenKampPersonelleri] = useState<any[]>([]);
   const [gunlukAkisRaporlari, setGunlukAkisRaporlari] = useState<any[]>([]);
 
@@ -602,6 +609,24 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
     };
   }, []);
 
+  // Operatör taşeron kesinti + saha faaliyetleri (onay havuzu)
+  useEffect(() => {
+    const unsubKesinti = onSnapshot(collection(db, 'operatorFaaliyetleri'), (snapshot) => {
+      const list: any[] = [];
+      snapshot.forEach((d) => list.push({ id: d.id, ...d.data() }));
+      setOperatorKesintiFaaliyetler(list);
+    });
+    const unsubSaha = onSnapshot(collection(db, 'operatorSahaFaaliyetleri'), (snapshot) => {
+      const list: any[] = [];
+      snapshot.forEach((d) => list.push({ id: d.id, ...d.data() }));
+      setOperatorSahaFaaliyetler(list);
+    });
+    return () => {
+      unsubKesinti();
+      unsubSaha();
+    };
+  }, []);
+
   // Kampçının kurduğu, yönetici onayı bekleyen personeller
   useEffect(() => {
     const unsub = onSnapshot(collection(db, 'personeller'), (snapshot) => {
@@ -786,6 +811,101 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
     } catch (err) {
       console.error(err);
       alert("Reddetme işlemi başarısız.");
+    }
+  };
+
+  const isOperatorKesintiPending = (d: any) => {
+    if (d.onayDurumu === 'ONAYLANDI' || d.onayDurumu === 'REDDEDİLDİ') return false;
+    if (d.durum === 'ONAYLANDI' || d.durum === 'REDDEDİLDİ') return false;
+    return (
+      d.onayDurumu === 'BEKLEMEDE' ||
+      d.durum === 'ONAY BEKLİYOR' ||
+      d.durum === 'BEKLEMEDE'
+    );
+  };
+
+  const handleApproveOperatorKesinti = async (id: string) => {
+    try {
+      const matchedUser = kullanicilar.find((u) => u.email?.toLowerCase() === currentUser?.email?.toLowerCase());
+      const role = matchedUser?.yetki || 'YÖNETİCİ';
+      if (!canApproveMobilDocuments(role, currentUser?.email)) {
+        alert('Bu belgeyi onaylama yetkiniz bulunmuyor.');
+        return;
+      }
+      const raw = operatorKesintiFaaliyetler.find((x) => x.id === id);
+      if (!raw) {
+        alert('Kayıt bulunamadı.');
+        return;
+      }
+      const updateData = {
+        ...buildSingleApprovalUpdate(currentUser?.email || 'yonetici@kibritci.com', role),
+        onayDurumu: 'ONAYLANDI',
+      };
+      await updateDoc(doc(db, 'operatorFaaliyetleri', id), updateData);
+      const cariIslem = buildCariIslemFromOperatorFaaliyet({ ...raw, ...updateData } as OperatorFaaliyet);
+      if (cariIslem && setCariIslemGecmisi) {
+        setCariIslemGecmisi((prev) => {
+          const rest = (prev || []).filter((x) => x.id !== cariIslem.id && x.islemId !== id);
+          return [cariIslem, ...rest];
+        });
+      }
+      alert('Operatör taşeron kesinti kaydı onaylandı; cari geçmişe işlendi.');
+    } catch (err) {
+      console.error(err);
+      alert('Onaylama sırasında hata oluştu.');
+    }
+  };
+
+  const handleRejectOperatorKesinti = async (id: string) => {
+    if (!window.confirm('Bu kesinti kaydını reddetmek istediğinize emin misiniz?')) return;
+    try {
+      await updateDoc(doc(db, 'operatorFaaliyetleri', id), {
+        onayDurumu: 'REDDEDİLDİ',
+        durum: 'REDDEDİLDİ',
+        onaylayanYonetici: currentUser?.email || 'yonetici',
+        onayTarihi: new Date().toISOString(),
+      });
+      alert('Kesinti kaydı reddedildi.');
+    } catch (err) {
+      console.error(err);
+      alert('Reddetme başarısız.');
+    }
+  };
+
+  const handleApproveOperatorSaha = async (id: string) => {
+    try {
+      const matchedUser = kullanicilar.find((u) => u.email?.toLowerCase() === currentUser?.email?.toLowerCase());
+      const role = matchedUser?.yetki || 'YÖNETİCİ';
+      if (!canApproveMobilDocuments(role, currentUser?.email)) {
+        alert('Bu belgeyi onaylama yetkiniz bulunmuyor.');
+        return;
+      }
+      const updateData = buildSingleApprovalUpdate(currentUser?.email || 'yonetici@kibritci.com', role);
+      await updateDoc(doc(db, 'operatorSahaFaaliyetleri', id), updateData);
+      // Bağlı kesinti kaydı varsa onu da onayla
+      const saha = operatorSahaFaaliyetler.find((x) => x.id === id);
+      if (saha?.bagliOperatorFaaliyetId) {
+        await handleApproveOperatorKesinti(String(saha.bagliOperatorFaaliyetId));
+      }
+      alert('Operatör saha faaliyeti onaylandı (reel kayıt).');
+    } catch (err) {
+      console.error(err);
+      alert('Onaylama sırasında hata oluştu.');
+    }
+  };
+
+  const handleRejectOperatorSaha = async (id: string) => {
+    if (!window.confirm('Bu operatör faaliyetini reddetmek istediğinize emin misiniz?')) return;
+    try {
+      await updateDoc(doc(db, 'operatorSahaFaaliyetleri', id), {
+        durum: 'REDDEDİLDİ',
+        onaylayanYonetici: currentUser?.email || 'yonetici',
+        onayTarihi: new Date().toISOString(),
+      });
+      alert('Faaliyet reddedildi.');
+    } catch (err) {
+      console.error(err);
+      alert('Reddetme başarısız.');
     }
   };
 
@@ -1199,6 +1319,20 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
     return canApproveMobilDocuments(currentUserRole, currentUser?.email);
   });
 
+  const pendingOperatorKesintiler = operatorKesintiFaaliyetler.filter((doc) => {
+    if (!isOperatorKesintiPending(doc)) return false;
+    return canApproveMobilDocuments(currentUserRole, currentUser?.email);
+  });
+
+  const pendingOperatorSaha = operatorSahaFaaliyetler.filter((doc) => {
+    if (!isMobilDocPending(doc)) return false;
+    // Eski kayıtlar durum boşsa onaylı say — yalnızca açık ONAY BEKLİYOR / BEKLEMEDE
+    if (!doc.durum || doc.durum === 'KAYITLI') return false;
+    return canApproveMobilDocuments(currentUserRole, currentUser?.email);
+  });
+
+  const operatorOnayCount = pendingOperatorKesintiler.length + pendingOperatorSaha.length;
+
   const pendingYildirimGateCount = gelenEvraklar.filter(
     (x) => x.durum === 'BEKLEMEDE' && x.kaynak === 'YILDIRIM_TANKER_FIS'
   ).length;
@@ -1246,6 +1380,7 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
     pendingKampFaaliyetler.length +
     bekleyenKampPersonelleri.length +
     tesisatMermerCount +
+    operatorOnayCount +
     pendingGunlukAkis.length +
     pendingSoforCount +
     pendingDepocuCount +
@@ -1263,6 +1398,7 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
     | 'guvenlik_belgeleri'
     | 'kampci_belgeleri'
     | 'tesisat_mermer_belgeleri'
+    | 'operator_belgeleri'
     | 'formen_belgeleri'
     | 'gunluk_loglar'
     | 'sofor_talepleri'
@@ -1282,6 +1418,7 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
     { id: 'guvenlik_belgeleri', label: 'Güvenlik Belgeleri', shortLabel: 'Güvenlik', count: guvenlikCount, icon: Truck },
     { id: 'kampci_belgeleri', label: 'Kampçı Belgeleri', shortLabel: 'Kampçı', count: kampciCount, icon: Package },
     { id: 'tesisat_mermer_belgeleri', label: 'Tesisatçı & Mermerci', shortLabel: 'Tesisat/Mermer', count: tesisatMermerCount, icon: FileText },
+    { id: 'operator_belgeleri', label: 'Operatör Belgeleri', shortLabel: 'Operatör', count: operatorOnayCount, icon: HardHat },
     { id: 'formen_belgeleri', label: 'Formen Belgeleri', shortLabel: 'Formen', count: pendingPersonelCount, icon: UserCheck },
     { id: 'gunluk_loglar', label: 'Günlük Loglar', shortLabel: 'Loglar', count: pendingGunlukAkis.length, icon: FileText },
     { id: 'sofor_talepleri', label: 'Şoför Talepleri', shortLabel: 'Şoför', count: pendingSoforCount, icon: Truck },
@@ -2615,6 +2752,106 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
                     </div>
                   )
                 )
+              )}
+            </div>
+          )}
+
+          {activeTab === 'operator_belgeleri' && (
+            <div className="space-y-6">
+              {operatorOnayCount === 0 ? (
+                <div className="text-center py-8 text-slate-400 text-sm">
+                  Onay bekleyen operatör faaliyeti / taşeron kesinti kaydı yok.
+                </div>
+              ) : (
+                <>
+                  {pendingOperatorKesintiler.length > 0 && (
+                    <div className="space-y-3">
+                      <h3 className="font-display font-black text-xs text-slate-600 tracking-wider flex items-center gap-2 uppercase">
+                        <HardHat size={14} className="text-rose-600" />
+                        Taşeron Kesinti Onayları ({pendingOperatorKesintiler.length})
+                      </h3>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {pendingOperatorKesintiler.map((docItem) => (
+                          <div key={docItem.id} className="bg-white border border-rose-100 p-4 rounded-2xl space-y-3">
+                            <div className="flex justify-between gap-2">
+                              <span className="font-mono bg-rose-50 border border-rose-200 text-rose-700 text-[10px] font-bold px-2 py-0.5 rounded-md">
+                                KESİNTİ · {makineEtiketi(docItem as OperatorFaaliyet)}
+                              </span>
+                              <span className="text-[10px] text-slate-500 font-mono font-bold">{docItem.tarih}</span>
+                            </div>
+                            <p className="text-xs font-bold text-slate-800">{docItem.yapilanIs}</p>
+                            <p className="text-[10px] text-slate-500">
+                              {docItem.operatorIsim} · {docItem.firmaAdi} · {docItem.baslangicSaat}–{docItem.bitisSaat} ({Number(docItem.calismaSuresi || 0).toFixed(1)} sa)
+                            </p>
+                            {docItem.fotoUrl && (
+                              <img src={docItem.fotoUrl} alt="" className="max-h-36 w-full object-cover rounded-xl border" />
+                            )}
+                            <div className="flex gap-2 pt-2 border-t border-slate-100">
+                              <button
+                                type="button"
+                                onClick={() => void handleRejectOperatorKesinti(docItem.id)}
+                                className="flex-1 bg-red-950 hover:bg-red-900 text-red-300 py-1.5 rounded-lg text-[10px] font-black"
+                              >
+                                Reddet
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => void handleApproveOperatorKesinti(docItem.id)}
+                                className="flex-1 bg-rose-600 hover:bg-rose-700 text-white py-1.5 rounded-lg text-[10px] font-black"
+                              >
+                                Onayla
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {pendingOperatorSaha.length > 0 && (
+                    <div className="space-y-3">
+                      <h3 className="font-display font-black text-xs text-slate-600 tracking-wider flex items-center gap-2 uppercase">
+                        <HardHat size={14} className="text-amber-600" />
+                        Operatör Saha Faaliyet Onayları ({pendingOperatorSaha.length})
+                      </h3>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {pendingOperatorSaha.map((docItem) => (
+                          <div key={docItem.id} className="bg-white border border-amber-100 p-4 rounded-2xl space-y-3">
+                            <div className="flex justify-between gap-2">
+                              <span className="font-mono bg-amber-50 border border-amber-200 text-amber-800 text-[10px] font-bold px-2 py-0.5 rounded-md">
+                                {docItem.faaliyetGrubu === 'MESAI' ? 'MESAİ' : 'NORMAL'} · {docItem.isNiteligi || '—'}
+                              </span>
+                              <span className="text-[10px] text-slate-500 font-mono font-bold">{docItem.tarih}</span>
+                            </div>
+                            <p className="text-[10px] text-slate-500">
+                              {docItem.parsel} / {docItem.blok}
+                              {docItem.taseronKesinti ? ` · Taşeron: ${docItem.taseronFirmaAdi || '—'}` : ''}
+                            </p>
+                            <p className="text-xs text-slate-800">{docItem.aciklama || '—'}</p>
+                            {docItem.fotoUrl && (
+                              <img src={docItem.fotoUrl} alt="" className="max-h-36 w-full object-cover rounded-xl border" />
+                            )}
+                            <div className="flex gap-2 pt-2 border-t border-slate-100">
+                              <button
+                                type="button"
+                                onClick={() => void handleRejectOperatorSaha(docItem.id)}
+                                className="flex-1 bg-red-950 hover:bg-red-900 text-red-300 py-1.5 rounded-lg text-[10px] font-black"
+                              >
+                                Reddet
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => void handleApproveOperatorSaha(docItem.id)}
+                                className="flex-1 bg-amber-600 hover:bg-amber-700 text-white py-1.5 rounded-lg text-[10px] font-black"
+                              >
+                                Onayla
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </>
               )}
             </div>
           )}

@@ -16,7 +16,7 @@ import {
   HardHat,
 } from 'lucide-react';
 import { collection, deleteDoc, doc, onSnapshot, setDoc } from 'firebase/firestore';
-import { AylikYoklamaMap, Personel, SoforSahaFaaliyet, OperatorSahaFaaliyet } from '../types/erp';
+import { AylikYoklamaMap, CariKart, Personel, SoforSahaFaaliyet, OperatorSahaFaaliyet } from '../types/erp';
 import { db, cleanUndefined } from '../lib/firebase';
 import { compressImage } from '../lib/imageCompress';
 import { todayDateKey, formatDateLabelTr, normalizeDateKey } from '../lib/dateKeyUtils';
@@ -24,6 +24,7 @@ import { applySahaMesaiToYoklama, normalizeMesaiHours } from '../lib/sahaFaaliye
 import { ensureSahaFaaliyetFotolarPersisted } from '../lib/sahaFaaliyetFotoStorage';
 import { isOperatorGorev, isSoforGorev, getYoklamaDay, setYoklamaDay } from '../lib/yoklamaUtils';
 import { resolveGeldiRolPersonelIds, type MobilRolEtiket } from '../lib/mobilRolEtiketUtils';
+import { getTaseronCariKartlar } from '../lib/taseronUtils';
 import { PARSEL_BLOK_MAP, PARSEL_LIST, defaultBlokForParsel } from '../data/parselBlokMap';
 import { KampGunlukYoklamaTab } from './KampGunlukYoklamaTab';
 
@@ -52,6 +53,7 @@ const OPERATOR_IS_OPTIONS = [
 interface RolMobilFaaliyetYoklamaPanelProps {
   rol: Rol;
   personeller: Personel[];
+  cariKartlar?: CariKart[];
   yoklamalar?: AylikYoklamaMap;
   setYoklamalar?: (updater: AylikYoklamaMap | ((y: AylikYoklamaMap) => AylikYoklamaMap)) => void;
   saveYoklamalarNow?: (next: AylikYoklamaMap) => Promise<void>;
@@ -65,6 +67,7 @@ interface RolMobilFaaliyetYoklamaPanelProps {
 export const RolMobilFaaliyetYoklamaPanel: React.FC<RolMobilFaaliyetYoklamaPanelProps> = ({
   rol,
   personeller,
+  cariKartlar = [],
   yoklamalar = {},
   setYoklamalar,
   saveYoklamalarNow,
@@ -107,6 +110,8 @@ export const RolMobilFaaliyetYoklamaPanel: React.FC<RolMobilFaaliyetYoklamaPanel
   const [savingFaaliyet, setSavingFaaliyet] = useState(false);
   const [faaliyetler, setFaaliyetler] = useState<Kayit[]>([]);
   const [editingFaaliyetId, setEditingFaaliyetId] = useState<string | null>(null);
+  const [taseronKesintiAcik, setTaseronKesintiAcik] = useState(false);
+  const [taseronCariId, setTaseronCariId] = useState('');
 
   useEffect(() => {
     const unsub = onSnapshot(collection(db, collectionName), (snap) => {
@@ -119,9 +124,14 @@ export const RolMobilFaaliyetYoklamaPanel: React.FC<RolMobilFaaliyetYoklamaPanel
   }, [collectionName]);
 
   const rolPersoneller = useMemo(
-    () => personeller.filter((p) => matchGorev(p.gorev)),
+    () =>
+      personeller
+        .filter((p) => p.durum !== false && matchGorev(p.gorev))
+        .sort((a, b) => `${a.ad} ${a.soyad}`.localeCompare(`${b.ad} ${b.soyad}`, 'tr')),
     [personeller, matchGorev]
   );
+
+  const taseronCariler = useMemo(() => getTaseronCariKartlar(cariKartlar), [cariKartlar]);
 
   const gunlukFaaliyetler = useMemo(
     () => faaliyetler.filter((f) => normalizeDateKey(f.tarih) === normalizeDateKey(faaliyetTarih)),
@@ -157,6 +167,8 @@ export const RolMobilFaaliyetYoklamaPanel: React.FC<RolMobilFaaliyetYoklamaPanel
     setAciklama('');
     setFotoUrl('');
     setPersonelMesaiSaatleri({});
+    setTaseronKesintiAcik(false);
+    setTaseronCariId('');
   };
 
   const syncMesai = async (
@@ -212,14 +224,20 @@ export const RolMobilFaaliyetYoklamaPanel: React.FC<RolMobilFaaliyetYoklamaPanel
       if (faaliyetGrubu === 'MESAI') {
         mesaiMap = Object.fromEntries(
           Object.entries(personelMesaiSaatleri)
-            .map(([pid, h]) => [pid, normalizeMesaiHours(h)] as const)
+            .map(([pid, h]) => [pid, normalizeMesaiHours(Number(h))] as const)
             .filter(([, h]) => h > 0)
         );
-        if (!mesaiMap || Object.keys(mesaiMap).length === 0) {
+        if (mesaiMap && Object.keys(mesaiMap).length === 0) {
           showStatus('error', 'Mesaili faaliyet için en az bir personele saat girin.');
           setSavingFaaliyet(false);
           return;
         }
+      }
+
+      if (rol === 'OPERATOR' && faaliyetGrubu === 'MESAI' && taseronKesintiAcik && !taseronCariId) {
+        showStatus('error', 'Taşeron kesintisi için taşeron firma seçin.');
+        setSavingFaaliyet(false);
+        return;
       }
 
       let aktifPersonelListesi: string[] = [];
@@ -245,6 +263,47 @@ export const RolMobilFaaliyetYoklamaPanel: React.FC<RolMobilFaaliyetYoklamaPanel
         fotoPersisted = String(ensured.fotoUrl || fotoPersisted);
       }
 
+      const taseronCari = taseronCariler.find((c) => c.id === taseronCariId);
+      let bagliOperatorFaaliyetId: string | undefined;
+
+      // Operatör mesai + taşeron kesinti → ayrı kesinti kaydı (onay havuzuna)
+      if (rol === 'OPERATOR' && faaliyetGrubu === 'MESAI' && taseronKesintiAcik && taseronCari && mesaiMap) {
+        const toplamSaat = Object.values(mesaiMap).reduce((s, h) => s + Number(h || 0), 0);
+        const ofId = existing && (existing as OperatorSahaFaaliyet).bagliOperatorFaaliyetId
+          ? String((existing as OperatorSahaFaaliyet).bagliOperatorFaaliyetId)
+          : `of_mesai_${Date.now()}`;
+        const firstPid = aktifPersonelListesi[0];
+        const firstP = personeller.find((p) => p.id === firstPid);
+        await setDoc(
+          doc(db, 'operatorFaaliyetleri', ofId),
+          cleanUndefined({
+            id: ofId,
+            aracId: 'mesai_saha',
+            aracPlaka: 'MESAİ SAHA',
+            operatorPersonelId: firstPid,
+            operatorIsim: firstP ? `${firstP.ad} ${firstP.soyad}` : kaydedenEmail || 'Operatör',
+            operatorTipi: 'DİĞER',
+            tarih: normalizeDateKey(faaliyetTarih),
+            baslangicSaat: '17:00',
+            bitisSaat: '17:00',
+            calismaSuresi: Math.round(toplamSaat * 100) / 100,
+            yapilanIs: `[Mesai kesinti] ${aciklama.trim()} · ${isNiteligi} (${parsel}/${blok})`,
+            firmaAdi: taseronCari.unvan,
+            firmaId: taseronCari.id,
+            fotoUrl: fotoPersisted || null,
+            makineKaynak: 'MANUEL',
+            makineManuelAd: 'Mesai saha',
+            isKaydiEtiketi: 'Mesai taşeron kesinti',
+            onayDurumu: 'BEKLEMEDE',
+            durum: 'ONAY BEKLİYOR',
+            kaydedenKullanici: kaydedenEmail,
+            kayitTarihi: new Date().toISOString(),
+          })
+        );
+        bagliOperatorFaaliyetId = ofId;
+      }
+
+      const needsOnay = rol === 'OPERATOR';
       const payload: Kayit = {
         id,
         tarih: normalizeDateKey(faaliyetTarih),
@@ -256,11 +315,19 @@ export const RolMobilFaaliyetYoklamaPanel: React.FC<RolMobilFaaliyetYoklamaPanel
         fotoUrl: fotoPersisted || null,
         aktifPersonelListesi,
         personelMesaiSaatleri: mesaiMap,
-        durum: 'KAYITLI',
+        durum: needsOnay ? 'ONAY BEKLİYOR' : 'KAYITLI',
         kaydeden: kaydedenEmail || undefined,
         kaynakEkran: kaynakEkran as any,
         olusturulma: existing?.olusturulma || new Date().toISOString(),
         guncellenme: new Date().toISOString(),
+        ...(rol === 'OPERATOR'
+          ? {
+              taseronKesinti: faaliyetGrubu === 'MESAI' && taseronKesintiAcik,
+              taseronFirmaId: taseronKesintiAcik ? taseronCariId || null : null,
+              taseronFirmaAdi: taseronKesintiAcik ? taseronCari?.unvan || null : null,
+              bagliOperatorFaaliyetId: bagliOperatorFaaliyetId || null,
+            }
+          : {}),
       };
 
       if (faaliyetGrubu !== 'MESAI') {
@@ -269,7 +336,8 @@ export const RolMobilFaaliyetYoklamaPanel: React.FC<RolMobilFaaliyetYoklamaPanel
 
       await setDoc(doc(db, collectionName, id), cleanUndefined(payload));
 
-      if (faaliyetGrubu === 'MESAI' || existing?.faaliyetGrubu === 'MESAI') {
+      // Operatör: mesai yoklamaya ancak onay sonrası yazılır (şimdilik beklet)
+      if (rol !== 'OPERATOR' && (faaliyetGrubu === 'MESAI' || existing?.faaliyetGrubu === 'MESAI')) {
         await syncMesai(
           String(payload.tarih),
           faaliyetGrubu === 'MESAI' && mesaiMap ? mesaiMap : undefined,
@@ -281,10 +349,17 @@ export const RolMobilFaaliyetYoklamaPanel: React.FC<RolMobilFaaliyetYoklamaPanel
         await addNotification(
           `${rol === 'SOFOR' ? 'Şöför' : 'Operatör'} ${
             faaliyetGrubu === 'MESAI' ? 'mesai ' : ''
-          }faaliyeti: ${isNiteligi} (${payload.parsel} / ${payload.blok})`
+          }faaliyeti${needsOnay ? ' (onay bekliyor)' : ''}: ${isNiteligi} (${payload.parsel} / ${payload.blok})`
         );
       }
-      showStatus('success', editingFaaliyetId ? 'Faaliyet güncellendi.' : 'Faaliyet kaydedildi.');
+      showStatus(
+        'success',
+        editingFaaliyetId
+          ? 'Faaliyet güncellendi.'
+          : needsOnay
+            ? 'Faaliyet onay havuzuna gönderildi.'
+            : 'Faaliyet kaydedildi.'
+      );
       resetFaaliyetForm();
     } catch (err: any) {
       console.error(err);
@@ -304,6 +379,9 @@ export const RolMobilFaaliyetYoklamaPanel: React.FC<RolMobilFaaliyetYoklamaPanel
     setAciklama(f.aciklama || '');
     setFotoUrl(f.fotoUrl || '');
     setPersonelMesaiSaatleri(f.personelMesaiSaatleri || {});
+    const of = f as OperatorSahaFaaliyet;
+    setTaseronKesintiAcik(Boolean(of.taseronKesinti));
+    setTaseronCariId(of.taseronFirmaId || '');
     setActiveSubTab('faaliyet');
   };
 
@@ -311,7 +389,15 @@ export const RolMobilFaaliyetYoklamaPanel: React.FC<RolMobilFaaliyetYoklamaPanel
     if (!window.confirm('Bu faaliyet silinsin mi?')) return;
     try {
       await deleteDoc(doc(db, collectionName, f.id));
-      if (f.faaliyetGrubu === 'MESAI' && f.personelMesaiSaatleri) {
+      const bagli = (f as OperatorSahaFaaliyet).bagliOperatorFaaliyetId;
+      if (bagli) {
+        try {
+          await deleteDoc(doc(db, 'operatorFaaliyetleri', bagli));
+        } catch {
+          /* ignore */
+        }
+      }
+      if (rol !== 'OPERATOR' && f.faaliyetGrubu === 'MESAI' && f.personelMesaiSaatleri) {
         await syncMesai(f.tarih, undefined, f.personelMesaiSaatleri);
       }
       if (editingFaaliyetId === f.id) resetFaaliyetForm();
@@ -496,7 +582,9 @@ export const RolMobilFaaliyetYoklamaPanel: React.FC<RolMobilFaaliyetYoklamaPanel
 
               {faaliyetGrubu === 'MESAI' && (
                 <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 space-y-2">
-                  <p className="text-[9px] font-black uppercase text-amber-800">Mesai Saatleri</p>
+                  <p className="text-[9px] font-black uppercase text-amber-800">
+                    Mesai Saatleri {rol === 'OPERATOR' ? '(yalnızca operatör personel)' : ''}
+                  </p>
                   {rolPersoneller.length === 0 ? (
                     <p className="text-[10px] text-amber-700 italic">Bu görevde personel bulunamadı.</p>
                   ) : (
@@ -530,6 +618,39 @@ export const RolMobilFaaliyetYoklamaPanel: React.FC<RolMobilFaaliyetYoklamaPanel
                           </div>
                         );
                       })}
+                    </div>
+                  )}
+
+                  {rol === 'OPERATOR' && (
+                    <div className="pt-2 border-t border-amber-200 space-y-2">
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={taseronKesintiAcik}
+                          onChange={(e) => setTaseronKesintiAcik(e.target.checked)}
+                          className="rounded border-amber-400"
+                        />
+                        <span className="text-[10px] font-black text-amber-900 uppercase">
+                          Taşeron için mesai — kesinti kaydı oluştur
+                        </span>
+                      </label>
+                      {taseronKesintiAcik && (
+                        <select
+                          value={taseronCariId}
+                          onChange={(e) => setTaseronCariId(e.target.value)}
+                          className="w-full bg-white border border-amber-300 rounded-xl px-3 py-2 font-bold text-[11px]"
+                        >
+                          <option value="">Taşeron firma seçin</option>
+                          {taseronCariler.map((c) => (
+                            <option key={c.id} value={c.id}>
+                              {c.unvan}
+                            </option>
+                          ))}
+                        </select>
+                      )}
+                      <p className="text-[9px] text-amber-800/80">
+                        Kesinti kaydı Onay Havuzu’na düşer; onaylanınca cari geçmişe ve maddi rapora gider.
+                      </p>
                     </div>
                   )}
                 </div>
@@ -571,6 +692,14 @@ export const RolMobilFaaliyetYoklamaPanel: React.FC<RolMobilFaaliyetYoklamaPanel
                         <p className="text-[11px] font-black text-slate-800">{f.isNiteligi}</p>
                         <p className="text-[9px] text-slate-500 font-bold">
                           {f.parsel} / {f.blok} · {f.faaliyetGrubu === 'MESAI' ? 'MESAİ' : 'NORMAL'}
+                          {f.durum === 'ONAY BEKLİYOR' || f.durum === 'BEKLEMEDE'
+                            ? ' · Onay bekliyor'
+                            : f.durum === 'ONAYLANDI'
+                              ? ' · Onaylandı'
+                              : f.durum === 'REDDEDİLDİ'
+                                ? ' · Reddedildi'
+                                : ''}
+                          {(f as OperatorSahaFaaliyet).taseronKesinti ? ' · Taşeron kesinti' : ''}
                         </p>
                       </div>
                       <div className="flex gap-1">
