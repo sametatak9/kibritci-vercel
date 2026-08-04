@@ -2886,6 +2886,9 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
                             <p className="text-[10px] text-slate-500">
                               {docItem.parsel} / {docItem.blok}
                               {docItem.taseronKesinti ? ` · Taşeron: ${docItem.taseronFirmaAdi || '—'}` : ''}
+                              {docItem.isKaydiEtiketi || docItem.aracPlaka
+                                ? ` · ${docItem.isKaydiEtiketi || docItem.aracPlaka}`
+                                : ''}
                             </p>
                             <p className="text-xs text-slate-800">{docItem.aciklama || '—'}</p>
                             {docItem.fotoUrl && (
