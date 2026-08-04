@@ -50,3 +50,12 @@ export function normalizeGorev(gorev?: string): string {
   // Aynı yazım farklı büyük/küçük harf → tek satır
   return gorev.trim().toLocaleUpperCase('tr-TR');
 }
+
+/** ZER YAPI / hakediş — görev adında USTA geçenler (yardımcı usta dahil) */
+export function isUstaGorev(gorev?: string): boolean {
+  const key = gorevAsciiKey(String(gorev || ''));
+  if (!key) return false;
+  // "FORMEN" usta sayılmaz
+  if (key.includes('FORMEN') || key.includes('FORMAN')) return false;
+  return key.includes('USTA');
+}

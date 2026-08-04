@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import {
   CreditCard, Calendar, Printer, ShieldCheck, CheckCircle2,
-  RefreshCw, UserX, BarChart3, Copy, Download
+  RefreshCw, UserX, BarChart3, Copy, Download, Users, FileSpreadsheet, X
 } from 'lucide-react';
 import { db, parseYoklamaSnapshotData, saveDocument } from '../lib/firebase';
 import { collection, doc, getDoc, onSnapshot, query, where } from 'firebase/firestore';
@@ -11,7 +11,7 @@ import { CorporateReportLayout } from './CorporateReportLayout';
 import { CORPORATE_COMPANY, getCorporateReportCss } from '../lib/corporateReportHtml';
 import { buildPersonelListForMonth, isDayActiveForPersonel, normalizeTurkishName } from '../lib/yoklamaUtils';
 import { resolveStubPersonelFromLegacyId } from '../lib/legacyYoklamaImport';
-import { normalizeGorev } from '../lib/gorevUtils';
+import { normalizeGorev, isUstaGorev } from '../lib/gorevUtils';
 import {
   prepareSahaFaaliyetRaporu,
   prepareKampFaaliyetRaporu,
@@ -364,6 +364,7 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
   const [lastYoklamaRefreshAt, setLastYoklamaRefreshAt] = useState<string | null>(null);
   const [copiedSummary, setCopiedSummary] = useState(false);
   const [downloadingReport, setDownloadingReport] = useState(false);
+  const [showUstaListeModal, setShowUstaListeModal] = useState(false);
 
   const donemLabel = `${TURKISH_MONTHS[selectedMonth - 1]} ${selectedYear}`;
   const donemKey = `${selectedYear}-${String(selectedMonth).padStart(2, '0')}`;
@@ -502,6 +503,154 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
   };
 
   const activeStaffRows = allStaffRows.filter(r => !excludedStaffIds.includes(r.personel.id));
+
+  const ustaliRows = useMemo(
+    () => activeStaffRows.filter((r) => isUstaGorev(r.personel.gorev)),
+    [activeStaffRows]
+  );
+  const ustasizRows = useMemo(
+    () => activeStaffRows.filter((r) => !isUstaGorev(r.personel.gorev)),
+    [activeStaffRows]
+  );
+
+  const summarizeRows = (rows: StaffHakedisRow[]) => {
+    const geldi = rows.reduce((s, r) => s + r.geldiGun, 0);
+    const mesai = rows.reduce((s, r) => s + r.mesaiSaat, 0);
+    const gunKaz = rows.reduce((s, r) => s + r.gunKazanci, 0);
+    const mesaiKaz = rows.reduce((s, r) => s + r.mesaiKazanci, 0);
+    const maas = rows.reduce((s, r) => s + r.toplamKazanc, 0);
+    const zer = rows.reduce((s, r) => s + r.zerYapiHakedis, 0);
+    return { geldi, mesai, gunKaz, mesaiKaz, maas, zer, kisi: rows.length };
+  };
+
+  const fillUstaSheet = (
+    ws: { addRow: (values?: any) => any },
+    baslik: string,
+    rows: StaffHakedisRow[]
+  ) => {
+    const o = summarizeRows(rows);
+    ws.addRow([baslik, donemLabel]);
+    ws.addRow([]);
+    ws.addRow(['Personel Sayısı', o.kisi]);
+    ws.addRow(['Toplam İş Günü', o.geldi]);
+    ws.addRow(['Toplam Mesai Saati', o.mesai]);
+    ws.addRow(['Gün Kazancı', formatMoney(o.gunKaz)]);
+    ws.addRow(['Mesai Kazancı', formatMoney(o.mesaiKaz)]);
+    ws.addRow(['Toplam Maaş', formatMoney(o.maas)]);
+    ws.addRow(['ZER YAPI Hakediş', formatMoney(o.zer, 0)]);
+    ws.addRow(['Formül', `${o.geldi} gün × ₺${ZER_YAPI_GUNLUK}`]);
+    ws.addRow([]);
+    const header = [
+      'Ad Soyad',
+      'Görev',
+      'Geldi Gün',
+      'Mesai Saat',
+      'Gün Kazancı',
+      'Mesai Kazancı',
+      'Toplam Maaş',
+      'ZER YAPI Hakedis',
+    ];
+    const headerRow = ws.addRow(header);
+    headerRow.font = { bold: true };
+    rows.forEach((row) => {
+      ws.addRow([
+        `${row.personel.ad} ${row.personel.soyad}`,
+        normalizeGorev(row.personel.gorev),
+        row.geldiGun,
+        row.mesaiSaat,
+        row.gunKazanci,
+        row.mesaiKazanci,
+        row.toplamKazanc,
+        row.zerYapiHakedis,
+      ]);
+    });
+  };
+
+  const openUstaHtmlReport = (baslik: string, rows: StaffHakedisRow[]) => {
+    const o = summarizeRows(rows);
+    const bodyRows = rows
+      .map(
+        (r) => `<tr>
+        <td>${r.personel.ad} ${r.personel.soyad}</td>
+        <td>${normalizeGorev(r.personel.gorev)}</td>
+        <td style="text-align:center">${r.geldiGun}</td>
+        <td style="text-align:center">${r.mesaiSaat}</td>
+        <td style="text-align:right">${formatMoney(r.gunKazanci)}</td>
+        <td style="text-align:right">${formatMoney(r.mesaiKazanci)}</td>
+        <td style="text-align:right">${formatMoney(r.toplamKazanc)}</td>
+        <td style="text-align:right;font-weight:700;color:#047857">${formatMoney(r.zerYapiHakedis, 0)}</td>
+      </tr>`
+      )
+      .join('');
+    const html = `<!DOCTYPE html><html lang="tr"><head><meta charset="utf-8"><title>${baslik}_${donemKey}</title>
+      <style>
+        body{font-family:'Segoe UI',Arial,sans-serif;margin:24px;color:#1f2937}
+        h1{font-size:16pt;margin:0 0 4px} .sub{color:#6b7280;font-size:10pt;margin-bottom:16px}
+        .cards{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px}
+        .card{border:1px solid #d1d5db;border-radius:8px;padding:10px 14px;min-width:120px;background:#f9fafb}
+        .card b{display:block;font-size:14pt;margin-top:4px}
+        table{width:100%;border-collapse:collapse;font-size:10pt}
+        th,td{border:1px solid #e5e7eb;padding:6px 8px;text-align:left}
+        th{background:#f3f4f6;font-size:8pt;text-transform:uppercase}
+        @media print{button{display:none}}
+      </style></head><body>
+      <button onclick="window.print()" style="margin-bottom:12px;padding:8px 14px;cursor:pointer">Yazdır / PDF</button>
+      <h1>${baslik}</h1>
+      <p class="sub">ZER YAPI Hakediş · ${donemLabel} · Günlük ₺${ZER_YAPI_GUNLUK}</p>
+      <div class="cards">
+        <div class="card">Personel<b>${o.kisi}</b></div>
+        <div class="card">İş günü<b>${o.geldi}</b></div>
+        <div class="card">Mesai saati<b>${o.mesai}</b></div>
+        <div class="card">ZER YAPI<b style="color:#047857">${formatMoney(o.zer, 0)}</b></div>
+        <div class="card">Toplam maaş<b>${formatMoney(o.maas)}</b></div>
+      </div>
+      <table><thead><tr>
+        <th>Ad Soyad</th><th>Görev</th><th>Geldi</th><th>Mesai</th>
+        <th>Gün Kaz.</th><th>Mesai Kaz.</th><th>Toplam</th><th>ZER YAPI</th>
+      </tr></thead><tbody>${bodyRows || '<tr><td colspan="8">Kayıt yok</td></tr>'}</tbody></table>
+      </body></html>`;
+    const win = window.open('', '_blank');
+    if (win) {
+      win.document.write(html);
+      win.document.close();
+    }
+  };
+
+  const handleUstaUstasizRaporlar = async () => {
+    setDownloadingReport(true);
+    try {
+      const { createExcelWorkbook } = await import('../lib/exceljsLoader');
+      const wb = await createExcelWorkbook();
+      const wsUstali = wb.addWorksheet('USTALI');
+      const wsUstasiz = wb.addWorksheet('USTASIZ');
+      fillUstaSheet(wsUstali, 'ZER YAPI — USTALI PERSONEL RAPORU', ustaliRows);
+      fillUstaSheet(wsUstasiz, 'ZER YAPI — USTASIZ PERSONEL RAPORU', ustasizRows);
+      const buffer = await wb.xlsx.writeBuffer();
+      const blob = new Blob([buffer as BlobPart], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `ZER_YAPI_Ustali_Ustasiz_${donemKey}.xlsx`;
+      a.click();
+      URL.revokeObjectURL(url);
+
+      openUstaHtmlReport(`ZER YAPI — USTALI RAPOR — ${donemLabel}`, ustaliRows);
+      setTimeout(() => {
+        openUstaHtmlReport(`ZER YAPI — USTASIZ RAPOR — ${donemLabel}`, ustasizRows);
+      }, 400);
+
+      showStatus(
+        'success',
+        `2 rapor üretildi: Ustalı ${ustaliRows.length} kişi · Ustasız ${ustasizRows.length} kişi (Excel + HTML).`
+      );
+    } catch (err: any) {
+      showStatus('error', `Ustalı/ustasız rapor oluşturulamadı: ${err?.message || err}`);
+    } finally {
+      setDownloadingReport(false);
+    }
+  };
 
   const monthlySahaFaaliyetleri = useMemo(
     () => filterByMonth(tumSahaFaaliyetleri, selectedYear, selectedMonth),
@@ -1081,6 +1230,25 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
             <span>+6.000 Analiz (Gün+Mesai)</span>
           </button>
           <button
+            type="button"
+            onClick={() => void handleUstaUstasizRaporlar()}
+            disabled={downloadingReport || activeStaffRows.length === 0}
+            className="bg-amber-500 hover:bg-amber-600 disabled:opacity-60 text-slate-950 font-bold text-xs px-4 py-2.5 rounded-xl transition shadow cursor-pointer flex items-center space-x-1"
+            title="Ustalı ve ustasız olmak üzere 2 ayrı hakediş raporu (Excel + HTML yazdırma)"
+          >
+            {downloadingReport ? <RefreshCw size={12} className="animate-spin" /> : <FileSpreadsheet size={12} />}
+            <span>Ustalı + Ustasız Rapor</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowUstaListeModal(true)}
+            className="bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs px-4 py-2.5 rounded-xl transition shadow cursor-pointer flex items-center space-x-1"
+            title="Güncel dönem personelini ustalı / ustasız olarak göster"
+          >
+            <Users size={12} />
+            <span>Ustalı / Ustasız Liste</span>
+          </button>
+          <button
             onClick={handleSaveReport}
             disabled={loading}
             className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-4 py-2.5 rounded-xl transition shadow cursor-pointer flex items-center space-x-1"
@@ -1114,6 +1282,9 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
               <p className="text-[10px] text-slate-500 mt-1 leading-relaxed">
                 Seçilen ayda en az 1 gün &quot;Geldi&quot; kaydı olan personeller. Hakedişten çıkarmak istediklerinizi işaretleyin.
               </p>
+              <p className="text-[10px] text-amber-800 font-semibold mt-1.5">
+                Aktif: Ustalı {ustaliRows.length} · Ustasız {ustasizRows.length}
+              </p>
             </div>
 
             <div className="space-y-1.5 max-h-96 overflow-y-auto pr-1">
@@ -1136,7 +1307,8 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
                           {p.ad} {p.soyad}
                         </span>
                         <span className="text-[9px] text-slate-500 block uppercase font-semibold">
-                          {normalizeGorev(p.gorev)} • {geldiGun} gün
+                          {normalizeGorev(p.gorev)}
+                          {isUstaGorev(p.gorev) ? ' · USTA' : ''} • {geldiGun} gün
                           {mesaiSaat > 0 && ` • ${mesaiSaat} sa mesai`}
                         </span>
                         <span className="text-[8px] text-slate-800 block">
@@ -1691,6 +1863,116 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
           </div>
         </div>
       </div>
+
+      {showUstaListeModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/50">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
+            <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-black text-slate-900 uppercase tracking-wide">
+                  Ustalı / Ustasız Personel — {donemLabel}
+                </h3>
+                <p className="text-[11px] text-slate-500 mt-0.5">
+                  Aktif hakediş listesi (çıkarılanlar hariç) · Ustalı {ustaliRows.length} · Ustasız{' '}
+                  {ustasizRows.length}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowUstaListeModal(false)}
+                className="p-2 rounded-xl bg-slate-100 text-slate-600 hover:bg-slate-200 cursor-pointer"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-0 divide-y md:divide-y-0 md:divide-x divide-slate-100 overflow-y-auto flex-1">
+              <div className="p-4 space-y-2">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-[11px] font-black uppercase text-amber-800 tracking-wider">
+                    Ustalı ({ustaliRows.length})
+                  </h4>
+                  <span className="text-[10px] font-mono font-bold text-emerald-700">
+                    ZER {formatMoney(summarizeRows(ustaliRows).zer, 0)}
+                  </span>
+                </div>
+                {ustaliRows.length === 0 ? (
+                  <p className="text-[11px] text-slate-400 italic">Usta görevli personel yok.</p>
+                ) : (
+                  ustaliRows.map((r) => (
+                    <div
+                      key={r.personel.id}
+                      className="flex justify-between gap-2 p-2 rounded-xl bg-amber-50/80 border border-amber-100"
+                    >
+                      <div>
+                        <p className="text-xs font-bold text-slate-800">
+                          {r.personel.ad} {r.personel.soyad}
+                        </p>
+                        <p className="text-[9px] text-slate-500 uppercase font-semibold">
+                          {normalizeGorev(r.personel.gorev)} · {r.geldiGun} gün
+                          {r.mesaiSaat > 0 ? ` · ${r.mesaiSaat} sa` : ''}
+                        </p>
+                      </div>
+                      <span className="text-[10px] font-bold text-emerald-700 whitespace-nowrap">
+                        {formatMoney(r.zerYapiHakedis, 0)}
+                      </span>
+                    </div>
+                  ))
+                )}
+              </div>
+              <div className="p-4 space-y-2">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-[11px] font-black uppercase text-slate-700 tracking-wider">
+                    Ustasız ({ustasizRows.length})
+                  </h4>
+                  <span className="text-[10px] font-mono font-bold text-emerald-700">
+                    ZER {formatMoney(summarizeRows(ustasizRows).zer, 0)}
+                  </span>
+                </div>
+                {ustasizRows.length === 0 ? (
+                  <p className="text-[11px] text-slate-400 italic">Ustasız personel yok.</p>
+                ) : (
+                  ustasizRows.map((r) => (
+                    <div
+                      key={r.personel.id}
+                      className="flex justify-between gap-2 p-2 rounded-xl bg-slate-50 border border-slate-100"
+                    >
+                      <div>
+                        <p className="text-xs font-bold text-slate-800">
+                          {r.personel.ad} {r.personel.soyad}
+                        </p>
+                        <p className="text-[9px] text-slate-500 uppercase font-semibold">
+                          {normalizeGorev(r.personel.gorev)} · {r.geldiGun} gün
+                          {r.mesaiSaat > 0 ? ` · ${r.mesaiSaat} sa` : ''}
+                        </p>
+                      </div>
+                      <span className="text-[10px] font-bold text-emerald-700 whitespace-nowrap">
+                        {formatMoney(r.zerYapiHakedis, 0)}
+                      </span>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+            <div className="px-5 py-3 border-t border-slate-100 flex flex-wrap gap-2 justify-end">
+              <button
+                type="button"
+                onClick={() => void handleUstaUstasizRaporlar()}
+                disabled={downloadingReport}
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-[11px] font-bold bg-amber-500 text-slate-950 cursor-pointer disabled:opacity-60"
+              >
+                <FileSpreadsheet size={12} /> 2 Rapor Üret
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowUstaListeModal(false)}
+                className="px-4 py-2 rounded-xl text-[11px] font-bold bg-slate-900 text-white cursor-pointer"
+              >
+                Kapat
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
