@@ -24,7 +24,7 @@ import { applySahaMesaiToYoklama, normalizeMesaiHours } from '../lib/sahaFaaliye
 import { ensureSahaFaaliyetFotolarPersisted } from '../lib/sahaFaaliyetFotoStorage';
 import { isOperatorGorev, isSoforGorev, getYoklamaDay, setYoklamaDay } from '../lib/yoklamaUtils';
 import { resolveGeldiRolPersonelIds, type MobilRolEtiket } from '../lib/mobilRolEtiketUtils';
-import { getTaseronCariKartlar, buildOperatorIsKaydiEtiketi } from '../lib/taseronUtils';
+import { getTaseronCariKartlar, buildOperatorIsKaydiEtiketi, isIsMakinesiArac } from '../lib/taseronUtils';
 import { assertErpWriteAuth, formatFirestoreWriteError } from '../lib/authWriteGuard';
 import { PARSEL_BLOK_MAP, PARSEL_LIST, defaultBlokForParsel } from '../data/parselBlokMap';
 import { KampGunlukYoklamaTab } from './KampGunlukYoklamaTab';
@@ -155,15 +155,7 @@ export const RolMobilFaaliyetYoklamaPanel: React.FC<RolMobilFaaliyetYoklamaPanel
   const taseronCariler = useMemo(() => getTaseronCariKartlar(cariKartlar), [cariKartlar]);
 
   const ismakineAraclari = useMemo(
-    () =>
-      araclar.filter(
-        (a) =>
-          a.tur === 'İŞ MAKİNESİ' ||
-          a.markaModel?.toLowerCase().includes('excavator') ||
-          a.markaModel?.toLowerCase().includes('jcb') ||
-          a.markaModel?.toLowerCase().includes('kato') ||
-          a.plaka?.toLowerCase().includes('exc')
-      ),
+    () => araclar.filter((a) => isIsMakinesiArac(a as any)),
     [araclar]
   );
 

@@ -294,6 +294,45 @@ export function makineKaynakGrupLabel(g: MakineKaynakGrup): string {
   return g === 'KIRALIK' ? 'Kiralık Makine' : 'Ana Firma Makinesi';
 }
 
+/** Demirbaş envanterindeki iş makinelerini operatör seçim listesine almak için */
+export function isIsMakinesiArac(a: {
+  aracTipi?: string | null;
+  tur?: string | null;
+  markaModel?: string | null;
+  plaka?: string | null;
+  durum?: string | null;
+}): boolean {
+  if (String(a.durum || '').toLocaleUpperCase('tr-TR') === 'PASIF') return false;
+
+  // IdariScreen kaydı: aracTipi = 'IS_MAKINESI' (eski filtre yanlışlıkla tur === 'İŞ MAKİNESİ' arıyordu)
+  const tip = String(a.aracTipi || a.tur || '')
+    .trim()
+    .toLocaleUpperCase('tr-TR')
+    .replace(/İ/g, 'I')
+    .replace(/Ş/g, 'S')
+    .replace(/Ğ/g, 'G')
+    .replace(/Ü/g, 'U')
+    .replace(/Ö/g, 'O')
+    .replace(/Ç/g, 'C')
+    .replace(/[\s-]+/g, '_');
+  if (tip === 'IS_MAKINESI' || tip.includes('IS_MAKINE')) return true;
+
+  const blob = `${a.markaModel || ''} ${a.plaka || ''}`.toLocaleLowerCase('tr-TR');
+  return (
+    blob.includes('jcb') ||
+    blob.includes('kato') ||
+    blob.includes('excavator') ||
+    blob.includes('ekskavat') ||
+    blob.includes('iş makinesi') ||
+    blob.includes('is makinesi') ||
+    blob.includes('dozer') ||
+    blob.includes('loder') ||
+    blob.includes('loader') ||
+    blob.includes('exc') ||
+    blob.includes('eks')
+  );
+}
+
 /**
  * İş kaydı etiketi — örn. "Demirbaş JCB makinesi iş kaydı"
  * Makine kaynağı (Demirbaş/Kiralık/Elle) + makine tipi etiketi (JCB/KATO/…) birleşir.

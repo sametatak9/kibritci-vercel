@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { HardHat, Clock, Calendar, Building2, Camera, Save, Search, FileText, Trash2, CreditCard as Edit3, CircleCheck as CheckCircle, X, ChevronDown, ChevronUp, Truck, TriangleAlert as AlertTriangle, Download, Mail, ListFilter as Filter, Plus, Printer } from 'lucide-react';
 import { AracBakim, AylikYoklamaMap, CariKart, CariKartIslem, OperatorFaaliyet, TaseronKesintiRaporu, Personel } from '../types/erp';
 import { compressImage } from '../lib/imageCompress';
-import { getTaseronCariKartlar, buildOperatorIsKaydiEtiketi, makineEtiketi, cariIslemIdForOperatorFaaliyet, resolveMakineKaynakGrup, makineKaynakGrupLabel } from '../lib/taseronUtils';
+import { getTaseronCariKartlar, buildOperatorIsKaydiEtiketi, makineEtiketi, cariIslemIdForOperatorFaaliyet, resolveMakineKaynakGrup, makineKaynakGrupLabel, isIsMakinesiArac } from '../lib/taseronUtils';
 import { indirIsMakinesiRaporu } from '../lib/taseronReportUtils';
 import { kibritciLogoHtml } from '../lib/kibritciBrand';
 import { isOperatorGorev } from '../lib/yoklamaUtils';
@@ -94,15 +94,10 @@ export const OperatorScreen: React.FC<OperatorScreenProps> = ({
     });
   }, [makineKaynak, operatorTipi, makineManuelAd, selectedAracId, araclar]);
 
-  const ismakineAraclari = useMemo(() => {
-    return araclar.filter(a =>
-      a.tur === 'İŞ MAKİNESİ' ||
-      a.markaModel?.toLowerCase().includes('excavator') ||
-      a.markaModel?.toLowerCase().includes('jcb') ||
-      a.markaModel?.toLowerCase().includes('kato') ||
-      a.plaka?.toLowerCase().includes('exc')
-    );
-  }, [araclar]);
+  const ismakineAraclari = useMemo(
+    () => araclar.filter((a) => isIsMakinesiArac(a as any)),
+    [araclar]
+  );
 
   const filteredFaaliyetler = useMemo(() => {
     let list = operatorFaaliyetleri;
