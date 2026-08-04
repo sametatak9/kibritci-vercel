@@ -1230,15 +1230,19 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
 
       const ayOdemeTablosu = bloklar
         .map(
-          (b, i) => `<tr style="background:${i % 2 ? '#f0fdfa' : '#fff'}">
+          (b, i) => {
+            const ayNetKar = b.kar.zarar - b.ozet.zer;
+            return `<tr style="background:${i % 2 ? '#f0fdfa' : '#fff'}">
           <td style="padding:8px;border-bottom:1px solid #ccfbf1;font-weight:800">${escHtml(b.label)}</td>
           <td style="padding:8px;border-bottom:1px solid #ccfbf1;text-align:center;font-family:Consolas,monospace">${b.ozet.kisi}</td>
           <td style="padding:8px;border-bottom:1px solid #ccfbf1;text-align:center;font-family:Consolas,monospace">${b.ozet.geldi}</td>
           <td style="padding:8px;border-bottom:1px solid #ccfbf1;text-align:center;font-family:Consolas,monospace">${b.ozet.mesai}</td>
-          <td style="padding:8px;border-bottom:1px solid #ccfbf1;text-align:right;font-family:Consolas,monospace;font-weight:900;color:#0f766e">${formatMoney(b.ozet.zer, 0)}</td>
-          <td style="padding:8px;border-bottom:1px solid #ccfbf1;text-align:right;font-family:Consolas,monospace;font-size:11px;color:#b91c1c">${formatMoney(b.kar.zarar, 0)}</td>
+          <td style="padding:8px;border-bottom:1px solid #ccfbf1;text-align:right;font-family:Consolas,monospace;font-size:11px;color:#047857">${formatMoney(b.kar.zarar, 0)}</td>
+          <td style="padding:8px;border-bottom:1px solid #ccfbf1;text-align:right;font-family:Consolas,monospace;font-weight:900;color:#b91c1c">${formatMoney(b.ozet.zer, 0)}</td>
+          <td style="padding:8px;border-bottom:1px solid #ccfbf1;text-align:right;font-family:Consolas,monospace;font-weight:900;color:#047857">${formatMoney(ayNetKar, 0)}</td>
           <td style="padding:8px;border-bottom:1px solid #ccfbf1;text-align:center;font-size:11px;color:#64748b">${b.saha.length} saha · ${b.kamp.length} kamp</td>
-        </tr>`
+        </tr>`;
+          }
         )
         .join('');
 
@@ -1283,6 +1287,7 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
             )
             .join('');
 
+          const ayNetKar = b.kar.zarar - b.ozet.zer;
           return `
             <section style="margin:22px 0;page-break-inside:avoid">
               <div style="display:flex;flex-wrap:wrap;justify-content:space-between;gap:8px;align-items:center;margin-bottom:10px;padding:10px 12px;border-radius:12px;background:linear-gradient(135deg,#ecfdf5,#f0fdfa);border:1px solid #99f6e4">
@@ -1291,9 +1296,24 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
                   <div style="font-size:16px;font-weight:900;color:#134e4a">${escHtml(b.label)}</div>
                 </div>
                 <div style="text-align:right">
-                  <div style="font-size:10px;font-weight:800;color:#64748b;text-transform:uppercase">Ay ödemesi</div>
-                  <div style="font-size:18px;font-weight:900;color:#0f766e;font-family:Consolas,monospace">${formatMoney(b.ozet.zer, 0)}</div>
+                  <div style="font-size:10px;font-weight:800;color:#64748b;text-transform:uppercase">ZER ödeneği</div>
+                  <div style="font-size:18px;font-weight:900;color:#b91c1c;font-family:Consolas,monospace">${formatMoney(b.ozet.zer, 0)}</div>
                   <div style="font-size:10px;color:#64748b">${b.ozet.kisi} kişi · ${b.ozet.geldi} gün × ₺${ZER_YAPI_GUNLUK}</div>
+                </div>
+              </div>
+
+              <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-bottom:10px">
+                <div style="border:1px solid #e2e8f0;border-radius:10px;padding:8px;text-align:center;background:#fff">
+                  <div style="font-size:9px;font-weight:800;color:#64748b;text-transform:uppercase">+6.000 farkı</div>
+                  <div style="font-size:14px;font-weight:900;font-family:Consolas,monospace">${formatMoney(b.kar.zarar, 0)}</div>
+                </div>
+                <div style="border:1px solid #fecaca;border-radius:10px;padding:8px;text-align:center;background:#fef2f2">
+                  <div style="font-size:9px;font-weight:800;color:#b91c1c;text-transform:uppercase">− ZER ödeneği</div>
+                  <div style="font-size:14px;font-weight:900;font-family:Consolas,monospace;color:#b91c1c">${formatMoney(b.ozet.zer, 0)}</div>
+                </div>
+                <div style="border:2px solid #86efac;border-radius:10px;padding:8px;text-align:center;background:#ecfdf5">
+                  <div style="font-size:9px;font-weight:800;color:#047857;text-transform:uppercase">Net şirket karı</div>
+                  <div style="font-size:14px;font-weight:900;font-family:Consolas,monospace;color:#047857">${formatMoney(ayNetKar, 0)}</div>
                 </div>
               </div>
 
@@ -1362,8 +1382,9 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
             Seçilen dönem: <strong>${escHtml(donemAralik)} ${topluAyYil}</strong>
           </p>
           <p style="margin:6px 0 0;font-size:12px;color:#64748b;line-height:1.45">
-            Formül: geldi gün × ₺${ZER_YAPI_GUNLUK}. Bu rapor tahsilat / ödeme için ustasız personeli kapsar;
-            her ayın saha kayıtları ve ay ödemesi ayrıca listelenir.
+            ZER ödeneği: geldi gün × ₺${ZER_YAPI_GUNLUK}. Net şirket karı:
+            <strong>(+₺${TABAN_FARK_TL.toLocaleString('tr-TR')} fark) − (ZER ödeneği)</strong>.
+            Her ayın saha kayıtları ve net karı ayrıca listelenir.
           </p>
         </div>
 
@@ -1373,30 +1394,33 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
             <div style="font-size:20px;font-weight:900;margin-top:4px;color:#b45309;font-family:Consolas,monospace">${formatMoney(ustaliZer, 0)}</div>
             <div style="font-size:10px;color:#92400e;margin-top:4px">max ${ustaliKisiMax} kişi/ay · ${ustaliGun} iş-günü</div>
           </div>
-          <div style="border:2px solid #99f6e4;border-radius:12px;padding:12px;background:#ecfdf5">
-            <div style="font-size:10px;font-weight:900;color:#0f766e;text-transform:uppercase">Ustasız ZER tahsilat</div>
-            <div style="font-size:20px;font-weight:900;margin-top:4px;color:#0f766e;font-family:Consolas,monospace">${formatMoney(genelZer, 0)}</div>
-            <div style="font-size:10px;color:#0f766e;margin-top:4px">${bloklar.length} ay · ${genelGun} iş-günü × ₺${ZER_YAPI_GUNLUK}</div>
+          <div style="border:2px solid #fecaca;border-radius:12px;padding:12px;background:#fef2f2">
+            <div style="font-size:10px;font-weight:900;color:#b91c1c;text-transform:uppercase">Ustasız ZER ödeneği (−)</div>
+            <div style="font-size:20px;font-weight:900;margin-top:4px;color:#b91c1c;font-family:Consolas,monospace">${formatMoney(genelZer, 0)}</div>
+            <div style="font-size:10px;color:#9a3412;margin-top:4px">${bloklar.length} ay · ${genelGun} iş-günü × ₺${ZER_YAPI_GUNLUK} · kardan düşülür</div>
           </div>
         </div>
 
         <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:16px">
           <div style="border:1px solid #e2e8f0;border-radius:12px;padding:12px;background:#fff;text-align:center">
-            <div style="font-size:10px;font-weight:800;color:#64748b;text-transform:uppercase">Ay sayısı</div>
-            <div style="font-size:20px;font-weight:900;margin-top:4px">${bloklar.length}</div>
-          </div>
-          <div style="border:1px solid #e2e8f0;border-radius:12px;padding:12px;background:#fff;text-align:center">
-            <div style="font-size:10px;font-weight:800;color:#64748b;text-transform:uppercase">Şu an ödenen (maaş)</div>
-            <div style="font-size:16px;font-weight:900;margin-top:4px;font-family:Consolas,monospace">${formatMoney(genelMevcut, 0)}</div>
+            <div style="font-size:10px;font-weight:800;color:#64748b;text-transform:uppercase">+6.000 farkı</div>
+            <div style="font-size:18px;font-weight:900;margin-top:4px;font-family:Consolas,monospace">${formatMoney(genelKar, 0)}</div>
+            <div style="font-size:9px;color:#64748b;margin-top:3px">${bloklar.length} ay · kaçınılan fazla maaş</div>
           </div>
           <div style="border:1px solid #fecaca;border-radius:12px;padding:12px;background:#fef2f2;text-align:center">
-            <div style="font-size:10px;font-weight:800;color:#b91c1c;text-transform:uppercase">+6.000 olsaydı</div>
-            <div style="font-size:16px;font-weight:900;margin-top:4px;font-family:Consolas,monospace;color:#b91c1c">${formatMoney(genelSenaryo, 0)}</div>
+            <div style="font-size:10px;font-weight:800;color:#b91c1c;text-transform:uppercase">− ZER ödeneği</div>
+            <div style="font-size:18px;font-weight:900;margin-top:4px;font-family:Consolas,monospace;color:#b91c1c">${formatMoney(genelZer, 0)}</div>
+            <div style="font-size:9px;color:#9a3412;margin-top:3px">Şirket öder</div>
           </div>
           <div style="border:2px solid #86efac;border-radius:12px;padding:12px;background:#ecfdf5;text-align:center">
             <div style="font-size:10px;font-weight:800;color:#047857;text-transform:uppercase">Net şirket karı</div>
-            <div style="font-size:18px;font-weight:900;margin-top:4px;font-family:Consolas,monospace;color:#047857">${formatMoney(genelProjeYarari, 0)}</div>
-            <div style="font-size:9px;color:#065f46;margin-top:3px">${formatMoney(genelKar, 0)} − ZER ${formatMoney(genelZer, 0)}</div>
+            <div style="font-size:20px;font-weight:900;margin-top:4px;font-family:Consolas,monospace;color:#047857">${formatMoney(genelProjeYarari, 0)}</div>
+            <div style="font-size:9px;color:#065f46;margin-top:3px">${formatMoney(genelKar, 0)} − ${formatMoney(genelZer, 0)}</div>
+          </div>
+          <div style="border:1px solid #e2e8f0;border-radius:12px;padding:12px;background:#fff;text-align:center">
+            <div style="font-size:10px;font-weight:800;color:#64748b;text-transform:uppercase">Şu an maaş / +6.000</div>
+            <div style="font-size:13px;font-weight:900;margin-top:4px;font-family:Consolas,monospace">${formatMoney(genelMevcut, 0)}</div>
+            <div style="font-size:11px;font-weight:800;color:#b91c1c;margin-top:2px;font-family:Consolas,monospace">${formatMoney(genelSenaryo, 0)}</div>
           </div>
         </div>
 
@@ -1417,7 +1441,7 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
         </div>
 
         <h3 style="margin:0 0 8px;font-size:12px;font-weight:900;text-transform:uppercase;color:#0f766e;letter-spacing:.04em">
-          Ay bazlı ödeme özeti
+          Ay bazlı ödeme ve net kar özeti
         </h3>
         <table style="width:100%;border-collapse:collapse;border:1px solid #99f6e4;border-radius:12px;overflow:hidden;margin-bottom:8px">
           <thead>
@@ -1426,8 +1450,9 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
               <th style="padding:8px;text-align:center">Kişi</th>
               <th style="padding:8px;text-align:center">Gün</th>
               <th style="padding:8px;text-align:center">Mesai</th>
-              <th style="padding:8px;text-align:right">Ay ödemesi (ZER)</th>
-              <th style="padding:8px;text-align:right">+6.000 kar</th>
+              <th style="padding:8px;text-align:right">+6.000 fark</th>
+              <th style="padding:8px;text-align:right">− ZER ödeneği</th>
+              <th style="padding:8px;text-align:right">Net kar</th>
               <th style="padding:8px;text-align:center">Saha / Kamp</th>
             </tr>
           </thead>
@@ -1437,19 +1462,19 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
               <td style="padding:10px 8px" colspan="2">GENEL TOPLAM</td>
               <td style="padding:10px 8px;text-align:center;font-family:Consolas,monospace">${genelGun}</td>
               <td style="padding:10px 8px;text-align:center">—</td>
-              <td style="padding:10px 8px;text-align:right;font-family:Consolas,monospace;font-size:14px">${formatMoney(genelZer, 0)}</td>
-              <td style="padding:10px 8px;text-align:right;font-family:Consolas,monospace;font-size:14px">${formatMoney(genelKar, 0)}</td>
+              <td style="padding:10px 8px;text-align:right;font-family:Consolas,monospace;font-size:13px">${formatMoney(genelKar, 0)}</td>
+              <td style="padding:10px 8px;text-align:right;font-family:Consolas,monospace;font-size:13px;color:#fecaca">${formatMoney(genelZer, 0)}</td>
+              <td style="padding:10px 8px;text-align:right;font-family:Consolas,monospace;font-size:14px">${formatMoney(genelProjeYarari, 0)}</td>
               <td style="padding:10px 8px;text-align:center;font-size:11px">max ${genelKisiMax} kişi/ay</td>
             </tr>
           </tfoot>
         </table>
         <p style="margin:0 0 14px;font-size:11px;color:#64748b">
-          Genel ZER toplam = seçilen ayların ustasız hakedişleri (${genelGun} gün × ₺${ZER_YAPI_GUNLUK}).
-          +6.000 kar = taban +₺${TABAN_FARK_TL.toLocaleString('tr-TR')} olsaydı yapılacak fazla maaş ödemesi.
+          Formül: (+₺${TABAN_FARK_TL.toLocaleString('tr-TR')} taban farkı) − (ZER ödeneği = ${genelGun} gün × ₺${ZER_YAPI_GUNLUK}) = net şirket karı.
         </p>
 
         <h3 style="margin:0 0 8px;font-size:12px;font-weight:900;text-transform:uppercase;color:#c2410c;letter-spacing:.04em">
-          Ay bazlı kar / fayda detayı
+          Ay bazlı maaş / net kar detayı
         </h3>
         <table style="width:100%;border-collapse:collapse;border:1px solid #fed7aa;border-radius:12px;overflow:hidden;margin-bottom:16px">
           <thead>
