@@ -982,8 +982,8 @@ export const TaseronKesintiScreen: React.FC<TaseronKesintiScreenProps> = ({
                       İş Makinesi İcmali · {ayAdi(selectedAy)} {selectedYil}
                     </h3>
                     <p className="text-[10px] text-slate-500 mt-1 max-w-2xl">
-                      Firma satırları × makine tipi kolonları. Operatör faaliyetleri ve kesinti
-                      raporlarındaki saatler buraya düşer. Dönemi aşağıdan seçin (örn. Temmuz).
+                      Firma satırları × makine tipi kolonları. HTML/Yazdır raporunda önce özet icmal,
+                      ardından her firmanın kayıt kayıt kesinti açıklamaları (tarih, makine, süre, iş) yer alır.
                     </p>
                     <div className="mt-3 flex flex-wrap gap-2 items-end">
                       <label className="block space-y-1">
