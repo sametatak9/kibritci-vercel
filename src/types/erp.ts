@@ -321,6 +321,13 @@ export interface OperatorSahaFaaliyet {
   taseronFirmaId?: string;
   taseronFirmaAdi?: string;
   bagliOperatorFaaliyetId?: string;
+  /** İş makinesi */
+  aracId?: string;
+  aracPlaka?: string;
+  makineKaynak?: 'DEMIRBAS' | 'KIRALIK' | 'MANUEL';
+  makineManuelAd?: string;
+  operatorTipi?: 'JCB' | 'KATO' | 'KİRALIK' | 'DİĞER' | string;
+  isKaydiEtiketi?: string;
 }
 
 export interface FaturaItem {

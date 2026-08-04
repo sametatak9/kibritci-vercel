@@ -68,6 +68,9 @@ export function soforToSaha(f: SoforSahaFaaliyet): SahaFaaliyeti {
 }
 
 export function operatorToSaha(f: OperatorSahaFaaliyet): SahaFaaliyeti {
+  const makine =
+    f.isKaydiEtiketi ||
+    [f.aracPlaka, f.makineManuelAd, f.operatorTipi].filter(Boolean).join(' · ');
   return {
     id: f.id,
     personelId: f.aktifPersonelListesi?.[0] || '',
@@ -75,7 +78,7 @@ export function operatorToSaha(f: OperatorSahaFaaliyet): SahaFaaliyeti {
     isNiteligi: f.isNiteligi || 'Operatör / iş makinesi faaliyeti',
     parsel: f.parsel || '',
     blok: f.blok || '',
-    aciklama: f.aciklama || '',
+    aciklama: makine ? `${f.aciklama || ''}${f.aciklama ? ' · ' : ''}${makine}`.trim() : f.aciklama || '',
     fotoUrl: f.fotoUrl || undefined,
     fotoUrls: f.fotoUrls,
     aktifPersonelListesi: f.aktifPersonelListesi,
@@ -84,5 +87,6 @@ export function operatorToSaha(f: OperatorSahaFaaliyet): SahaFaaliyeti {
     kaynakEkran: 'OPERATOR_MOBIL',
     kaydeden: f.kaydeden,
     durum: f.durum,
+    isEtiketi: makine || undefined,
   } as SahaFaaliyeti;
 }

@@ -500,6 +500,7 @@ export const OperatorScreen: React.FC<OperatorScreenProps> = ({
             rol="OPERATOR"
             personeller={personeller}
             cariKartlar={cariKartlar}
+            araclar={araclar}
             yoklamalar={yoklamalar}
             setYoklamalar={setYoklamalar}
             saveYoklamalarNow={saveYoklamalarNow}

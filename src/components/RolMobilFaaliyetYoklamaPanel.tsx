@@ -16,7 +16,7 @@ import {
   HardHat,
 } from 'lucide-react';
 import { collection, deleteDoc, doc, onSnapshot, setDoc } from 'firebase/firestore';
-import { AylikYoklamaMap, CariKart, Personel, SoforSahaFaaliyet, OperatorSahaFaaliyet } from '../types/erp';
+import { AylikYoklamaMap, AracBakim, CariKart, Personel, SoforSahaFaaliyet, OperatorSahaFaaliyet } from '../types/erp';
 import { db, cleanUndefined } from '../lib/firebase';
 import { compressImage } from '../lib/imageCompress';
 import { todayDateKey, formatDateLabelTr, normalizeDateKey } from '../lib/dateKeyUtils';
@@ -24,7 +24,7 @@ import { applySahaMesaiToYoklama, normalizeMesaiHours } from '../lib/sahaFaaliye
 import { ensureSahaFaaliyetFotolarPersisted } from '../lib/sahaFaaliyetFotoStorage';
 import { isOperatorGorev, isSoforGorev, getYoklamaDay, setYoklamaDay } from '../lib/yoklamaUtils';
 import { resolveGeldiRolPersonelIds, type MobilRolEtiket } from '../lib/mobilRolEtiketUtils';
-import { getTaseronCariKartlar } from '../lib/taseronUtils';
+import { getTaseronCariKartlar, buildOperatorIsKaydiEtiketi } from '../lib/taseronUtils';
 import { formatFirestoreWriteError } from '../lib/authWriteGuard';
 import { PARSEL_BLOK_MAP, PARSEL_LIST, defaultBlokForParsel } from '../data/parselBlokMap';
 import { KampGunlukYoklamaTab } from './KampGunlukYoklamaTab';
@@ -58,6 +58,8 @@ interface RolMobilFaaliyetYoklamaPanelProps {
   rol: Rol;
   personeller: Personel[];
   cariKartlar?: CariKart[];
+  /** Operatör saha faaliyetinde iş makinesi seçimi için */
+  araclar?: AracBakim[];
   yoklamalar?: AylikYoklamaMap;
   setYoklamalar?: (updater: AylikYoklamaMap | ((y: AylikYoklamaMap) => AylikYoklamaMap)) => void;
   saveYoklamalarNow?: (next: AylikYoklamaMap) => Promise<void>;
@@ -72,6 +74,7 @@ export const RolMobilFaaliyetYoklamaPanel: React.FC<RolMobilFaaliyetYoklamaPanel
   rol,
   personeller,
   cariKartlar = [],
+  araclar = [],
   yoklamalar = {},
   setYoklamalar,
   saveYoklamalarNow,
@@ -116,6 +119,10 @@ export const RolMobilFaaliyetYoklamaPanel: React.FC<RolMobilFaaliyetYoklamaPanel
   const [editingFaaliyetId, setEditingFaaliyetId] = useState<string | null>(null);
   const [taseronKesintiAcik, setTaseronKesintiAcik] = useState(false);
   const [taseronCariId, setTaseronCariId] = useState('');
+  const [makineKaynak, setMakineKaynak] = useState<'DEMIRBAS' | 'KIRALIK' | 'MANUEL'>('DEMIRBAS');
+  const [selectedAracId, setSelectedAracId] = useState('');
+  const [makineManuelAd, setMakineManuelAd] = useState('');
+  const [operatorTipi, setOperatorTipi] = useState<'JCB' | 'KATO' | 'KİRALIK' | 'DİĞER'>('JCB');
 
   useEffect(() => {
     const unsub = onSnapshot(
@@ -143,6 +150,29 @@ export const RolMobilFaaliyetYoklamaPanel: React.FC<RolMobilFaaliyetYoklamaPanel
   );
 
   const taseronCariler = useMemo(() => getTaseronCariKartlar(cariKartlar), [cariKartlar]);
+
+  const ismakineAraclari = useMemo(
+    () =>
+      araclar.filter(
+        (a) =>
+          a.tur === 'İŞ MAKİNESİ' ||
+          a.markaModel?.toLowerCase().includes('excavator') ||
+          a.markaModel?.toLowerCase().includes('jcb') ||
+          a.markaModel?.toLowerCase().includes('kato') ||
+          a.plaka?.toLowerCase().includes('exc')
+      ),
+    [araclar]
+  );
+
+  const canliMakineEtiketi = useMemo(() => {
+    const arac = araclar.find((a) => a.id === selectedAracId);
+    return buildOperatorIsKaydiEtiketi({
+      makineKaynak,
+      operatorTipi,
+      makineManuelAd: makineKaynak === 'MANUEL' ? makineManuelAd : undefined,
+      aracPlaka: makineKaynak === 'MANUEL' ? makineManuelAd : arac?.plaka,
+    });
+  }, [makineKaynak, operatorTipi, makineManuelAd, selectedAracId, araclar]);
 
   const gunlukFaaliyetler = useMemo(
     () => faaliyetler.filter((f) => normalizeDateKey(f.tarih) === normalizeDateKey(faaliyetTarih)),
@@ -180,6 +210,10 @@ export const RolMobilFaaliyetYoklamaPanel: React.FC<RolMobilFaaliyetYoklamaPanel
     setPersonelMesaiSaatleri({});
     setTaseronKesintiAcik(false);
     setTaseronCariId('');
+    setMakineKaynak('DEMIRBAS');
+    setSelectedAracId('');
+    setMakineManuelAd('');
+    setOperatorTipi('JCB');
   };
 
   const syncMesai = async (
@@ -256,6 +290,37 @@ export const RolMobilFaaliyetYoklamaPanel: React.FC<RolMobilFaaliyetYoklamaPanel
         return;
       }
 
+      let makineFields: Partial<OperatorSahaFaaliyet> = {};
+      if (rol === 'OPERATOR') {
+        if (makineKaynak === 'MANUEL' && !makineManuelAd.trim()) {
+          showStatus('error', 'Manuel makine adı / plaka girin.');
+          setSavingFaaliyet(false);
+          return;
+        }
+        if (makineKaynak !== 'MANUEL' && !selectedAracId) {
+          showStatus('error', 'İş makinesi seçin (veya Manuel kaynak kullanın).');
+          setSavingFaaliyet(false);
+          return;
+        }
+        const arac = araclar.find((a) => a.id === selectedAracId);
+        const aracPlaka =
+          makineKaynak === 'MANUEL' ? makineManuelAd.trim() : arac?.plaka || makineManuelAd.trim();
+        const isKaydiEtiketi = buildOperatorIsKaydiEtiketi({
+          makineKaynak,
+          operatorTipi,
+          makineManuelAd: makineKaynak === 'MANUEL' ? makineManuelAd.trim() : undefined,
+          aracPlaka,
+        });
+        makineFields = {
+          aracId: makineKaynak === 'MANUEL' ? `manuel_${Date.now()}` : selectedAracId,
+          aracPlaka: aracPlaka || undefined,
+          makineKaynak,
+          makineManuelAd: makineKaynak === 'MANUEL' ? makineManuelAd.trim() : undefined,
+          operatorTipi,
+          isKaydiEtiketi,
+        };
+      }
+
       let aktifPersonelListesi: string[] = [];
       if (mesaiMap && Object.keys(mesaiMap).length > 0) {
         aktifPersonelListesi = Object.keys(mesaiMap);
@@ -307,11 +372,11 @@ export const RolMobilFaaliyetYoklamaPanel: React.FC<RolMobilFaaliyetYoklamaPanel
           doc(db, 'operatorFaaliyetleri', ofId),
           cleanUndefined({
             id: ofId,
-            aracId: 'mesai_saha',
-            aracPlaka: 'MESAİ SAHA',
+            aracId: makineFields.aracId || 'mesai_saha',
+            aracPlaka: makineFields.aracPlaka || 'MESAİ SAHA',
             operatorPersonelId: firstPid,
             operatorIsim: firstP ? `${firstP.ad} ${firstP.soyad}` : kaydedenEmail || 'Operatör',
-            operatorTipi: 'DİĞER',
+            operatorTipi: makineFields.operatorTipi || 'DİĞER',
             tarih: tarihKey,
             baslangicSaat: '17:00',
             bitisSaat: '17:00',
@@ -320,9 +385,9 @@ export const RolMobilFaaliyetYoklamaPanel: React.FC<RolMobilFaaliyetYoklamaPanel
             firmaAdi: taseronCari.unvan,
             firmaId: taseronCari.id,
             fotoUrl: kesintiFoto,
-            makineKaynak: 'MANUEL',
-            makineManuelAd: 'Mesai saha',
-            isKaydiEtiketi: 'Mesai taşeron kesinti',
+            makineKaynak: makineFields.makineKaynak || 'MANUEL',
+            makineManuelAd: makineFields.makineManuelAd || makineFields.aracPlaka || 'Mesai saha',
+            isKaydiEtiketi: makineFields.isKaydiEtiketi || 'Mesai taşeron kesinti',
             onayDurumu: 'BEKLEMEDE',
             durum: 'ONAY BEKLİYOR',
             kaydedenKullanici: kaydedenEmail,
@@ -355,6 +420,7 @@ export const RolMobilFaaliyetYoklamaPanel: React.FC<RolMobilFaaliyetYoklamaPanel
               taseronFirmaId: taseronKesintiAcik ? taseronCariId || null : null,
               taseronFirmaAdi: taseronKesintiAcik ? taseronCari?.unvan || null : null,
               bagliOperatorFaaliyetId: bagliOperatorFaaliyetId || null,
+              ...makineFields,
             }
           : {}),
       };
@@ -433,6 +499,14 @@ export const RolMobilFaaliyetYoklamaPanel: React.FC<RolMobilFaaliyetYoklamaPanel
     const of = f as OperatorSahaFaaliyet;
     setTaseronKesintiAcik(Boolean(of.taseronKesinti));
     setTaseronCariId(of.taseronFirmaId || '');
+    setMakineKaynak(of.makineKaynak || 'DEMIRBAS');
+    setSelectedAracId(of.makineKaynak === 'MANUEL' ? '' : of.aracId || '');
+    setMakineManuelAd(of.makineManuelAd || (of.makineKaynak === 'MANUEL' ? of.aracPlaka || '' : ''));
+    const tipRaw = String(of.operatorTipi || 'JCB').toLocaleUpperCase('tr-TR');
+    if (tipRaw.includes('KATO')) setOperatorTipi('KATO');
+    else if (tipRaw.includes('KİRAL') || tipRaw.includes('KIRAL')) setOperatorTipi('KİRALIK');
+    else if (tipRaw.includes('DİĞER') || tipRaw.includes('DIGER')) setOperatorTipi('DİĞER');
+    else setOperatorTipi('JCB');
     setActiveSubTab('faaliyet');
   };
 
@@ -612,6 +686,89 @@ export const RolMobilFaaliyetYoklamaPanel: React.FC<RolMobilFaaliyetYoklamaPanel
                 </label>
               </div>
 
+              {rol === 'OPERATOR' && (
+                <div className="space-y-2 rounded-xl border border-amber-200 bg-amber-50/60 p-3">
+                  <p className="text-[9px] font-black text-amber-900 uppercase tracking-wider">
+                    İş Makinesi *
+                  </p>
+                  <div className="grid grid-cols-3 gap-1.5">
+                    {(
+                      [
+                        ['DEMIRBAS', 'Demirbaş'],
+                        ['KIRALIK', 'Kiralık'],
+                        ['MANUEL', 'Manuel'],
+                      ] as const
+                    ).map(([k, label]) => (
+                      <button
+                        key={k}
+                        type="button"
+                        onClick={() => setMakineKaynak(k)}
+                        className={`py-1.5 rounded-lg border text-[9px] font-bold cursor-pointer ${
+                          makineKaynak === k
+                            ? 'bg-slate-900 text-white border-slate-900'
+                            : 'bg-white border-amber-200 text-slate-600'
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                  {makineKaynak === 'MANUEL' ? (
+                    <input
+                      value={makineManuelAd}
+                      onChange={(e) => setMakineManuelAd(e.target.value)}
+                      placeholder="Makine adı / plaka (elle)"
+                      className="w-full bg-white border border-amber-200 rounded-xl px-3 py-2 font-bold text-[11px]"
+                    />
+                  ) : (
+                    <select
+                      value={selectedAracId}
+                      onChange={(e) => {
+                        const id = e.target.value;
+                        setSelectedAracId(id);
+                        const arac = araclar.find((a) => a.id === id);
+                        const mm = `${arac?.markaModel || ''} ${arac?.plaka || ''}`.toLocaleLowerCase(
+                          'tr-TR'
+                        );
+                        if (mm.includes('jcb')) setOperatorTipi('JCB');
+                        else if (mm.includes('kato')) setOperatorTipi('KATO');
+                      }}
+                      className="w-full bg-white border border-amber-200 rounded-xl px-3 py-2 font-bold text-[11px]"
+                    >
+                      <option value="">İş makinesi seçiniz</option>
+                      {ismakineAraclari.length === 0 ? (
+                        <option value="" disabled>
+                          Kayıtlı iş makinesi yok — Manuel deneyin
+                        </option>
+                      ) : (
+                        ismakineAraclari.map((a) => (
+                          <option key={a.id} value={a.id}>
+                            {a.plaka} — {a.markaModel}
+                          </option>
+                        ))
+                      )}
+                    </select>
+                  )}
+                  <div className="grid grid-cols-4 gap-1.5">
+                    {(['JCB', 'KATO', 'KİRALIK', 'DİĞER'] as const).map((tip) => (
+                      <button
+                        key={tip}
+                        type="button"
+                        onClick={() => setOperatorTipi(tip)}
+                        className={`py-1.5 rounded-lg border text-[9px] font-bold uppercase cursor-pointer ${
+                          operatorTipi === tip
+                            ? 'bg-amber-500 text-slate-950 border-amber-500'
+                            : 'bg-white text-slate-500 border-amber-200'
+                        }`}
+                      >
+                        {tip}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="text-[10px] font-bold text-amber-950 leading-snug">{canliMakineEtiketi}</p>
+                </div>
+              )}
+
               <label className="block space-y-1">
                 <span className="text-[9px] font-black text-slate-500 uppercase">Açıklama *</span>
                 <textarea
@@ -759,6 +916,13 @@ export const RolMobilFaaliyetYoklamaPanel: React.FC<RolMobilFaaliyetYoklamaPanel
                                 : ''}
                           {(f as OperatorSahaFaaliyet).taseronKesinti ? ' · Taşeron kesinti' : ''}
                         </p>
+                        {(f as OperatorSahaFaaliyet).isKaydiEtiketi ||
+                        (f as OperatorSahaFaaliyet).aracPlaka ? (
+                          <p className="text-[9px] font-bold text-amber-800">
+                            {(f as OperatorSahaFaaliyet).isKaydiEtiketi ||
+                              (f as OperatorSahaFaaliyet).aracPlaka}
+                          </p>
+                        ) : null}
                       </div>
                       <div className="flex gap-1">
                         <button
