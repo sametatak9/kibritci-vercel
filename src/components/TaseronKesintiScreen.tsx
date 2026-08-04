@@ -149,7 +149,7 @@ export const TaseronKesintiScreen: React.FC<TaseronKesintiScreenProps> = ({
   );
   const [selectedLogIds, setSelectedLogIds] = useState<string[]>([]);
   /** İcmal: varsayılan yalnızca onaylı faaliyetler */
-  const [icmalOnlyOnayli, setIcmalOnlyOnayli] = useState(true);
+  const [icmalOnlyOnayli, setIcmalOnlyOnayli] = useState(false);
 
   useEffect(() => {
     const unsubKapi = onSnapshot(collection(db, 'guvenlikGirisCikisLoglari'), (snap) => {
@@ -222,8 +222,16 @@ export const TaseronKesintiScreen: React.FC<TaseronKesintiScreenProps> = ({
         ay: selectedAy,
         yil: selectedYil,
         onlyOnayli: icmalOnlyOnayli,
+        kesintiRaporlari: taseronKesintiRaporlari,
       }),
-    [operatorFaaliyetleri, cariKartlar, selectedAy, selectedYil, icmalOnlyOnayli]
+    [
+      operatorFaaliyetleri,
+      cariKartlar,
+      selectedAy,
+      selectedYil,
+      icmalOnlyOnayli,
+      taseronKesintiRaporlari,
+    ]
   );
 
   const mevcutEnerji = useMemo(
@@ -968,16 +976,61 @@ export const TaseronKesintiScreen: React.FC<TaseronKesintiScreenProps> = ({
             <div className="space-y-4">
               <div className="bg-white border border-amber-200 rounded-2xl p-5 space-y-3">
                 <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
+                  <div className="min-w-0 flex-1">
                     <h3 className="text-xs font-black uppercase text-slate-800 flex items-center gap-2">
                       <Table2 size={14} className="text-amber-600" />
                       İş Makinesi İcmali · {ayAdi(selectedAy)} {selectedYil}
                     </h3>
                     <p className="text-[10px] text-slate-500 mt-1 max-w-2xl">
-                      Yemek icmali gibi firma satırları × makine tipi kolonları. Operatör faaliyetlerinden
-                      dönem saatleri anlık toplanır; kesinti taslağına alınmış olsun olmasın burada günceldir.
-                      Yemek icmali ayrı sekmede ileride eklenecek.
+                      Firma satırları × makine tipi kolonları. Operatör faaliyetleri ve kesinti
+                      raporlarındaki saatler buraya düşer. Dönemi aşağıdan seçin (örn. Temmuz).
                     </p>
+                    <div className="mt-3 flex flex-wrap gap-2 items-end">
+                      <label className="block space-y-1">
+                        <span className="text-[9px] font-black uppercase text-amber-800">Dönem ay</span>
+                        <select
+                          value={selectedAy}
+                          onChange={(e) => setSelectedAy(Number(e.target.value))}
+                          className="block text-xs font-bold p-2.5 border-2 border-amber-300 bg-amber-50 rounded-xl min-w-[140px]"
+                        >
+                          {Array.from({ length: 12 }, (_, i) => (
+                            <option key={i + 1} value={i + 1}>
+                              {ayAdi(i + 1)}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="block space-y-1">
+                        <span className="text-[9px] font-black uppercase text-amber-800">Yıl</span>
+                        <select
+                          value={selectedYil}
+                          onChange={(e) => setSelectedYil(Number(e.target.value))}
+                          className="block text-xs font-bold p-2.5 border-2 border-amber-300 bg-amber-50 rounded-xl"
+                        >
+                          {[2024, 2025, 2026, 2027].map((y) => (
+                            <option key={y} value={y}>
+                              {y}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <div className="flex flex-wrap gap-1 pb-0.5">
+                        {[5, 6, 7, 8].map((ay) => (
+                          <button
+                            key={ay}
+                            type="button"
+                            onClick={() => setSelectedAy(ay)}
+                            className={`px-2.5 py-2 rounded-lg text-[10px] font-black cursor-pointer ${
+                              selectedAy === ay
+                                ? 'bg-amber-500 text-slate-950'
+                                : 'bg-white border border-amber-200 text-amber-900'
+                            }`}
+                          >
+                            {ayAdi(ay)}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
                   </div>
                   <div className="flex flex-wrap gap-2 items-center">
                     <label className="flex items-center gap-1.5 text-[10px] font-bold text-slate-600 cursor-pointer select-none">

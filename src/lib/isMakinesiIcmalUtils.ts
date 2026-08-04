@@ -50,15 +50,18 @@ function isOnayli(f: OperatorFaaliyet): boolean {
 }
 
 function faaliyetDonemde(f: OperatorFaaliyet, ay: number, yil: number): boolean {
-  const d = new Date(f.tarih);
+  const raw = String(f.tarih || '');
+  const m = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m) return Number(m[1]) === yil && Number(m[2]) === ay;
+  const d = new Date(raw);
   if (Number.isNaN(d.getTime())) return false;
   return d.getMonth() + 1 === ay && d.getFullYear() === yil;
 }
 
 /**
  * Dönemsel firma bazlı iş makinesi icmali.
- * Kaynak: operatör faaliyetleri (kesinti raporuna alınmış olsun/olmasın).
- * Varsayılan: yalnızca ONAYLANDI kayıtlar (canlı güncel icmal).
+ * Kaynak: operatör faaliyetleri + (opsiyonel) kesinti raporlarına gömülü faaliyetler.
+ * Varsayılan: yalnızca ONAYLANDI kayıtlar.
  */
 export function buildIsMakinesiIcmal(opts: {
   faaliyetler: OperatorFaaliyet[];
@@ -67,10 +70,19 @@ export function buildIsMakinesiIcmal(opts: {
   yil: number;
   /** false ise onay bekleyenler de dahil */
   onlyOnayli?: boolean;
+  /** Kesinti raporlarındaki gömülü faaliyetleri de birleştir (çift sayma yok) */
+  kesintiRaporlari?: Array<{
+    kesintiTipi?: string;
+    donemAy?: string;
+    donemYil?: string;
+    faaliyetler?: OperatorFaaliyet[];
+  }>;
 }): IsMakinesiIcmalOzet {
-  const { faaliyetler, cariKartlar, ay, yil, onlyOnayli = true } = opts;
+  const { faaliyetler, cariKartlar, ay, yil, onlyOnayli = true, kesintiRaporlari = [] } = opts;
   const cariler = getTaseronCariKartlar(cariKartlar);
   const byKey = new Map<string, IsMakinesiIcmalSatir>();
+  const ayStr = String(ay).padStart(2, '0');
+  const yilStr = String(yil);
 
   const resolveFirma = (f: OperatorFaaliyet) => {
     const ad = String(f.firmaAdi || '').trim() || 'Belirtilmemiş';
@@ -82,9 +94,36 @@ export function buildIsMakinesiIcmal(opts: {
     return { key, unvan, firmaId: cari?.id };
   };
 
+  /** id → faaliyet (canlı liste öncelikli) */
+  const byId = new Map<string, OperatorFaaliyet>();
+  let anon = 0;
   for (const f of faaliyetler) {
+    if (!f) continue;
+    const id = f.id || `__live_${anon++}`;
+    byId.set(id, f);
+  }
+  for (const r of kesintiRaporlari) {
+    if (r.kesintiTipi && r.kesintiTipi !== 'IS_MAKINESI') continue;
+    const raporDonemOk =
+      !r.donemAy || !r.donemYil || (r.donemAy === ayStr && r.donemYil === yilStr);
+    if (!raporDonemOk) continue;
+    for (const f of r.faaliyetler || []) {
+      if (!f) continue;
+      const id = f.id || `__rapor_${anon++}`;
+      if (byId.has(id)) continue;
+      // Rapora alınmış kayıt: dönem rapordan gelsin (tarih sapması olmasın)
+      byId.set(id, {
+        ...f,
+        tarih: f.tarih && faaliyetDonemde(f, ay, yil) ? f.tarih : `${yilStr}-${ayStr}-15`,
+        kesintiYansitildi: true,
+        onayDurumu: f.onayDurumu || 'ONAYLANDI',
+      });
+    }
+  }
+
+  for (const f of byId.values()) {
     if (!faaliyetDonemde(f, ay, yil)) continue;
-    const onayli = isOnayli(f);
+    const onayli = isOnayli(f) || Boolean(f.kesintiYansitildi);
     if (onlyOnayli && !onayli) continue;
 
     const saat = Number(f.calismaSuresi) || 0;
