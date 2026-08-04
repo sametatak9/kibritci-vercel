@@ -25,8 +25,12 @@ import { ensureSahaFaaliyetFotolarPersisted } from '../lib/sahaFaaliyetFotoStora
 import { isOperatorGorev, isSoforGorev, getYoklamaDay, setYoklamaDay } from '../lib/yoklamaUtils';
 import { resolveGeldiRolPersonelIds, type MobilRolEtiket } from '../lib/mobilRolEtiketUtils';
 import { getTaseronCariKartlar } from '../lib/taseronUtils';
+import { formatFirestoreWriteError } from '../lib/authWriteGuard';
 import { PARSEL_BLOK_MAP, PARSEL_LIST, defaultBlokForParsel } from '../data/parselBlokMap';
 import { KampGunlukYoklamaTab } from './KampGunlukYoklamaTab';
+
+/** Firestore tek doküman ~1MB; inline foto aşarsa kaydı düşürmemek için atlanır */
+const MAX_INLINE_FOTO_CHARS = 700_000;
 
 type Rol = 'SOFOR' | 'OPERATOR';
 type Kayit = SoforSahaFaaliyet | OperatorSahaFaaliyet;
@@ -114,12 +118,19 @@ export const RolMobilFaaliyetYoklamaPanel: React.FC<RolMobilFaaliyetYoklamaPanel
   const [taseronCariId, setTaseronCariId] = useState('');
 
   useEffect(() => {
-    const unsub = onSnapshot(collection(db, collectionName), (snap) => {
-      const list: Kayit[] = [];
-      snap.forEach((d) => list.push({ id: d.id, ...(d.data() as Omit<Kayit, 'id'>) }));
-      list.sort((a, b) => String(b.tarih).localeCompare(String(a.tarih)));
-      setFaaliyetler(list);
-    });
+    const unsub = onSnapshot(
+      collection(db, collectionName),
+      (snap) => {
+        const list: Kayit[] = [];
+        snap.forEach((d) => list.push({ id: d.id, ...(d.data() as Omit<Kayit, 'id'>) }));
+        list.sort((a, b) => String(b.tarih).localeCompare(String(a.tarih)));
+        setFaaliyetler(list);
+      },
+      (err) => {
+        console.error(`${collectionName} dinlenemedi:`, err);
+        showStatus('error', formatFirestoreWriteError(err, 'Faaliyet listesi okunamadı.'), 8000);
+      }
+    );
     return () => unsub();
   }, [collectionName]);
 
@@ -163,7 +174,7 @@ export const RolMobilFaaliyetYoklamaPanel: React.FC<RolMobilFaaliyetYoklamaPanel
     setIsNiteligi(isOptions[0]);
     setParsel(PARSEL_LIST[0] || 'GENEL SAHA');
     setBlok(defaultBlokForParsel(PARSEL_LIST[0] || 'GENEL SAHA'));
-    setFaaliyetTarih(todayDateKey());
+    // Seçili tarih KORUNUR — geçmiş güne kayıt sonrası liste boşalmasın / tarih kaybolmasın
     setAciklama('');
     setFotoUrl('');
     setPersonelMesaiSaatleri({});
@@ -211,6 +222,11 @@ export const RolMobilFaaliyetYoklamaPanel: React.FC<RolMobilFaaliyetYoklamaPanel
       showStatus('error', 'Açıklama zorunlu.');
       return;
     }
+    const tarihKey = normalizeDateKey(faaliyetTarih);
+    if (!tarihKey || !/^\d{4}-\d{2}-\d{2}$/.test(tarihKey)) {
+      showStatus('error', 'Geçerli bir tarih seçin.');
+      return;
+    }
     setSavingFaaliyet(true);
     showStatus('info', 'Kaydediliyor…', 0);
     try {
@@ -228,7 +244,7 @@ export const RolMobilFaaliyetYoklamaPanel: React.FC<RolMobilFaaliyetYoklamaPanel
             .filter(([, h]) => h > 0)
         );
         if (mesaiMap && Object.keys(mesaiMap).length === 0) {
-          showStatus('error', 'Mesaili faaliyet için en az bir personele saat girin.');
+          showStatus('error', 'Mesaili faaliyet için en az bir personele saat girin (0 olamaz).', 8000);
           setSavingFaaliyet(false);
           return;
         }
@@ -247,20 +263,31 @@ export const RolMobilFaaliyetYoklamaPanel: React.FC<RolMobilFaaliyetYoklamaPanel
         aktifPersonelListesi = resolveGeldiRolPersonelIds(
           personeller,
           yoklamalar,
-          normalizeDateKey(faaliyetTarih),
+          tarihKey,
           etiketRol,
           { ensureEmail: kaydedenEmail }
         );
       }
 
       let fotoPersisted = fotoUrl || '';
+      let fotoUyari = '';
       if (fotoPersisted.startsWith('data:')) {
-        const ensured = await ensureSahaFaaliyetFotolarPersisted({
-          id,
-          tarih: normalizeDateKey(faaliyetTarih),
-          fotoUrl: fotoPersisted,
-        } as any);
-        fotoPersisted = String(ensured.fotoUrl || fotoPersisted);
+        try {
+          const ensured = await ensureSahaFaaliyetFotolarPersisted({
+            id,
+            tarih: tarihKey,
+            fotoUrl: fotoPersisted,
+          } as any);
+          fotoPersisted = String(ensured.fotoUrl || fotoPersisted);
+        } catch (fotoErr) {
+          console.warn('Foto yükleme atlandı:', fotoErr);
+          fotoUyari = ' Fotoğraf yüklenemedi; kayıt fotosuz kaydedildi.';
+          fotoPersisted = '';
+        }
+      }
+      if (fotoPersisted.startsWith('data:') && fotoPersisted.length > MAX_INLINE_FOTO_CHARS) {
+        fotoUyari = ' Fotoğraf çok büyük olduğu için kayıtsız bırakıldı (Storage gerekli).';
+        fotoPersisted = '';
       }
 
       const taseronCari = taseronCariler.find((c) => c.id === taseronCariId);
@@ -274,6 +301,8 @@ export const RolMobilFaaliyetYoklamaPanel: React.FC<RolMobilFaaliyetYoklamaPanel
           : `of_mesai_${Date.now()}`;
         const firstPid = aktifPersonelListesi[0];
         const firstP = personeller.find((p) => p.id === firstPid);
+        const kesintiFoto =
+          fotoPersisted && !fotoPersisted.startsWith('data:') ? fotoPersisted : null;
         await setDoc(
           doc(db, 'operatorFaaliyetleri', ofId),
           cleanUndefined({
@@ -283,14 +312,14 @@ export const RolMobilFaaliyetYoklamaPanel: React.FC<RolMobilFaaliyetYoklamaPanel
             operatorPersonelId: firstPid,
             operatorIsim: firstP ? `${firstP.ad} ${firstP.soyad}` : kaydedenEmail || 'Operatör',
             operatorTipi: 'DİĞER',
-            tarih: normalizeDateKey(faaliyetTarih),
+            tarih: tarihKey,
             baslangicSaat: '17:00',
             bitisSaat: '17:00',
             calismaSuresi: Math.round(toplamSaat * 100) / 100,
             yapilanIs: `[Mesai kesinti] ${aciklama.trim()} · ${isNiteligi} (${parsel}/${blok})`,
             firmaAdi: taseronCari.unvan,
             firmaId: taseronCari.id,
-            fotoUrl: fotoPersisted || null,
+            fotoUrl: kesintiFoto,
             makineKaynak: 'MANUEL',
             makineManuelAd: 'Mesai saha',
             isKaydiEtiketi: 'Mesai taşeron kesinti',
@@ -306,7 +335,7 @@ export const RolMobilFaaliyetYoklamaPanel: React.FC<RolMobilFaaliyetYoklamaPanel
       const needsOnay = rol === 'OPERATOR';
       const payload: Kayit = {
         id,
-        tarih: normalizeDateKey(faaliyetTarih),
+        tarih: tarihKey,
         faaliyetGrubu,
         isNiteligi,
         parsel,
@@ -336,6 +365,14 @@ export const RolMobilFaaliyetYoklamaPanel: React.FC<RolMobilFaaliyetYoklamaPanel
 
       await setDoc(doc(db, collectionName, id), cleanUndefined(payload));
 
+      // Anında listede görünsün (snapshot gecikse bile)
+      setFaaliyetler((prev) => {
+        const rest = prev.filter((x) => x.id !== id);
+        return [payload, ...rest].sort((a, b) => String(b.tarih).localeCompare(String(a.tarih)));
+      });
+      // Seçili tarihi kayda sabitle (normalize)
+      setFaaliyetTarih(tarihKey);
+
       // Operatör: mesai yoklamaya ancak onay sonrası yazılır.
       // Onaylı kayıt yeniden düzenlenirse eski mesaiyi geri al (tekrar onaya düşer).
       if (rol === 'OPERATOR') {
@@ -355,24 +392,29 @@ export const RolMobilFaaliyetYoklamaPanel: React.FC<RolMobilFaaliyetYoklamaPanel
       }
 
       if (addNotification) {
-        await addNotification(
-          `${rol === 'SOFOR' ? 'Şöför' : 'Operatör'} ${
-            faaliyetGrubu === 'MESAI' ? 'mesai ' : ''
-          }faaliyeti${needsOnay ? ' (onay bekliyor)' : ''}: ${isNiteligi} (${payload.parsel} / ${payload.blok})`
-        );
+        try {
+          await addNotification(
+            `${rol === 'SOFOR' ? 'Şöför' : 'Operatör'} ${
+              faaliyetGrubu === 'MESAI' ? 'mesai ' : ''
+            }faaliyeti${needsOnay ? ' (onay bekliyor)' : ''}: ${isNiteligi} (${payload.parsel} / ${payload.blok})`
+          );
+        } catch (nErr) {
+          console.warn('Bildirim atlandı:', nErr);
+        }
       }
       showStatus(
         'success',
-        editingFaaliyetId
+        (editingFaaliyetId
           ? 'Faaliyet güncellendi.'
           : needsOnay
-            ? 'Faaliyet onay havuzuna gönderildi.'
-            : 'Faaliyet kaydedildi.'
+            ? `Faaliyet kaydedildi (${formatDateLabelTr(tarihKey)}) — onay havuzuna düştü.`
+            : `Faaliyet kaydedildi (${formatDateLabelTr(tarihKey)}).`) + fotoUyari,
+        6000
       );
       resetFaaliyetForm();
     } catch (err: any) {
       console.error(err);
-      showStatus('error', 'Kayıt başarısız: ' + (err?.message || ''));
+      showStatus('error', formatFirestoreWriteError(err, 'Kayıt başarısız'), 10000);
     } finally {
       setSavingFaaliyet(false);
     }
@@ -695,7 +737,10 @@ export const RolMobilFaaliyetYoklamaPanel: React.FC<RolMobilFaaliyetYoklamaPanel
               {formatDateLabelTr(faaliyetTarih)} kayıtları ({gunlukFaaliyetler.length})
             </h3>
             {gunlukFaaliyetler.length === 0 ? (
-              <p className="text-[11px] text-slate-500 italic">Bu tarihte kayıt yok.</p>
+              <p className="text-[11px] text-slate-500 italic">
+                Bu tarihte kayıt yok. Kaydettikten sonra burada listelenir; mesaili kayıtta en az bir
+                personele saat girilmelidir.
+              </p>
             ) : (
               <div className="space-y-2 max-h-[28rem] overflow-y-auto">
                 {gunlukFaaliyetler.map((f) => (

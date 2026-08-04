@@ -83,5 +83,6 @@ export function operatorToSaha(f: OperatorSahaFaaliyet): SahaFaaliyeti {
     faaliyetTipi: f.faaliyetGrubu === 'MESAI' ? 'MESAI_SAHA' : 'NORMAL',
     kaynakEkran: 'OPERATOR_MOBIL',
     kaydeden: f.kaydeden,
+    durum: f.durum,
   } as SahaFaaliyeti;
 }

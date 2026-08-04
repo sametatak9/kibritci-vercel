@@ -574,6 +574,8 @@ export interface SahaFaaliyeti {
   kaydeden?: string;
   kaydedenUid?: string;
   kaydedenFormen?: string;
+  /** Mobil onay durumu (operatör vb.) */
+  durum?: string;
   programaGonderildi?: boolean;
   programaGonderimTarihi?: string;
   iceriAktarimDurumu?: 'BEKLIYOR' | 'AKTARILDI';

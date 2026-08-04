@@ -207,8 +207,8 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
       ...operatorSahaFaaliyetleri
         .filter((f) => {
           const d = String(f.durum || '').toLocaleUpperCase('tr-TR');
+          // Reddedilenler gizlensin; onay bekleyenler görünsün (etiketli)
           if (d.includes('RED')) return false;
-          if (d.includes('ONAY BEKL') || d === 'BEKLEMEDE') return false;
           return true;
         })
         .map(operatorToSaha),
@@ -1606,6 +1606,12 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
                                     Mesai faaliyet
                                   </span>
                                 )}
+                                {(String(f.durum || '').includes('ONAY BEKL') ||
+                                  f.durum === 'BEKLEMEDE') && (
+                                  <span className="text-[8px] font-black uppercase bg-rose-100 text-rose-800 px-2 py-0.5 rounded-full">
+                                    Onay bekliyor
+                                  </span>
+                                )}
                                 {fotolar.length > 0 && (
                                   <span className="text-[9px] font-black uppercase bg-indigo-50 text-indigo-700 border border-indigo-100 px-2 py-0.5 rounded-full inline-flex items-center gap-1">
                                     <Images size={10} />
@@ -2030,6 +2036,12 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
                                 {isMesaiSahaFaaliyet(f) && (
                                   <span className="text-[8px] font-black uppercase bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full">
                                     Mesai faaliyet
+                                  </span>
+                                )}
+                                {(String(f.durum || '').includes('ONAY BEKL') ||
+                                  f.durum === 'BEKLEMEDE') && (
+                                  <span className="text-[8px] font-black uppercase bg-rose-100 text-rose-800 px-2 py-0.5 rounded-full">
+                                    Onay bekliyor
                                   </span>
                                 )}
                                 {fotolar.length > 0 && (
