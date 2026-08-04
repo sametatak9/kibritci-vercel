@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { 
   Truck, Plus, Trash2, Camera, CheckCircle, Search, AlertCircle, 
-  FileText, Calendar, Printer, Phone, MapPin, Wallet, ClipboardList, Clock, Check, X, Image as ImageIcon
+  FileText, Calendar, Printer, Phone, MapPin, Wallet, ClipboardList, Clock, Check, X, Image as ImageIcon, LogOut
 } from 'lucide-react';
 import { AracBakim, AylikYoklamaMap, KasaOdemeDurumu, Personel } from '../types/erp';
 import { compressImage } from '../lib/imageCompress';
@@ -705,38 +705,52 @@ export const LojistikScreen: React.FC<LojistikScreenProps> = ({
   };
 
   return (
-    <div className="min-h-full bg-slate-50 text-slate-800 p-4 lg:p-6 font-sans flex flex-col">
+    <div className="min-h-full w-full max-w-[100vw] min-w-0 overflow-x-hidden bg-slate-50 text-slate-800 p-2.5 sm:p-4 lg:p-6 font-sans flex flex-col box-border">
       
       {/* Upper Status Notifications */}
       {statusMessage && (
-        <div className={`fixed bottom-4 right-4 z-50 p-4 rounded-xl shadow-lg border text-xs font-bold transition-all duration-300 flex items-center space-x-2 animate-bounce ${
+        <div className={`fixed bottom-4 left-3 right-3 sm:left-auto sm:right-4 sm:max-w-sm z-50 p-3 sm:p-4 rounded-xl shadow-lg border text-xs font-bold transition-all duration-300 flex items-start gap-2 ${
           statusMessage.type === 'success' ? 'bg-emerald-50 text-emerald-800 border-emerald-200' : 'bg-rose-50 text-rose-800 border-rose-200'
         }`}>
-          <span>{statusMessage.type === 'success' ? '✅' : '❌'}</span>
-          <span>{statusMessage.text}</span>
+          <span className="shrink-0">{statusMessage.type === 'success' ? '✅' : '❌'}</span>
+          <span className="min-w-0 break-words">{statusMessage.text}</span>
         </div>
       )}
 
       {/* Main Container */}
-      <div className="max-w-7xl mx-auto space-y-5">
+      <div className="w-full max-w-7xl mx-auto space-y-3 sm:space-y-5 min-w-0">
         
         {/* Upper Dashboard Widget */}
-        <div className="bg-gradient-to-r from-slate-100 to-indigo-800 rounded-3xl p-5 lg:p-6 text-white shadow-lg border border-slate-800">
-          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-            <div className="flex items-center space-x-3">
-              <div className="p-3 bg-white/10 rounded-2xl">
-                <Truck className="h-6 w-6 text-white" />
+        <div className="bg-gradient-to-r from-slate-800 to-indigo-800 rounded-2xl sm:rounded-3xl p-3 sm:p-5 lg:p-6 text-white shadow-lg border border-slate-800 overflow-hidden">
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 sm:gap-4 min-w-0">
+            <div className="flex items-start gap-2.5 sm:gap-3 min-w-0 flex-1">
+              <div className="p-2.5 sm:p-3 bg-white/10 rounded-2xl shrink-0">
+                <Truck className="h-5 w-5 sm:h-6 sm:w-6 text-white" />
               </div>
-              <div>
-                <h1 className="font-semibold text-base tracking-tight">Şöför Mobil Paneli</h1>
-                <p className="text-[11px] text-slate-100 mt-0.5">
-                  Giriş Yapan Yetkili: <span className="font-bold">{soforPersonelAdi}</span>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-start justify-between gap-2">
+                  <h1 className="font-semibold text-sm sm:text-base tracking-tight leading-tight">Şöför Mobil Paneli</h1>
+                  {isStandalone && onSignOut && (
+                    <button
+                      type="button"
+                      onClick={onSignOut}
+                      className="shrink-0 p-2 rounded-xl bg-white/10 border border-white/20 text-white cursor-pointer"
+                      title="Çıkış"
+                    >
+                      <LogOut size={14} />
+                    </button>
+                  )}
+                </div>
+                <p className="text-[10px] sm:text-[11px] text-slate-100 mt-1 flex flex-wrap items-center gap-1.5">
+                  <span className="min-w-0 break-words">
+                    Yetkili: <span className="font-bold">{soforPersonelAdi}</span>
+                  </span>
                   {matchedSoforPersonel ? (
-                    <span className="ml-2 text-[9px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-100 px-1.5 py-0.5 rounded-full">
-                      Eşleşti · TC {matchedSoforPersonel.tcNo}
+                    <span className="text-[9px] font-bold text-emerald-800 bg-emerald-50 border border-emerald-100 px-1.5 py-0.5 rounded-full shrink-0">
+                      Eşleşti
                     </span>
                   ) : (
-                    <span className="ml-2 text-[9px] font-bold text-amber-700 bg-amber-50 border border-amber-100 px-1.5 py-0.5 rounded-full">
+                    <span className="text-[9px] font-bold text-amber-800 bg-amber-50 border border-amber-100 px-1.5 py-0.5 rounded-full shrink-0">
                       Personel eşleşmesi yok
                     </span>
                   )}
@@ -745,19 +759,19 @@ export const LojistikScreen: React.FC<LojistikScreenProps> = ({
             </div>
             
             {/* Quick Stats Grid */}
-            <div className="grid grid-cols-3 gap-3 text-center">
-              <div className="bg-white/10 px-3 py-1.5 rounded-xl border border-white/5">
-                <span className="text-[10px] text-slate-500 block">Sistem Vasıtaları</span>
+            <div className="grid grid-cols-3 gap-1.5 sm:gap-3 text-center w-full md:w-auto min-w-0">
+              <div className="bg-white/10 px-1.5 sm:px-3 py-1.5 rounded-xl border border-white/10 min-w-0">
+                <span className="text-[8px] sm:text-[10px] text-slate-300 block truncate">Vasıta</span>
                 <span className="text-sm font-bold font-mono">{araclar.length}</span>
               </div>
-              <div className="bg-white/10 px-3 py-1.5 rounded-xl border border-white/5">
-                <span className="text-[10px] text-slate-500 block">Bekleyen Onaylar</span>
+              <div className="bg-white/10 px-1.5 sm:px-3 py-1.5 rounded-xl border border-white/10 min-w-0">
+                <span className="text-[8px] sm:text-[10px] text-slate-300 block truncate">Onay</span>
                 <span className="text-sm font-bold font-mono text-amber-300">
                   {aracTalepleri.filter(t => t.durum === 'ONAY BEKLİYOR').length + yolHarcamalari.filter(y => y.durum === 'ONAY BEKLİYOR').length}
                 </span>
               </div>
-              <div className="bg-white/10 px-3 py-1.5 rounded-xl border border-white/5">
-                <span className="text-[10px] text-slate-500 block">Kayıtlı Rotalar</span>
+              <div className="bg-white/10 px-1.5 sm:px-3 py-1.5 rounded-xl border border-white/10 min-w-0">
+                <span className="text-[8px] sm:text-[10px] text-slate-300 block truncate">Rota</span>
                 <span className="text-sm font-bold font-mono">{seyahatRotalari.length}</span>
               </div>
             </div>
@@ -765,7 +779,7 @@ export const LojistikScreen: React.FC<LojistikScreenProps> = ({
         </div>
 
         {/* Navigation Tabs */}
-        <div className="flex space-x-1.5 overflow-x-auto p-1 bg-white/80 backdrop-blur-xs rounded-2xl border border-slate-200 shrink-0 select-none scrollbar-none">
+        <div className="flex gap-1.5 overflow-x-auto overscroll-x-contain p-1 bg-white/80 backdrop-blur-xs rounded-2xl border border-slate-200 shrink-0 select-none scrollbar-none w-full max-w-full min-w-0 touch-pan-x">
           <button 
             onClick={() => setActiveTab('günlük_rutin')}
             className={`px-4 py-2 rounded-xl text-xs font-bold transition duration-150 shrink-0 cursor-pointer ${activeTab === 'günlük_rutin' ? 'bg-slate-900 text-white shadow-sm shadow-slate-500/10' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'}`}
@@ -829,14 +843,14 @@ export const LojistikScreen: React.FC<LojistikScreenProps> = ({
         </div>
 
         {/* Dynamic Content Grid */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 sm:gap-5 min-w-0 w-full">
           
           {/* Main Work Area (Left 2 Columns) */}
-          <div className="lg:col-span-2 space-y-5">
+          <div className="lg:col-span-2 space-y-3 sm:space-y-5 min-w-0 w-full overflow-x-hidden">
             
             {/* TAB 1: GÜNLÜK RUTİN */}
             {activeTab === 'günlük_rutin' && (
-              <div className="bg-white border border-slate-200 rounded-3xl p-5 space-y-4 shadow-xs">
+              <div className="bg-white border border-slate-200 rounded-2xl sm:rounded-3xl p-3 sm:p-5 space-y-4 shadow-xs min-w-0 overflow-hidden">
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between border-b pb-3 gap-2">
                   <div>
                     <h2 className="text-sm font-bold text-slate-800 flex items-center space-x-1.5">
@@ -930,7 +944,7 @@ export const LojistikScreen: React.FC<LojistikScreenProps> = ({
             )}
 
             {activeTab === 'saha_faaliyet' && (
-              <div className="bg-white border border-slate-200 rounded-3xl p-4 sm:p-5 shadow-xs animate-in fade-in duration-150">
+              <div className="bg-white border border-slate-200 rounded-2xl sm:rounded-3xl p-2.5 sm:p-5 shadow-xs animate-in fade-in duration-150 min-w-0 overflow-x-hidden">
                 <RolMobilFaaliyetYoklamaPanel
                   rol="SOFOR"
                   personeller={personeller}
@@ -946,7 +960,7 @@ export const LojistikScreen: React.FC<LojistikScreenProps> = ({
             )}
 
             {activeTab === 'yoklama' && (
-              <div className="bg-white border border-slate-200 rounded-3xl p-4 sm:p-5 shadow-xs animate-in fade-in duration-150">
+              <div className="bg-white border border-slate-200 rounded-2xl sm:rounded-3xl p-2.5 sm:p-5 shadow-xs animate-in fade-in duration-150 min-w-0 overflow-x-hidden">
                 <KampGunlukYoklamaTab
                   personeller={personeller}
                   yoklamalar={yoklamalar}
@@ -961,7 +975,7 @@ export const LojistikScreen: React.FC<LojistikScreenProps> = ({
 
             {/* TAB: GÜNLÜK FAALİYET KAYDI */}
             {activeTab === 'günlük_faaliyet' && (
-              <div className="bg-white border border-slate-200 rounded-3xl p-5 space-y-4 shadow-xs animate-in fade-in duration-150">
+              <div className="bg-white border border-slate-200 rounded-2xl sm:rounded-3xl p-3 sm:p-5 space-y-4 shadow-xs min-w-0 overflow-hidden animate-in fade-in duration-150">
                 <div className="border-b pb-3">
                   <h2 className="text-sm font-bold text-slate-800 flex items-center space-x-1.5">
                     <span>📝 Günlük Sevk ve Sürücü Faaliyet Kaydı</span>
@@ -1094,7 +1108,7 @@ export const LojistikScreen: React.FC<LojistikScreenProps> = ({
 
             {/* TAB 2: HAFTALIK KM GİRİŞİ */}
             {activeTab === 'haftalık_km' && (
-              <div className="bg-white border border-slate-200 rounded-3xl p-5 space-y-4 shadow-xs">
+              <div className="bg-white border border-slate-200 rounded-2xl sm:rounded-3xl p-3 sm:p-5 space-y-4 shadow-xs min-w-0 overflow-hidden">
                 <div className="border-b pb-3">
                   <h2 className="text-sm font-bold text-slate-800 flex items-center space-x-1.5">
                     <span>📊 Haftalık Kilometre Takibi</span>
@@ -1188,7 +1202,7 @@ export const LojistikScreen: React.FC<LojistikScreenProps> = ({
 
             {/* TAB 3: ARAÇ KARTI VE ONAY TALEBİ */}
             {activeTab === 'araç_kartı' && (
-              <div className="bg-white border border-slate-200 rounded-3xl p-5 space-y-4 shadow-xs">
+              <div className="bg-white border border-slate-200 rounded-2xl sm:rounded-3xl p-3 sm:p-5 space-y-4 shadow-xs min-w-0 overflow-hidden">
                 <div className="border-b pb-3">
                   <h2 className="text-sm font-bold text-slate-800 flex items-center space-x-1.5">
                     <span>🚗 Yeni Araç Kartı &amp; Bakım Limiti Tanımlama</span>
@@ -1291,7 +1305,7 @@ export const LojistikScreen: React.FC<LojistikScreenProps> = ({
 
             {/* TAB 4: SEYAHAT ROTARI */}
             {activeTab === 'rotalar' && (
-              <div className="bg-white border border-slate-200 rounded-3xl p-5 space-y-4 shadow-xs">
+              <div className="bg-white border border-slate-200 rounded-2xl sm:rounded-3xl p-3 sm:p-5 space-y-4 shadow-xs min-w-0 overflow-hidden">
                 <div className="border-b pb-3">
                   <h2 className="text-sm font-bold text-slate-800 flex items-center space-x-1.5">
                     <span>📍 Seyahat Rotası &amp; Rotalandırma</span>
@@ -1382,7 +1396,7 @@ export const LojistikScreen: React.FC<LojistikScreenProps> = ({
 
             {/* TAB 5: YOL HARCAMASI */}
             {activeTab === 'yol_harcaması' && (
-              <div className="bg-white border border-slate-200 rounded-3xl p-5 space-y-4 shadow-xs">
+              <div className="bg-white border border-slate-200 rounded-2xl sm:rounded-3xl p-3 sm:p-5 space-y-4 shadow-xs min-w-0 overflow-hidden">
                 <div className="border-b pb-3">
                   <h2 className="text-sm font-bold text-slate-800 flex items-center space-x-1.5">
                     <span>💳 Yol Harcaması (Fiş / Fatura) Girişi</span>
@@ -1629,7 +1643,7 @@ export const LojistikScreen: React.FC<LojistikScreenProps> = ({
 
             {/* TAB 6: PRINTABLE MINI REPORTS */}
             {activeTab === 'mini_raporlar' && (
-              <div className="bg-white border border-slate-200 rounded-3xl p-5 space-y-4 shadow-xs">
+              <div className="bg-white border border-slate-200 rounded-2xl sm:rounded-3xl p-3 sm:p-5 space-y-4 shadow-xs min-w-0 overflow-hidden">
                 
                 {/* Print Control Bar (Hidden on actual print) */}
                 <div className="flex items-center justify-between border-b pb-3 print:hidden">
@@ -1801,7 +1815,7 @@ export const LojistikScreen: React.FC<LojistikScreenProps> = ({
 
             {/* TAB: AYLIK SEFER RAPORU */}
             {activeTab === 'aylik_rapor' && (
-              <div className="bg-white border border-slate-200 rounded-3xl p-5 space-y-4 shadow-xs animate-in fade-in duration-150">
+              <div className="bg-white border border-slate-200 rounded-2xl sm:rounded-3xl p-3 sm:p-5 space-y-4 shadow-xs min-w-0 overflow-hidden animate-in fade-in duration-150">
                 <div className="border-b pb-3 flex justify-between items-center flex-wrap gap-2 print:hidden">
                   <div>
                     <h2 className="text-sm font-bold text-slate-800 flex items-center space-x-1.5">
@@ -2057,11 +2071,11 @@ export const LojistikScreen: React.FC<LojistikScreenProps> = ({
 
           </div>
 
-          {/* Right Reference Lists Column */}
-          <div className="space-y-5">
+          {/* Right Reference Lists Column — dar ekranda gizle (yatay taşma / gereksiz yük) */}
+          <div className="space-y-5 min-w-0 hidden lg:block">
             
             {/* 1. SEKTÖR ARAÇ VERİ TABANI */}
-            <div className="bg-white border border-slate-200 rounded-3xl p-5 space-y-3.5 shadow-xs">
+            <div className="bg-white border border-slate-200 rounded-3xl p-4 sm:p-5 space-y-3.5 shadow-xs min-w-0 overflow-hidden">
               <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block">🛞 Şirket Araç Filosu ({araclar.length})</span>
               
               {araclar.length === 0 ? (
@@ -2071,13 +2085,13 @@ export const LojistikScreen: React.FC<LojistikScreenProps> = ({
                   {araclar.map(a => {
                     const maintAlerts = getMaintenanceAlerts(a);
                     return (
-                      <div key={a.id} className="bg-slate-50 hover:bg-slate-100 transition p-3 rounded-2xl border border-slate-100 flex flex-col space-y-2">
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <span className="font-mono text-[10px] font-bold text-slate-700 bg-white border px-1.5 py-0.5 rounded shadow-3xs">{a.plaka}</span>
-                            <span className="text-xs font-bold text-slate-800 ml-2">{a.markaModel}</span>
+                      <div key={a.id} className="bg-slate-50 hover:bg-slate-100 transition p-3 rounded-2xl border border-slate-100 flex flex-col space-y-2 min-w-0">
+                        <div className="flex items-center justify-between gap-2 min-w-0">
+                          <div className="min-w-0 flex items-center gap-2">
+                            <span className="font-mono text-[10px] font-bold text-slate-700 bg-white border px-1.5 py-0.5 rounded shadow-3xs shrink-0">{a.plaka}</span>
+                            <span className="text-xs font-bold text-slate-800 truncate">{a.markaModel}</span>
                           </div>
-                          <div className="text-right text-[10px] font-mono font-bold text-slate-800">
+                          <div className="text-right text-[10px] font-mono font-bold text-slate-800 shrink-0">
                             {a.mevcutKm} KM
                           </div>
                         </div>

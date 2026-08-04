@@ -562,22 +562,22 @@ export const RolMobilFaaliyetYoklamaPanel: React.FC<RolMobilFaaliyetYoklamaPanel
   };
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center gap-3">
-        <div className={`p-2.5 rounded-2xl ${rol === 'SOFOR' ? 'bg-sky-100' : 'bg-amber-100'}`}>
+    <div className="space-y-3 sm:space-y-4 min-w-0 w-full max-w-full overflow-x-hidden">
+      <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
+        <div className={`p-2.5 rounded-2xl shrink-0 ${rol === 'SOFOR' ? 'bg-sky-100' : 'bg-amber-100'}`}>
           <TitleIcon className={rol === 'SOFOR' ? 'text-sky-700' : 'text-amber-800'} size={20} />
         </div>
-        <div>
-          <h2 className="text-sm font-black text-slate-900 uppercase tracking-wide">{title}</h2>
-          <p className="text-[10px] text-slate-500">
-            Normal / mesai faaliyet → Faaliyeti Olan Personeller · ZER · kendi yoklama
+        <div className="min-w-0 flex-1">
+          <h2 className="text-sm font-black text-slate-900 uppercase tracking-wide truncate">{title}</h2>
+          <p className="text-[10px] text-slate-500 leading-snug">
+            Normal / mesai · Faaliyeti Olan · ZER · yoklama
           </p>
         </div>
       </div>
 
       {statusMessage && (
         <div
-          className={`p-3 rounded-xl border flex items-center gap-2 max-w-xl ${
+          className={`p-3 rounded-xl border flex items-start gap-2 w-full max-w-full min-w-0 ${
             statusMessage.type === 'success'
               ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
               : statusMessage.type === 'info'
@@ -586,11 +586,11 @@ export const RolMobilFaaliyetYoklamaPanel: React.FC<RolMobilFaaliyetYoklamaPanel
           }`}
         >
           {statusMessage.type === 'info' ? (
-            <RefreshCw size={14} className="animate-spin shrink-0" />
+            <RefreshCw size={14} className="animate-spin shrink-0 mt-0.5" />
           ) : (
-            <CheckCircle size={14} className="shrink-0" />
+            <CheckCircle size={14} className="shrink-0 mt-0.5" />
           )}
-          <span className="text-xs font-bold">{statusMessage.text}</span>
+          <span className="text-xs font-bold break-words min-w-0">{statusMessage.text}</span>
         </div>
       )}
 
@@ -622,12 +622,12 @@ export const RolMobilFaaliyetYoklamaPanel: React.FC<RolMobilFaaliyetYoklamaPanel
       )}
 
       {(activeSubTab === 'faaliyet' || !showYoklamaTab) && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <div className="bg-white border border-slate-200 rounded-2xl p-4 space-y-3 shadow-sm">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 sm:gap-4 min-w-0 w-full">
+          <div className="bg-white border border-slate-200 rounded-2xl p-3 sm:p-4 space-y-3 shadow-sm min-w-0 overflow-hidden">
             <h3 className="text-xs font-black uppercase tracking-wider text-slate-800">
               {editingFaaliyetId ? 'Faaliyet Düzenle' : 'Yeni Faaliyet'}
             </h3>
-            <form onSubmit={handleSaveFaaliyet} className="space-y-3 text-xs">
+            <form onSubmit={handleSaveFaaliyet} className="space-y-3 text-xs min-w-0">
               <div className="flex bg-slate-100 p-1 rounded-xl">
                 <button
                   type="button"
@@ -655,16 +655,16 @@ export const RolMobilFaaliyetYoklamaPanel: React.FC<RolMobilFaaliyetYoklamaPanel
                   type="date"
                   value={faaliyetTarih}
                   onChange={(e) => setFaaliyetTarih(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-bold"
+                  className="w-full max-w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-bold box-border"
                 />
               </label>
 
-              <label className="block space-y-1">
+              <label className="block space-y-1 min-w-0">
                 <span className="text-[9px] font-black text-slate-500 uppercase">İş Niteliği</span>
                 <select
                   value={isNiteligi}
                   onChange={(e) => setIsNiteligi(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-bold"
+                  className="w-full max-w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-bold box-border"
                 >
                   {isOptions.map((o) => (
                     <option key={o} value={o}>
@@ -674,8 +674,8 @@ export const RolMobilFaaliyetYoklamaPanel: React.FC<RolMobilFaaliyetYoklamaPanel
                 </select>
               </label>
 
-              <div className="grid grid-cols-2 gap-2">
-                <label className="block space-y-1">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 min-w-0">
+                <label className="block space-y-1 min-w-0">
                   <span className="text-[9px] font-black text-slate-500 uppercase">Parsel *</span>
                   <select
                     required
@@ -685,7 +685,7 @@ export const RolMobilFaaliyetYoklamaPanel: React.FC<RolMobilFaaliyetYoklamaPanel
                       setParsel(next);
                       setBlok(defaultBlokForParsel(next));
                     }}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-bold"
+                    className="w-full max-w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-bold box-border"
                   >
                     {PARSEL_LIST.map((p) => (
                       <option key={p} value={p}>
@@ -694,13 +694,13 @@ export const RolMobilFaaliyetYoklamaPanel: React.FC<RolMobilFaaliyetYoklamaPanel
                     ))}
                   </select>
                 </label>
-                <label className="block space-y-1">
+                <label className="block space-y-1 min-w-0">
                   <span className="text-[9px] font-black text-slate-500 uppercase">Blok *</span>
                   <select
                     required
                     value={blok}
                     onChange={(e) => setBlok(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-bold"
+                    className="w-full max-w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-bold box-border"
                   >
                     {(blokOptions.length ? blokOptions : ['GENEL SAHA']).map((b) => (
                       <option key={b} value={b}>
@@ -814,7 +814,11 @@ export const RolMobilFaaliyetYoklamaPanel: React.FC<RolMobilFaaliyetYoklamaPanel
                 <input type="file" accept="image/*" className="hidden" onChange={handleFaaliyetFoto} />
               </label>
               {fotoUrl && (
-                <img src={fotoUrl} alt="" className="max-h-36 rounded-xl border object-contain bg-slate-50" />
+                <img
+                  src={fotoUrl}
+                  alt=""
+                  className="max-h-36 w-full max-w-full rounded-xl border object-contain bg-slate-50"
+                />
               )}
 
               {faaliyetGrubu === 'MESAI' && (
@@ -914,8 +918,8 @@ export const RolMobilFaaliyetYoklamaPanel: React.FC<RolMobilFaaliyetYoklamaPanel
             </form>
           </div>
 
-          <div className="bg-white border border-slate-200 rounded-2xl p-4 space-y-3 shadow-sm">
-            <h3 className="text-xs font-black uppercase tracking-wider text-slate-800">
+          <div className="bg-white border border-slate-200 rounded-2xl p-3 sm:p-4 space-y-3 shadow-sm min-w-0 overflow-hidden">
+            <h3 className="text-xs font-black uppercase tracking-wider text-slate-800 break-words">
               {formatDateLabelTr(faaliyetTarih)} kayıtları ({gunlukFaaliyetler.length})
             </h3>
             {gunlukFaaliyetler.length === 0 ? (
