@@ -17,7 +17,7 @@ import {
 } from 'lucide-react';
 import { collection, deleteDoc, doc, onSnapshot, setDoc } from 'firebase/firestore';
 import { AylikYoklamaMap, AracBakim, CariKart, Personel, SoforSahaFaaliyet, OperatorSahaFaaliyet } from '../types/erp';
-import { db, cleanUndefined } from '../lib/firebase';
+import { db, cleanUndefined, withTimeout } from '../lib/firebase';
 import { compressImage } from '../lib/imageCompress';
 import { todayDateKey, formatDateLabelTr, normalizeDateKey } from '../lib/dateKeyUtils';
 import { applySahaMesaiToYoklama, normalizeMesaiHours } from '../lib/sahaFaaliyetUtils';
@@ -25,12 +25,15 @@ import { ensureSahaFaaliyetFotolarPersisted } from '../lib/sahaFaaliyetFotoStora
 import { isOperatorGorev, isSoforGorev, getYoklamaDay, setYoklamaDay } from '../lib/yoklamaUtils';
 import { resolveGeldiRolPersonelIds, type MobilRolEtiket } from '../lib/mobilRolEtiketUtils';
 import { getTaseronCariKartlar, buildOperatorIsKaydiEtiketi } from '../lib/taseronUtils';
-import { formatFirestoreWriteError } from '../lib/authWriteGuard';
+import { assertErpWriteAuth, formatFirestoreWriteError } from '../lib/authWriteGuard';
 import { PARSEL_BLOK_MAP, PARSEL_LIST, defaultBlokForParsel } from '../data/parselBlokMap';
 import { KampGunlukYoklamaTab } from './KampGunlukYoklamaTab';
 
-/** Firestore tek doküman ~1MB; inline foto aşarsa kaydı düşürmemek için atlanır */
-const MAX_INLINE_FOTO_CHARS = 700_000;
+/** Inline data URL Firestore'a yazılmaz — büyük payload timeout üretir */
+function isSafeHttpFoto(url?: string | null): boolean {
+  const u = String(url || '').trim();
+  return /^https?:\/\//i.test(u) || u.startsWith('blob:');
+}
 
 type Rol = 'SOFOR' | 'OPERATOR';
 type Kayit = SoforSahaFaaliyet | OperatorSahaFaaliyet;
@@ -191,7 +194,7 @@ export const RolMobilFaaliyetYoklamaPanel: React.FC<RolMobilFaaliyetYoklamaPanel
         reader.onerror = reject;
         reader.readAsDataURL(file);
       });
-      const compressed = await compressImage(raw, 0.72, 1600);
+      const compressed = await compressImage(raw, 1280, 1280, 0.72, 5000);
       setFotoUrl(compressed);
     } catch {
       showStatus('error', 'Fotoğraf okunamadı.');
@@ -264,6 +267,12 @@ export const RolMobilFaaliyetYoklamaPanel: React.FC<RolMobilFaaliyetYoklamaPanel
     setSavingFaaliyet(true);
     showStatus('info', 'Kaydediliyor…', 0);
     try {
+      const authBlock = await assertErpWriteAuth();
+      if (authBlock) {
+        showStatus('error', authBlock, 10000);
+        return;
+      }
+
       const kaydedenEmail = String(currentUser?.email || '').trim().toLowerCase();
       const existing = editingFaaliyetId
         ? faaliyetler.find((f) => f.id === editingFaaliyetId)
@@ -279,14 +288,12 @@ export const RolMobilFaaliyetYoklamaPanel: React.FC<RolMobilFaaliyetYoklamaPanel
         );
         if (mesaiMap && Object.keys(mesaiMap).length === 0) {
           showStatus('error', 'Mesaili faaliyet için en az bir personele saat girin (0 olamaz).', 8000);
-          setSavingFaaliyet(false);
           return;
         }
       }
 
       if (rol === 'OPERATOR' && faaliyetGrubu === 'MESAI' && taseronKesintiAcik && !taseronCariId) {
         showStatus('error', 'Taşeron kesintisi için taşeron firma seçin.');
-        setSavingFaaliyet(false);
         return;
       }
 
@@ -294,12 +301,10 @@ export const RolMobilFaaliyetYoklamaPanel: React.FC<RolMobilFaaliyetYoklamaPanel
       if (rol === 'OPERATOR') {
         if (makineKaynak === 'MANUEL' && !makineManuelAd.trim()) {
           showStatus('error', 'Manuel makine adı / plaka girin.');
-          setSavingFaaliyet(false);
           return;
         }
         if (makineKaynak !== 'MANUEL' && !selectedAracId) {
           showStatus('error', 'İş makinesi seçin (veya Manuel kaynak kullanın).');
-          setSavingFaaliyet(false);
           return;
         }
         const arac = araclar.find((a) => a.id === selectedAracId);
@@ -343,15 +348,20 @@ export const RolMobilFaaliyetYoklamaPanel: React.FC<RolMobilFaaliyetYoklamaPanel
             tarih: tarihKey,
             fotoUrl: fotoPersisted,
           } as any);
-          fotoPersisted = String(ensured.fotoUrl || fotoPersisted);
+          fotoPersisted = String(ensured.fotoUrl || '');
         } catch (fotoErr) {
           console.warn('Foto yükleme atlandı:', fotoErr);
           fotoUyari = ' Fotoğraf yüklenemedi; kayıt fotosuz kaydedildi.';
           fotoPersisted = '';
         }
       }
-      if (fotoPersisted.startsWith('data:') && fotoPersisted.length > MAX_INLINE_FOTO_CHARS) {
-        fotoUyari = ' Fotoğraf çok büyük olduğu için kayıtsız bırakıldı (Storage gerekli).';
+      // data: URL asla Firestore'a gitmesin (mobilde timeout / 1MB limiti)
+      if (fotoPersisted.startsWith('data:') || !isSafeHttpFoto(fotoPersisted)) {
+        if (fotoPersisted.startsWith('data:')) {
+          fotoUyari =
+            fotoUyari ||
+            ' Fotoğraf Storage’a yüklenemedi; kayıt fotosuz kaydedildi (yeniden deneyebilirsiniz).';
+        }
         fotoPersisted = '';
       }
 
@@ -366,33 +376,37 @@ export const RolMobilFaaliyetYoklamaPanel: React.FC<RolMobilFaaliyetYoklamaPanel
           : `of_mesai_${Date.now()}`;
         const firstPid = aktifPersonelListesi[0];
         const firstP = personeller.find((p) => p.id === firstPid);
-        const kesintiFoto =
-          fotoPersisted && !fotoPersisted.startsWith('data:') ? fotoPersisted : null;
-        await setDoc(
-          doc(db, 'operatorFaaliyetleri', ofId),
-          cleanUndefined({
-            id: ofId,
-            aracId: makineFields.aracId || 'mesai_saha',
-            aracPlaka: makineFields.aracPlaka || 'MESAİ SAHA',
-            operatorPersonelId: firstPid,
-            operatorIsim: firstP ? `${firstP.ad} ${firstP.soyad}` : kaydedenEmail || 'Operatör',
-            operatorTipi: makineFields.operatorTipi || 'DİĞER',
-            tarih: tarihKey,
-            baslangicSaat: '17:00',
-            bitisSaat: '17:00',
-            calismaSuresi: Math.round(toplamSaat * 100) / 100,
-            yapilanIs: `[Mesai kesinti] ${aciklama.trim()} · ${isNiteligi} (${parsel}/${blok})`,
-            firmaAdi: taseronCari.unvan,
-            firmaId: taseronCari.id,
-            fotoUrl: kesintiFoto,
-            makineKaynak: makineFields.makineKaynak || 'MANUEL',
-            makineManuelAd: makineFields.makineManuelAd || makineFields.aracPlaka || 'Mesai saha',
-            isKaydiEtiketi: makineFields.isKaydiEtiketi || 'Mesai taşeron kesinti',
-            onayDurumu: 'BEKLEMEDE',
-            durum: 'ONAY BEKLİYOR',
-            kaydedenKullanici: kaydedenEmail,
-            kayitTarihi: new Date().toISOString(),
-          })
+        const kesintiFoto = isSafeHttpFoto(fotoPersisted) ? fotoPersisted : null;
+        await withTimeout(
+          () =>
+            setDoc(
+              doc(db, 'operatorFaaliyetleri', ofId),
+              cleanUndefined({
+                id: ofId,
+                aracId: makineFields.aracId || 'mesai_saha',
+                aracPlaka: makineFields.aracPlaka || 'MESAİ SAHA',
+                operatorPersonelId: firstPid,
+                operatorIsim: firstP ? `${firstP.ad} ${firstP.soyad}` : kaydedenEmail || 'Operatör',
+                operatorTipi: makineFields.operatorTipi || 'DİĞER',
+                tarih: tarihKey,
+                baslangicSaat: '17:00',
+                bitisSaat: '17:00',
+                calismaSuresi: Math.round(toplamSaat * 100) / 100,
+                yapilanIs: `[Mesai kesinti] ${aciklama.trim()} · ${isNiteligi} (${parsel}/${blok})`,
+                firmaAdi: taseronCari.unvan,
+                firmaId: taseronCari.id,
+                fotoUrl: kesintiFoto,
+                makineKaynak: makineFields.makineKaynak || 'MANUEL',
+                makineManuelAd: makineFields.makineManuelAd || makineFields.aracPlaka || 'Mesai saha',
+                isKaydiEtiketi: makineFields.isKaydiEtiketi || 'Mesai taşeron kesinti',
+                onayDurumu: 'BEKLEMEDE',
+                durum: 'ONAY BEKLİYOR',
+                kaydedenKullanici: kaydedenEmail,
+                kayitTarihi: new Date().toISOString(),
+              })
+            ),
+          20000,
+          2
         );
         bagliOperatorFaaliyetId = ofId;
       }
@@ -429,7 +443,11 @@ export const RolMobilFaaliyetYoklamaPanel: React.FC<RolMobilFaaliyetYoklamaPanel
         (payload as any).personelMesaiSaatleri = null;
       }
 
-      await setDoc(doc(db, collectionName, id), cleanUndefined(payload));
+      await withTimeout(
+        () => setDoc(doc(db, collectionName, id), cleanUndefined(payload)),
+        20000,
+        2
+      );
 
       // Anında listede görünsün (snapshot gecikse bile)
       setFaaliyetler((prev) => {
@@ -441,25 +459,32 @@ export const RolMobilFaaliyetYoklamaPanel: React.FC<RolMobilFaaliyetYoklamaPanel
 
       // Operatör: mesai yoklamaya ancak onay sonrası yazılır.
       // Onaylı kayıt yeniden düzenlenirse eski mesaiyi geri al (tekrar onaya düşer).
-      if (rol === 'OPERATOR') {
-        if (
-          existing?.durum === 'ONAYLANDI' &&
-          existing.faaliyetGrubu === 'MESAI' &&
-          existing.personelMesaiSaatleri
-        ) {
-          await syncMesai(String(existing.tarih), undefined, existing.personelMesaiSaatleri);
+      // Yoklama senkronu faaliyet kaydını bozmasın — ayrı try.
+      try {
+        if (rol === 'OPERATOR') {
+          if (
+            existing?.durum === 'ONAYLANDI' &&
+            existing.faaliyetGrubu === 'MESAI' &&
+            existing.personelMesaiSaatleri
+          ) {
+            await syncMesai(String(existing.tarih), undefined, existing.personelMesaiSaatleri);
+          }
+        } else if (faaliyetGrubu === 'MESAI' || existing?.faaliyetGrubu === 'MESAI') {
+          await syncMesai(
+            String(payload.tarih),
+            faaliyetGrubu === 'MESAI' && mesaiMap ? mesaiMap : undefined,
+            existing?.faaliyetGrubu === 'MESAI' ? existing.personelMesaiSaatleri : undefined
+          );
         }
-      } else if (faaliyetGrubu === 'MESAI' || existing?.faaliyetGrubu === 'MESAI') {
-        await syncMesai(
-          String(payload.tarih),
-          faaliyetGrubu === 'MESAI' && mesaiMap ? mesaiMap : undefined,
-          existing?.faaliyetGrubu === 'MESAI' ? existing.personelMesaiSaatleri : undefined
-        );
+      } catch (yoklamaErr) {
+        console.warn('Mesai yoklama senkronu atlandı:', yoklamaErr);
+        fotoUyari +=
+          ' Faaliyet kaydı yazıldı; yoklama mesai senkronu gecikti — Yoklama sekmesinden kontrol edin.';
       }
 
       if (addNotification) {
         try {
-          await addNotification(
+          void addNotification(
             `${rol === 'SOFOR' ? 'Şöför' : 'Operatör'} ${
               faaliyetGrubu === 'MESAI' ? 'mesai ' : ''
             }faaliyeti${needsOnay ? ' (onay bekliyor)' : ''}: ${isNiteligi} (${payload.parsel} / ${payload.blok})`

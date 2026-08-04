@@ -134,7 +134,13 @@ export const OperatorScreen: React.FC<OperatorScreenProps> = ({
     const file = e.target.files?.[0];
     if (!file) return;
     try {
-      const compressed = await compressImage(file, 1200, 0.7);
+      const raw = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result || ''));
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+      const compressed = await compressImage(raw, 1200, 1200, 0.7, 5000);
       setFotoUrl(compressed);
     } catch (err) {
       alert('Fotoğraf sıkıştırılırken hata oluştu.');

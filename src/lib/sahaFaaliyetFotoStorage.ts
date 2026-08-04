@@ -62,8 +62,9 @@ async function uploadOne(faaliyetId: string, dataUrl: string, index: number): Pr
     );
     return await withTimeout(getDownloadURL(storageRef), 6000, 'Saha foto URL');
   } catch (err) {
-    console.warn('Saha foto Storage atlandı, inline kullanılacak:', faaliyetId, index, err);
-    return payload;
+    // Inline data URL Firestore yazımında timeout üretir — boş bırak, kayıt fotosuz devam etsin
+    console.warn('Saha foto Storage atlandı (inline yazılmayacak):', faaliyetId, index, err);
+    return '';
   }
 }
 
