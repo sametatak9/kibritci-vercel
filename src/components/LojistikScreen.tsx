@@ -3,7 +3,7 @@ import {
   Truck, Plus, Trash2, Camera, CheckCircle, Search, AlertCircle, 
   FileText, Calendar, Printer, Phone, MapPin, Wallet, ClipboardList, Clock, Check, X, Image as ImageIcon
 } from 'lucide-react';
-import { AracBakim, AylikYoklamaMap, Personel } from '../types/erp';
+import { AracBakim, AylikYoklamaMap, KasaOdemeDurumu, Personel } from '../types/erp';
 import { compressImage } from '../lib/imageCompress';
 import { db } from '../lib/firebase';
 import { collection, onSnapshot, doc, setDoc, deleteDoc, updateDoc } from 'firebase/firestore';
@@ -679,8 +679,9 @@ export const LojistikScreen: React.FC<LojistikScreenProps> = ({
       surucu: x.surucu,
       fotoUrl: x.faturaFotoUrl,
       masrafTipi: x.nihaiMasrafTipi || x.masrafTipi || 'KENDI',
-      odemeDurumu:
-        (x.nihaiMasrafTipi || x.masrafTipi) === 'KASA' ? 'KASA_ODEDI' : 'BORC',
+      odemeDurumu: (
+        (x.nihaiMasrafTipi || x.masrafTipi) === 'KASA' ? 'KASA_ODEDI' : 'BORC'
+      ) as KasaOdemeDurumu,
     }));
     if (items.length === 0) {
       alert('Seçili aralıkta masraf kaydı yok.');

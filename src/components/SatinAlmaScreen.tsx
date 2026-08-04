@@ -510,9 +510,9 @@ export const SatinAlmaScreen: React.FC<SatinAlmaScreenProps> = ({
     if (openRapor) {
       openEvrakZincirRaporu({
         sa: saForRapor,
-        irsaliyeler: [...created, ...irsaliyeler],
+        irsaliyeler: [...yeniIrsaliyeler, ...irsaliyeler],
         faturalar,
-        focusIrsaliyeIds: created.map((ir) => ir.id),
+        focusIrsaliyeIds: yeniIrsaliyeler.map((ir) => ir.id),
       });
     }
   };
