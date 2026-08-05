@@ -321,6 +321,8 @@ export interface OperatorSahaFaaliyet {
   taseronFirmaId?: string;
   taseronFirmaAdi?: string;
   bagliOperatorFaaliyetId?: string;
+  /** Mesai saatleri yoklamaya kaydedildiğinde true (onayda çift yazmayı önler) */
+  mesaiYoklamayaIslendi?: boolean;
   /** İş makinesi */
   aracId?: string;
   aracPlaka?: string;

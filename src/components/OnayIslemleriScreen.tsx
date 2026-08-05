@@ -907,17 +907,23 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
   const syncOperatorSahaMesaiOnApprove = async (saha: any) => {
     const mesaiMap = saha?.personelMesaiSaatleri as Record<string, number> | undefined;
     if (saha?.faaliyetGrubu !== 'MESAI' || !mesaiMap || Object.keys(mesaiMap).length === 0) return;
+    // Kayıt anında zaten yoklamaya işlendiyse çift yazma
+    if (saha?.mesaiYoklamayaIslendi) return;
     const { fetchYoklamaMap, persistYoklamaDocument } = await import('../lib/yoklamaPersistence');
-    const { applySahaMesaiToYoklama } = await import('../lib/sahaFaaliyetUtils');
+    const { applySahaMesaiToYoklama, ensureGeldiForPersoneller } = await import('../lib/sahaFaaliyetUtils');
     const { getYoklamaDay, setYoklamaDay } = await import('../lib/yoklamaUtils');
     const { normalizeDateKey } = await import('../lib/dateKeyUtils');
     const tarih = normalizeDateKey(saha.tarih);
     const gonderen = String(saha.kaydeden || currentUser?.email || 'operator');
     let draft = await fetchYoklamaMap();
+    // Eski bekleyen kayıtlar: onayda mesai + Geldi
+    const gelidi = ensureGeldiForPersoneller(draft, tarih, Object.keys(mesaiMap), gonderen);
+    draft = gelidi.next;
     draft = applySahaMesaiToYoklama(draft, tarih, mesaiMap, gonderen, 'add');
     const [y, m, d] = tarih.split('-').map(Number);
     const sparse: Record<string, unknown> = {};
-    for (const pid of Object.keys(mesaiMap)) {
+    const touched = new Set([...Object.keys(mesaiMap), ...gelidi.touchedIds]);
+    for (const pid of touched) {
       const cell = getYoklamaDay(draft[pid], y, m, d);
       if (!cell) continue;
       sparse[pid] = setYoklamaDay({}, y, m, d, cell) as any;
@@ -970,6 +976,41 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
         onaylayanYonetici: currentUser?.email || 'yonetici',
         onayTarihi: new Date().toISOString(),
       });
+      // Kayıtta yazılmış mesaiyi geri al
+      if (
+        saha?.faaliyetGrubu === 'MESAI' &&
+        saha?.personelMesaiSaatleri &&
+        (saha as any).mesaiYoklamayaIslendi
+      ) {
+        try {
+          const { fetchYoklamaMap, persistYoklamaDocument } = await import('../lib/yoklamaPersistence');
+          const { applySahaMesaiToYoklama } = await import('../lib/sahaFaaliyetUtils');
+          const { getYoklamaDay, setYoklamaDay } = await import('../lib/yoklamaUtils');
+          const { normalizeDateKey } = await import('../lib/dateKeyUtils');
+          const tarih = normalizeDateKey(saha.tarih);
+          const gonderen = String(saha.kaydeden || currentUser?.email || 'operator');
+          let draft = await fetchYoklamaMap();
+          draft = applySahaMesaiToYoklama(
+            draft,
+            tarih,
+            saha.personelMesaiSaatleri as Record<string, number>,
+            gonderen,
+            'subtract'
+          );
+          const [y, m, d] = tarih.split('-').map(Number);
+          const sparse: Record<string, unknown> = {};
+          for (const pid of Object.keys(saha.personelMesaiSaatleri as object)) {
+            const cell = getYoklamaDay(draft[pid], y, m, d);
+            if (!cell) continue;
+            sparse[pid] = setYoklamaDay({}, y, m, d, cell) as any;
+          }
+          if (Object.keys(sparse).length > 0) {
+            await persistYoklamaDocument(sparse as any, 'sync');
+          }
+        } catch (mesaiErr) {
+          console.warn('Red mesai geri alma:', mesaiErr);
+        }
+      }
       if (saha?.bagliOperatorFaaliyetId) {
         try {
           await rejectOperatorKesintiCore(String(saha.bagliOperatorFaaliyetId));
@@ -1779,8 +1820,11 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
       alert(
         `İkinci kontrol tamam.\n${formatKapiMatchLabel(matched.summary)}` +
           (matched.summary.unmatchedKalemler?.length
-            ? `\nEşleşmeyen: ${matched.summary.unmatchedKalemler.join(', ')}`
-            : '\nMevcut cari/stok kartlarına bağlandı (yeni kart açılmadı).')
+            ? `\nEşleşmeyen (onayda stok kartı açılır): ${matched.summary.unmatchedKalemler.join(', ')}`
+            : '\nMevcut cari/stok kartlarına bağlandı.') +
+          (matched.summary.cariMatched
+            ? ''
+            : '\nCari yoksa onayda yeni tedarikçi kartı açılır.')
       );
     } catch (err) {
       console.error(err);
@@ -1789,8 +1833,7 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
   };
 
   /**
-   * Listeden tek tık: 2× eşleştir → mevcut cari altına işlem + stok giriş → onayla.
-   * Yeni cari/stok kartı açmaz.
+   * Listeden tek tık: 2× eşleştir → cari/stok oluştur veya bağla → onayla.
    */
   const handleQuickApproveGateIrsaliye = async (docItem: any) => {
     const tur = docItem?.evrakTuru || 'İRSALİYE';
@@ -1834,26 +1877,26 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
           `${label}${saId ? `\nSA: ${saId}` : ' (SA bağlı değil)'}\n` +
           (matched.summary.cariMatched
             ? '→ Mevcut cari kartın altına işlem kaydı yazılacak.\n'
-            : '→ Cari bulunamadı; unvan serbest kaydedilecek (yeni kart açılmaz).\n') +
+            : '→ Cari yoksa onayda yeni tedarikçi kartı açılacak.\n') +
           (matched.summary.stokLinked
             ? `→ ${matched.summary.stokLinked} stok kartına giriş işlenecek.\n`
-            : '→ Eşleşen stok yok; miktar artırılmaz.\n') +
-          `\nYeni cari/stok kartı açılmaz.`
+            : '→ Eşleşmeyen kalemler için stok kartı açılıp giriş işlenecek.\n')
       );
       if (!ok) return;
 
       const { cari, stok } = await loadLiveCariStok();
-      const { summary } = await finalizeKapiIrsaliyeApproval({
+      const { summary, kalemler: finalKalemler } = await finalizeKapiIrsaliyeApproval({
         guvenlikEvrakId: docItem.id,
         irsaliyeNo: docItem.evrakNo || docItem.id,
         firma: matched.summary.cariUnvan || docItem.firma || '',
         tarih: docItem.tarih || new Date().toISOString().split('T')[0],
-        fotoUrl: docItem.fotoUrl || '',
+        fotoUrl: pickPrimaryFotoUrl(docItem) || docItem.fotoUrl || '',
         kalemler: matched.kalemler,
         onaylayan: currentUser?.email || 'Yönetici',
         cariKartlar: cari,
         stokKartlar: stok,
         setIrsaliyeler,
+        setCariKartlar,
         setCariIslemGecmisi,
         setStokKartlar,
         setStokIslemGecmisi,
@@ -1872,7 +1915,7 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
         evrakNo: docItem.evrakNo || docItem.id,
         firma: summary.cariUnvan || docItem.firma || '',
         tarih: docItem.tarih || new Date().toISOString().split('T')[0],
-        kalemler: matched.kalemler,
+        kalemler: finalKalemler,
         saId: saId || '',
         donusumKaynagi: saId ? 'KAPI_SA_ESLESME' : 'KAPI_EVRAK',
         onayTarihi: new Date().toISOString(),
@@ -1881,7 +1924,7 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
       if (addNotification) {
         addNotification(`Kapı irsaliyesi onaylandı (${docItem.evrakNo || docItem.id}) · ${formatKapiMatchLabel(summary)}`);
       }
-      alert(`Onaylandı.\n${formatKapiMatchLabel(summary)}\nCari altına kayıt yazıldı (varsa); stok girişleri işlendi.`);
+      alert(`Onaylandı.\n${formatKapiMatchLabel(summary)}\nCari ve stok kayıtları işlendi.`);
     } catch (err) {
       console.error(err);
       alert('Hızlı onay başarısız. Formdan kontrol edip tekrar deneyin.');
@@ -2197,7 +2240,7 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
         setIrsaliyeFirma(rematched.summary.cariUnvan || irsaliyeFirma);
         setIrsaliyeKalemler(rematched.kalemler);
 
-        const { summary } = await finalizeKapiIrsaliyeApproval({
+        const { summary, kalemler: finalKalemler } = await finalizeKapiIrsaliyeApproval({
           guvenlikEvrakId: docId,
           irsaliyeNo,
           firma: rematched.summary.cariUnvan || irsaliyeFirma,
@@ -2208,6 +2251,7 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
           cariKartlar: liveCari,
           stokKartlar: liveStok,
           setIrsaliyeler,
+          setCariKartlar,
           setCariIslemGecmisi,
           setStokKartlar,
           setStokIslemGecmisi,
@@ -2226,7 +2270,7 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
           evrakNo: irsaliyeNo,
           firma: summary.cariUnvan || irsaliyeFirma,
           tarih: irsaliyeTarih,
-          kalemler: rematched.kalemler,
+          kalemler: finalKalemler,
           saId: String(activeGateDoc?.saId || summary.saId || '').trim() || '',
           donusumKaynagi: String(activeGateDoc?.saId || summary.saId || '').trim()
             ? 'KAPI_SA_ESLESME'
@@ -2242,10 +2286,14 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
 
         alert(
           `İrsaliye onaylandı.\n${formatKapiMatchLabel(summary)}\n` +
-            (summary.cariMatched
-              ? 'Mevcut cari kartın altına işlem kaydı yazıldı.\n'
-              : 'Cari bulunamadı; yeni kart açılmadı.\n') +
-            'Stok eşleşen kalemlere giriş işlendi.'
+            (summary.cariCreated
+              ? 'Yeni cari kart açıldı; işlem altına yazıldı.\n'
+              : summary.cariMatched
+                ? 'Mevcut cari kartın altına işlem kaydı yazıldı.\n'
+                : 'Cari bağlanamadı.\n') +
+            (summary.stokCreated
+              ? `${summary.stokCreated} yeni stok kartı açıldı; giriş işlendi.`
+              : 'Stok girişleri işlendi.')
         );
         setActiveGateDoc(null);
         return;
@@ -2300,7 +2348,12 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
       setActiveGateDoc(null);
     } catch (err) {
       console.error(err);
-      alert("Kaydedilirken veritabanı hatası oluştu!");
+      const detail = formatFirestoreWriteError(err) || (err instanceof Error ? err.message : String(err || ''));
+      alert(
+        detail
+          ? `Kaydedilirken hata oluştu:\n${detail}`
+          : 'Kaydedilirken veritabanı hatası oluştu!'
+      );
     }
   };
 

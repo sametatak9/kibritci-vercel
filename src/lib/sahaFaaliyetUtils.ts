@@ -218,6 +218,44 @@ export function applySahaMesaiToYoklama(
   return next;
 }
 
+/**
+ * Faaliyet kaydında yoklama durumu yoksa (Girilmedi / boş) → Geldi.
+ * Mevcut Yok / İzinli / Geldi ezilmez.
+ */
+export function ensureGeldiForPersoneller(
+  yoklamalar: AylikYoklamaMap,
+  tarih: string,
+  personelIds: string[],
+  gonderen: string
+): { next: AylikYoklamaMap; touchedIds: string[] } {
+  const dk = normalizeDateKey(tarih);
+  const ids = [...new Set((personelIds || []).map((id) => String(id || '').trim()).filter(Boolean))];
+  if (!dk || ids.length === 0) return { next: yoklamalar, touchedIds: [] };
+
+  const [y, m, d] = dk.split('-').map(Number);
+  let next: AylikYoklamaMap = { ...yoklamalar };
+  const touchedIds: string[] = [];
+
+  for (const personelId of ids) {
+    const dayData = getYoklamaDay(next[personelId], y, m, d);
+    const durum = String(dayData?.durum || 'Girilmedi').trim();
+    const needsGeldi = !dayData || !durum || durum === 'Girilmedi';
+    if (!needsGeldi) continue;
+
+    next = {
+      ...next,
+      [personelId]: setYoklamaDay(next[personelId], y, m, d, {
+        durum: 'Geldi',
+        mesaiSaati: normalizeMesaiHours(Number(dayData?.mesaiSaati) || 0),
+        gonderen,
+      }),
+    };
+    touchedIds.push(personelId);
+  }
+
+  return { next, touchedIds };
+}
+
 export function formatMesaiFaaliyetLabel(f: SahaFaaliyeti, personeller: { id: string; ad: string; soyad: string }[]): string {
   if (!isMesaiSahaFaaliyet(f) || !f.personelMesaiSaatleri) return '';
   const parts = Object.entries(f.personelMesaiSaatleri)

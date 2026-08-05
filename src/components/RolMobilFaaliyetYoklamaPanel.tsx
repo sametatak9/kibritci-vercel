@@ -22,6 +22,7 @@ import { compressImage } from '../lib/imageCompress';
 import { todayDateKey, formatDateLabelTr, normalizeDateKey } from '../lib/dateKeyUtils';
 import {
   applySahaMesaiToYoklama,
+  ensureGeldiForPersoneller,
   mesaiInputDisplayValue,
   normalizeMesaiHours,
   setMesaiHoursInMap,
@@ -250,6 +251,29 @@ export const RolMobilFaaliyetYoklamaPanel: React.FC<RolMobilFaaliyetYoklamaPanel
     }
   };
 
+  /** Faaliyet personeline yoklama yoksa Geldi yaz */
+  const syncGeldiFromFaaliyet = async (tarih: string, personelIds: string[]) => {
+    if (!saveYoklamalarNow && !setYoklamalar) return;
+    if (!personelIds.length) return;
+    const gonderen = String(currentUser?.email || kaynakEkran);
+    const { next, touchedIds } = ensureGeldiForPersoneller(yoklamalar, tarih, personelIds, gonderen);
+    if (touchedIds.length === 0) return;
+    const dk = normalizeDateKey(tarih);
+    const [y, m, d] = dk.split('-').map(Number);
+    const sparse: AylikYoklamaMap = {};
+    for (const pid of touchedIds) {
+      const cell = getYoklamaDay(next[pid], y, m, d);
+      if (!cell) continue;
+      sparse[pid] = setYoklamaDay({}, y, m, d, cell) as any;
+    }
+    if (Object.keys(sparse).length === 0) return;
+    if (saveYoklamalarNow) {
+      await saveYoklamalarNow(sparse);
+    } else if (setYoklamalar) {
+      setYoklamalar(next);
+    }
+  };
+
   const handleSaveFaaliyet = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!aciklama.trim()) {
@@ -409,6 +433,8 @@ export const RolMobilFaaliyetYoklamaPanel: React.FC<RolMobilFaaliyetYoklamaPanel
       }
 
       const needsOnay = rol === 'OPERATOR';
+      const willSyncMesai =
+        faaliyetGrubu === 'MESAI' && Boolean(mesaiMap && Object.keys(mesaiMap).length > 0);
       const payload: Kayit = {
         id,
         tarih: tarihKey,
@@ -431,6 +457,7 @@ export const RolMobilFaaliyetYoklamaPanel: React.FC<RolMobilFaaliyetYoklamaPanel
               taseronFirmaId: taseronKesintiAcik ? taseronCariId || null : null,
               taseronFirmaAdi: taseronKesintiAcik ? taseronCari?.unvan || null : null,
               bagliOperatorFaaliyetId: bagliOperatorFaaliyetId || null,
+              mesaiYoklamayaIslendi: willSyncMesai ? true : null,
               ...makineFields,
             }
           : {}),
@@ -438,6 +465,7 @@ export const RolMobilFaaliyetYoklamaPanel: React.FC<RolMobilFaaliyetYoklamaPanel
 
       if (faaliyetGrubu !== 'MESAI') {
         (payload as any).personelMesaiSaatleri = null;
+        if (rol === 'OPERATOR') (payload as any).mesaiYoklamayaIslendi = null;
       }
 
       await withTimeout(
@@ -454,19 +482,12 @@ export const RolMobilFaaliyetYoklamaPanel: React.FC<RolMobilFaaliyetYoklamaPanel
       // Seçili tarihi kayda sabitle (normalize)
       setFaaliyetTarih(tarihKey);
 
-      // Operatör: mesai yoklamaya ancak onay sonrası yazılır.
-      // Onaylı kayıt yeniden düzenlenirse eski mesaiyi geri al (tekrar onaya düşer).
-      // Yoklama senkronu faaliyet kaydını bozmasın — ayrı try.
+      // Yoklama: 1) durum yoksa Geldi  2) mesaili ise saatleri yaz
+      // (Operatörde eskiden mesai yalnızca onayda yazılıyordu — kayıpta görünmüyordu.)
       try {
-        if (rol === 'OPERATOR') {
-          if (
-            existing?.durum === 'ONAYLANDI' &&
-            existing.faaliyetGrubu === 'MESAI' &&
-            existing.personelMesaiSaatleri
-          ) {
-            await syncMesai(String(existing.tarih), undefined, existing.personelMesaiSaatleri);
-          }
-        } else if (faaliyetGrubu === 'MESAI' || existing?.faaliyetGrubu === 'MESAI') {
+        await syncGeldiFromFaaliyet(String(payload.tarih), aktifPersonelListesi);
+
+        if (faaliyetGrubu === 'MESAI' || existing?.faaliyetGrubu === 'MESAI') {
           await syncMesai(
             String(payload.tarih),
             faaliyetGrubu === 'MESAI' && mesaiMap ? mesaiMap : undefined,
@@ -474,9 +495,9 @@ export const RolMobilFaaliyetYoklamaPanel: React.FC<RolMobilFaaliyetYoklamaPanel
           );
         }
       } catch (yoklamaErr) {
-        console.warn('Mesai yoklama senkronu atlandı:', yoklamaErr);
+        console.warn('Yoklama / mesai senkronu atlandı:', yoklamaErr);
         fotoUyari +=
-          ' Faaliyet kaydı yazıldı; yoklama mesai senkronu gecikti — Yoklama sekmesinden kontrol edin.';
+          ' Faaliyet kaydı yazıldı; yoklama senkronu gecikti — Yoklama sekmesinden kontrol edin.';
       }
 
       if (addNotification) {
@@ -496,8 +517,11 @@ export const RolMobilFaaliyetYoklamaPanel: React.FC<RolMobilFaaliyetYoklamaPanel
           ? 'Faaliyet güncellendi.'
           : needsOnay
             ? `Faaliyet kaydedildi (${formatDateLabelTr(tarihKey)}) — onay havuzuna düştü.`
-            : `Faaliyet kaydedildi (${formatDateLabelTr(tarihKey)}).`) + fotoUyari,
-        6000
+            : `Faaliyet kaydedildi (${formatDateLabelTr(tarihKey)}).`) +
+          (willSyncMesai ? ' Mesai yoklamaya işlendi.' : '') +
+          ' Yoklama durumu yoksa Geldi işaretlendi.' +
+          fotoUyari,
+        7000
       );
       resetFaaliyetForm();
     } catch (err: any) {
@@ -544,11 +568,8 @@ export const RolMobilFaaliyetYoklamaPanel: React.FC<RolMobilFaaliyetYoklamaPanel
           /* ignore */
         }
       }
-      if (
-        f.faaliyetGrubu === 'MESAI' &&
-        f.personelMesaiSaatleri &&
-        (rol !== 'OPERATOR' || f.durum === 'ONAYLANDI')
-      ) {
+      if (f.faaliyetGrubu === 'MESAI' && f.personelMesaiSaatleri) {
+        // Operatörde artık kayıtta da yazılıyor — silince geri al
         await syncMesai(f.tarih, undefined, f.personelMesaiSaatleri);
       }
       if (editingFaaliyetId === f.id) resetFaaliyetForm();
