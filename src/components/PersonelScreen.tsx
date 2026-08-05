@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Users, UserPlus, Trash2, CreditCard as Edit3, Camera, Search, ShieldCheck, Mail, Phone, MapPin, DollarSign, UserX, FileText, CloudUpload as UploadCloud, CircleCheck as CheckCircle2, CircleAlert as AlertCircle, Loader as Loader2, Building2, History, Download, Printer } from 'lucide-react';
+import { Users, UserPlus, Trash2, CreditCard as Edit3, Camera, Search, ShieldCheck, Mail, Phone, MapPin, DollarSign, UserX, FileText, CloudUpload as UploadCloud, CircleCheck as CheckCircle2, CircleAlert as AlertCircle, Loader as Loader2, Building2, History, Download, Printer, RefreshCw, ListPlus } from 'lucide-react';
 import { CariKart, CariKartIslem, Personel } from '../types/erp';
 import { fetchApiJson } from '../lib/apiClient';
 import { compressImage } from '../lib/imageCompress';
@@ -24,6 +24,11 @@ import {
 import { CANONICAL_ANA_FIRMA_ADI, isTaseronPersonel } from '../lib/yoklamaUtils';
 import { getPersonelMissingDocs, getPersonellerWithMissingTcIban } from '../lib/personelMissingDocs';
 import { listOdemeEngelleri, validateIBAN, validateTC } from '../lib/personelOdemeUtils';
+import {
+  parseTaseronListeText,
+  syncTaseronPersonelListe,
+  type TaseronListeSyncResult,
+} from '../lib/taseronPersonelListeGuncelle';
 
 const MAX_PERSONEL_INLINE_MEDIA = 120_000;
 
@@ -285,6 +290,17 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
   const [manuelTaseronAdi, setManuelTaseronAdi] = useState('');
   const [taseronResolveModal, setTaseronResolveModal] = useState<TaseronResolveModalState>(null);
 
+  /** Haftalık taşeron kadro listesi güncelleme */
+  const [listeModalOpen, setListeModalOpen] = useState(false);
+  const [listeFirmaCariId, setListeFirmaCariId] = useState('');
+  const [listeManuelFirma, setListeManuelFirma] = useState('');
+  const [listeText, setListeText] = useState('');
+  const [listeDonemBas, setListeDonemBas] = useState('');
+  const [listeDonemBit, setListeDonemBit] = useState('');
+  const [listePreview, setListePreview] = useState<TaseronListeSyncResult | null>(null);
+  const [listeParseErrors, setListeParseErrors] = useState<string[]>([]);
+  const [listeSaving, setListeSaving] = useState(false);
+
   const taseronCariList = useMemo(
     () =>
       cariKartlar
@@ -307,6 +323,11 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
         firmaTipi: nextTip,
         firmaAdi: nextTip === 'TASERON' ? '' : CANONICAL_ANA_FIRMA_ADI,
         gorev: nextTip === 'TASERON' ? prev.gorev : resolveAkvizyonGorev(CANONICAL_ANA_FIRMA_ADI, prev.gorev),
+        // Taşeron: IBAN/maaş zorunlu değil
+        maas: nextTip === 'TASERON' ? 0 : prev.maas || 30000,
+        ibanNo: nextTip === 'TASERON' ? '' : prev.ibanNo || 'TR',
+        ucretTipi: nextTip === 'TASERON' ? 'Günlük' : prev.ucretTipi,
+        sgkDurumu: nextTip === 'TASERON' ? 'Sigortasız' : prev.sgkDurumu,
       }));
       setTaseronKaynak('');
       setManuelTaseronAdi('');
@@ -651,16 +672,96 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
     );
   };
 
+  const resolveListeFirmaAdi = (): string => {
+    if (listeFirmaCariId === TASERON_MANUEL_KEY) {
+      return String(listeManuelFirma || '').trim();
+    }
+    return taseronCariList.find((c) => c.id === listeFirmaCariId)?.unvan?.trim() || '';
+  };
+
+  const handleListeOnizle = () => {
+    const firmaAdi = resolveListeFirmaAdi();
+    if (!firmaAdi) {
+      alert('Taşeron firma seçin veya elle yazın.');
+      return;
+    }
+    const { rows, errors } = parseTaseronListeText(listeText);
+    setListeParseErrors(errors);
+    if (rows.length === 0) {
+      setListePreview(null);
+      alert('Liste boş — satır satır Ad Soyad (isteğe bağlı TC) yapıştırın.');
+      return;
+    }
+    const result = syncTaseronPersonelListe({
+      firmaAdi,
+      rows,
+      existing: personeller,
+      cikisTarihi: listeDonemBit || new Date().toISOString().slice(0, 10),
+      iseGirisTarihi: listeDonemBas || new Date().toISOString().slice(0, 10),
+    });
+    setListePreview({ ...result, parseErrors: errors });
+  };
+
+  const handleListeUygula = async () => {
+    if (!listePreview) {
+      handleListeOnizle();
+      return;
+    }
+    if (listePreview.toSave.length === 0) {
+      alert('Değişiklik yok — liste mevcut kadroyla aynı.');
+      return;
+    }
+    const firmaAdi = resolveListeFirmaAdi();
+    const msg =
+      `${firmaAdi} taşeron kadrosu güncellenecek:\n` +
+      `+ ${listePreview.created.length} yeni\n` +
+      `↻ ${listePreview.reactivated.length} yeniden aktif\n` +
+      `✎ ${listePreview.updated.length} güncelleme\n` +
+      `− ${listePreview.deactivated.length} pasife alınacak\n` +
+      `= ${listePreview.kept.length} aynı kalacak\n\n` +
+      `Devam? (Personel Yönetimi listesine yazılır; yoklama/maaş hesaplanmaz.)`;
+    if (!window.confirm(msg)) return;
+
+    setListeSaving(true);
+    try {
+      for (const p of listePreview.toSave) {
+        await saveDocument('personeller', leanPersonelForFirestore(p) as Personel);
+      }
+      setPersoneller(listePreview.list);
+      alert(
+        `Taşeron liste güncellendi.\nYeni: ${listePreview.created.length} · Pasif: ${listePreview.deactivated.length}`
+      );
+      setListeModalOpen(false);
+      setListePreview(null);
+      setListeText('');
+      setListeParseErrors([]);
+    } catch (err: any) {
+      console.error(err);
+      alert('Liste kaydedilemedi: ' + (err?.message || 'bilinmeyen hata'));
+    } finally {
+      setListeSaving(false);
+    }
+  };
+
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.ad || !formData.soyad || !formData.tcNo) {
-      alert("Lütfen en az Ad, Soyad ve TC Kimlik No alanlarını doldurun.");
+    const isTaseronForm = formData.firmaTipi === 'TASERON';
+    if (!formData.ad || !formData.soyad) {
+      alert('Lütfen en az Ad ve Soyad alanlarını doldurun.');
+      return;
+    }
+    if (!isTaseronForm && !formData.tcNo) {
+      alert('Ana firma personeli için TC Kimlik No zorunludur.');
       return;
     }
 
     const normalizedTc = String(formData.tcNo || '').trim();
-    if (!validateTC(normalizedTc)) {
-      alert("TC Kimlik No tam 11 haneli ve sadece rakamlardan oluşmalıdır!");
+    if (normalizedTc && !validateTC(normalizedTc)) {
+      alert('TC Kimlik No tam 11 haneli ve sadece rakamlardan oluşmalıdır!');
+      return;
+    }
+    if (!isTaseronForm && !validateTC(normalizedTc)) {
+      alert('TC Kimlik No tam 11 haneli ve sadece rakamlardan oluşmalıdır!');
       return;
     }
 
@@ -669,14 +770,16 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
       ('id' in formData && formData.id ? String(formData.id).trim() : '');
     const isEdit = Boolean(editingId);
 
-    const duplicateTc = personeller.find((p) => {
-      const existingTc = String(p.tcNo || '').trim();
-      if (isEdit && p.id === editingId) return false;
-      return existingTc.length > 0 && existingTc === normalizedTc;
-    });
-    if (duplicateTc) {
-      alert(`Bu TC kimlik numarası zaten kayıtlı: ${duplicateTc.ad} ${duplicateTc.soyad}`);
-      return;
+    if (normalizedTc) {
+      const duplicateTc = personeller.find((p) => {
+        const existingTc = String(p.tcNo || '').trim();
+        if (isEdit && p.id === editingId) return false;
+        return existingTc.length > 0 && existingTc === normalizedTc;
+      });
+      if (duplicateTc) {
+        alert(`Bu TC kimlik numarası zaten kayıtlı: ${duplicateTc.ad} ${duplicateTc.soyad}`);
+        return;
+      }
     }
 
     if (!is_aktif_status(formData.durum) && !formData.istenCikisTarihi) {
@@ -1255,7 +1358,9 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
 
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="text-[10px] font-bold text-slate-500 uppercase">TC Kimlik No *</label>
+                <label className="text-[10px] font-bold text-slate-500 uppercase">
+                  {formData.firmaTipi === 'TASERON' ? 'TC Kimlik No (opsiyonel)' : 'TC Kimlik No *'}
+                </label>
                 <input
                   type="text"
                   name="tcNo"
@@ -1263,7 +1368,7 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
                   value={formData.tcNo}
                   onChange={handleInputChange}
                   className="w-full text-xs font-medium border border-[#e2e8f0] rounded-lg mt-1 p-2 bg-slate-50  transition duration-150"
-                  placeholder="11 Hane"
+                  placeholder={formData.firmaTipi === 'TASERON' ? 'Zorunlu değil' : '11 Hane'}
                 />
               </div>
               <div>
@@ -1476,8 +1581,9 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
               </p>
             )}
             {formData.firmaTipi === 'TASERON' && !isAkvizyonFirmaAdi(formData.firmaAdi) && (
-              <p className="text-[9px] text-slate-500 bg-slate-50 border border-slate-100 rounded-lg px-2 py-1.5">
-                Taşeron personel yoklama listesine dahil edilmez; yalnızca ana firma kadrosu yoklamaya girer.
+              <p className="text-[9px] text-amber-800 bg-amber-50 border border-amber-100 rounded-lg px-2 py-1.5">
+                Taşeron personelde IBAN ve maaş zorunlu değildir. Yoklama alınmaz, maaş hesaplanmaz.
+                Haftalık kadro güncellemesi için sağ üstteki <strong>Taşeron Liste Güncelle</strong> kullanın.
               </p>
             )}
           </div>
@@ -1585,14 +1691,16 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
 
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="text-[10px] font-bold text-slate-500 uppercase">Maaş (Brüt) *</label>
+                <label className="text-[10px] font-bold text-slate-500 uppercase">
+                  {formData.firmaTipi === 'TASERON' ? 'Maaş (opsiyonel)' : 'Maaş (Brüt) *'}
+                </label>
                 <input
                   type="number"
                   name="maas"
-                  value={formData.maas}
+                  value={formData.maas || ''}
                   onChange={handleInputChange}
                   className="w-full text-xs font-semibold border border-[#e2e8f0] rounded-lg mt-1 p-2 bg-slate-50"
-                  placeholder="30000"
+                  placeholder={formData.firmaTipi === 'TASERON' ? 'Zorunlu değil' : '30000'}
                 />
               </div>
               <div>
@@ -1615,6 +1723,11 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
           <div className="space-y-3 pt-2">
             <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest border-b border-slate-100 pb-1">
               Banka Hesap Bilgileri
+              {formData.firmaTipi === 'TASERON' && (
+                <span className="ml-2 text-amber-600 font-semibold normal-case tracking-normal">
+                  (taşeron — zorunlu değil)
+                </span>
+              )}
             </h4>
             <div className="grid grid-cols-2 gap-3">
               <div>
@@ -1642,14 +1755,16 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
             </div>
 
             <div>
-              <label className="text-[10px] font-bold text-slate-500 uppercase">IBAN Numarası</label>
+              <label className="text-[10px] font-bold text-slate-500 uppercase">
+                {formData.firmaTipi === 'TASERON' ? 'IBAN (opsiyonel)' : 'IBAN Numarası'}
+              </label>
               <input
                 type="text"
                 name="ibanNo"
                 value={formData.ibanNo}
                 onChange={handleInputChange}
                 className="w-full text-xs font-mono font-medium border border-[#e2e8f0] rounded-lg mt-1 p-2 bg-slate-50"
-                placeholder="TR000..."
+                placeholder={formData.firmaTipi === 'TASERON' ? 'Zorunlu değil' : 'TR000...'}
               />
             </div>
           </div>
@@ -1894,6 +2009,23 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
             </button>
             <button
               type="button"
+              onClick={() => {
+                const today = new Date().toISOString().slice(0, 10);
+                const bas = new Date();
+                bas.setDate(bas.getDate() - 6);
+                setListeDonemBas(bas.toISOString().slice(0, 10));
+                setListeDonemBit(today);
+                setListePreview(null);
+                setListeParseErrors([]);
+                setListeModalOpen(true);
+              }}
+              className="flex items-center gap-1.5 text-[10px] font-bold px-3 py-2 bg-orange-700 text-white rounded-xl hover:bg-orange-800 cursor-pointer"
+              title="Haftalık taşeron personel listesini toplu güncelle (liste bazlı)"
+            >
+              <ListPlus size={12} /> Taşeron Liste Güncelle
+            </button>
+            <button
+              type="button"
               onClick={() => void handleExportAllTaseronExcel()}
               className="flex items-center gap-1.5 text-[10px] font-bold px-3 py-2 bg-amber-600 text-white rounded-xl hover:bg-amber-700 cursor-pointer"
               title="Tüm taşeron firma personelini Excel (.xlsx) olarak indir"
@@ -1962,9 +2094,9 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
                             Ayrılış: {p.istenCikisTarihi}
                           </span>
                         )}
-                        {p.firmaTipi === 'TASERON' && (
+                        {(p.firmaTipi === 'TASERON' || isTaseronPersonel(p)) && (
                           <span className="text-[10px] bg-amber-50 text-amber-700 border border-amber-100 px-2 py-0.5 rounded-full font-bold">
-                            {p.firmaAdi || 'Taşeron'}
+                            {p.firmaAdi || 'Taşeron'} · Yoklama/maaş yok
                           </span>
                         )}
                         {(p.personelGrubu === 'IDARI' || p.departman === 'İDARİ') && (
@@ -2189,6 +2321,161 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
                 <Download size={12} /> Raporu İndir
               </button>
               <button onClick={() => setShowHistoryModal(false)} className="bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold text-xs py-2 px-4 rounded-xl transition cursor-pointer">
+                Kapat
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {listeModalOpen && (
+        <div className="fixed inset-0 bg-slate-950/70 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl w-full max-w-xl max-h-[90vh] overflow-y-auto p-5 space-y-4 shadow-2xl">
+            <div className="flex items-center gap-2 text-orange-800">
+              <RefreshCw size={18} />
+              <h3 className="font-display font-bold text-sm uppercase tracking-wide">
+                Taşeron Personel Liste Güncelle
+              </h3>
+            </div>
+            <p className="text-[11px] text-slate-600 leading-relaxed">
+              Haftalık (6–7 gün) kadro değişiminde firma seçip güncel listeyi yapıştırın.
+              Listedekiler Personel Yönetimi’nde aktif kalır / eklenir; listede olmayan aynı firma
+              personeli pasife alınır. IBAN ve maaş gerekmez — yoklama alınmaz, maaş hesaplanmaz.
+            </p>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="col-span-2">
+                <label className="text-[10px] font-bold text-slate-500 uppercase">Taşeron Firma</label>
+                <select
+                  value={listeFirmaCariId}
+                  onChange={(e) => {
+                    setListeFirmaCariId(e.target.value);
+                    setListePreview(null);
+                  }}
+                  className="w-full text-xs border border-slate-200 rounded-xl mt-1 p-2.5 bg-slate-50"
+                >
+                  <option value="">Firma seçin…</option>
+                  {taseronCariList.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.unvan}
+                    </option>
+                  ))}
+                  <option value={TASERON_MANUEL_KEY}>Elle yaz (yeni / manuel)</option>
+                </select>
+                {listeFirmaCariId === TASERON_MANUEL_KEY && (
+                  <input
+                    type="text"
+                    value={listeManuelFirma}
+                    onChange={(e) => {
+                      setListeManuelFirma(e.target.value);
+                      setListePreview(null);
+                    }}
+                    placeholder="Taşeron firma adı"
+                    className="w-full text-xs border border-amber-200 rounded-xl mt-2 p-2.5 bg-amber-50"
+                  />
+                )}
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-slate-500 uppercase">Dönem başlangıç</label>
+                <input
+                  type="date"
+                  value={listeDonemBas}
+                  onChange={(e) => setListeDonemBas(e.target.value)}
+                  className="w-full text-xs border border-slate-200 rounded-xl mt-1 p-2 bg-slate-50"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-slate-500 uppercase">Dönem bitiş / çıkış</label>
+                <input
+                  type="date"
+                  value={listeDonemBit}
+                  onChange={(e) => setListeDonemBit(e.target.value)}
+                  className="w-full text-xs border border-slate-200 rounded-xl mt-1 p-2 bg-slate-50"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="text-[10px] font-bold text-slate-500 uppercase">
+                Güncel personel listesi (satır satır)
+              </label>
+              <textarea
+                value={listeText}
+                onChange={(e) => {
+                  setListeText(e.target.value);
+                  setListePreview(null);
+                }}
+                rows={10}
+                placeholder={'AHMET YILMAZ\nMEHMET DEMİR\t12345678901\nAYŞE KAYA;12345678901\n…'}
+                className="w-full text-xs font-mono border border-slate-200 rounded-xl mt-1 p-3 bg-slate-50 resize-y"
+              />
+              <p className="text-[9px] text-slate-400 mt-1">
+                Biçim: Ad Soyad · veya Ad Soyad + TC (sekme / noktalı virgül). Excel’den yapıştırabilirsiniz.
+              </p>
+            </div>
+
+            {listeParseErrors.length > 0 && (
+              <div className="text-[10px] text-amber-800 bg-amber-50 border border-amber-100 rounded-xl px-3 py-2 space-y-0.5 max-h-24 overflow-y-auto">
+                {listeParseErrors.map((err, i) => (
+                  <p key={i}>{err}</p>
+                ))}
+              </div>
+            )}
+
+            {listePreview && (
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-[10px]">
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2">
+                  <p className="font-bold text-emerald-800">Yeni</p>
+                  <p className="text-lg font-black text-emerald-700">{listePreview.created.length}</p>
+                </div>
+                <div className="rounded-xl border border-sky-200 bg-sky-50 px-3 py-2">
+                  <p className="font-bold text-sky-800">Yeniden aktif</p>
+                  <p className="text-lg font-black text-sky-700">{listePreview.reactivated.length}</p>
+                </div>
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                  <p className="font-bold text-slate-700">Güncelleme</p>
+                  <p className="text-lg font-black text-slate-800">{listePreview.updated.length}</p>
+                </div>
+                <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2">
+                  <p className="font-bold text-rose-800">Pasife</p>
+                  <p className="text-lg font-black text-rose-700">{listePreview.deactivated.length}</p>
+                </div>
+                <div className="rounded-xl border border-slate-200 bg-white px-3 py-2">
+                  <p className="font-bold text-slate-600">Aynı</p>
+                  <p className="text-lg font-black text-slate-700">{listePreview.kept.length}</p>
+                </div>
+                <div className="rounded-xl border border-orange-200 bg-orange-50 px-3 py-2">
+                  <p className="font-bold text-orange-800">Yazılacak</p>
+                  <p className="text-lg font-black text-orange-700">{listePreview.toSave.length}</p>
+                </div>
+              </div>
+            )}
+
+            <div className="flex flex-wrap gap-2 pt-1">
+              <button
+                type="button"
+                onClick={handleListeOnizle}
+                className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold py-2.5 rounded-xl text-xs"
+              >
+                Önizle
+              </button>
+              <button
+                type="button"
+                disabled={listeSaving}
+                onClick={() => void handleListeUygula()}
+                className="flex-1 bg-orange-700 hover:bg-orange-800 disabled:opacity-60 text-white font-bold py-2.5 rounded-xl text-xs inline-flex items-center justify-center gap-1.5"
+              >
+                {listeSaving ? <Loader2 size={14} className="animate-spin" /> : <ListPlus size={14} />}
+                {listeSaving ? 'Kaydediliyor…' : 'Listeyi Uygula'}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setListeModalOpen(false);
+                  setListePreview(null);
+                }}
+                className="px-4 bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 font-bold py-2.5 rounded-xl text-xs"
+              >
                 Kapat
               </button>
             </div>

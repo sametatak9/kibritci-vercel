@@ -1,4 +1,5 @@
 import { Personel } from '../types/erp';
+import { isTaseronPersonel } from './yoklamaUtils';
 
 /** Personelde eksik görülen temel alanlar — salt uyarı, kayıt engellemez. */
 export type PersonelMissingField =
@@ -33,17 +34,19 @@ export function isIbanValid(iban: string): boolean {
 
 export function getPersonelMissingDocs(p: Personel): PersonelMissingField[] {
   const missing: PersonelMissingField[] = [];
-  if (!isTcNoValid(p.tcNo)) missing.push('TC No');
-  if (!isIbanValid(p.ibanNo)) missing.push('IBAN');
+  const taseron = isTaseronPersonel(p);
+  // Taşeron: TC/IBAN/maaş/foto zorunlu değil — yoklama alınmaz, maaş hesaplanmaz
+  if (!taseron && !isTcNoValid(p.tcNo)) missing.push('TC No');
+  if (!taseron && !isIbanValid(p.ibanNo)) missing.push('IBAN');
   if (!String(p.iseGirisTarihi || '').trim()) missing.push('İşe Giriş');
-  if (!String(p.sgkDurumu || '').trim()) missing.push('SGK');
-  if (!hasPhoto(p)) missing.push('Fotoğraf');
-  // Sigorta evrakı yalnızca SGK'lı personelde zorunlu sayılır
+  if (!taseron && !String(p.sgkDurumu || '').trim()) missing.push('SGK');
+  if (!taseron && !hasPhoto(p)) missing.push('Fotoğraf');
+  // Sigorta evrakı yalnızca ana firma SGK'lı personelde zorunlu sayılır
   const sgk = String(p.sgkDurumu || '');
-  if (sgk.includes('SGK') && !String(p.sigortaEvrakUrl || '').trim()) {
+  if (!taseron && sgk.includes('SGK') && !String(p.sigortaEvrakUrl || '').trim()) {
     missing.push('Sigorta Evrakı');
   }
-  if (!String(p.telefonNo || '').trim()) missing.push('Telefon');
+  if (!taseron && !String(p.telefonNo || '').trim()) missing.push('Telefon');
   return missing;
 }
 
@@ -55,13 +58,14 @@ export function hasPersonelMissingDocs(p: Personel): boolean {
   return getPersonelMissingDocs(p).length > 0;
 }
 
-/** Yalnızca TC / IBAN eksik/hatalı personelleri filtrele */
+/** Yalnızca TC / IBAN eksik/hatalı personelleri filtrele (taşeron hariç) */
 export function getPersonellerWithMissingTcIban(personeller: Personel[]): Array<{
   personel: Personel;
   eksikTc: boolean;
   eksikIban: boolean;
 }> {
   return personeller
+    .filter((p) => !isTaseronPersonel(p))
     .map((p) => ({
       personel: p,
       eksikTc: !isTcNoValid(p.tcNo),
