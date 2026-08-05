@@ -677,6 +677,7 @@ export const LojistikScreen: React.FC<LojistikScreenProps> = ({
       aciklama: x.aciklama,
       tutar: Number(x.tutar) || 0,
       surucu: x.surucu,
+      personelAdi: x.personelAdi || soforPersonelAdi || currentChauffeurName,
       fotoUrl: x.faturaFotoUrl,
       masrafTipi: x.nihaiMasrafTipi || x.masrafTipi || 'KENDI',
       odemeDurumu: (

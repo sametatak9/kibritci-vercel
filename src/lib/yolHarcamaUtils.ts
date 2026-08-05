@@ -434,17 +434,119 @@ type RaporKalem = {
   aciklama: string;
   tutar: number;
   surucu?: string;
+  personelAdi?: string;
   fotoUrl?: string;
   tipEtiket?: string;
   masrafTipi?: SoforMasrafTipi | string;
   odemeDurumu?: KasaOdemeDurumu | null;
 };
 
+function raporKalemKisiAdi(r: RaporKalem): string {
+  const name = String(r.personelAdi || r.surucu || '').trim();
+  if (!name) return 'Personel (adsız)';
+  if (name.toLocaleLowerCase('tr-TR') === 'celal@kibritciinsaat.com') return 'CELAL YILMAZ';
+  return name;
+}
+
 function raporKalemOdemeDurumu(r: RaporKalem): KasaOdemeDurumu {
   if (r.odemeDurumu === 'BORC' || r.odemeDurumu === 'PERSONEL_ODEDI' || r.odemeDurumu === 'KASA_ODEDI') {
     return r.odemeDurumu;
   }
   return normalizeSoforMasrafTipi(r.masrafTipi) === 'KASA' ? 'KASA_ODEDI' : 'BORC';
+}
+
+/** Kim ne kadar masraf yapmış — kişi özeti + kalem kalem döküm */
+function buildPersonelHarcamaOzetHtml(rows: RaporKalem[]): string {
+  type Bucket = {
+    label: string;
+    toplam: number;
+    kalemler: RaporKalem[];
+  };
+  const map = new Map<string, Bucket>();
+  for (const r of rows) {
+    const label = raporKalemKisiAdi(r);
+    const key = label.toLocaleUpperCase('tr-TR');
+    const prev = map.get(key);
+    if (prev) {
+      prev.toplam += Number(r.tutar) || 0;
+      prev.kalemler.push(r);
+    } else {
+      map.set(key, { label, toplam: Number(r.tutar) || 0, kalemler: [r] });
+    }
+  }
+  const buckets = [...map.values()].sort((a, b) => b.toplam - a.toplam);
+  if (buckets.length === 0) {
+    return `<p style="color:#94a3b8;font-style:italic;font-size:11px">Kişi bazlı harcama yok</p>`;
+  }
+
+  const ozetRows = buckets
+    .map(
+      (b, i) => `<tr>
+      <td style="padding:6px 8px;border:1px solid #cbd5e1;text-align:center">${i + 1}</td>
+      <td style="padding:6px 8px;border:1px solid #cbd5e1;font-weight:800">${escapeHtml(b.label)}</td>
+      <td style="padding:6px 8px;border:1px solid #cbd5e1;text-align:center;font-weight:700">${b.kalemler.length}</td>
+      <td style="padding:6px 8px;border:1px solid #cbd5e1;text-align:right;font-weight:900;color:#b91c1c">−${b.toplam.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺</td>
+    </tr>`
+    )
+    .join('');
+
+  const detay = buckets
+    .map((b) => {
+      const lines = b.kalemler
+        .slice()
+        .sort((a, c) => String(a.tarih).localeCompare(String(c.tarih)))
+        .map((r) => {
+          const durum = raporKalemOdemeDurumu(r);
+          return `<tr>
+          <td style="padding:5px 8px;border:1px solid #e2e8f0;font-family:ui-monospace,monospace;font-size:10px">${escapeHtml(r.tarih)}</td>
+          <td style="padding:5px 8px;border:1px solid #e2e8f0;font-size:10px;font-weight:700">${escapeHtml(kasaOdemeDurumuLabel(durum))}</td>
+          <td style="padding:5px 8px;border:1px solid #e2e8f0;font-size:10px">${escapeHtml(r.fisNo || '—')}</td>
+          <td style="padding:5px 8px;border:1px solid #e2e8f0;font-size:10px">${escapeHtml(r.tipEtiket || '')}${escapeHtml(r.aciklama || '—')}</td>
+          <td style="padding:5px 8px;border:1px solid #e2e8f0;text-align:right;font-weight:800;color:#b91c1c;font-size:10px">−${Number(r.tutar || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺</td>
+        </tr>`;
+        })
+        .join('');
+      return `<div style="margin:14px 0 18px;page-break-inside:avoid">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 10px;background:#1e3a5f;color:#fff;border-radius:8px 8px 0 0">
+          <span style="font-size:12px;font-weight:800">${escapeHtml(b.label)}</span>
+          <span style="font-size:11px;font-weight:800">−${b.toplam.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺ · ${b.kalemler.length} kalem</span>
+        </div>
+        <table style="width:100%;border-collapse:collapse;background:#fff">
+          <thead>
+            <tr style="background:#f1f5f9;color:#334155">
+              <th style="padding:6px 8px;border:1px solid #e2e8f0;text-align:left;font-size:10px">Tarih</th>
+              <th style="padding:6px 8px;border:1px solid #e2e8f0;text-align:left;font-size:10px">Ödeme</th>
+              <th style="padding:6px 8px;border:1px solid #e2e8f0;text-align:left;font-size:10px">Fiş</th>
+              <th style="padding:6px 8px;border:1px solid #e2e8f0;text-align:left;font-size:10px">Açıklama</th>
+              <th style="padding:6px 8px;border:1px solid #e2e8f0;text-align:right;font-size:10px">Tutar</th>
+            </tr>
+          </thead>
+          <tbody>${lines}</tbody>
+        </table>
+      </div>`;
+    })
+    .join('');
+
+  return `<section style="margin:18px 0 22px">
+    <h3 style="font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:#1e3a5f;margin:0 0 10px">
+      Harcama bazlı kişi özeti — kim ne kadar masraf yapmış
+    </h3>
+    <table style="width:100%;border-collapse:collapse;font-size:11px;margin-bottom:16px">
+      <thead>
+        <tr style="background:#0f766e;color:#fff">
+          <th style="padding:7px;border:1px solid #0f766e">#</th>
+          <th style="padding:7px;border:1px solid #0f766e;text-align:left">Personel / Şoför</th>
+          <th style="padding:7px;border:1px solid #0f766e;text-align:center">Kalem</th>
+          <th style="padding:7px;border:1px solid #0f766e;text-align:right">Toplam masraf</th>
+        </tr>
+      </thead>
+      <tbody>${ozetRows}</tbody>
+    </table>
+    <h3 style="font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:#1e3a5f;margin:0 0 8px">
+      Kişi bazlı kalem kalem döküm
+    </h3>
+    ${detay}
+  </section>`;
 }
 
 function buildMasrafTableHtml(rows: RaporKalem[], toplam: number): string {
@@ -460,7 +562,7 @@ function buildMasrafTableHtml(rows: RaporKalem[], toplam: number): string {
       <td style="padding:6px 8px;border:1px solid #cbd5e1;font-weight:700">${escapeHtml(r.fisNo || '—')}</td>
       <td style="padding:6px 8px;border:1px solid #cbd5e1;font-size:10px;font-weight:800;color:${tipColor}">${escapeHtml(kasaOdemeDurumuLabel(durum))}</td>
       <td style="padding:6px 8px;border:1px solid #cbd5e1">${escapeHtml(r.tipEtiket || '')}${escapeHtml(r.aciklama || '—')}</td>
-      <td style="padding:6px 8px;border:1px solid #cbd5e1">${escapeHtml(r.surucu || '—')}</td>
+      <td style="padding:6px 8px;border:1px solid #cbd5e1">${escapeHtml(raporKalemKisiAdi(r))}</td>
       <td style="padding:6px 8px;border:1px solid #cbd5e1;text-align:right;font-weight:800;color:#b91c1c">−${Number(r.tutar || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺</td>
     </tr>`;
       }
@@ -517,18 +619,20 @@ function buildFotoGridHtml(rows: RaporKalem[]): string {
   const photos = rows
     .filter((r) => r.fotoUrl)
     .map(
-      (r) => `<figure style="margin:0;border:1px solid #cbd5e1;border-radius:8px;overflow:hidden;background:#fff;page-break-inside:avoid">
-      <div style="padding:6px 8px;background:#f1f5f9;font-size:10px;font-weight:700;color:#334155">
-        ${escapeHtml(r.fisNo || r.id)} · ${escapeHtml(r.tarih)} · −${Number(r.tutar || 0).toLocaleString('tr-TR')} ₺
+      (r) => `<figure style="margin:0 0 18px;border:1px solid #cbd5e1;border-radius:10px;overflow:hidden;background:#fff;page-break-inside:avoid;break-inside:avoid">
+      <div style="padding:8px 10px;background:#f1f5f9;font-size:11px;font-weight:800;color:#0f172a">
+        ${escapeHtml(raporKalemKisiAdi(r))} · ${escapeHtml(r.fisNo || r.id)} · ${escapeHtml(r.tarih)} · −${Number(r.tutar || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺
       </div>
-      <img src="${escapeHtml(r.fotoUrl!)}" alt="Fiş" style="display:block;width:100%;max-height:320px;object-fit:contain;background:#f8fafc" />
-      <figcaption style="padding:6px 8px;font-size:10px;color:#64748b">${escapeHtml(r.aciklama || '')}</figcaption>
+      <div style="padding:10px;background:#f8fafc;text-align:center">
+        <img src="${escapeHtml(r.fotoUrl!)}" alt="Fiş" style="display:inline-block;max-width:100%;width:auto;height:auto;max-height:none;object-fit:contain" />
+      </div>
+      <figcaption style="padding:8px 10px;font-size:11px;color:#475569;line-height:1.4">${escapeHtml(r.aciklama || '')}</figcaption>
     </figure>`
     )
     .join('');
-  return `<h3 style="font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:#1e3a5f;margin:0 0 10px">Fiş görselleri (taranmış ek)</h3>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
-      ${photos || '<p style="color:#94a3b8;font-style:italic;grid-column:1/-1">Fiş görseli yok</p>'}
+  return `<h3 style="font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:#1e3a5f;margin:18px 0 10px">Fiş görselleri (tam boyut)</h3>
+    <div style="display:block">
+      ${photos || '<p style="color:#94a3b8;font-style:italic">Fiş görseli yok</p>'}
     </div>`;
 }
 
@@ -571,6 +675,7 @@ export function buildSoforMasrafIadeReportHtml(options: {
       <p style="margin:2px 0">Oluşturan: ${escapeHtml(options.olusturan || '—')} · ${new Date().toLocaleString('tr-TR')}</p>
       <p style="margin:2px 0;font-style:italic">Her çıkışta ödeme durumu: <strong>BORÇ</strong> · <strong>PERSONEL ÖDEDİ</strong> · <strong>KASA ÖDEDİ</strong> (ayrı + toplam).</p>
     </div>
+    ${buildPersonelHarcamaOzetHtml(rows)}
     ${buildMasrafTableHtml(rows, toplam)}
     ${buildFotoGridHtml(rows)}
     <footer style="margin-top:20px;padding-top:10px;border-top:1px solid #e2e8f0;font-size:10px;color:#94a3b8;text-align:center">
@@ -599,6 +704,7 @@ export function buildKasaHarcamaAralikReportHtml(options: {
       aciklama: r.aciklama,
       tutar: Number(r.tutar) || 0,
       surucu: r.surucu || (isSoforKaynakliKasaHareketi(r) ? 'Şoför' : r.referansTipi),
+      personelAdi: r.personelAdi,
       fotoUrl: r.fisEvrakUrl,
       tipEtiket: isSoforKaynakliKasaHareketi(r) ? '[Şoför] ' : '',
       masrafTipi: resolveKasaRaporMasrafTipi(r) || r.masrafTipi || 'KASA',
@@ -635,6 +741,7 @@ export function buildKasaHarcamaAralikReportHtml(options: {
       <p style="margin:2px 0">Şoför fişleri payı: <strong>−${soforToplam.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺</strong></p>
       <p style="margin:2px 0">Oluşturan: ${escapeHtml(options.olusturan || '—')} · ${new Date().toLocaleString('tr-TR')}</p>
     </div>
+    ${buildPersonelHarcamaOzetHtml(rows)}
     ${buildMasrafTableHtml(rows, toplam)}
     ${buildFotoGridHtml(rows)}
     <footer style="margin-top:20px;padding-top:10px;border-top:1px solid #e2e8f0;font-size:10px;color:#94a3b8;text-align:center">
@@ -660,12 +767,29 @@ export function buildKasaCikisMailPlainText(
   let borc = 0;
   let personel = 0;
   let kasa = 0;
+  const byKisi = new Map<string, number>();
   const lines: string[] = [
     'KASA HARCAMA / ÇIKIŞ DÖKÜMÜ',
     `Tarih aralığı: ${start} — ${end}`,
     `Kalem: ${rows.length}`,
     '',
+    '── KİŞİ BAZLI TOPLAM ──',
   ];
+
+  rows.forEach((r) => {
+    const who = String(r.personelAdi || r.surucu || 'Personel (adsız)').trim();
+    const label =
+      who.toLocaleLowerCase('tr-TR') === 'celal@kibritciinsaat.com' ? 'CELAL YILMAZ' : who;
+    byKisi.set(label, (byKisi.get(label) || 0) + (Number(r.tutar) || 0));
+  });
+  [...byKisi.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .forEach(([name, sum], i) => {
+      lines.push(
+        `${i + 1}) ${name}: −${sum.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺`
+      );
+    });
+  lines.push('', '── KALEM KALEM ──', '');
 
   rows.forEach((r, i) => {
     const durum = resolveKasaOdemeDurumu(r) || 'KASA_ODEDI';

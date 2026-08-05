@@ -213,6 +213,7 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
         aciklama: r.aciklama,
         tutar: Number(r.tutar) || 0,
         surucu: r.surucu,
+        personelAdi: r.personelAdi,
         fotoUrl: r.fisEvrakUrl,
         masrafTipi: resolveKasaRaporMasrafTipi(r) || (isSoforUzerindenKasaGideri(r) ? 'KASA' : 'KENDI'),
         odemeDurumu: resolveKasaOdemeDurumu(r),
@@ -387,6 +388,55 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
     });
 
     return { satirlar, totals };
+  }, [filteredHareketler, personeller]);
+
+  /** Rapor: kim ne kadar masraf yapmış (çıkışlar) */
+  const kisiHarcamaOzet = useMemo(() => {
+    type Bucket = {
+      label: string;
+      toplam: number;
+      kalemler: Array<{
+        id: string;
+        tarih: string;
+        aciklama: string;
+        tutar: number;
+        odeme: string;
+        fisNo?: string;
+      }>;
+    };
+    const map = new Map<string, Bucket>();
+    for (const kh of filteredHareketler) {
+      if (kh.hareketTipi !== 'ÇIKIŞ') continue;
+      const tutar = Number(kh.tutar) || 0;
+      if (tutar <= 0) continue;
+      const unvan = resolvePersonelUnvan(
+        {
+          personelId: kh.personelId,
+          personelAdi: kh.personelAdi,
+          surucu: kh.surucu,
+        },
+        personeller
+      );
+      const label = unvan.label || 'Personel (adsız)';
+      const key = unvan.key;
+      const odeme = odemeDurumuLabel(resolveOdemeDurumu(kh)) || '—';
+      const prev = map.get(key);
+      const kalem = {
+        id: kh.id,
+        tarih: kh.tarih,
+        aciklama: kh.aciklama,
+        tutar,
+        odeme,
+        fisNo: kh.fisNo,
+      };
+      if (prev) {
+        prev.toplam += tutar;
+        prev.kalemler.push(kalem);
+      } else {
+        map.set(key, { label, toplam: tutar, kalemler: [kalem] });
+      }
+    }
+    return [...map.values()].sort((a, b) => b.toplam - a.toplam);
   }, [filteredHareketler, personeller]);
 
   const personelSecenekleri = useMemo(() => {
@@ -1692,6 +1742,79 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
                 </div>
               </div>
 
+              {/* Kim ne kadar masraf yapmış */}
+              <div className="mb-6 border border-teal-200 rounded-xl overflow-hidden bg-white">
+                <div className="bg-teal-800 text-white px-3 py-2 text-[10px] font-black uppercase tracking-wider">
+                  Harcama bazlı kişi özeti — kim ne kadar masraf yapmış
+                </div>
+                {kisiHarcamaOzet.length === 0 ? (
+                  <p className="text-[10px] text-slate-400 italic p-3">Seçili aralıkta çıkış / masraf yok.</p>
+                ) : (
+                  <div className="p-3 space-y-4">
+                    <table className="w-full text-[9px] border-collapse mb-2">
+                      <thead>
+                        <tr className="bg-teal-50 text-teal-900 font-bold">
+                          <th className="p-2 border border-teal-100 text-left">#</th>
+                          <th className="p-2 border border-teal-100 text-left">Personel / Şoför</th>
+                          <th className="p-2 border border-teal-100 text-center">Kalem</th>
+                          <th className="p-2 border border-teal-100 text-right">Toplam masraf</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {kisiHarcamaOzet.map((b, i) => (
+                          <tr key={b.label} className="border-b border-slate-100">
+                            <td className="p-2 border border-slate-100 text-slate-500">{i + 1}</td>
+                            <td className="p-2 border border-slate-100 font-extrabold text-slate-900">{b.label}</td>
+                            <td className="p-2 border border-slate-100 text-center font-bold">{b.kalemler.length}</td>
+                            <td className="p-2 border border-slate-100 text-right font-black text-rose-700 font-mono">
+                              −₺{b.toplam.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+
+                    {kisiHarcamaOzet.map((b) => (
+                      <div key={`detay-${b.label}`} className="print:break-inside-avoid border border-slate-200 rounded-lg overflow-hidden">
+                        <div className="bg-slate-800 text-white px-3 py-1.5 flex justify-between items-center gap-2 text-[10px] font-bold">
+                          <span>{b.label}</span>
+                          <span className="font-mono">
+                            −₺{b.toplam.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} · {b.kalemler.length} kalem
+                          </span>
+                        </div>
+                        <table className="w-full text-[8px] border-collapse">
+                          <thead>
+                            <tr className="bg-slate-50 text-slate-600 font-bold">
+                              <th className="p-1.5 border border-slate-100 text-left">Tarih</th>
+                              <th className="p-1.5 border border-slate-100 text-left">Ödeme</th>
+                              <th className="p-1.5 border border-slate-100 text-left">Fiş</th>
+                              <th className="p-1.5 border border-slate-100 text-left">Açıklama</th>
+                              <th className="p-1.5 border border-slate-100 text-right">Tutar</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {b.kalemler
+                              .slice()
+                              .sort((a, c) => a.tarih.localeCompare(c.tarih))
+                              .map((k) => (
+                                <tr key={k.id} className="border-b border-slate-50">
+                                  <td className="p-1.5 border border-slate-100 font-mono text-slate-500">{k.tarih}</td>
+                                  <td className="p-1.5 border border-slate-100 font-bold">{k.odeme}</td>
+                                  <td className="p-1.5 border border-slate-100">{k.fisNo || '—'}</td>
+                                  <td className="p-1.5 border border-slate-100 text-slate-800">{k.aciklama}</td>
+                                  <td className="p-1.5 border border-slate-100 text-right font-mono font-bold text-rose-700">
+                                    −₺{k.tutar.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
+                                  </td>
+                                </tr>
+                              ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
               {/* Data Table */}
               <div className="border border-slate-350 rounded-md overflow-hidden mb-8">
                 <table className="w-full text-[9px] border-collapse bg-white">
@@ -1753,25 +1876,26 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
                 {filteredHareketler.filter(k => k.fisEvrakUrl).length === 0 ? (
                   <p className="text-xs text-slate-400 italic">Rapor kapsamına girmiş herhangi bir fiş görseli veya fatura eki eklenmemiştir.</p>
                 ) : (
-                  <div className="grid grid-cols-2 gap-6">
+                  <div className="grid grid-cols-1 gap-6">
                     {filteredHareketler.filter(k => k.fisEvrakUrl).map((kh, i) => (
                       <button
-                        key={i}
+                        key={kh.id || i}
                         type="button"
                         onClick={() => {
                           setSelectedReceiptUrl(kh.fisEvrakUrl || null);
-                          setSelectedReceiptName(`${kh.tarih} · ${kh.aciklama}`);
+                          setSelectedReceiptName(`${kh.tarih} · ${kh.personelAdi || kh.surucu || kh.aciklama}`);
                         }}
-                        className="border border-slate-200 rounded-xl p-3 bg-slate-50 flex flex-col items-center justify-between text-center space-y-2 cursor-pointer hover:border-sky-300 hover:bg-sky-50/50 transition print:cursor-default"
+                        className="border border-slate-200 rounded-xl p-3 bg-slate-50 flex flex-col items-stretch text-left space-y-2 cursor-pointer hover:border-sky-300 hover:bg-sky-50/50 transition print:cursor-default print:break-inside-avoid"
                         title="Büyüt / indir"
                       >
-                        <div className="text-[10px] text-slate-600 font-bold uppercase truncate max-w-[200px]">
-                          {kh.tarih} · {kh.aciklama}
+                        <div className="text-[10px] text-slate-800 font-bold">
+                          {(kh.personelAdi || kh.surucu || '—')} · {kh.tarih} · −₺{Number(kh.tutar || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
                         </div>
+                        <div className="text-[9px] text-slate-600 font-medium">{kh.aciklama}</div>
                         <img 
                           src={kh.fisEvrakUrl} 
                           alt="Fiş Fotoğrafı" 
-                          className="max-h-[140px] rounded object-contain border bg-white pointer-events-none" 
+                          className="w-full max-h-none h-auto rounded object-contain border bg-white pointer-events-none print:max-h-none" 
                           referrerPolicy="no-referrer"
                         />
                         <span className="text-[8px] text-sky-700 font-bold uppercase tracking-tight print:hidden">
