@@ -1,10 +1,10 @@
-import React, { useMemo, useState } from 'react';
-import { Calendar, CheckCircle, Truck, User, XCircle, Save, RefreshCw, Printer } from 'lucide-react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { CheckCircle, Truck, Save, RefreshCw, Printer } from 'lucide-react';
 import type { AracBakim, KiralikKamyonPuantajKaydi, Personel } from '../types/erp';
-import { isSoforGorev } from '../lib/yoklamaUtils';
 import { todayDateKey } from '../lib/dateKeyUtils';
-import { mesaiInputDisplayValue, setMesaiHoursInMap } from '../lib/sahaFaaliyetUtils';
+import { mesaiInputDisplayValue, parseMesaiInputValue } from '../lib/sahaFaaliyetUtils';
 import { openKiralikKamyonPuantajReport } from '../lib/kiralikKamyonPuantajReport';
+
 export function isKiralikKamyonArac(a?: AracBakim | null): boolean {
   if (!a) return false;
   if (a.kiralikKamyon === true) return true;
@@ -15,13 +15,19 @@ function isAktifArac(a: AracBakim): boolean {
   return a.durum === 'AKTIF' || !a.durum;
 }
 
-function isAktifPersonel(p: Personel): boolean {
-  return p.durum === true || String(p.durum).toLowerCase() === 'true';
-}
-
 export function kiralikKamyonPuantajDocId(aracId: string, tarih: string): string {
   return `kkp_${aracId}_${tarih}`;
 }
+
+type Durum = 'Geldi' | 'Yok' | 'Girilmedi';
+
+type CellDraft = {
+  durum: Durum;
+  mesaiSaati: number;
+};
+
+/** aracId → gün (1–31) → hücre */
+type DraftGrid = Record<string, Record<number, CellDraft>>;
 
 interface KiralikKamyonPuantajTabProps {
   araclar: AracBakim[];
@@ -32,12 +38,57 @@ interface KiralikKamyonPuantajTabProps {
   addNotification?: (mesaj: string) => void;
 }
 
-type RowDraft = {
-  durum: 'Geldi' | 'Yok' | 'Girilmedi';
-  soforPersonelId: string;
-  mesaiSaati: number | undefined;
-  notlar: string;
-};
+const AYLAR = [
+  { k: 1, v: 'Ocak' },
+  { k: 2, v: 'Şubat' },
+  { k: 3, v: 'Mart' },
+  { k: 4, v: 'Nisan' },
+  { k: 5, v: 'Mayıs' },
+  { k: 6, v: 'Haziran' },
+  { k: 7, v: 'Temmuz' },
+  { k: 8, v: 'Ağustos' },
+  { k: 9, v: 'Eylül' },
+  { k: 10, v: 'Ekim' },
+  { k: 11, v: 'Kasım' },
+  { k: 12, v: 'Aralık' },
+];
+
+const MAX_MESAI = 14;
+const emptyCell = (): CellDraft => ({ durum: 'Girilmedi', mesaiSaati: 0 });
+
+function cycleDurum(d: Durum): Durum {
+  if (d === 'Girilmedi') return 'Geldi';
+  if (d === 'Geldi') return 'Yok';
+  return 'Girilmedi';
+}
+
+function statusColor(d: Durum): string {
+  switch (d) {
+    case 'Geldi':
+      return 'bg-emerald-50 text-emerald-800 border-emerald-300';
+    case 'Yok':
+      return 'bg-rose-50 text-rose-800 border-rose-300';
+    default:
+      return 'bg-slate-50 text-slate-400 border-slate-200';
+  }
+}
+
+function statusAbbr(d: Durum): string {
+  if (d === 'Geldi') return 'G';
+  if (d === 'Yok') return 'Y';
+  return '-';
+}
+
+function dateKey(year: number, month: number, day: number): string {
+  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
+function soforLabel(personeller: Personel[], sorumluId?: string): string {
+  if (!sorumluId) return '';
+  const p = personeller.find((x) => x.id === sorumluId);
+  if (!p) return '';
+  return `${p.ad} ${p.soyad}`.trim();
+}
 
 export const KiralikKamyonPuantajTab: React.FC<KiralikKamyonPuantajTabProps> = ({
   araclar,
@@ -47,11 +98,20 @@ export const KiralikKamyonPuantajTab: React.FC<KiralikKamyonPuantajTabProps> = (
   currentUser,
   addNotification,
 }) => {
-  const [tarih, setTarih] = useState(todayDateKey());
-  const [drafts, setDrafts] = useState<Record<string, RowDraft>>({});
+  const today = todayDateKey();
+  const [selectedMonth, setSelectedMonth] = useState(() => Number(today.slice(5, 7)) || 7);
+  const [selectedYear, setSelectedYear] = useState(() => Number(today.slice(0, 4)) || 2026);
+  const [draft, setDraft] = useState<DraftGrid>({});
+  const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [reporting, setReporting] = useState(false);
-  const [mesaiMap, setMesaiMap] = useState<Record<string, number>>({});
+
+  const periodPrefix = `${selectedYear}-${String(selectedMonth).padStart(2, '0')}`;
+  const daysInMonth = new Date(selectedYear, selectedMonth, 0).getDate();
+  const daysArray = useMemo(
+    () => Array.from({ length: daysInMonth }, (_, i) => i + 1),
+    [daysInMonth]
+  );
 
   const kamyonlar = useMemo(
     () =>
@@ -61,67 +121,180 @@ export const KiralikKamyonPuantajTab: React.FC<KiralikKamyonPuantajTabProps> = (
     [araclar]
   );
 
-  const soforler = useMemo(
-    () =>
-      personeller
-        .filter((p) => isAktifPersonel(p) && isSoforGorev(p.gorev))
-        .sort((a, b) => `${a.ad} ${a.soyad}`.localeCompare(`${b.ad} ${b.soyad}`, 'tr')),
-    [personeller]
-  );
-
-  const tumPersonelSecenek = useMemo(() => {
-    if (soforler.length > 0) return soforler;
-    return personeller
-      .filter(isAktifPersonel)
-      .sort((a, b) => `${a.ad} ${a.soyad}`.localeCompare(`${b.ad} ${b.soyad}`, 'tr'));
-  }, [soforler, personeller]);
-
-  const kayitByArac = useMemo(() => {
-    const map = new Map<string, KiralikKamyonPuantajKaydi>();
-    for (const k of kayitlar) {
-      if (k.tarih === tarih) map.set(k.aracId, k);
+  const hydrate = useCallback(() => {
+    const next: DraftGrid = {};
+    for (const arac of kamyonlar) {
+      next[arac.id] = {};
+      for (const day of daysArray) {
+        next[arac.id][day] = emptyCell();
+      }
     }
-    return map;
-  }, [kayitlar, tarih]);
 
-  const getDraft = (aracId: string): RowDraft => {
-    if (drafts[aracId]) return drafts[aracId];
-    const existing = kayitByArac.get(aracId);
+    for (const k of kayitlar) {
+      if (!String(k.tarih || '').startsWith(periodPrefix)) continue;
+      const day = Number(String(k.tarih).slice(8, 10));
+      if (!day || day < 1 || day > daysInMonth) continue;
+      if (!next[k.aracId]) {
+        next[k.aracId] = {};
+        for (const d of daysArray) next[k.aracId][d] = emptyCell();
+      }
+      next[k.aracId][day] = {
+        durum: k.durum === 'Geldi' || k.durum === 'Yok' ? k.durum : 'Girilmedi',
+        mesaiSaati: Number(k.mesaiSaati) || 0,
+      };
+    }
+
+    setDraft(next);
+    setDirty(false);
+  }, [kamyonlar, kayitlar, periodPrefix, daysArray, daysInMonth]);
+
+  useEffect(() => {
+    hydrate();
+    // Dönem değişince taslağı yükle
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedMonth, selectedYear]);
+
+  useEffect(() => {
+    if (dirty) return;
+    hydrate();
+  }, [kayitlar, kamyonlar, dirty, hydrate]);
+
+  const dayOfWeekAbbreviation = (day: number) => {
+    const d = new Date(selectedYear, selectedMonth - 1, day);
+    return ['Pa', 'Pt', 'Sa', 'Ça', 'Pe', 'Cu', 'Ct'][d.getDay()];
+  };
+
+  const isSundayOrHoliday = (day: number) => {
+    const d = new Date(selectedYear, selectedMonth - 1, day);
+    const isSunday = d.getDay() === 0;
+    const m = selectedMonth;
+    const official =
+      (m === 1 && day === 1) ||
+      (m === 4 && day === 23) ||
+      (m === 5 && day === 1) ||
+      (m === 5 && day === 19) ||
+      (m === 7 && day === 15) ||
+      (m === 8 && day === 30) ||
+      (m === 10 && day === 29);
     return {
-      durum: existing?.durum || 'Girilmedi',
-      soforPersonelId: existing?.soforPersonelId || '',
-      mesaiSaati: existing?.mesaiSaati,
-      notlar: existing?.notlar || '',
+      isHoliday: isSunday || official,
+      isOfficial: !!official,
+      name: official ? 'Resmi tatil' : isSunday ? 'Pazar' : undefined,
     };
   };
 
-  const patchDraft = (aracId: string, patch: Partial<RowDraft>) => {
-    setDrafts((prev) => {
-      const base = prev[aracId] || getDraft(aracId);
-      return { ...prev, [aracId]: { ...base, ...patch } };
+  const getCell = (aracId: string, day: number): CellDraft =>
+    draft[aracId]?.[day] || emptyCell();
+
+  const patchCell = (aracId: string, day: number, patch: Partial<CellDraft>) => {
+    setDraft((prev) => {
+      const row = { ...(prev[aracId] || {}) };
+      const base = row[day] || emptyCell();
+      let nextCell = { ...base, ...patch };
+      if (nextCell.durum === 'Yok' || nextCell.durum === 'Girilmedi') {
+        if (patch.durum === 'Yok' || patch.durum === 'Girilmedi') {
+          nextCell = { ...nextCell, mesaiSaati: 0 };
+        }
+      }
+      row[day] = nextCell;
+      return { ...prev, [aracId]: row };
+    });
+    setDirty(true);
+  };
+
+  const handleCellClick = (aracId: string, day: number) => {
+    const cur = getCell(aracId, day);
+    const next = cycleDurum(cur.durum);
+    patchCell(aracId, day, {
+      durum: next,
+      mesaiSaati: next === 'Geldi' ? cur.mesaiSaati : 0,
     });
   };
 
-  // Tarih değişince draft temizle; mesai map'i mevcut kayıtlardan yükle
-  React.useEffect(() => {
-    setDrafts({});
-    const next: Record<string, number> = {};
-    for (const k of kayitlar) {
-      if (k.tarih === tarih && k.mesaiSaati && k.mesaiSaati > 0) {
-        next[k.aracId] = k.mesaiSaati;
-      }
-    }
-    setMesaiMap(next);
-  }, [tarih, kayitlar]);
+  const handleMesaiChange = (aracId: string, day: number, hours: number) => {
+    const clamped = Math.max(0, Math.min(MAX_MESAI, hours));
+    const cur = getCell(aracId, day);
+    patchCell(aracId, day, {
+      mesaiSaati: clamped,
+      durum: clamped > 0 && cur.durum !== 'Yok' ? 'Geldi' : cur.durum,
+    });
+  };
 
-  const geldiSayisi = kamyonlar.filter((a) => getDraft(a.id).durum === 'Geldi').length;
-  const yokSayisi = kamyonlar.filter((a) => getDraft(a.id).durum === 'Yok').length;
+  const confirmPeriodChange = (): boolean => {
+    if (!dirty) return true;
+    return window.confirm('Kaydedilmemiş değişiklikler var. Dönemi değiştirmek istiyor musunuz?');
+  };
 
-  const handleSaveAll = async () => {
-    if (kamyonlar.length === 0) {
-      alert('Kiralık kamyon bulunamadı.\n\nAraç Envanteri’nden mülkiyet = Kiralık (kamyon) olarak kayıt açın.');
+  const handleBulkGeldi = () => {
+    if (
+      !window.confirm(
+        `${AYLAR.find((a) => a.k === selectedMonth)?.v} ${selectedYear} — tüm kamyonlar için iş günlerini Geldi yapmak istiyor musunuz? (Pazar/tatil hariç)`
+      )
+    ) {
       return;
     }
+    setDraft((prev) => {
+      const next: DraftGrid = { ...prev };
+      for (const arac of kamyonlar) {
+        const row = { ...(next[arac.id] || {}) };
+        for (const day of daysArray) {
+          const { isHoliday } = isSundayOrHoliday(day);
+          if (isHoliday) continue;
+          const cur = row[day] || emptyCell();
+          row[day] = { ...cur, durum: 'Geldi' };
+        }
+        next[arac.id] = row;
+      }
+      return next;
+    });
+    setDirty(true);
+  };
+
+  const handleBulkReset = () => {
+    if (!window.confirm('Seçili ayın tüm hücreleri sıfırlansın mı?')) return;
+    setDraft((prev) => {
+      const next: DraftGrid = { ...prev };
+      for (const arac of kamyonlar) {
+        const row: Record<number, CellDraft> = {};
+        for (const day of daysArray) row[day] = emptyCell();
+        next[arac.id] = row;
+      }
+      return next;
+    });
+    setDirty(true);
+  };
+
+  const monthStats = useMemo(() => {
+    let geldi = 0;
+    let yok = 0;
+    let mesai = 0;
+    for (const arac of kamyonlar) {
+      for (const day of daysArray) {
+        const c = draft[arac.id]?.[day];
+        if (!c) continue;
+        if (c.durum === 'Geldi') {
+          geldi += 1;
+          mesai += c.mesaiSaati || 0;
+        } else if (c.durum === 'Yok') yok += 1;
+      }
+    }
+    return { geldi, yok, mesai };
+  }, [draft, kamyonlar, daysArray]);
+
+  const handleSaveMonth = async () => {
+    if (kamyonlar.length === 0) {
+      alert('Kiralık kamyon bulunamadı.\n\nAraç Envanteri’nden kiralık kamyon olarak kayıt açın.');
+      return;
+    }
+
+    const eksikSofor = kamyonlar.filter((a) => !a.sorumluPersonelId);
+    if (eksikSofor.length > 0) {
+      alert(
+        `Şoförü tanımlanmamış kamyon(lar):\n${eksikSofor.map((a) => a.plaka).join(', ')}\n\nAraç Envanteri’nde sorumlu personeli (şoför) seçip kaydedin.`
+      );
+      return;
+    }
+
     setSaving(true);
     try {
       const kaydeden = currentUser?.email || currentUser?.displayName || 'sistem';
@@ -129,43 +302,44 @@ export const KiralikKamyonPuantajTab: React.FC<KiralikKamyonPuantajTabProps> = (
       const toUpsert: KiralikKamyonPuantajKaydi[] = [];
 
       for (const arac of kamyonlar) {
-        const d = getDraft(arac.id);
-        const mesai = mesaiMap[arac.id];
-        const sofor = tumPersonelSecenek.find((p) => p.id === d.soforPersonelId);
-        if (d.durum === 'Geldi' && !d.soforPersonelId) {
-          alert(`${arac.plaka}: Geldi işaretlenen kamyonda şoför seçilmelidir (Personel Yönetimi).`);
-          setSaving(false);
-          return;
+        const soforId = arac.sorumluPersonelId || '';
+        const soforAdi = soforLabel(personeller, soforId) || undefined;
+
+        for (const day of daysArray) {
+          const c = getCell(arac.id, day);
+          const tarih = dateKey(selectedYear, selectedMonth, day);
+          const existing = kayitlar.find((k) => k.aracId === arac.id && k.tarih === tarih);
+          if (c.durum === 'Girilmedi' && !existing) continue;
+
+          toUpsert.push({
+            id: kiralikKamyonPuantajDocId(arac.id, tarih),
+            tarih,
+            aracId: arac.id,
+            plaka: arac.plaka,
+            markaModel: arac.markaModel,
+            soforPersonelId: soforId || undefined,
+            soforAdi,
+            durum: c.durum,
+            mesaiSaati: c.durum === 'Geldi' ? c.mesaiSaati || 0 : 0,
+            kaydeden,
+            updatedAt: now,
+          });
         }
-        const id = kiralikKamyonPuantajDocId(arac.id, tarih);
-        toUpsert.push({
-          id,
-          tarih,
-          aracId: arac.id,
-          plaka: arac.plaka,
-          markaModel: arac.markaModel,
-          soforPersonelId: d.soforPersonelId || undefined,
-          soforAdi: sofor ? `${sofor.ad} ${sofor.soyad}`.trim() : undefined,
-          durum: d.durum,
-          mesaiSaati: d.durum === 'Geldi' ? mesai || 0 : 0,
-          notlar: d.notlar || undefined,
-          kaydeden,
-          updatedAt: now,
-        });
       }
 
       setKayitlar((prev) => {
-        const withoutThese = prev.filter(
-          (k) => !(k.tarih === tarih && toUpsert.some((u) => u.aracId === k.aracId))
-        );
-        return [...withoutThese, ...toUpsert];
+        const removeKeys = new Set(toUpsert.map((u) => `${u.aracId}|${u.tarih}`));
+        const without = prev.filter((k) => !removeKeys.has(`${k.aracId}|${k.tarih}`));
+        return [...without, ...toUpsert];
       });
 
-      setDrafts({});
+      setDirty(false);
       addNotification?.(
-        `Kiralık kamyon puantajı kaydedildi · ${tarih} · Geldi ${geldiSayisi} · Yok ${yokSayisi}`
+        `Kiralık kamyon aylık puantaj kaydedildi · ${periodPrefix} · Geldi ${monthStats.geldi} · Yok ${monthStats.yok}`
       );
-      alert(`Puantaj kaydedildi.\n${tarih}\nGeldi: ${geldiSayisi} · Yok: ${yokSayisi}`);
+      alert(
+        `Ay kaydedildi.\n${AYLAR.find((a) => a.k === selectedMonth)?.v} ${selectedYear}\nGeldi: ${monthStats.geldi} · Yok: ${monthStats.yok} · Mesai: ${monthStats.mesai.toLocaleString('tr-TR', { maximumFractionDigits: 1 })} sa`
+      );
     } catch (err) {
       console.error(err);
       alert('Kayıt başarısız: ' + (err instanceof Error ? err.message : String(err)));
@@ -174,35 +348,51 @@ export const KiralikKamyonPuantajTab: React.FC<KiralikKamyonPuantajTabProps> = (
     }
   };
 
-  const ayOzeti = useMemo(() => {
-    const prefix = tarih.slice(0, 7); // YYYY-MM
-    const map = new Map<string, { plaka: string; geldi: number; yok: number; mesai: number }>();
-    for (const k of kayitlar) {
-      if (!String(k.tarih || '').startsWith(prefix)) continue;
-      const prev = map.get(k.aracId) || { plaka: k.plaka, geldi: 0, yok: 0, mesai: 0 };
-      if (k.durum === 'Geldi') {
-        prev.geldi += 1;
-        prev.mesai += Number(k.mesaiSaati) || 0;
+  const handleAyiRaporla = async () => {
+    if (dirty) {
+      const ok = window.confirm(
+        'Kaydedilmemiş değişiklikler var. Rapor kayıtlı (DB) veriden üretilir.\nÖnce kaydetmek ister misiniz?\n\nTamam = önce kaydet · İptal = yine de raporla'
+      );
+      if (ok) {
+        await handleSaveMonth();
       }
-      if (k.durum === 'Yok') prev.yok += 1;
-      map.set(k.aracId, prev);
-    }
-    return [...map.entries()]
-      .map(([aracId, v]) => ({ aracId, ...v }))
-      .sort((a, b) => a.plaka.localeCompare(b.plaka, 'tr'));
-  }, [kayitlar, tarih]);
-
-  const handlePuantajRaporla = async () => {
-    const period = tarih.slice(0, 7);
-    const hasData = kayitlar.some((k) => String(k.tarih || '').startsWith(period));
-    if (!hasData && kamyonlar.length === 0) {
-      alert('Raporlanacak kiralık kamyon / puantaj kaydı yok.');
-      return;
     }
     setReporting(true);
     try {
-      await openKiralikKamyonPuantajReport(kayitlar, araclar, period);
-      addNotification?.(`Kiralık kamyon puantaj raporu açıldı · ${period}`);
+      // Kaydet sonrası güncel state bir tick gecikebilir; draft’ı da rapora yansıtmak için
+      // geçici birleşik liste üret
+      const merged = (() => {
+        const map = new Map<string, KiralikKamyonPuantajKaydi>();
+        for (const k of kayitlar) map.set(`${k.aracId}|${k.tarih}`, k);
+        const kaydeden = currentUser?.email || currentUser?.displayName || 'sistem';
+        const now = new Date().toISOString();
+        for (const arac of kamyonlar) {
+          const soforId = arac.sorumluPersonelId || '';
+          const soforAdi = soforLabel(personeller, soforId) || undefined;
+          for (const day of daysArray) {
+            const c = getCell(arac.id, day);
+            if (c.durum === 'Girilmedi') continue;
+            const tarih = dateKey(selectedYear, selectedMonth, day);
+            map.set(`${arac.id}|${tarih}`, {
+              id: kiralikKamyonPuantajDocId(arac.id, tarih),
+              tarih,
+              aracId: arac.id,
+              plaka: arac.plaka,
+              markaModel: arac.markaModel,
+              soforPersonelId: soforId || undefined,
+              soforAdi,
+              durum: c.durum,
+              mesaiSaati: c.durum === 'Geldi' ? c.mesaiSaati || 0 : 0,
+              kaydeden,
+              updatedAt: now,
+            });
+          }
+        }
+        return [...map.values()];
+      })();
+
+      await openKiralikKamyonPuantajReport(merged, araclar, periodPrefix, personeller);
+      addNotification?.(`Kiralık kamyon aylık puantaj raporu · ${periodPrefix}`);
     } catch (err) {
       console.error(err);
       alert('Rapor açılamadı: ' + (err instanceof Error ? err.message : String(err)));
@@ -210,222 +400,327 @@ export const KiralikKamyonPuantajTab: React.FC<KiralikKamyonPuantajTabProps> = (
       setReporting(false);
     }
   };
+
+  const periodLabel = new Date(selectedYear, selectedMonth - 1, 1).toLocaleDateString('tr-TR', {
+    month: 'long',
+    year: 'numeric',
+  });
+
   return (
-    <div className="flex-1 flex flex-col gap-4 min-h-0 overflow-hidden">
-      <div className="bg-white border border-slate-200 rounded-2xl p-4 shrink-0 space-y-3">
+    <div className="flex-1 flex flex-col gap-3 min-h-0 overflow-hidden">
+      <div className="bg-white border border-slate-200 rounded-xl p-3 shadow-sm shrink-0 space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h3 className="font-display font-bold text-sm text-slate-900 uppercase tracking-wide flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex items-center gap-2">
               <Truck size={16} className="text-teal-700" />
-              Kiralık Kamyon Puantajı
-            </h3>
-            <p className="text-[10px] text-slate-500 mt-1 max-w-xl">
-              Araç Envanteri’nden <strong>Kiralık kamyon</strong> olarak kurulan araçlar burada yoklanır.
-              Şoför kaydı Personel Yönetimi’nden; araç kaydı Araç Yönetimi’nden gelir.
-            </p>
+              <h3 className="font-display font-bold text-sm text-slate-900 uppercase tracking-wide">
+                Kiralık Kamyon Puantajı
+              </h3>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] font-bold text-slate-600">Dönem:</span>
+              <select
+                value={selectedMonth}
+                onChange={(e) => {
+                  if (!confirmPeriodChange()) return;
+                  setSelectedMonth(Number(e.target.value));
+                  setDirty(false);
+                }}
+                className="text-xs font-semibold border border-slate-200 rounded-lg p-1.5 bg-slate-50 cursor-pointer"
+              >
+                {AYLAR.map((m) => (
+                  <option key={m.k} value={m.k}>
+                    {m.v}
+                  </option>
+                ))}
+              </select>
+              <select
+                value={selectedYear}
+                onChange={(e) => {
+                  if (!confirmPeriodChange()) return;
+                  setSelectedYear(Number(e.target.value));
+                  setDirty(false);
+                }}
+                className="text-xs font-semibold border border-slate-200 rounded-lg p-1.5 bg-slate-50 cursor-pointer"
+              >
+                {[2024, 2025, 2026, 2027].map((y) => (
+                  <option key={y} value={y}>
+                    {y}
+                  </option>
+                ))}
+              </select>
+              <span className="text-[10px] font-bold text-slate-500 bg-slate-100 border border-slate-200 rounded-lg px-2 py-1 capitalize">
+                {periodLabel}
+              </span>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-1.5 border-l pl-3 border-slate-200">
+              <span className="text-[9px] font-bold text-slate-400 uppercase">Toplu:</span>
+              <button
+                type="button"
+                onClick={handleBulkGeldi}
+                className="text-[10px] bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 rounded-lg px-2 py-1 font-bold"
+              >
+                ✓ İş günleri Geldi
+              </button>
+              <button
+                type="button"
+                onClick={handleBulkReset}
+                className="text-[10px] bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-200 rounded-lg px-2 py-1 font-bold"
+              >
+                Sıfırla
+              </button>
+            </div>
           </div>
-          <div className="flex items-center gap-2 flex-wrap">
-            <label className="flex items-center gap-1.5 text-[10px] font-bold text-slate-600 uppercase">
-              <Calendar size={12} />
-              Tarih
-              <input
-                type="date"
-                value={tarih}
-                onChange={(e) => setTarih(e.target.value)}
-                className="ml-1 border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-mono font-bold bg-slate-50"
-              />
-            </label>
+
+          <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
-              disabled={saving}
-              onClick={() => void handleSaveAll()}
-              className="inline-flex items-center gap-1.5 bg-teal-700 hover:bg-teal-800 disabled:opacity-60 text-white text-[11px] font-bold px-3 py-2 rounded-xl"
+              disabled={!dirty}
+              onClick={() => {
+                if (dirty && !window.confirm('Kaydedilmemiş değişiklikler iptal edilsin mi?')) return;
+                hydrate();
+              }}
+              className="inline-flex items-center gap-1 text-[11px] bg-rose-50 hover:bg-rose-100 disabled:opacity-40 text-rose-700 border border-rose-200 rounded-lg px-2.5 py-1.5 font-bold"
+            >
+              <RefreshCw size={12} />
+              Taslağı Geri Al
+            </button>
+            <button
+              type="button"
+              disabled={saving || !dirty}
+              onClick={() => void handleSaveMonth()}
+              className="inline-flex items-center gap-1.5 bg-teal-700 hover:bg-teal-800 disabled:opacity-50 text-white text-[11px] font-bold px-3 py-1.5 rounded-lg"
             >
               {saving ? <RefreshCw size={12} className="animate-spin" /> : <Save size={12} />}
-              Günü Kaydet
+              {saving ? 'Kaydediliyor…' : dirty ? 'Ayı Kaydet' : 'Kaydedildi'}
             </button>
             <button
               type="button"
               disabled={reporting}
-              onClick={() => void handlePuantajRaporla()}
+              onClick={() => void handleAyiRaporla()}
               title="Seçili ayın Kibritçi antetli puantaj evrakını açar"
-              className="inline-flex items-center gap-1.5 bg-[#1e4e78] hover:bg-[#163a5c] disabled:opacity-60 text-white text-[11px] font-bold px-3 py-2 rounded-xl"
+              className="inline-flex items-center gap-1.5 bg-[#1e4e78] hover:bg-[#163a5c] disabled:opacity-60 text-white text-[11px] font-bold px-3 py-1.5 rounded-lg"
             >
               {reporting ? <RefreshCw size={12} className="animate-spin" /> : <Printer size={12} />}
-              Puantaj Raporla
+              Ayı Raporla
             </button>
           </div>
         </div>
 
-        <div className="flex flex-wrap gap-2 text-[10px] font-bold">
+        <div className="flex flex-wrap gap-2 text-[10px] font-bold items-center">
           <span className="bg-slate-100 text-slate-700 px-2.5 py-1 rounded-lg">
             Kiralık kamyon: {kamyonlar.length}
           </span>
           <span className="bg-emerald-50 text-emerald-800 border border-emerald-100 px-2.5 py-1 rounded-lg">
-            Geldi: {geldiSayisi}
+            Geldi: {monthStats.geldi}
           </span>
           <span className="bg-rose-50 text-rose-800 border border-rose-100 px-2.5 py-1 rounded-lg">
-            Yok: {yokSayisi}
+            Yok: {monthStats.yok}
           </span>
           <span className="bg-sky-50 text-sky-800 border border-sky-100 px-2.5 py-1 rounded-lg">
-            Şoför havuzu: {tumPersonelSecenek.length}
-            {soforler.length === 0 ? ' (tüm aktif personel)' : ''}
+            Mesai: {monthStats.mesai.toLocaleString('tr-TR', { maximumFractionDigits: 1 })} sa
+          </span>
+          {dirty && (
+            <span className="bg-amber-50 text-amber-800 border border-amber-200 px-2.5 py-1 rounded-lg animate-pulse">
+              Kaydedilmemiş değişiklik var
+            </span>
+          )}
+        </div>
+
+        <div className="flex flex-wrap items-center gap-3 text-[9px] text-slate-500 font-semibold">
+          <span className="flex items-center gap-1">
+            <span className="w-5 h-5 bg-emerald-50 text-emerald-800 border border-emerald-300 rounded font-bold flex items-center justify-center">
+              G
+            </span>
+            Geldi
+          </span>
+          <span className="flex items-center gap-1">
+            <span className="w-5 h-5 bg-rose-50 text-rose-800 border border-rose-300 rounded font-bold flex items-center justify-center">
+              Y
+            </span>
+            Yok
+          </span>
+          <span className="flex items-center gap-1">
+            <span className="w-5 h-5 bg-slate-50 text-slate-400 border border-slate-200 rounded font-bold flex items-center justify-center">
+              -
+            </span>
+            Girilmedi (tıkla: G → Y → -)
+          </span>
+          <span className="text-slate-700 bg-slate-50 px-2 py-0.5 rounded-full border border-slate-200">
+            Şoför araç kaydından gelir · hücre altına mesai saati yazın
           </span>
         </div>
       </div>
 
-      <div className="flex-1 min-h-0 overflow-y-auto space-y-2 pr-1">
+      <div className="flex-1 min-h-0 overflow-auto bg-white border border-slate-200 rounded-xl shadow-sm">
         {kamyonlar.length === 0 ? (
-          <div className="bg-amber-50 border border-amber-200 rounded-2xl p-6 text-center space-y-2">
+          <div className="p-10 text-center space-y-2">
             <Truck className="mx-auto text-amber-700" size={28} />
             <p className="text-xs font-bold text-amber-900">Kiralık kamyon tanımlı değil</p>
             <p className="text-[10px] text-amber-800 max-w-md mx-auto">
-              Araç Envanteri &amp; Kayıt sekmesinde yeni araç eklerken mülkiyeti <strong>Kiralık</strong> seçin
-              ve <strong>Kiralık kamyon puantajına dahil et</strong> işaretini açın.
+              Araç Envanteri’nde mülkiyet <strong>Kiralık</strong>, şoförü sorumlu personel olarak
+              seçin ve <strong>Kiralık kamyon puantajına dahil et</strong> işaretleyin.
             </p>
           </div>
         ) : (
-          kamyonlar.map((arac) => {
-            const d = getDraft(arac.id);
-            const hrs = mesaiMap[arac.id];
-            return (
-              <div
-                key={arac.id}
-                className={`bg-white border rounded-2xl p-3 flex flex-col sm:flex-row sm:items-center gap-3 ${
-                  d.durum === 'Geldi'
-                    ? 'border-emerald-200 bg-emerald-50/30'
-                    : d.durum === 'Yok'
-                      ? 'border-rose-200 bg-rose-50/30'
-                      : 'border-slate-200'
-                }`}
-              >
-                <div className="min-w-0 sm:w-44 shrink-0">
-                  <p className="font-black text-sm text-slate-900 font-mono">{arac.plaka}</p>
-                  <p className="text-[10px] text-slate-500 truncate">{arac.markaModel || '—'}</p>
-                  <span className="inline-block mt-1 text-[8px] font-black uppercase bg-teal-100 text-teal-800 px-1.5 py-0.5 rounded">
-                    Kiralık kamyon
-                  </span>
-                </div>
-
-                <div className="flex-1 min-w-0 space-y-2">
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    <button
-                      type="button"
-                      onClick={() => patchDraft(arac.id, { durum: 'Geldi' })}
-                      className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[10px] font-extrabold border ${
-                        d.durum === 'Geldi'
-                          ? 'bg-emerald-600 text-white border-emerald-700'
-                          : 'bg-emerald-50 text-emerald-800 border-emerald-200 hover:bg-emerald-100'
-                      }`}
-                    >
-                      <CheckCircle size={12} /> Geldi
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => patchDraft(arac.id, { durum: 'Yok' })}
-                      className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[10px] font-extrabold border ${
-                        d.durum === 'Yok'
-                          ? 'bg-rose-600 text-white border-rose-700'
-                          : 'bg-rose-50 text-rose-800 border-rose-200 hover:bg-rose-100'
-                      }`}
-                    >
-                      <XCircle size={12} /> Yok
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => patchDraft(arac.id, { durum: 'Girilmedi', soforPersonelId: '' })}
-                      className="px-2 py-1.5 rounded-lg text-[9px] font-bold text-slate-500 border border-slate-200 hover:bg-slate-50"
-                    >
-                      Sıfırla
-                    </button>
-                  </div>
-
-                  <div className="flex flex-wrap items-center gap-2">
-                    <label className="flex items-center gap-1 text-[9px] font-bold text-slate-500 uppercase">
-                      <User size={11} />
-                      Şoför
-                      <select
-                        value={d.soforPersonelId}
-                        onChange={(e) => patchDraft(arac.id, { soforPersonelId: e.target.value })}
-                        className="ml-1 border border-slate-200 rounded-lg px-2 py-1 text-[10px] font-semibold bg-white min-w-[160px] max-w-[220px]"
-                      >
-                        <option value="">Seçin…</option>
-                        {tumPersonelSecenek.map((p) => (
-                          <option key={p.id} value={p.id}>
-                            {p.ad} {p.soyad} ({p.gorev})
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-
-                    {d.durum === 'Geldi' && (
-                      <label className="flex items-center gap-1 text-[9px] font-bold text-slate-500 uppercase">
-                        Mesai (sa)
-                        <input
-                          type="number"
-                          min={0}
-                          max={14}
-                          step={0.5}
-                          placeholder="—"
-                          value={mesaiInputDisplayValue(hrs)}
-                          onChange={(e) =>
-                            setMesaiMap((prev) => setMesaiHoursInMap(prev, arac.id, e.target.value))
-                          }
-                          className="w-16 text-center border border-slate-200 rounded-lg py-1 text-[10px] font-mono font-bold"
-                        />
-                      </label>
-                    )}
-                  </div>
-
-                  <input
-                    type="text"
-                    value={d.notlar}
-                    onChange={(e) => patchDraft(arac.id, { notlar: e.target.value })}
-                    placeholder="Not (opsiyonel)"
-                    className="w-full text-[10px] border border-slate-100 rounded-lg px-2 py-1.5 bg-slate-50"
-                  />
-                </div>
-              </div>
-            );
-          })
-        )}
-      </div>
-
-      {ayOzeti.length > 0 && (
-        <div className="bg-white border border-slate-200 rounded-2xl p-3 shrink-0">
-          <h4 className="text-[10px] font-black uppercase text-slate-600 tracking-wider mb-2">
-            Ay özeti ({tarih.slice(0, 7)})
-          </h4>
-          <div className="overflow-x-auto">
-            <table className="w-full text-[10px] border-collapse">
-              <thead>
-                <tr className="bg-slate-50 text-slate-600 font-bold">
-                  <th className="p-1.5 text-left border border-slate-100">Plaka</th>
-                  <th className="p-1.5 text-center border border-slate-100">Geldi gün</th>
-                  <th className="p-1.5 text-center border border-slate-100">Yok gün</th>
-                  <th className="p-1.5 text-center border border-slate-100">Mesai (sa)</th>
+          <div className="inline-block min-w-full align-middle p-2">
+            <table className="min-w-full divide-y divide-slate-100">
+              <thead className="sticky top-0 z-30 bg-slate-50 font-display text-[10px] font-bold text-slate-600 tracking-wider">
+                <tr>
+                  <th
+                    scope="col"
+                    className="px-3 py-3 text-left w-52 sticky top-0 left-0 bg-slate-50 z-40 shadow-[2px_0_5px_rgba(0,0,0,0.03)] border-r"
+                  >
+                    <div>Plaka / Şoför</div>
+                    <div className="text-[8px] font-normal text-slate-400 normal-case tracking-normal mt-0.5">
+                      Şoför araç kaydından etiketlenir
+                    </div>
+                  </th>
+                  {daysArray.map((day) => {
+                    const dayName = dayOfWeekAbbreviation(day);
+                    const { isHoliday, name, isOfficial } = isSundayOrHoliday(day);
+                    let thClass =
+                      'px-1 py-1.5 text-center w-9 min-w-9 transition-colors sticky top-0 bg-slate-50 z-30';
+                    if (isHoliday) {
+                      thClass += isOfficial
+                        ? ' bg-purple-100/80 text-purple-900 border-x border-purple-200'
+                        : ' bg-orange-100/80 text-orange-900 border-x border-orange-200';
+                    }
+                    return (
+                      <th key={day} scope="col" className={thClass} title={name}>
+                        <div className="flex flex-col items-center">
+                          <span className="font-bold text-[10px]">
+                            {day.toString().padStart(2, '0')}
+                          </span>
+                          <span className="text-[8px] font-bold opacity-80 uppercase tracking-wide">
+                            {dayName}
+                          </span>
+                        </div>
+                      </th>
+                    );
+                  })}
+                  <th
+                    scope="col"
+                    className="px-2 py-3 text-center w-14 min-w-14 border-l font-bold text-emerald-700 bg-slate-50"
+                  >
+                    Gelen
+                  </th>
+                  <th
+                    scope="col"
+                    className="px-2 py-3 text-center w-16 min-w-16 font-bold text-slate-800 bg-slate-50"
+                  >
+                    Top. Mesai
+                  </th>
                 </tr>
               </thead>
-              <tbody>
-                {ayOzeti.map((r) => (
-                  <tr key={r.aracId}>
-                    <td className="p-1.5 border border-slate-100 font-mono font-bold">{r.plaka}</td>
-                    <td className="p-1.5 border border-slate-100 text-center text-emerald-700 font-bold">
-                      {r.geldi}
-                    </td>
-                    <td className="p-1.5 border border-slate-100 text-center text-rose-700 font-bold">
-                      {r.yok}
-                    </td>
-                    <td className="p-1.5 border border-slate-100 text-center text-sky-800 font-bold">
-                      {r.mesai.toLocaleString('tr-TR', { maximumFractionDigits: 1 })}
-                    </td>
-                  </tr>
-                ))}
+              <tbody className="bg-white divide-y divide-slate-100 text-[11px]">
+                {kamyonlar.map((arac) => {
+                  const soforAdi = soforLabel(personeller, arac.sorumluPersonelId);
+                  let totalGeldi = 0;
+                  let totalMesai = 0;
+
+                  const cells = daysArray.map((day) => {
+                    const cell = getCell(arac.id, day);
+                    if (cell.durum === 'Geldi') {
+                      totalGeldi += 1;
+                      totalMesai += cell.mesaiSaati || 0;
+                    }
+                    const { isHoliday, isOfficial } = isSundayOrHoliday(day);
+                    let tdClass = 'px-0.5 py-1.5 text-center min-w-9';
+                    if (isHoliday) {
+                      tdClass += isOfficial
+                        ? ' bg-purple-100/50 border-x border-purple-200'
+                        : ' bg-orange-100/50 border-x border-orange-200';
+                    }
+                    return (
+                      <td key={day} className={tdClass}>
+                        <button
+                          type="button"
+                          onClick={() => handleCellClick(arac.id, day)}
+                          title={`${arac.plaka} · ${day}.${selectedMonth}.${selectedYear} · ${cell.durum}${
+                            soforAdi ? ` · ${soforAdi}` : ''
+                          }`}
+                          className={`w-7 h-7 mx-auto rounded-md border font-bold text-[9px] flex items-center justify-center transition shadow-sm hover:scale-105 active:scale-95 cursor-pointer ${statusColor(
+                            cell.durum
+                          )}`}
+                        >
+                          {statusAbbr(cell.durum)}
+                        </button>
+                        <div className="mt-1 flex items-center justify-center">
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            maxLength={5}
+                            placeholder="-"
+                            title="Mesai saati (0–14)"
+                            value={mesaiInputDisplayValue(
+                              cell.durum === 'Geldi' || cell.mesaiSaati > 0
+                                ? cell.mesaiSaati
+                                : undefined
+                            )}
+                            onChange={(e) => {
+                              const parsed = parseMesaiInputValue(e.target.value);
+                              handleMesaiChange(arac.id, day, parsed ?? 0);
+                            }}
+                            className={`w-7 text-[8px] font-bold font-mono text-center rounded border py-0.5 focus:outline-none focus:ring-1 focus:ring-teal-400 ${
+                              isHoliday
+                                ? isOfficial
+                                  ? 'bg-purple-50 border-purple-200 text-purple-700'
+                                  : 'bg-orange-50 border-orange-200 text-orange-700'
+                                : 'bg-slate-50 hover:bg-slate-100 border-slate-200 text-slate-700'
+                            }`}
+                          />
+                        </div>
+                      </td>
+                    );
+                  });
+
+                  return (
+                    <tr key={arac.id} className="hover:bg-slate-50/50">
+                      <td className="px-3 py-2 whitespace-nowrap sticky left-0 bg-white z-10 border-r shadow-[2px_0_5px_rgba(0,0,0,0.02)]">
+                        <div className="font-mono font-black text-slate-900 text-xs">{arac.plaka}</div>
+                        <div className="text-[9px] text-slate-500 truncate max-w-[190px]">
+                          {arac.markaModel || 'Kamyon'}
+                        </div>
+                        <span className="inline-block mt-0.5 text-[7px] font-black uppercase bg-teal-100 text-teal-800 px-1 py-0.5 rounded">
+                          Kiralık kamyon
+                        </span>
+                        {soforAdi ? (
+                          <div
+                            className="mt-1.5 text-[10px] font-bold text-slate-800 bg-sky-50 border border-sky-100 rounded-md px-1.5 py-1 truncate max-w-[190px]"
+                            title={`Araç kaydındaki sorumlu: ${soforAdi}`}
+                          >
+                            👤 {soforAdi}
+                          </div>
+                        ) : (
+                          <div className="mt-1.5 text-[9px] font-bold text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-1.5 py-1">
+                            Şoför yok — Araç Envanteri’nden ekleyin
+                          </div>
+                        )}
+                      </td>
+                      {cells}
+                      <td className="px-2 py-2 text-center font-black text-emerald-700 border-l bg-emerald-50/30">
+                        {totalGeldi}
+                      </td>
+                      <td className="px-2 py-2 text-center font-black text-slate-800 font-mono">
+                        {totalMesai.toLocaleString('tr-TR', { maximumFractionDigits: 1 })}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
-        </div>
-      )}
+        )}
+      </div>
+
+      <div className="shrink-0 text-[9px] text-slate-400 font-medium flex items-center gap-1.5 px-1">
+        <CheckCircle size={11} className="text-teal-600" />
+        Hücreye tıklayarak gün girin · altına mesai yazın · şoför araç kaydından gelir ·{' '}
+        <strong className="text-slate-600">Ayı Kaydet</strong> /{' '}
+        <strong className="text-slate-600">Ayı Raporla</strong>
+      </div>
     </div>
   );
 };

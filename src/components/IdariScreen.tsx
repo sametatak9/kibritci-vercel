@@ -2222,7 +2222,11 @@ export const IdariScreen: React.FC<IdariScreenProps> = ({
                   </div>
 
                   <div>
-                    <label className="text-[10px] font-bold text-slate-500 uppercase">Zimmetlenecek Sorumlu Personel</label>
+                    <label className="text-[10px] font-bold text-slate-500 uppercase">
+                      {newKiralikKamyon
+                        ? 'Şoför (puantajda otomatik etiketlenir)'
+                        : 'Zimmetlenecek Sorumlu Personel'}
+                    </label>
                     <select 
                       className="w-full text-xs font-semibold mt-1 p-2 bg-slate-50 border border-[#e2e8f0] rounded-lg cursor-pointer"
                       value={newSorumlu}
@@ -2232,6 +2236,11 @@ export const IdariScreen: React.FC<IdariScreenProps> = ({
                         <option key={p.id} value={p.id}>{p.ad} {p.soyad} ({p.gorev})</option>
                       ))}
                     </select>
+                    {newKiralikKamyon && (
+                      <p className="text-[9px] text-teal-700 font-semibold mt-1">
+                        Bu şoför kamyonla birlikte puantaj satırında görünür; tekrar seçilmez.
+                      </p>
+                    )}
                   </div>
 
                   <div>

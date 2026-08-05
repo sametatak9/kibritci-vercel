@@ -60,7 +60,8 @@ export type KiralikKamyonAyOzetSatir = {
 export function buildKiralikKamyonAyOzeti(
   kayitlar: KiralikKamyonPuantajKaydi[],
   araclar: AracBakim[],
-  periodYm: string
+  periodYm: string,
+  personeller?: { id: string; ad: string; soyad: string }[]
 ): KiralikKamyonAyOzetSatir[] {
   const prefix = periodYm.slice(0, 7);
   const { year, month } = parsePeriod(prefix);
@@ -85,7 +86,7 @@ export function buildKiralikKamyonAyOzeti(
 
   const rows: KiralikKamyonAyOzetSatir[] = [];
   for (const aracId of ids) {
-    const arac = kamyonlar.find((a) => a.id === aracId);
+    const arac = kamyonlar.find((a) => a.id === aracId) || araclar.find((a) => a.id === aracId);
     const list = byArac.get(aracId) || [];
     if (!arac && list.length === 0) continue;
 
@@ -96,6 +97,12 @@ export function buildKiralikKamyonAyOzeti(
     let toplamMesai = 0;
     const soforSet = new Set<string>();
     const kayitGunleri = new Set<string>();
+
+    // Araç kaydındaki sorumlu = şoför (birincil etiket)
+    if (arac?.sorumluPersonelId && personeller?.length) {
+      const p = personeller.find((x) => x.id === arac.sorumluPersonelId);
+      if (p) soforSet.add(`${p.ad} ${p.soyad}`.trim());
+    }
 
     for (const k of list) {
       kayitGunleri.add(k.tarih);
@@ -136,14 +143,22 @@ function durumBadge(durum: string): string {
 export async function buildKiralikKamyonPuantajReportHtml(
   kayitlar: KiralikKamyonPuantajKaydi[],
   araclar: AracBakim[],
-  periodYm: string
+  periodYm: string,
+  personeller?: { id: string; ad: string; soyad: string }[]
 ): Promise<string> {
   const prefix = periodYm.slice(0, 7);
   const { year, month, label } = parsePeriod(prefix);
   const gunSayisi = daysInMonth(year, month);
-  const ozet = buildKiralikKamyonAyOzeti(kayitlar, araclar, prefix);
+  const ozet = buildKiralikKamyonAyOzeti(kayitlar, araclar, prefix, personeller);
   const assets = await loadKibritciReportAssets();
 
+  const soforByAracId = (aracId: string, fallback?: string): string => {
+    if (fallback) return fallback;
+    const arac = araclar.find((a) => a.id === aracId);
+    if (!arac?.sorumluPersonelId || !personeller?.length) return '—';
+    const p = personeller.find((x) => x.id === arac.sorumluPersonelId);
+    return p ? `${p.ad} ${p.soyad}`.trim() : '—';
+  };
   const aylikKayitlar = kayitlar
     .filter((k) => String(k.tarih || '').startsWith(prefix))
     .sort((a, b) => {
@@ -246,7 +261,7 @@ export async function buildKiralikKamyonPuantajReportHtml(
         <td style="${cell};font-family:ui-monospace,monospace;font-weight:800">${esc(k.plaka)}</td>
         <td style="${cell}">${esc(k.markaModel || '—')}</td>
         <td style="${cell};text-align:center">${durumBadge(k.durum)}</td>
-        <td style="${cell}">${esc(k.soforAdi || '—')}</td>
+        <td style="${cell}">${esc(soforByAracId(k.aracId, k.soforAdi))}</td>
         <td style="${cell};text-align:right;font-weight:700">${
           k.durum === 'Geldi'
             ? `${(Number(k.mesaiSaati) || 0).toLocaleString('tr-TR', { maximumFractionDigits: 1 })} sa`
@@ -373,9 +388,15 @@ export async function buildKiralikKamyonPuantajReportHtml(
 export async function openKiralikKamyonPuantajReport(
   kayitlar: KiralikKamyonPuantajKaydi[],
   araclar: AracBakim[],
-  periodYm: string
+  periodYm: string,
+  personeller?: { id: string; ad: string; soyad: string }[]
 ): Promise<void> {
-  const html = await buildKiralikKamyonPuantajReportHtml(kayitlar, araclar, periodYm);
+  const html = await buildKiralikKamyonPuantajReportHtml(
+    kayitlar,
+    araclar,
+    periodYm,
+    personeller
+  );
   const { label } = parsePeriod(periodYm.slice(0, 7));
   openKibritciReportPrint(html, `Kiralık_Kamyon_Puantaj_${label.replace(/\s+/g, '_')}`);
 }
@@ -383,9 +404,15 @@ export async function openKiralikKamyonPuantajReport(
 export async function downloadKiralikKamyonPuantajReport(
   kayitlar: KiralikKamyonPuantajKaydi[],
   araclar: AracBakim[],
-  periodYm: string
+  periodYm: string,
+  personeller?: { id: string; ad: string; soyad: string }[]
 ): Promise<void> {
-  const html = await buildKiralikKamyonPuantajReportHtml(kayitlar, araclar, periodYm);
+  const html = await buildKiralikKamyonPuantajReportHtml(
+    kayitlar,
+    araclar,
+    periodYm,
+    personeller
+  );
   const stamp = periodYm.slice(0, 7);
   downloadKibritciReportHtml(html, `Kiralik_Kamyon_Puantaj_${stamp}.html`);
 }
