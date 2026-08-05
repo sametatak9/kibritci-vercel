@@ -1581,7 +1581,7 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
                 })();
               }}
               className="bg-emerald-600 hover:bg-emerald-700 border border-emerald-700 text-white text-[11px] font-bold py-1.5 px-3 rounded-lg flex items-center space-x-1.5 transition cursor-pointer text-left"
-              title="Kibritçi antetli · kişi bazlı · fiş fotoğraflı Excel"
+              title="Kibritçi antetli · kişi bazlı · fiş önizleme + Orijinali aç linki"
             >
               <FileText size={12} />
               <span>Kasa Excel</span>

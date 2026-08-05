@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Download, X, ZoomIn, ZoomOut, RotateCcw } from 'lucide-react';
+import { Download, X, ZoomIn, ZoomOut, RotateCcw, ExternalLink } from 'lucide-react';
 
 export type ImageLightboxProps = {
   url: string;
@@ -34,7 +34,7 @@ async function downloadImage(url: string, fileName: string) {
   }
 }
 
-/** Tam ekran fiş/foto önizleme — yakınlaştır / uzaklaştır / indir */
+/** Tam ekran fiş/foto önizleme — yakınlaştır / uzaklaştır / indir / orijinal */
 export function ImageLightbox({ url, title, fileName, onClose }: ImageLightboxProps) {
   const [scale, setScale] = useState(1);
   const safeName =
@@ -45,6 +45,7 @@ export function ImageLightbox({ url, title, fileName, onClose }: ImageLightboxPr
   const downloadName = /\.(jpe?g|png|webp|gif)$/i.test(safeName)
     ? safeName
     : `${safeName}.jpg`;
+  const canOpenExternal = /^https?:\/\//i.test(url);
 
   useEffect(() => {
     setScale(1);
@@ -104,6 +105,17 @@ export function ImageLightbox({ url, title, fileName, onClose }: ImageLightboxPr
           >
             <RotateCcw size={15} />
           </button>
+          {canOpenExternal && (
+            <button
+              type="button"
+              title="Orijinali yeni sekmede aç"
+              onClick={() => window.open(url, '_blank', 'noopener,noreferrer')}
+              className="px-2.5 py-2 rounded-lg bg-sky-600 hover:bg-sky-700 text-white text-[10px] font-bold flex items-center gap-1 cursor-pointer"
+            >
+              <ExternalLink size={14} />
+              Orijinal
+            </button>
+          )}
           <button
             type="button"
             title="İndir"
@@ -150,6 +162,7 @@ export function ImageLightbox({ url, title, fileName, onClose }: ImageLightboxPr
 
       <p className="shrink-0 text-center text-[10px] text-white/55 font-semibold py-2">
         Fare tekeriği veya +/− ile yakınlaştır · Esc ile kapat
+        {canOpenExternal ? ' · Orijinal = yeni sekmede tam dosya' : ''}
       </p>
     </div>
   );
