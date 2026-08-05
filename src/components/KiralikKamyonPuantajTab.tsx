@@ -1,10 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { CheckCircle, Truck, Save, RefreshCw, Printer } from 'lucide-react';
+import { CheckCircle, Truck, Save, RefreshCw, Printer, FileSpreadsheet } from 'lucide-react';
 import type { AracBakim, KiralikKamyonPuantajKaydi, Personel } from '../types/erp';
 import { todayDateKey } from '../lib/dateKeyUtils';
 import { mesaiInputDisplayValue, parseMesaiInputValue } from '../lib/sahaFaaliyetUtils';
 import { openKiralikKamyonPuantajReport } from '../lib/kiralikKamyonPuantajReport';
-
+import { exportKiralikKamyonPuantajExcel } from '../lib/kiralikKamyonPuantajExcel';
 export function isKiralikKamyonArac(a?: AracBakim | null): boolean {
   if (!a) return false;
   if (a.kiralikKamyon === true) return true;
@@ -105,6 +105,7 @@ export const KiralikKamyonPuantajTab: React.FC<KiralikKamyonPuantajTabProps> = (
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [reporting, setReporting] = useState(false);
+  const [exportingExcel, setExportingExcel] = useState(false);
 
   const periodPrefix = `${selectedYear}-${String(selectedMonth).padStart(2, '0')}`;
   const daysInMonth = new Date(selectedYear, selectedMonth, 0).getDate();
@@ -348,10 +349,41 @@ export const KiralikKamyonPuantajTab: React.FC<KiralikKamyonPuantajTabProps> = (
     }
   };
 
+  /** Ekrandaki taslak + DB kayıtlarını seçili ay için birleştir (rapor/Excel) */
+  const buildMergedKayitlarForPeriod = (): KiralikKamyonPuantajKaydi[] => {
+    const map = new Map<string, KiralikKamyonPuantajKaydi>();
+    for (const k of kayitlar) map.set(`${k.aracId}|${k.tarih}`, k);
+    const kaydeden = currentUser?.email || currentUser?.displayName || 'sistem';
+    const now = new Date().toISOString();
+    for (const arac of kamyonlar) {
+      const soforId = arac.sorumluPersonelId || '';
+      const soforAdi = soforLabel(personeller, soforId) || undefined;
+      for (const day of daysArray) {
+        const c = getCell(arac.id, day);
+        if (c.durum === 'Girilmedi') continue;
+        const tarih = dateKey(selectedYear, selectedMonth, day);
+        map.set(`${arac.id}|${tarih}`, {
+          id: kiralikKamyonPuantajDocId(arac.id, tarih),
+          tarih,
+          aracId: arac.id,
+          plaka: arac.plaka,
+          markaModel: arac.markaModel,
+          soforPersonelId: soforId || undefined,
+          soforAdi,
+          durum: c.durum,
+          mesaiSaati: c.durum === 'Geldi' ? c.mesaiSaati || 0 : 0,
+          kaydeden,
+          updatedAt: now,
+        });
+      }
+    }
+    return [...map.values()];
+  };
+
   const handleAyiRaporla = async () => {
     if (dirty) {
       const ok = window.confirm(
-        'Kaydedilmemiş değişiklikler var. Rapor kayıtlı (DB) veriden üretilir.\nÖnce kaydetmek ister misiniz?\n\nTamam = önce kaydet · İptal = yine de raporla'
+        'Kaydedilmemiş değişiklikler var. Rapor ekrandaki taslağı da dahil eder.\nÖnce kaydetmek ister misiniz?\n\nTamam = önce kaydet · İptal = yine de raporla'
       );
       if (ok) {
         await handleSaveMonth();
@@ -359,38 +391,7 @@ export const KiralikKamyonPuantajTab: React.FC<KiralikKamyonPuantajTabProps> = (
     }
     setReporting(true);
     try {
-      // Kaydet sonrası güncel state bir tick gecikebilir; draft’ı da rapora yansıtmak için
-      // geçici birleşik liste üret
-      const merged = (() => {
-        const map = new Map<string, KiralikKamyonPuantajKaydi>();
-        for (const k of kayitlar) map.set(`${k.aracId}|${k.tarih}`, k);
-        const kaydeden = currentUser?.email || currentUser?.displayName || 'sistem';
-        const now = new Date().toISOString();
-        for (const arac of kamyonlar) {
-          const soforId = arac.sorumluPersonelId || '';
-          const soforAdi = soforLabel(personeller, soforId) || undefined;
-          for (const day of daysArray) {
-            const c = getCell(arac.id, day);
-            if (c.durum === 'Girilmedi') continue;
-            const tarih = dateKey(selectedYear, selectedMonth, day);
-            map.set(`${arac.id}|${tarih}`, {
-              id: kiralikKamyonPuantajDocId(arac.id, tarih),
-              tarih,
-              aracId: arac.id,
-              plaka: arac.plaka,
-              markaModel: arac.markaModel,
-              soforPersonelId: soforId || undefined,
-              soforAdi,
-              durum: c.durum,
-              mesaiSaati: c.durum === 'Geldi' ? c.mesaiSaati || 0 : 0,
-              kaydeden,
-              updatedAt: now,
-            });
-          }
-        }
-        return [...map.values()];
-      })();
-
+      const merged = buildMergedKayitlarForPeriod();
       await openKiralikKamyonPuantajReport(merged, araclar, periodPrefix, personeller);
       addNotification?.(`Kiralık kamyon aylık puantaj raporu · ${periodPrefix}`);
     } catch (err) {
@@ -401,6 +402,27 @@ export const KiralikKamyonPuantajTab: React.FC<KiralikKamyonPuantajTabProps> = (
     }
   };
 
+  const handleAyiExcel = async () => {
+    if (dirty) {
+      const ok = window.confirm(
+        'Kaydedilmemiş değişiklikler var. Excel ekrandaki taslağı da dahil eder.\nÖnce kaydetmek ister misiniz?\n\nTamam = önce kaydet · İptal = yine de Excel indir'
+      );
+      if (ok) {
+        await handleSaveMonth();
+      }
+    }
+    setExportingExcel(true);
+    try {
+      const merged = buildMergedKayitlarForPeriod();
+      await exportKiralikKamyonPuantajExcel(merged, araclar, periodPrefix, personeller);
+      addNotification?.(`Kiralık kamyon puantaj Excel indirildi · ${periodPrefix}`);
+    } catch (err) {
+      console.error(err);
+      alert('Excel oluşturulamadı: ' + (err instanceof Error ? err.message : String(err)));
+    } finally {
+      setExportingExcel(false);
+    }
+  };
   const periodLabel = new Date(selectedYear, selectedMonth - 1, 1).toLocaleDateString('tr-TR', {
     month: 'long',
     year: 'numeric',
@@ -504,6 +526,20 @@ export const KiralikKamyonPuantajTab: React.FC<KiralikKamyonPuantajTabProps> = (
             >
               {reporting ? <RefreshCw size={12} className="animate-spin" /> : <Printer size={12} />}
               Ayı Raporla
+            </button>
+            <button
+              type="button"
+              disabled={exportingExcel}
+              onClick={() => void handleAyiExcel()}
+              title="Seçili ayın Kibritçi antetli Excel puantajını indirir"
+              className="inline-flex items-center gap-1.5 bg-emerald-700 hover:bg-emerald-800 disabled:opacity-60 text-white text-[11px] font-bold px-3 py-1.5 rounded-lg"
+            >
+              {exportingExcel ? (
+                <RefreshCw size={12} className="animate-spin" />
+              ) : (
+                <FileSpreadsheet size={12} />
+              )}
+              Excel
             </button>
           </div>
         </div>
@@ -719,7 +755,8 @@ export const KiralikKamyonPuantajTab: React.FC<KiralikKamyonPuantajTabProps> = (
         <CheckCircle size={11} className="text-teal-600" />
         Hücreye tıklayarak gün girin · altına mesai yazın · şoför araç kaydından gelir ·{' '}
         <strong className="text-slate-600">Ayı Kaydet</strong> /{' '}
-        <strong className="text-slate-600">Ayı Raporla</strong>
+        <strong className="text-slate-600">Ayı Raporla</strong> /{' '}
+        <strong className="text-slate-600">Excel</strong>
       </div>
     </div>
   );
