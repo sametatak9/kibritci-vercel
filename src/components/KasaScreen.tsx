@@ -145,6 +145,7 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
 
   // Weekly Cash Report Print Modal Toggle
   const [showWeeklyReportModal, setShowWeeklyReportModal] = useState(false);
+  const [exportingKasaExcel, setExportingKasaExcel] = useState(false);
   const [soforIadeStart, setSoforIadeStart] = useState(week0.start);
   const [soforIadeEnd, setSoforIadeEnd] = useState(week0.end);
   const [soforIadeFiltre, setSoforIadeFiltre] = useState('');
@@ -1570,9 +1571,13 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
               <Mail size={12} />
               <span>Harcama → Merkeze E-posta</span>
             </button>
-            <button 
+            <button
+              type="button"
+              disabled={exportingKasaExcel}
               onClick={() => {
                 void (async () => {
+                  if (exportingKasaExcel) return;
+                  setExportingKasaExcel(true);
                   try {
                     await exportKasaExcel(
                       filteredHareketler,
@@ -1586,14 +1591,16 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
                       'Kasa Excel oluşturulamadı:\n' +
                         (err instanceof Error ? err.message : String(err))
                     );
+                  } finally {
+                    setExportingKasaExcel(false);
                   }
                 })();
               }}
-              className="bg-emerald-600 hover:bg-emerald-700 border border-emerald-700 text-white text-[11px] font-bold py-1.5 px-3 rounded-lg flex items-center space-x-1.5 transition cursor-pointer text-left"
-              title="Kibritçi antetli · kişi bazlı · fiş önizleme + Orijinali aç linki"
+              className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 disabled:cursor-wait border border-emerald-700 text-white text-[11px] font-bold py-1.5 px-3 rounded-lg flex items-center space-x-1.5 transition cursor-pointer text-left"
+              title="Kibritçi antetli · kişi bazlı · fiş önizleme + orijinal foto linki"
             >
               <FileText size={12} />
-              <span>Kasa Excel</span>
+              <span>{exportingKasaExcel ? 'Excel hazırlanıyor…' : 'Kasa Excel'}</span>
             </button>
             <button 
               onClick={() => setShowWeeklyReportModal(true)}

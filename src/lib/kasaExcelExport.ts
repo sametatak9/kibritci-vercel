@@ -22,18 +22,22 @@ function thinBorder() {
   };
 }
 
-function downloadBuffer(buffer: ArrayBuffer, fileName: string) {
-  const blob = new Blob([buffer], {
-    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-  });
+function downloadBuffer(buffer: ArrayBuffer | Uint8Array | Blob, fileName: string) {
+  const blob =
+    buffer instanceof Blob
+      ? buffer
+      : new Blob([buffer as BlobPart], {
+          type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
   a.download = fileName;
+  a.rel = 'noopener';
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+  setTimeout(() => URL.revokeObjectURL(url), 1500);
 }
 
 function isOpenablePhotoUrl(url: string): boolean {
@@ -41,13 +45,23 @@ function isOpenablePhotoUrl(url: string): boolean {
   return /^https?:\/\//i.test(u);
 }
 
-/** data: / kısa URL → mümkünse Storage https (Excel HYPERLINK için şart) */
+/**
+ * Excel HYPERLINK için https URL.
+ * Export sırasında her fişi Storage’a yüklemek (eski davranış) butonu dakikalarca kilitliyordu.
+ * Zaten https olanlar kullanılır; data: için sayfa içi «Fis Fotograflari» linki yeter.
+ * İsteğe bağlı kısa deneme: yalnızca birkaç kayıt, sıkı zaman aşımı.
+ */
 async function resolvePhotoHttpUrl(hareketId: string, url: string): Promise<string> {
   const raw = String(url || '').trim();
   if (!raw) return '';
   if (isOpenablePhotoUrl(raw)) return raw;
+  // data: / uzun inline — Storage yüklemesini export’ta atla (UI donmasın)
+  if (raw.startsWith('data:') || raw.length > 80_000) return '';
   try {
-    const persisted = await ensureKasaFisFotoPersisted(hareketId || `excel_${Date.now()}`, raw);
+    const persisted = await Promise.race([
+      ensureKasaFisFotoPersisted(hareketId || `excel_${Date.now()}`, raw),
+      new Promise<string>((resolve) => setTimeout(() => resolve(''), 2500)),
+    ]);
     if (isOpenablePhotoUrl(persisted)) return persisted;
   } catch (err) {
     console.warn('[kasa-excel] fiş URL çözülemedi', hareketId, err);
@@ -109,7 +123,9 @@ function setOriginalPhotoHyperlink(
   cell.alignment = { vertical: 'middle', horizontal: 'center' };
 }
 
-/** Excel'e gömmek için görseli JPEG base64'e çevirir */
+const IMAGE_LOAD_TIMEOUT_MS = 8000;
+
+/** Excel'e gömmek için görseli JPEG base64'e çevirir (zaman aşımı ile — takılmayı önler) */
 async function loadImageAsJpegBase64(
   url: string,
   maxW = 640,
@@ -122,6 +138,14 @@ async function loadImageAsJpegBase64(
     new Promise((resolve) => {
       const img = new Image();
       if (!src.startsWith('data:')) img.crossOrigin = 'anonymous';
+      let done = false;
+      const settle = (value: string | null) => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        resolve(value);
+      };
+      const timer = setTimeout(() => settle(null), IMAGE_LOAD_TIMEOUT_MS);
       const finish = () => {
         try {
           const scale = Math.min(1, maxW / Math.max(1, img.naturalWidth || img.width || 1));
@@ -132,34 +156,26 @@ async function loadImageAsJpegBase64(
           canvas.height = h;
           const ctx = canvas.getContext('2d');
           if (!ctx) {
-            resolve(null);
+            settle(null);
             return;
           }
           ctx.fillStyle = '#ffffff';
           ctx.fillRect(0, 0, w, h);
           ctx.drawImage(img, 0, 0, w, h);
           const dataUrl = canvas.toDataURL('image/jpeg', quality);
-          resolve(dataUrl.replace(/^data:image\/jpeg;base64,/i, '') || null);
+          settle(dataUrl.replace(/^data:image\/jpeg;base64,/i, '') || null);
         } catch {
-          resolve(null);
+          settle(null);
         }
       };
       img.onload = finish;
-      img.onerror = () => resolve(null);
+      img.onerror = () => settle(null);
       img.src = src;
     });
 
   try {
-    // Orijinale yakın gömme: büyük maxW ile canvas üzerinden
-    if (raw.startsWith('data:image/') && maxW >= 1600) {
-      return await fromCanvas(raw);
-    }
+    // Büyük data URL’leri doğrudan gömme — xlsx şişer / yazım çöker; her zaman küçült
     if (raw.startsWith('data:image/')) {
-      if (/^data:image\/jpeg/i.test(raw) || /^data:image\/jpg/i.test(raw)) {
-        // Küçük önizleme için yine de boyutlandır
-        if (maxW <= 400) return await fromCanvas(raw);
-        return raw.replace(/^data:image\/[^;]+;base64,/i, '');
-      }
       return await fromCanvas(raw);
     }
     return await fromCanvas(raw);
@@ -285,13 +301,15 @@ export async function exportKasaExcel(
   const girisler = kasaHareketleri.filter((k) => k.hareketTipi === 'GİRİŞ');
   const buckets = groupByPersonel(cikislar, personeller);
 
-  // Fiş URL’lerini Excel HYPERLINK için https’e çevir (data: link olmaz)
+  // Fiş URL’leri — yalnızca hazır https (Storage upload export’u kilitlemesin)
   const withFotoAll = cikislar.filter((k) => String(k.fisEvrakUrl || '').trim());
   const httpUrlById = new Map<string, string>();
-  for (const kh of withFotoAll) {
-    const resolved = await resolvePhotoHttpUrl(kh.id, String(kh.fisEvrakUrl));
-    if (resolved) httpUrlById.set(kh.id, resolved);
-  }
+  await Promise.all(
+    withFotoAll.map(async (kh) => {
+      const resolved = await resolvePhotoHttpUrl(kh.id, String(kh.fisEvrakUrl));
+      if (resolved) httpUrlById.set(kh.id, resolved);
+    })
+  );
 
   let totalIn = 0;
   let totalOut = 0;
@@ -656,8 +674,8 @@ export async function exportKasaExcel(
 
       const fotoUrl = String(kh.fisEvrakUrl || '').trim();
       const httpUrl = httpUrlById.get(kh.id) || '';
-      // Büyük gömülü görsel (orijinale yakın)
-      const b64 = await loadImageAsJpegBase64(httpUrl || fotoUrl, 1800, 0.92);
+      // Gömülü görsel — orta boyut (çok büyük gömme dosyayı şişirip indirmeyi bozuyordu)
+      const b64 = await loadImageAsJpegBase64(httpUrl || fotoUrl, 720, 0.72);
       if (b64) {
         const imageId = workbook.addImage({ base64: b64, extension: 'jpeg' });
         fotoSheet.addImage(imageId, {
@@ -690,8 +708,5 @@ export async function exportKasaExcel(
   }
 
   const buffer = await workbook.xlsx.writeBuffer();
-  downloadBuffer(
-    buffer as ArrayBuffer,
-    `Kibritci_Haftalik_Kasa_${startDate}_${endDate}.xlsx`
-  );
+  downloadBuffer(buffer as ArrayBuffer | Uint8Array, `Kibritci_Haftalik_Kasa_${startDate}_${endDate}.xlsx`);
 }
