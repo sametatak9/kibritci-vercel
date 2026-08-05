@@ -2,7 +2,13 @@ import React, { useEffect, useState, useMemo } from 'react';
 import { Calendar, Trash2, ShieldAlert, CheckCircle, FileText, ChevronRight, RefreshCw, Database, Undo2, Redo2, Camera } from 'lucide-react';
 import { Personel, AylikYoklamaMap, YoklamaDurum, SahaFaaliyeti, KampFaaliyet } from '../types/erp';
 import { normalizeDateKey } from '../lib/dateKeyUtils';
-import { formatMesaiFaaliyetLabel, getFaaliyetFotolar, isMesaiSahaFaaliyet } from '../lib/sahaFaaliyetUtils';
+import {
+  formatMesaiFaaliyetLabel,
+  getFaaliyetFotolar,
+  isMesaiSahaFaaliyet,
+  mesaiInputDisplayValue,
+  parseMesaiInputValue,
+} from '../lib/sahaFaaliyetUtils';
 import {
   buildFaaliyetPersoneller,
   getPersonFaaliyetleriInPeriod,
@@ -1262,10 +1268,15 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
                                 min={0}
                                 max={MAX_MESAI_SAATI}
                                 step={0.5}
-                                value={rec.mesaiSaati || 0}
+                                placeholder="—"
+                                value={mesaiInputDisplayValue(rec.mesaiSaati)}
                                 onChange={(e) => {
-                                  const val = normalizeMesaiHours(Number(e.target.value));
-                                  setParsedRecords(prev => prev.map((item, i) => i === idx ? { ...item, mesaiSaati: val } : item));
+                                  const parsed = parseMesaiInputValue(e.target.value);
+                                  setParsedRecords((prev) =>
+                                    prev.map((item, i) =>
+                                      i === idx ? { ...item, mesaiSaati: parsed ?? 0 } : item
+                                    )
+                                  );
                                 }}
                                 className="w-full text-xs p-0.5 border border-slate-300 rounded font-bold font-mono text-center"
                               />
@@ -1344,8 +1355,11 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
                 min={0}
                 max={MAX_MESAI_SAATI}
                 step={0.5}
-                value={overtimeHours}
-                onChange={(e) => setOvertimeHours(normalizeMesaiHours(parseFloat(e.target.value) || 0))}
+                placeholder="—"
+                value={mesaiInputDisplayValue(overtimeHours)}
+                onChange={(e) =>
+                  setOvertimeHours(parseMesaiInputValue(e.target.value) ?? 0)
+                }
                 className="w-12 text-center text-[11px] font-bold bg-white border border-slate-200 rounded p-1"
               />
               <span className="text-slate-400 font-medium text-[10px]">Saat</span>
@@ -2048,15 +2062,22 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
                                 min={0}
                                 max={MAX_MESAI_SAATI}
                                 step={0.5}
-                                value={dayData.mesaiSaati || 0}
+                                placeholder="—"
+                                value={mesaiInputDisplayValue(dayData.mesaiSaati)}
                                 onChange={(e) => {
-                                  const hours = normalizeMesaiHours(parseFloat(e.target.value) || 0);
-                                  updateDraftYoklama(prev => ({
+                                  const hours = parseMesaiInputValue(e.target.value) ?? 0;
+                                  updateDraftYoklama((prev) => ({
                                     ...prev,
-                                    [bireyselStaffId]: setYoklamaDay(prev[bireyselStaffId], bireyselYear, bireyselMonth, day, {
-                                      ...dayData,
-                                      mesaiSaati: hours
-                                    })
+                                    [bireyselStaffId]: setYoklamaDay(
+                                      prev[bireyselStaffId],
+                                      bireyselYear,
+                                      bireyselMonth,
+                                      day,
+                                      {
+                                        ...dayData,
+                                        mesaiSaati: hours,
+                                      }
+                                    ),
                                   }));
                                 }}
                                 className="w-12 text-center bg-slate-50 border rounded-lg p-1 text-[10px] font-mono font-bold"

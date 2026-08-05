@@ -145,6 +145,39 @@ export function normalizeMesaiHours(raw: number): number {
   return Math.round(clamped * 2) / 2;
 }
 
+/** Input'ta çakılı 0 göstermemek için — boş / 0 → '' */
+export function mesaiInputDisplayValue(hours: number | undefined | null): string {
+  if (hours == null || hours === 0 || !Number.isFinite(Number(hours))) return '';
+  return String(hours);
+}
+
+/**
+ * Mesai input parse: boş veya ≤0 → null (alan silinsin).
+ * Geçerli değer → normalize edilmiş saat.
+ */
+export function parseMesaiInputValue(raw: string): number | null {
+  const t = String(raw || '')
+    .trim()
+    .replace(',', '.');
+  if (!t) return null;
+  const n = parseFloat(t);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return normalizeMesaiHours(n);
+}
+
+/** Record içinden mesai saatini güncelle / sil */
+export function setMesaiHoursInMap(
+  prev: Record<string, number>,
+  personelId: string,
+  raw: string
+): Record<string, number> {
+  const next = { ...prev };
+  const parsed = parseMesaiInputValue(raw);
+  if (parsed == null) delete next[personelId];
+  else next[personelId] = parsed;
+  return next;
+}
+
 export function isMesaiSahaFaaliyet(f?: Pick<SahaFaaliyeti, 'faaliyetTipi'> | null): boolean {
   return f?.faaliyetTipi === 'MESAI_SAHA';
 }

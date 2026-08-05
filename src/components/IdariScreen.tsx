@@ -54,6 +54,8 @@ import {
   isMesaiSahaFaaliyet,
   MAX_SAHA_FOTO_COUNT,
   normalizeMesaiHours as normalizeSahaMesaiHours,
+  mesaiInputDisplayValue,
+  setMesaiHoursInMap,
 } from '../lib/sahaFaaliyetUtils';
 import {
   listSahaFaaliyetArchives,
@@ -3875,12 +3877,12 @@ export const IdariScreen: React.FC<IdariScreenProps> = ({
                               min={0}
                               max={14}
                               step={0.5}
-                              value={personelMesaiSaatleri[pid] ?? 0}
+                              placeholder="—"
+                              value={mesaiInputDisplayValue(personelMesaiSaatleri[pid])}
                               onChange={(e) =>
-                                setPersonelMesaiSaatleri((prev) => ({
-                                  ...prev,
-                                  [pid]: normalizeSahaMesaiHours(parseFloat(e.target.value) || 0),
-                                }))
+                                setPersonelMesaiSaatleri((prev) =>
+                                  setMesaiHoursInMap(prev, pid, e.target.value)
+                                )
                               }
                               className="w-16 text-center text-[10px] font-mono font-bold border border-slate-200 rounded-lg py-1"
                             />

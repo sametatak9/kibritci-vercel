@@ -3785,7 +3785,7 @@ export default function App() {
 
 
               {activeTab === "onay_islemleri" && (
-                  <OnayIslemleriScreen 
+                  <OnayIslemleriScreen
                   satinAlmaTalepleri={satinAlmaTalepleri}
                   setSatinAlmaTalepleri={setSatinAlmaTalepleriWithSync}
                   irsaliyeler={irsaliyeler}
@@ -3803,6 +3803,12 @@ export default function App() {
                   stokKartlar={stokKartlar}
                   setStokKartlar={setStokKartlarWithSync}
                   setStokIslemGecmisi={setStokIslemGecmisiWithSync}
+                  personeller={personeller}
+                  setPersoneller={setPersonellerWithSync}
+                  kampKayitlari={kampKayitlari}
+                  setKampKayitlari={setKampKayitlari}
+                  kampOdalari={kampOdalari}
+                  setKampOdalari={setKampOdalari}
                 />
               )}
 

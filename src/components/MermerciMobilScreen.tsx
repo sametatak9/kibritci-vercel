@@ -7,7 +7,12 @@ import { AylikYoklamaMap, MermerciFaaliyet, Personel, SahaFaaliyeti } from '../t
 import { db, cleanUndefined } from '../lib/firebase';
 import { compressImage } from '../lib/imageCompress';
 import { todayDateKey, formatDateLabelTr, normalizeDateKey } from '../lib/dateKeyUtils';
-import { applySahaMesaiToYoklama, normalizeMesaiHours } from '../lib/sahaFaaliyetUtils';
+import {
+  applySahaMesaiToYoklama,
+  mesaiInputDisplayValue,
+  normalizeMesaiHours,
+  setMesaiHoursInMap,
+} from '../lib/sahaFaaliyetUtils';
 import { ensureSahaFaaliyetFotolarPersisted } from '../lib/sahaFaaliyetFotoStorage';
 import { isMermerciGorev } from '../lib/yoklamaUtils';
 import { resolveGeldiRolPersonelIds } from '../lib/mobilRolEtiketUtils';
@@ -497,13 +502,14 @@ export const MermerciMobilScreen: React.FC<MermerciMobilScreenProps> = ({
                     <p className="text-[10px] text-amber-700 italic">MERMERCİ görevli personel bulunamadı.</p>
                   ) : (
                     <div className="max-h-44 overflow-y-auto space-y-1">
-                      {mermerciPersoneller.map((p) => {
-                        const hrs = personelMesaiSaatleri[p.id] || 0;
+                      {                      mermerciPersoneller.map((p) => {
+                        const hrs = personelMesaiSaatleri[p.id];
+                        const hasHrs = Number(hrs) > 0;
                         return (
                           <div
                             key={p.id}
                             className={`flex items-center justify-between gap-2 border rounded-lg px-2 py-1.5 ${
-                              hrs > 0 ? 'bg-amber-100 border-amber-300' : 'bg-white border-slate-200'
+                              hasHrs ? 'bg-amber-100 border-amber-300' : 'bg-white border-slate-200'
                             }`}
                           >
                             <span className="text-[9px] font-bold text-slate-800 truncate">
@@ -514,12 +520,12 @@ export const MermerciMobilScreen: React.FC<MermerciMobilScreenProps> = ({
                               min={0}
                               max={14}
                               step={0.5}
-                              value={hrs}
+                              placeholder="—"
+                              value={mesaiInputDisplayValue(hrs)}
                               onChange={(e) =>
-                                setPersonelMesaiSaatleri((prev) => ({
-                                  ...prev,
-                                  [p.id]: Number(e.target.value) || 0,
-                                }))
+                                setPersonelMesaiSaatleri((prev) =>
+                                  setMesaiHoursInMap(prev, p.id, e.target.value)
+                                )
                               }
                               className="w-16 text-center text-[10px] font-bold border rounded-lg py-1"
                             />

@@ -4,8 +4,20 @@ import {
   Truck, CreditCard, ChevronRight, PenTool, Check, CheckCircle2, UserCheck, Eye, Trash2,
   FileUp, ExternalLink, MessageSquare, AlertTriangle, Sparkles, Package, Tent, X, HardHat
 } from 'lucide-react';
-import { SatinAlmaTalebi, Irsaliye, Fatura, CariKart, CariKartIslem, StokKart, StokKartIslem } from '../types/erp';
+import {
+  SatinAlmaTalebi,
+  Irsaliye,
+  Fatura,
+  CariKart,
+  CariKartIslem,
+  StokKart,
+  StokKartIslem,
+  KampKaydi,
+  KampOdasi,
+  Personel,
+} from '../types/erp';
 import { db, saveDocument } from '../lib/firebase';
+import { evictActiveKampResidentsForPersonel } from '../lib/kampPlacementUtils';
 import { compressImage } from '../lib/imageCompress';
 import { collection, doc, setDoc, onSnapshot, updateDoc, deleteDoc, getDocs } from 'firebase/firestore';
 import {
@@ -72,6 +84,12 @@ interface OnayIslemleriScreenProps {
   stokKartlar?: StokKart[];
   setStokKartlar?: React.Dispatch<React.SetStateAction<StokKart[]>>;
   setStokIslemGecmisi?: React.Dispatch<React.SetStateAction<StokKartIslem[]>>;
+  personeller?: Personel[];
+  setPersoneller?: React.Dispatch<React.SetStateAction<Personel[]>>;
+  kampKayitlari?: KampKaydi[];
+  setKampKayitlari?: React.Dispatch<React.SetStateAction<KampKaydi[]>>;
+  kampOdalari?: KampOdasi[];
+  setKampOdalari?: React.Dispatch<React.SetStateAction<KampOdasi[]>>;
 }
 
 export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
@@ -92,6 +110,11 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
   stokKartlar = [],
   setStokKartlar,
   setStokIslemGecmisi,
+  setPersoneller,
+  kampKayitlari = [],
+  setKampKayitlari,
+  kampOdalari = [],
+  setKampOdalari,
 }) => {
   const [activeTab, setActiveTab] = useState<'satin_alma' | 'guvenlik_belgeleri' | 'kampci_belgeleri' | 'tesisat_mermer_belgeleri' | 'operator_belgeleri' | 'formen_belgeleri' | 'gunluk_loglar' | 'sofor_talepleri' | 'depocu_talepleri' | 'gecmis' | 'imzalar' | 'anahtarci_tutanaklari'>('satin_alma');
   const [selectedYoneticiEmail, setSelectedYoneticiEmail] = useState<string>('');
@@ -962,7 +985,7 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
   };
 
   const handleApproveCikis = async (item: any) => {
-    if (!window.confirm(`${item.personelIsim} için işten çıkış işlemini onaylamak istiyor musunuz?`)) return;
+    if (!window.confirm(`${item.personelIsim} için işten çıkış işlemini onaylamak istiyor musunuz?\n\nAktif kamp oda kaydı varsa otomatik tahliye edilir.`)) return;
     try {
       // 1. Update request status to ONAYLANDI
       await updateDoc(doc(db, 'personelCikisTalepleri', item.id), {
@@ -972,12 +995,49 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
       });
 
       // 2. Set actual personnel as inactive and save exit date
-      await updateDoc(doc(db, 'personeller', item.personelId), {
-        durum: false,
-        istenCikisTarihi: item.cikisTarihi
-      });
+      if (item.personelId) {
+        await updateDoc(doc(db, 'personeller', item.personelId), {
+          durum: false,
+          istenCikisTarihi: item.cikisTarihi
+        });
+      }
 
-      alert(`🎉 ${item.personelIsim} için işten çıkış işlemi onaylandı ve personel inaktif edildi!`);
+      // 3. Local personel state (App effect + anında UI)
+      if (setPersoneller && item.personelId) {
+        setPersoneller((prev) =>
+          prev.map((p) =>
+            p.id === item.personelId
+              ? { ...p, durum: false, istenCikisTarihi: item.cikisTarihi }
+              : p
+          )
+        );
+      }
+
+      // 4. Kamp çıkışı (aktif oda kaydı varsa)
+      let kampNot = '';
+      if (item.personelId || item.personelIsim) {
+        try {
+          const result = await evictActiveKampResidentsForPersonel({
+            personelId: item.personelId,
+            personelIsim: item.personelIsim,
+            cikisTarihi: item.cikisTarihi || new Date().toISOString().slice(0, 10),
+            kampOdalari,
+            kampKayitlari,
+          });
+          if (result.evictedCount > 0) {
+            setKampKayitlari?.(result.kampKayitlari);
+            setKampOdalari?.(result.kampOdalari);
+            kampNot = `\nKamp odasından otomatik tahliye: ${result.evictedCount} kayıt.`;
+            void addNotification?.(
+              `${item.personelIsim} işten çıkış onaylandı — kamptan ${result.evictedCount} oda kaydı tahliye edildi.`
+            );
+          }
+        } catch (kampErr) {
+          console.warn('Kamp tahliye atlandı:', kampErr);
+        }
+      }
+
+      alert(`🎉 ${item.personelIsim} için işten çıkış onaylandı ve personel pasife alındı.${kampNot}`);
     } catch (err) {
       console.error(err);
       alert("İşlem onaylanırken bir hata oluştu.");

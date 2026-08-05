@@ -16,7 +16,12 @@ import { KampGunlukYoklamaTab } from './KampGunlukYoklamaTab';
 import { KampVidanjorTab } from './KampVidanjorTab';
 import { AylikPuantajMobilPanel } from './AylikPuantajMobilPanel';
 import { collection, onSnapshot, doc, updateDoc, setDoc, query, orderBy } from 'firebase/firestore';
-import { applySahaMesaiToYoklama, normalizeMesaiHours } from '../lib/sahaFaaliyetUtils';
+import {
+  applySahaMesaiToYoklama,
+  mesaiInputDisplayValue,
+  setMesaiHoursInMap,
+} from '../lib/sahaFaaliyetUtils';
+import { submitPersonelCikisTalebi } from '../lib/personelCikisTalebiUtils';
 import {
   CANONICAL_ANA_FIRMA_ADI,
   canonicalizeAnaFirmaAdi,
@@ -1028,17 +1033,54 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
     }
   };
 
+  const sendCikisTalebiForKampTahliye = async (reg: KampKaydi, odaNo?: string) => {
+    const p = personeller.find((x) => x.id === reg.personelId);
+    const todayStr = new Date().toISOString().slice(0, 10);
+    await submitPersonelCikisTalebi({
+      personelId: reg.personelId || p?.id,
+      personelIsim: reg.personelIsim || `${p?.ad || ''} ${p?.soyad || ''}`.trim(),
+      personelGorev: p?.gorev || '',
+      personelMaas: p?.netMaas ?? p?.maas ?? 0,
+      cikisTarihi: todayStr,
+      cikisNedeni: `Kamp tahliyesi${odaNo ? ` · Oda ${odaNo}` : ''} — kampçı tarafından odadan çıkarıldı; işten çıkış onayı bekleniyor.`,
+      gonderen: currentUser?.email || 'kampci',
+      kaynak: 'KAMPCI_TAHLIYE',
+      hedefYoneticiRole: 'YÖNETİCİ',
+    });
+  };
+
   const handleCheckOut = async (reg: KampKaydi) => {
-    if (!window.confirm(`${reg.personelIsim} isimli personeli odadan çıkarmak (Check-out) istediğinize emin misiniz?`)) return;
+    if (
+      !window.confirm(
+        `${reg.personelIsim} odadan çıkarılsın mı?\n\nKamp çıkışı yapılacak ve yönetime işten çıkış talebi gönderilecek.`
+      )
+    ) {
+      return;
+    }
 
     try {
       const targetRoom = kampOdalari.find(r => r.id === reg.odaId || r.id === reg.roomId);
       await evictKampResident(reg, kampOdalari, kampKayitlari);
+      try {
+        await sendCikisTalebiForKampTahliye(reg, targetRoom?.odaNo);
+      } catch (talebiErr) {
+        console.warn('İşten çıkış talebi gönderilemedi:', talebiErr);
+        showStatus(
+          'error',
+          `${reg.personelIsim} odadan çıktı ancak işten çıkış talebi gönderilemedi — Onay Havuzu’nu kontrol edin.`
+        );
+        return;
+      }
       if (addNotification) {
         const roomNo = targetRoom ? targetRoom.odaNo : 'oda';
-        addNotification(`${reg.personelIsim} ${roomNo} nolu odadan çıkış yaptı.`);
+        addNotification(
+          `${reg.personelIsim} ${roomNo} nolu odadan çıkış yaptı · işten çıkış talebi yönetime gönderildi.`
+        );
       }
-      showStatus('success', `${reg.personelIsim} odadan çıkarıldı.`);
+      showStatus(
+        'success',
+        `${reg.personelIsim} odadan çıkarıldı; işten çıkış talebi yönetime iletildi.`
+      );
     } catch (err) {
       console.error(err);
       showStatus('error', 'Check-out işlemi başarısız!');
@@ -1058,7 +1100,13 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
       return;
     }
 
-    if (!window.confirm(`${targetRoom.odaNo} numaralı odadaki TÜM personelleri (${occupants.length} kişi) tahliye etmek istediğinize emin misiniz?`)) return;
+    if (
+      !window.confirm(
+        `${targetRoom.odaNo} numaralı odadaki TÜM personeller (${occupants.length} kişi) tahliye edilsin mi?\n\nHer biri için yönetime işten çıkış talebi de gönderilecek.`
+      )
+    ) {
+      return;
+    }
 
     try {
       const todayStr = new Date().toISOString().slice(0, 10);
@@ -1069,9 +1117,16 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
           cikisTarihi: todayStr
         };
         await saveDocument('kampKayitlari', updatedReg);
+        try {
+          await sendCikisTalebiForKampTahliye(reg, targetRoom.odaNo);
+        } catch (talebiErr) {
+          console.warn('İşten çıkış talebi atlandı:', reg.personelIsim, talebiErr);
+        }
       }
       if (addNotification) {
-        addNotification(`${targetRoom.odaNo} nolu odadaki tüm personeller (${occupants.length} kişi) tahliye edildi.`);
+        addNotification(
+          `${targetRoom.odaNo} nolu odadaki tüm personeller (${occupants.length} kişi) tahliye edildi · işten çıkış talepleri yönetime gönderildi.`
+        );
       }
 
       const updatedRoom: KampOdasi = {
@@ -1080,7 +1135,10 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
       };
       await saveDocument('kampOdalari', updatedRoom);
 
-      showStatus('success', `${targetRoom.odaNo} numaralı odadaki tüm personeller tahliye edildi.`);
+      showStatus(
+        'success',
+        `${targetRoom.odaNo} tahliye edildi; ${occupants.length} işten çıkış talebi yönetime iletildi.`
+      );
     } catch (err) {
       console.error(err);
       showStatus('error', 'Oda tahliye edilirken hata oluştu.');
@@ -2532,9 +2590,10 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
                       </div>
                     ) : (
                       mesaiPersonelListesi.map(p => {
-                        const hrs = personelMesaiSaatleri[p.id] || 0;
+                        const hrs = personelMesaiSaatleri[p.id];
+                        const hasHrs = Number(hrs) > 0;
                         return (
-                          <div key={p.id} className={`flex items-center justify-between gap-2 border rounded-lg px-2 py-1.5 transition-colors ${hrs > 0 ? 'bg-amber-100 border-amber-300' : 'bg-white border-slate-200 hover:bg-slate-50'}`}>
+                          <div key={p.id} className={`flex items-center justify-between gap-2 border rounded-lg px-2 py-1.5 transition-colors ${hasHrs ? 'bg-amber-100 border-amber-300' : 'bg-white border-slate-200 hover:bg-slate-50'}`}>
                             <div className="flex flex-col min-w-0">
                               <span className="text-[9px] font-bold text-slate-800 truncate">{p.ad} {p.soyad}</span>
                               <span className="text-[7px] font-semibold text-slate-500 truncate">{p.gorev} • {p.firmaTipi === 'TASERON' ? 'Taşeron' : 'Kamp'}</span>
@@ -2545,12 +2604,12 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
                                 min={0}
                                 max={14}
                                 step={0.5}
-                                value={hrs}
+                                placeholder="—"
+                                value={mesaiInputDisplayValue(hrs)}
                                 onChange={(e) =>
-                                  setPersonelMesaiSaatleri((prev) => ({
-                                    ...prev,
-                                    [p.id]: normalizeMesaiHours(parseFloat(e.target.value) || 0),
-                                  }))
+                                  setPersonelMesaiSaatleri((prev) =>
+                                    setMesaiHoursInMap(prev, p.id, e.target.value)
+                                  )
                                 }
                                 className="w-14 text-center bg-white border border-slate-300 rounded-lg py-1 text-[9px] font-mono font-bold"
                               />

@@ -12,6 +12,7 @@ import {
   assignKampResident, 
   evictKampResident 
 } from '../lib/kampPlacementUtils';
+import { submitPersonelCikisTalebi } from '../lib/personelCikisTalebiUtils';
 
 interface KampHaftalikYoklamaTabProps {
   kampOdalari: KampOdasi[];
@@ -119,15 +120,35 @@ export const KampHaftalikYoklamaTab: React.FC<KampHaftalikYoklamaTabProps> = ({
   };
 
   const handleTahliye = async (reg: KampKaydi) => {
-    if (!window.confirm(`${reg.personelIsim} isimli personeli odadan tahliye etmek istediğinize emin misiniz?`)) return;
+    if (
+      !window.confirm(
+        `${reg.personelIsim} odadan tahliye edilsin mi?\n\nKamp çıkışı + yönetime işten çıkış talebi gönderilecek.`
+      )
+    ) {
+      return;
+    }
     try {
       await evictKampResident(reg, kampOdalari, kampKayitlari);
+      try {
+        await submitPersonelCikisTalebi({
+          personelId: reg.personelId,
+          personelIsim: reg.personelIsim,
+          cikisTarihi: new Date().toISOString().slice(0, 10),
+          cikisNedeni: `Kamp tahliyesi · Oda ${reg.odaNo || ''} — haftalık sayım; işten çıkış onayı bekleniyor.`,
+          gonderen: currentUser?.email || 'kampci',
+          kaynak: 'KAMPCI_HAFTALIK_TAHLIYE',
+        });
+      } catch (talebiErr) {
+        console.warn('İşten çıkış talebi gönderilemedi:', talebiErr);
+      }
       setSessionLogs((prev) => [
         ...prev,
-        `${reg.odaNo} nolu odadan ${reg.personelIsim} tahliye edildi.`,
+        `${reg.odaNo} nolu odadan ${reg.personelIsim} tahliye edildi · işten çıkış talebi gönderildi.`,
       ]);
       if (addNotification) {
-        addNotification(`${reg.personelIsim} haftalık sayım sırasında ${reg.odaNo} nolu odadan tahliye edildi.`);
+        addNotification(
+          `${reg.personelIsim} haftalık sayımda ${reg.odaNo} nolu odadan tahliye edildi · işten çıkış talebi yönetime gönderildi.`
+        );
       }
     } catch (err: any) {
       alert('Tahliye edilirken hata oluştu: ' + err.message);

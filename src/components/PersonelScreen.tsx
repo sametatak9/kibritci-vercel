@@ -2119,7 +2119,9 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
                     }));
                   }
 
-                  alert(`${dismissingPersonel.ad} ${dismissingPersonel.soyad} isimli personelin işten çıkış tarihi (${dismissDateStr}) kaydedildi ve statüsü Pasif yapıldı.`);
+                  alert(
+                    `${dismissingPersonel.ad} ${dismissingPersonel.soyad} işten çıkış tarihi (${dismissDateStr}) kaydedildi; durum Pasif.\n\nAktif kamp oda kaydı varsa otomatik tahliye edilir.`
+                  );
                   setDismissingPersonel(null);
                 }}
                 className="flex-1 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs py-2 rounded-xl transition cursor-pointer select-none"

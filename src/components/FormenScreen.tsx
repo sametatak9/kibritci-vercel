@@ -149,7 +149,7 @@ export const FormenScreen: React.FC<FormenScreenProps> = ({
   const [mesaiSaatleri, setMesaiSaatleri] = useState<Record<string, number>>({});
   const [attendanceTouchedIds, setAttendanceTouchedIds] = useState<string[]>([]);
   const [hasLocalAttendanceDraft, setHasLocalAttendanceDraft] = useState(false);
-  const [spotlightMesai, setSpotlightMesai] = useState<string>('0');
+  const [spotlightMesai, setSpotlightMesai] = useState<string>('');
   const [lastAttendanceSaveAt, setLastAttendanceSaveAt] = useState<string | null>(() => {
     try {
       return localStorage.getItem('formen_gunluk_yoklama_last');
@@ -506,7 +506,12 @@ export const FormenScreen: React.FC<FormenScreenProps> = ({
   const setMesaiWithDraft = (id: string, value: number) => {
     const safe = Number.isFinite(value) ? Math.max(0, Math.min(24, value)) : 0;
     touchAttendance(id);
-    setMesaiSaatleri(prev => ({ ...prev, [id]: safe }));
+    setMesaiSaatleri((prev) => {
+      const next = { ...prev };
+      if (safe <= 0) delete next[id];
+      else next[id] = safe;
+      return next;
+    });
   };
 
   const touchAttendance = (id: string) => {
@@ -1576,7 +1581,12 @@ ${satirlar
                           <div className="flex items-center space-x-1">
                             <button
                               type="button"
-                              onClick={() => setSpotlightMesai(m => Math.max(0, Number(m) - 1).toString())}
+                              onClick={() =>
+                                setSpotlightMesai((m) => {
+                                  const next = Math.max(0, Number(m || 0) - 1);
+                                  return next <= 0 ? '' : String(next);
+                                })
+                              }
                               className="w-5 h-5 rounded bg-slate-800 flex items-center justify-center font-black text-xs hover:bg-slate-750 active:scale-90"
                             >
                               -
@@ -1585,13 +1595,28 @@ ${satirlar
                               type="number"
                               min="0"
                               max="12"
+                              placeholder="—"
                               value={spotlightMesai}
-                              onChange={(e) => setSpotlightMesai(e.target.value)}
+                              onChange={(e) => {
+                                const raw = e.target.value;
+                                if (!raw.trim()) {
+                                  setSpotlightMesai('');
+                                  return;
+                                }
+                                const n = Number(raw);
+                                if (!Number.isFinite(n) || n <= 0) {
+                                  setSpotlightMesai('');
+                                  return;
+                                }
+                                setSpotlightMesai(String(Math.min(12, n)));
+                              }}
                               className="w-9 bg-slate-950 border border-slate-800 text-center font-black text-amber-400 text-xs py-0.5 rounded focus:outline-none focus:ring-1 focus:ring-amber-500"
                             />
                             <button
                               type="button"
-                              onClick={() => setSpotlightMesai(m => Math.min(12, Number(m) + 1).toString())}
+                              onClick={() =>
+                                setSpotlightMesai((m) => String(Math.min(12, Number(m || 0) + 1)))
+                              }
                               className="w-5 h-5 rounded bg-slate-800 flex items-center justify-center font-black text-xs hover:bg-slate-750 active:scale-90"
                             >
                               +
@@ -2197,11 +2222,22 @@ ${satirlar
                                       setPersonelMesaiDraft((prev) => ({ ...prev, [pid]: raw }));
                                     }}
                                     onBlur={() => {
-                                      const raw = personelMesaiDraft[pid] ?? '';
+                                      const raw = (personelMesaiDraft[pid] ?? '').trim().replace(',', '.');
                                       const parsed = parseFloat(raw);
-                                      const safe = normalizeSahaMesaiHours(
-                                        Number.isFinite(parsed) ? parsed : 0
-                                      );
+                                      if (!raw || !Number.isFinite(parsed) || parsed <= 0) {
+                                        setPersonelMesaiSaatleri((prev) => {
+                                          const next = { ...prev };
+                                          delete next[pid];
+                                          return next;
+                                        });
+                                        setPersonelMesaiDraft((prev) => {
+                                          const next = { ...prev };
+                                          delete next[pid];
+                                          return next;
+                                        });
+                                        return;
+                                      }
+                                      const safe = normalizeSahaMesaiHours(parsed);
                                       setPersonelMesaiSaatleri((prev) => ({ ...prev, [pid]: safe }));
                                       setPersonelMesaiDraft((prev) => ({
                                         ...prev,
