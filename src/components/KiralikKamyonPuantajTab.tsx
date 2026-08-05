@@ -1,10 +1,10 @@
 import React, { useMemo, useState } from 'react';
-import { Calendar, CheckCircle, Truck, User, XCircle, Save, RefreshCw } from 'lucide-react';
+import { Calendar, CheckCircle, Truck, User, XCircle, Save, RefreshCw, Printer } from 'lucide-react';
 import type { AracBakim, KiralikKamyonPuantajKaydi, Personel } from '../types/erp';
 import { isSoforGorev } from '../lib/yoklamaUtils';
 import { todayDateKey } from '../lib/dateKeyUtils';
 import { mesaiInputDisplayValue, setMesaiHoursInMap } from '../lib/sahaFaaliyetUtils';
-
+import { openKiralikKamyonPuantajReport } from '../lib/kiralikKamyonPuantajReport';
 export function isKiralikKamyonArac(a?: AracBakim | null): boolean {
   if (!a) return false;
   if (a.kiralikKamyon === true) return true;
@@ -50,6 +50,7 @@ export const KiralikKamyonPuantajTab: React.FC<KiralikKamyonPuantajTabProps> = (
   const [tarih, setTarih] = useState(todayDateKey());
   const [drafts, setDrafts] = useState<Record<string, RowDraft>>({});
   const [saving, setSaving] = useState(false);
+  const [reporting, setReporting] = useState(false);
   const [mesaiMap, setMesaiMap] = useState<Record<string, number>>({});
 
   const kamyonlar = useMemo(
@@ -175,11 +176,14 @@ export const KiralikKamyonPuantajTab: React.FC<KiralikKamyonPuantajTabProps> = (
 
   const ayOzeti = useMemo(() => {
     const prefix = tarih.slice(0, 7); // YYYY-MM
-    const map = new Map<string, { plaka: string; geldi: number; yok: number }>();
+    const map = new Map<string, { plaka: string; geldi: number; yok: number; mesai: number }>();
     for (const k of kayitlar) {
       if (!String(k.tarih || '').startsWith(prefix)) continue;
-      const prev = map.get(k.aracId) || { plaka: k.plaka, geldi: 0, yok: 0 };
-      if (k.durum === 'Geldi') prev.geldi += 1;
+      const prev = map.get(k.aracId) || { plaka: k.plaka, geldi: 0, yok: 0, mesai: 0 };
+      if (k.durum === 'Geldi') {
+        prev.geldi += 1;
+        prev.mesai += Number(k.mesaiSaati) || 0;
+      }
       if (k.durum === 'Yok') prev.yok += 1;
       map.set(k.aracId, prev);
     }
@@ -188,6 +192,24 @@ export const KiralikKamyonPuantajTab: React.FC<KiralikKamyonPuantajTabProps> = (
       .sort((a, b) => a.plaka.localeCompare(b.plaka, 'tr'));
   }, [kayitlar, tarih]);
 
+  const handlePuantajRaporla = async () => {
+    const period = tarih.slice(0, 7);
+    const hasData = kayitlar.some((k) => String(k.tarih || '').startsWith(period));
+    if (!hasData && kamyonlar.length === 0) {
+      alert('Raporlanacak kiralık kamyon / puantaj kaydı yok.');
+      return;
+    }
+    setReporting(true);
+    try {
+      await openKiralikKamyonPuantajReport(kayitlar, araclar, period);
+      addNotification?.(`Kiralık kamyon puantaj raporu açıldı · ${period}`);
+    } catch (err) {
+      console.error(err);
+      alert('Rapor açılamadı: ' + (err instanceof Error ? err.message : String(err)));
+    } finally {
+      setReporting(false);
+    }
+  };
   return (
     <div className="flex-1 flex flex-col gap-4 min-h-0 overflow-hidden">
       <div className="bg-white border border-slate-200 rounded-2xl p-4 shrink-0 space-y-3">
@@ -221,6 +243,16 @@ export const KiralikKamyonPuantajTab: React.FC<KiralikKamyonPuantajTabProps> = (
             >
               {saving ? <RefreshCw size={12} className="animate-spin" /> : <Save size={12} />}
               Günü Kaydet
+            </button>
+            <button
+              type="button"
+              disabled={reporting}
+              onClick={() => void handlePuantajRaporla()}
+              title="Seçili ayın Kibritçi antetli puantaj evrakını açar"
+              className="inline-flex items-center gap-1.5 bg-[#1e4e78] hover:bg-[#163a5c] disabled:opacity-60 text-white text-[11px] font-bold px-3 py-2 rounded-xl"
+            >
+              {reporting ? <RefreshCw size={12} className="animate-spin" /> : <Printer size={12} />}
+              Puantaj Raporla
             </button>
           </div>
         </div>
@@ -371,6 +403,7 @@ export const KiralikKamyonPuantajTab: React.FC<KiralikKamyonPuantajTabProps> = (
                   <th className="p-1.5 text-left border border-slate-100">Plaka</th>
                   <th className="p-1.5 text-center border border-slate-100">Geldi gün</th>
                   <th className="p-1.5 text-center border border-slate-100">Yok gün</th>
+                  <th className="p-1.5 text-center border border-slate-100">Mesai (sa)</th>
                 </tr>
               </thead>
               <tbody>
@@ -382,6 +415,9 @@ export const KiralikKamyonPuantajTab: React.FC<KiralikKamyonPuantajTabProps> = (
                     </td>
                     <td className="p-1.5 border border-slate-100 text-center text-rose-700 font-bold">
                       {r.yok}
+                    </td>
+                    <td className="p-1.5 border border-slate-100 text-center text-sky-800 font-bold">
+                      {r.mesai.toLocaleString('tr-TR', { maximumFractionDigits: 1 })}
                     </td>
                   </tr>
                 ))}
