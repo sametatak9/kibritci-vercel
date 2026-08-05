@@ -116,6 +116,12 @@ export const SatinAlmaScreen: React.FC<SatinAlmaScreenProps> = ({
   const [suggestedStokCat, setSuggestedStokCat] = useState("Kaba İnşaat İmalatı");
   const [suggestedStokUnit, setSuggestedStokUnit] = useState("ADET");
 
+  const [nearStokSuggest, setNearStokSuggest] = useState<{
+    originalName: string;
+    nearStok: StokKart;
+    unit: string;
+  } | null>(null);
+
   const checkAndSuggestCari = (name: string) => {
     const exists = cariKartlar.some(c => c.unvan.toLowerCase().trim() === name.toLowerCase().trim());
     if (!exists) {
@@ -128,22 +134,12 @@ export const SatinAlmaScreen: React.FC<SatinAlmaScreenProps> = ({
     const exact = stokKartlar.find((s) => normalizeCardName(s.stokAdi) === normalizeCardName(name));
     const near = findNearDuplicateStokName(stokKartlar, name, 1);
     if (!exact && near) {
-      if (window.confirm(`'${name}' ismine çok benzer olan '${near.stokAdi}' kaydı bulundu. Bununla eşleştirmek ister misiniz?\n\nİptal'e basarsanız yeni bir kayıt açma ekranına yönlendirileceksiniz.`)) {
-        setCartItems(prev => {
-          const newCart = [...prev];
-          const lastItem = newCart[newCart.length - 1];
-          if (lastItem && lastItem.urunAdi === name) {
-            lastItem.urunAdi = near.stokAdi;
-          }
-          return newCart;
-        });
-        return;
-      } else {
-        setSuggestedStokName(name);
-        setSuggestedStokUnit(unit);
-        setShowStokSuggest(true);
-        return;
-      }
+      setNearStokSuggest({
+        originalName: name,
+        nearStok: near,
+        unit: unit || "ADET",
+      });
+      return;
     }
     if (!exact && !near) {
       setSuggestedStokName(name);
@@ -151,6 +147,32 @@ export const SatinAlmaScreen: React.FC<SatinAlmaScreenProps> = ({
       setShowStokSuggest(true);
       return;
     }
+  };
+
+  const handleAcceptNearStok = () => {
+    if (!nearStokSuggest) return;
+    setCartItems(prev => {
+      const newCart = [...prev];
+      const lastItem = newCart[newCart.length - 1];
+      if (lastItem && lastItem.urunAdi === nearStokSuggest.originalName) {
+        lastItem.urunAdi = nearStokSuggest.nearStok.stokAdi;
+        lastItem.stokKartId = nearStokSuggest.nearStok.id;
+      }
+      return newCart;
+    });
+    setNearStokSuggest(null);
+  };
+
+  const handleCreateNewStokFromNear = () => {
+    if (!nearStokSuggest) return;
+    setSuggestedStokName(nearStokSuggest.originalName);
+    setSuggestedStokUnit(nearStokSuggest.unit);
+    setNearStokSuggest(null);
+    setShowStokSuggest(true);
+  };
+
+  const handleRejectNearStokAndContinue = () => {
+    setNearStokSuggest(null);
   };
 
   const handleCreateCari = () => {
@@ -186,10 +208,8 @@ export const SatinAlmaScreen: React.FC<SatinAlmaScreenProps> = ({
   const handleCreateStok = () => {
     if (!suggestedStokName) return;
     const exists = stokKartlar.some(s => s.stokAdi.toLowerCase().trim() === suggestedStokName.toLowerCase().trim());
-    const near = findNearDuplicateStokName(stokKartlar, suggestedStokName, 1);
-    if (exists || near) {
-      const existingName = stokKartlar.find(s => s.stokAdi.toLowerCase().trim() === suggestedStokName.toLowerCase().trim())?.stokAdi || near?.stokAdi;
-      alert(`Hata: Bu isme çok yakın stok zaten var (${existingName}). Mükerrer kart açılmadı.`);
+    if (exists) {
+      alert(`Hata: "${suggestedStokName}" adında birebir aynı stok zaten var. Mükerrer kart açılmadı.`);
       setShowStokSuggest(false);
       return;
     }
@@ -230,9 +250,9 @@ export const SatinAlmaScreen: React.FC<SatinAlmaScreenProps> = ({
 
   const normalizeCartItemsByKnownStok = (items: SatinAlmaItem[]) =>
     items.map((item) => {
-      const match = findExistingStok(item.urunAdi, stokKartlar);
+      const match = stokKartlar.find((s) => normalizeCardName(s.stokAdi) === normalizeCardName(item.urunAdi));
       if (!match) return item;
-      return { ...item, urunAdi: match.stokAdi, birim: item.birim || match.birim || 'ADET' };
+      return { ...item, urunAdi: match.stokAdi, stokKartId: item.stokKartId || match.id, birim: item.birim || match.birim || 'ADET' };
     });
 
   const syncPurchaseToStokCards = (items: SatinAlmaItem[], saId: string, tarih: string, supplier: string) => {
@@ -256,12 +276,12 @@ export const SatinAlmaScreen: React.FC<SatinAlmaScreenProps> = ({
       alert("Lütfen ürün adı ve miktarını doldurun.");
       return;
     }
-    const existingStok = findExistingStok(tempItem.urunAdi, stokKartlar);
+    const exactStok = stokKartlar.find((s) => normalizeCardName(s.stokAdi) === normalizeCardName(tempItem.urunAdi));
     const newItem: SatinAlmaItem = {
       ...tempItem,
-      urunAdi: existingStok?.stokAdi || tempItem.urunAdi.trim(),
-      birim: tempItem.birim || existingStok?.birim || 'ADET',
-      stokKartId: existingStok?.id,
+      urunAdi: exactStok?.stokAdi || tempItem.urunAdi.trim(),
+      birim: tempItem.birim || exactStok?.birim || 'ADET',
+      stokKartId: exactStok?.id,
       id: `sai_${Date.now()}`
     };
     setCartItems(prev => [...prev, newItem]);
@@ -1451,6 +1471,74 @@ ${kalemOzet || '—'}${more}`,
               >
                 Evet, Kart Aç
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {nearStokSuggest && (
+        <div className="fixed inset-0 bg-slate-950/70 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl w-full max-w-md p-6 space-y-4 shadow-2xl border border-slate-100">
+            <div className="flex items-center gap-3">
+              <div className="p-3 bg-amber-100 text-amber-700 rounded-2xl shrink-0">
+                <AlertCircle className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="font-display font-black text-sm text-slate-900 uppercase tracking-wide">
+                  Benzer Stok Kaydı Bulundu
+                </h3>
+                <p className="text-[11px] text-slate-500 font-medium">
+                  Sistemde birbirine çok yakın bir stok ismi tespit edildi.
+                </p>
+              </div>
+            </div>
+
+            <div className="bg-slate-50 p-3.5 rounded-2xl border border-slate-200/80 space-y-2 text-xs">
+              <div className="flex justify-between items-center">
+                <span className="text-slate-500 font-semibold">Girilen Malzeme:</span>
+                <span className="font-bold text-slate-900 bg-white px-2.5 py-1 rounded-lg border border-slate-200">
+                  {nearStokSuggest.originalName}
+                </span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-amber-700 font-semibold">Mevcut Benzer Stok:</span>
+                <span className="font-bold text-amber-900 bg-amber-50 px-2.5 py-1 rounded-lg border border-amber-200">
+                  {nearStokSuggest.nearStok.stokAdi}
+                </span>
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-600 leading-relaxed font-medium">
+              Bu malzemeyi mevcut <strong>"{nearStokSuggest.nearStok.stokAdi}"</strong> kaydı ile eşleştirmek mi istersiniz, yoksa eşleştirmeyi reddedip yeni kart açmak veya olduğu gibi devam etmek mi istersiniz?
+            </p>
+
+            <div className="flex flex-col gap-2 pt-2">
+              <button
+                type="button"
+                onClick={handleAcceptNearStok}
+                className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 px-4 rounded-xl text-xs flex items-center justify-center gap-2 transition-colors cursor-pointer"
+              >
+                <CheckCircle2 className="w-4 h-4" />
+                Mevcut Kart ile Eşleştir ('{nearStokSuggest.nearStok.stokAdi}')
+              </button>
+
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={handleCreateNewStokFromNear}
+                  className="bg-slate-900 hover:bg-black text-white font-bold py-2.5 px-3 rounded-xl text-xs text-center transition-colors cursor-pointer"
+                >
+                  Yeni Kart Oluştur
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleRejectNearStokAndContinue}
+                  className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-2.5 px-3 rounded-xl text-xs text-center transition-colors cursor-pointer border border-slate-200"
+                >
+                  Reddet & Devam Et
+                </button>
+              </div>
             </div>
           </div>
         </div>
