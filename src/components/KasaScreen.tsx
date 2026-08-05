@@ -7,6 +7,7 @@ import { KasaHareketi, KasaOdemeDurumu, Personel, YolHarcamasi } from '../types/
 import { CorporateReportLayout } from './CorporateReportLayout';
 import { ImageLightbox } from './ImageLightbox';
 import { exportKasaExcel } from '../lib/kasaExcelExport';
+import { getKasaFisLightboxHtmlSnippet } from '../lib/kasaFisLightboxHtml';
 import { compressImage } from '../lib/imageCompress';
 import { db, removeDocument, saveDocument } from '../lib/firebase';
 import { ensureKasaFisFotoPersisted } from '../lib/sahaFaaliyetFotoStorage';
@@ -402,6 +403,7 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
         tutar: number;
         odeme: string;
         fisNo?: string;
+        fisEvrakUrl?: string;
       }>;
     };
     const map = new Map<string, Bucket>();
@@ -428,6 +430,7 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
         tutar,
         odeme,
         fisNo: kh.fisNo,
+        fisEvrakUrl: kh.fisEvrakUrl,
       };
       if (prev) {
         prev.toplam += tutar;
@@ -439,6 +442,12 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
     return [...map.values()].sort((a, b) => b.toplam - a.toplam);
   }, [filteredHareketler, personeller]);
 
+  const openFisLightbox = (url?: string | null, title?: string) => {
+    const u = String(url || '').trim();
+    if (!u) return;
+    setSelectedReceiptUrl(u);
+    setSelectedReceiptName(title || 'Fiş / Fatura');
+  };
   const personelSecenekleri = useMemo(() => {
     const q = personelArama.trim().toLocaleLowerCase('tr-TR');
     const list = (personeller || [])
@@ -1598,21 +1607,6 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
         </div>
       </div>
 
-      {selectedReceiptUrl && (
-        <ImageLightbox
-          url={selectedReceiptUrl}
-          title={`${selectedReceiptName || 'Evrak'} — Fiş / Fatura Görseli`}
-          fileName={`kasa-fis-${(selectedReceiptName || 'evrak').slice(0, 40)}`}
-          onClose={() => {
-            setSelectedReceiptUrl(null);
-            setSelectedReceiptName(null);
-          }}
-        />
-      )}
-
-      {/* ========================================================================= */}
-      {/* 📄 HIGH FIDELITY WEEKLY CASH REPORT PRINT OVERLAY MODEL WITH IMAGES      */}
-      {/* ========================================================================= */}
       {showWeeklyReportModal && (
         <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/80 flex items-start justify-center p-6 backdrop-blur-sm">
           <div className="bg-white rounded-2xl w-full max-w-7xl shadow-2xl flex flex-col overflow-hidden my-4 text-slate-900">
@@ -1630,13 +1624,16 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
                   type="button"
                   onClick={() => {
                     const el = document.querySelector('.kasa-report-printable-area');
+                    const lightbox = getKasaFisLightboxHtmlSnippet();
                     const html = el
-                      ? `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Haftalık Kasa Raporu</title></head><body>${el.innerHTML}</body></html>`
+                      ? `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Haftalık Kasa Raporu</title>
+<script src="https://cdn.tailwindcss.com"></script></head>
+<body class="p-8 bg-white text-slate-900 font-sans">${el.innerHTML}${lightbox}</body></html>`
                       : undefined;
                     void import('../lib/reportEmail').then(({ openReportEmailComposer }) => {
                       openReportEmailComposer({
                         subject: 'Kibritçi — Haftalık Kasa Raporu',
-                        body: 'Haftalık kasa mutabakat raporu merkeze bilginize sunulmuştur.',
+                        body: 'Haftalık kasa mutabakat raporu merkeze bilginize sunulmuştur. Fiş fotoğraflarına tıklayarak büyütebilirsiniz.',
                         html,
                         fileName: 'Kibritci_Haftalik_Kasa.html',
                         defaultTo: 'yonetim@kibritci.com',
@@ -1658,7 +1655,10 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
                     const el = document.querySelector('.kasa-report-printable-area');
                     if (el) {
                       const heading = `Kibritci_Insaat_Haftalik_Kasa_Raporu_${appliedStartDate}_to_${appliedEndDate}`;
-                      const blob = new Blob([`
+                      const lightbox = getKasaFisLightboxHtmlSnippet();
+                      const blob = new Blob(
+                        [
+                          `
                         <html>
                           <head>
                             <meta charset="utf-8">
@@ -1667,16 +1667,22 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
                           </head>
                           <body class="p-8 bg-white text-slate-900 font-sans">
                             ${el.innerHTML}
+                            ${lightbox}
                           </body>
                         </html>
-                      `], { type: 'text/html' });
+                      `,
+                        ],
+                        { type: 'text/html' }
+                      );
                       const url = URL.createObjectURL(blob);
                       const a = document.createElement('a');
                       a.href = url;
                       a.download = `${heading}.html`;
                       a.click();
                       URL.revokeObjectURL(url);
-                      alert("Haftalık kasa döküm mutabakat raporu başarıyla derlendi ve masaüstünüze HTML/Yazdırılabilir formatta kaydedildi.");
+                      alert(
+                        'Haftalık kasa raporu HTML olarak kaydedildi.\nFiş fotoğraflarına tıklayarak orijinal boyutta büyütebilirsiniz.'
+                      );
                     }
                   }}
                   className="bg-slate-900 hover:bg-slate-900 text-white font-bold text-xs px-4 py-2 rounded-xl transition shadow cursor-pointer"
@@ -1806,6 +1812,7 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
                               <th className="p-1.5 border border-slate-100 text-left">Fiş</th>
                               <th className="p-1.5 border border-slate-100 text-left">Açıklama</th>
                               <th className="p-1.5 border border-slate-100 text-right">Tutar</th>
+                              <th className="p-1.5 border border-slate-100 text-center w-16">Foto</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -1820,6 +1827,32 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
                                   <td className="p-1.5 border border-slate-100 text-slate-800">{k.aciklama}</td>
                                   <td className="p-1.5 border border-slate-100 text-right font-mono font-bold text-rose-700">
                                     −₺{k.tutar.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
+                                  </td>
+                                  <td className="p-1 border border-slate-100 text-center">
+                                    {k.fisEvrakUrl ? (
+                                      <button
+                                        type="button"
+                                        data-kasa-fis={k.fisEvrakUrl}
+                                        data-kasa-fis-title={`${k.tarih} · ${b.label} · ${k.aciklama}`}
+                                        onClick={() =>
+                                          openFisLightbox(
+                                            k.fisEvrakUrl,
+                                            `${k.tarih} · ${b.label} · ${k.aciklama}`
+                                          )
+                                        }
+                                        className="kasa-fis-thumb-btn inline-block mx-auto rounded border border-sky-200 overflow-hidden hover:ring-2 hover:ring-sky-400 cursor-zoom-in print:cursor-default"
+                                        title="Tıkla: fotoğrafı büyüt"
+                                      >
+                                        <img
+                                          src={k.fisEvrakUrl}
+                                          alt="Fiş"
+                                          className="w-12 h-12 object-cover pointer-events-none"
+                                          referrerPolicy="no-referrer"
+                                        />
+                                      </button>
+                                    ) : (
+                                      <span className="text-slate-300">—</span>
+                                    )}
                                   </td>
                                 </tr>
                               ))}
@@ -1883,43 +1916,56 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
                 </table>
               </div>
 
-              {/* INLINE ATTACHMENTS / RECEIPTS SECTION AS REQUESTED */}
-              <div className="mt-8 space-y-4 print:break-inside-avoid">
-                <h3 className="text-xs font-black text-[#1E4E78] uppercase border-b-2 border-[#1E4E78] pb-1 tracking-wider">
-                  📷 RAPOR EKİ FİŞ, FATURA VE HARCAMA DOSYA RESİMLERİ
-                </h3>
+              {/* INLINE ATTACHMENTS — küçük önizleme, tıkla büyüt */}
+              <div className="mt-8 space-y-3 print:break-inside-avoid">
+                <div className="flex flex-wrap items-end justify-between gap-2 border-b-2 border-[#1E4E78] pb-1">
+                  <h3 className="text-xs font-black text-[#1E4E78] uppercase tracking-wider">
+                    📷 RAPOR EKİ FİŞ, FATURA VE HARCAMA DOSYA RESİMLERİ
+                  </h3>
+                  <span className="text-[9px] font-bold text-sky-700 print:hidden">
+                    Küçük resme tıklayın → orijinal boyutta büyür
+                  </span>
+                </div>
                 
                 {filteredHareketler.filter(k => k.fisEvrakUrl).length === 0 ? (
                   <p className="text-xs text-slate-400 italic">Rapor kapsamına girmiş herhangi bir fiş görseli veya fatura eki eklenmemiştir.</p>
                 ) : (
-                  <div className="grid grid-cols-1 gap-6">
-                    {filteredHareketler.filter(k => k.fisEvrakUrl).map((kh, i) => (
+                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+                    {filteredHareketler.filter(k => k.fisEvrakUrl).map((kh, i) => {
+                      const title = `${kh.tarih} · ${kh.personelAdi || kh.surucu || kh.aciklama}`;
+                      return (
                       <button
                         key={kh.id || i}
                         type="button"
-                        onClick={() => {
-                          setSelectedReceiptUrl(kh.fisEvrakUrl || null);
-                          setSelectedReceiptName(`${kh.tarih} · ${kh.personelAdi || kh.surucu || kh.aciklama}`);
-                        }}
-                        className="border border-slate-200 rounded-xl p-3 bg-slate-50 flex flex-col items-stretch text-left space-y-2 cursor-pointer hover:border-sky-300 hover:bg-sky-50/50 transition print:cursor-default print:break-inside-avoid"
-                        title="Büyüt / indir"
+                        data-kasa-fis={kh.fisEvrakUrl}
+                        data-kasa-fis-title={title}
+                        onClick={() => openFisLightbox(kh.fisEvrakUrl, title)}
+                        className="kasa-fis-thumb-btn border border-slate-200 rounded-xl p-2 bg-slate-50 flex flex-col items-stretch text-left space-y-1.5 cursor-zoom-in hover:border-sky-400 hover:bg-sky-50/60 hover:shadow-md transition print:cursor-default print:break-inside-avoid"
+                        title="Tıkla: orijinal boyutta büyüt"
                       >
-                        <div className="text-[10px] text-slate-800 font-bold">
-                          {(kh.personelAdi || kh.surucu || '—')} · {kh.tarih} · −₺{Number(kh.tutar || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
+                        <div className="text-[9px] text-slate-800 font-bold line-clamp-2">
+                          {(kh.personelAdi || kh.surucu || '—')} · {kh.tarih}
                         </div>
-                        <div className="text-[9px] text-slate-600 font-medium">{kh.aciklama}</div>
-                        <img 
-                          src={kh.fisEvrakUrl} 
-                          alt="Fiş Fotoğrafı" 
-                          className="w-full max-h-none h-auto rounded object-contain border bg-white pointer-events-none print:max-h-none" 
-                          referrerPolicy="no-referrer"
-                        />
-                        <span className="text-[8px] text-sky-700 font-bold uppercase tracking-tight print:hidden">
-                          Tıkla: büyüt / indir
-                        </span>
-                        <span className="text-[8px] text-slate-400 font-mono uppercase tracking-tight">KONTROL ID: {kh.id}</span>
+                        <div className="text-[8px] text-slate-500 font-medium line-clamp-1">{kh.aciklama}</div>
+                        <div className="relative aspect-[4/3] rounded-lg overflow-hidden border bg-white">
+                          <img 
+                            src={kh.fisEvrakUrl} 
+                            alt="Fiş Fotoğrafı" 
+                            className="w-full h-full object-cover pointer-events-none print:object-contain" 
+                            referrerPolicy="no-referrer"
+                          />
+                          <span className="absolute bottom-1 right-1 bg-sky-700/90 text-white text-[8px] font-black px-1.5 py-0.5 rounded print:hidden">
+                            🔍 Büyüt
+                          </span>
+                        </div>
+                        <div className="flex justify-between items-center gap-1">
+                          <span className="text-[9px] font-black text-rose-700 font-mono">
+                            −₺{Number(kh.tutar || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
+                          </span>
+                          <span className="text-[7px] text-slate-400 font-mono truncate">#{kh.id?.slice(-6)}</span>
+                        </div>
                       </button>
-                    ))}
+                    );})}
                   </div>
                 )}
               </div>
@@ -1966,6 +2012,19 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
             </div>
           </div>
         </div>
+      )}
+
+      {/* Fiş büyütme — rapor modalının üstünde (z yüksek) */}
+      {selectedReceiptUrl && (
+        <ImageLightbox
+          url={selectedReceiptUrl}
+          title={`${selectedReceiptName || 'Evrak'} — Fiş / Fatura Görseli`}
+          fileName={`kasa-fis-${(selectedReceiptName || 'evrak').slice(0, 40)}`}
+          onClose={() => {
+            setSelectedReceiptUrl(null);
+            setSelectedReceiptName(null);
+          }}
+        />
       )}
 
     </div>

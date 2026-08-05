@@ -64,7 +64,7 @@ export function ImageLightbox({ url, title, fileName, onClose }: ImageLightboxPr
 
   return (
     <div
-      className="fixed inset-0 z-[90] bg-black/88 flex flex-col select-none"
+      className="fixed inset-0 z-[100] bg-black/88 flex flex-col select-none"
       role="dialog"
       aria-modal="true"
       aria-label={title || 'Görsel önizleme'}
