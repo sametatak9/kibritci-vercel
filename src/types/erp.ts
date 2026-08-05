@@ -437,6 +437,26 @@ export interface AracBakim {
   sigortaTarihi: string;
   durum: 'AKTIF' | 'PASIF' | 'BAKIMDA';
   notlar: string;
+  /** Özmal şirket aracı / kiralık (kamyon puantajı) */
+  mulkiyet?: 'OZMAL' | 'KIRALIK';
+  /** Kiralık kamyon puantaj listesine dahil */
+  kiralikKamyon?: boolean;
+}
+
+/** Kiralık kamyon günlük puantaj kaydı — araç envanter + şoför (personel) */
+export interface KiralikKamyonPuantajKaydi {
+  id: string;
+  tarih: string;
+  aracId: string;
+  plaka: string;
+  markaModel?: string;
+  soforPersonelId?: string;
+  soforAdi?: string;
+  durum: 'Geldi' | 'Yok' | 'Girilmedi';
+  mesaiSaati?: number;
+  notlar?: string;
+  kaydeden?: string;
+  updatedAt?: string;
 }
 
 export interface KmLor {

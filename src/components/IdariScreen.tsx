@@ -10,7 +10,7 @@ import {
   AracBakim, Demisbas, Tahsis, KampOdasi, KampKaydi, KampSarf, KampFaaliyet,
   SahaFaaliyeti, HazirTutanak, CariKart, StokKart, EpostaGonderim, Personel,
   KampYerleske, KampKat, SahaGunRaporArsiv, SahaFaaliyetTipi, AylikYoklamaMap,
-  ProgramliFaaliyet, TesisatciFaaliyet, MermerciFaaliyet
+  ProgramliFaaliyet, TesisatciFaaliyet, MermerciFaaliyet, KiralikKamyonPuantajKaydi
 } from '../types/erp';
 import { db, auth } from '../lib/firebase';
 import { SahaKolajScreen } from './SahaKolajScreen';
@@ -66,7 +66,7 @@ import type { SahaFaaliyetSaveSource } from '../lib/sahaFaaliyetPersistence';
 import { ParselBlokAnalizPanel } from './ParselBlokAnalizPanel';
 import { KampFaaliyetTakipTab } from './KampFaaliyetTakipTab';
 import { KampKrokiGorunumTab } from './KampKrokiGorunumTab';
-
+import { KiralikKamyonPuantajTab } from './KiralikKamyonPuantajTab';
 interface IdariScreenProps {
   currentSubTab: string; // arac, kamp, saha, tutanak, cari_stok, eposta
   araclar: AracBakim[];
@@ -106,6 +106,10 @@ interface IdariScreenProps {
   setProgramliFaaliyetler?: (
     updater: ProgramliFaaliyet[] | ((prev: ProgramliFaaliyet[]) => ProgramliFaaliyet[])
   ) => void;
+  kiralikKamyonPuantaj?: KiralikKamyonPuantajKaydi[];
+  setKiralikKamyonPuantaj?: React.Dispatch<React.SetStateAction<KiralikKamyonPuantajKaydi[]>>;
+  addNotification?: (mesaj: string) => void;
+  currentUser?: { email?: string; displayName?: string } | null;
 }
 
 interface FormenGunlukRaporKaydi {
@@ -145,7 +149,11 @@ export const IdariScreen: React.FC<IdariScreenProps> = ({
   setYoklamalar,
   saveYoklamalarNow,
   programliFaaliyetler = [],
-  setProgramliFaaliyetler
+  setProgramliFaaliyetler,
+  kiralikKamyonPuantaj = [],
+  setKiralikKamyonPuantaj,
+  addNotification,
+  currentUser = null,
 }) => {
   const [mobilTesisatciFaaliyetleri, setMobilTesisatciFaaliyetleri] = useState<TesisatciFaaliyet[]>([]);
   const [mobilMermerciFaaliyetleri, setMobilMermerciFaaliyetleri] = useState<MermerciFaaliyet[]>([]);
@@ -180,7 +188,7 @@ export const IdariScreen: React.FC<IdariScreenProps> = ({
   // 🚛 1. ARAÇ & DEMİRBAŞ STATES & EVENTS
   // ─────────────────────────────────────────────────────────────
   const [activeAracSub, setActiveAracSub] = useState<'arac' | 'demirbas'>('arac');
-  const [aracSubTab, setAracSubTab] = useState<'liste' | 'km_takip'>('liste');
+  const [aracSubTab, setAracSubTab] = useState<'liste' | 'km_takip' | 'bakim_raporu' | 'kiralik_kamyon_puantaj'>('liste');
   const [selectedAracForPdf, setSelectedAracForPdf] = useState<AracBakim | null>(null);
   const [showKampKrokiModal, setShowKampKrokiModal] = useState(false);
   const [exportingKampExcel, setExportingKampExcel] = useState(false);
@@ -296,6 +304,8 @@ export const IdariScreen: React.FC<IdariScreenProps> = ({
   const [newMuayene, setNewMuayene] = useState("");
   const [newYagKm, setNewYagKm] = useState(10000);
   const [newBakimKm, setNewBakimKm] = useState(15000);
+  const [newMulkiyet, setNewMulkiyet] = useState<'OZMAL' | 'KIRALIK'>('OZMAL');
+  const [newKiralikKamyon, setNewKiralikKamyon] = useState(false);
   const [editingAracId, setEditingAracId] = useState<string | null>(null);
 
   const handleStartEditArac = (ar: AracBakim) => {
@@ -307,6 +317,8 @@ export const IdariScreen: React.FC<IdariScreenProps> = ({
     setNewMuayene(ar.muayeneTarihi || "");
     setNewYagKm(ar.yagBakimKm || 10000);
     setNewBakimKm(ar.kmBakimAraligi || 15000);
+    setNewMulkiyet(ar.mulkiyet || (ar.kiralikKamyon ? 'KIRALIK' : 'OZMAL'));
+    setNewKiralikKamyon(!!ar.kiralikKamyon || ar.mulkiyet === 'KIRALIK');
   };
 
   const handleCancelEditArac = () => {
@@ -318,6 +330,8 @@ export const IdariScreen: React.FC<IdariScreenProps> = ({
     setNewMuayene("");
     setNewYagKm(10000);
     setNewBakimKm(15000);
+    setNewMulkiyet('OZMAL');
+    setNewKiralikKamyon(false);
   };
 
   const handleMileageUpdate = (id: string, currentVal: number) => {
@@ -332,6 +346,9 @@ export const IdariScreen: React.FC<IdariScreenProps> = ({
       return;
     }
 
+    const mulkiyet: 'OZMAL' | 'KIRALIK' = newKiralikKamyon ? 'KIRALIK' : newMulkiyet;
+    const kiralikKamyon = newKiralikKamyon || mulkiyet === 'KIRALIK';
+
     if (editingAracId) {
       // Edit Mode
       setAraclar(prev => prev.map(a => {
@@ -345,6 +362,8 @@ export const IdariScreen: React.FC<IdariScreenProps> = ({
             kmBakimAraligi: Number(newBakimKm) || 10000,
             yagBakimKm: Number(newYagKm) || 11200,
             muayeneTarihi: newMuayene,
+            mulkiyet,
+            kiralikKamyon,
           };
         }
         return a;
@@ -365,7 +384,9 @@ export const IdariScreen: React.FC<IdariScreenProps> = ({
         muayeneTarihi: newMuayene || new Date(Date.now() + 300 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
         sigortaTarihi: new Date(Date.now() + 180 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
         durum: "AKTIF",
-        notlar: "Sisteme yeni eklenen şantiye demirbaşı."
+        notlar: "Sisteme yeni eklenen şantiye demirbaşı.",
+        mulkiyet,
+        kiralikKamyon,
       };
       setAraclar(prev => [brandNew, ...prev]);
       alert("Yeni araç / makine başarıyla kaydedildi.");
@@ -379,6 +400,8 @@ export const IdariScreen: React.FC<IdariScreenProps> = ({
     setNewMuayene("");
     setNewYagKm(10000);
     setNewBakimKm(15000);
+    setNewMulkiyet('OZMAL');
+    setNewKiralikKamyon(false);
   };
 
   // ─────────────────────────────────────────────────────────────
@@ -2145,6 +2168,17 @@ export const IdariScreen: React.FC<IdariScreenProps> = ({
               >
                 🔧 Bakım Sayaç Raporu
               </button>
+              <button
+                onClick={() => setAracSubTab('kiralik_kamyon_puantaj')}
+                className={`px-4 py-1.5 rounded-lg text-xs font-bold transition duration-150 cursor-pointer flex items-center space-x-1.5 ${
+                  aracSubTab === 'kiralik_kamyon_puantaj'
+                    ? 'bg-teal-700 text-white shadow-sm'
+                    : 'text-slate-600 hover:bg-slate-100'
+                }`}
+              >
+                <span>🚛 Kiralık Kamyon Puantajı</span>
+                <span className="bg-teal-100 text-teal-900 text-[9px] rounded-full px-1.5 py-0.5">Yoklama</span>
+              </button>
             </div>
             
             <span className="text-[10px] text-slate-400 font-mono tracking-tight font-medium mr-2">
@@ -2211,6 +2245,40 @@ export const IdariScreen: React.FC<IdariScreenProps> = ({
                       <option value="IS_MAKINESI">Paletli Ekskavatör / Ağır İş Makinesi</option>
                       <option value="DEMIRBAS">Konstrüksiyon / Mobil Ekipman</option>
                     </select>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-500 uppercase">Mülkiyet</label>
+                      <select
+                        className="w-full text-xs font-semibold mt-1 p-2 bg-slate-50 border border-[#e2e8f0] rounded-lg cursor-pointer"
+                        value={newMulkiyet}
+                        onChange={(e) => {
+                          const v = e.target.value as 'OZMAL' | 'KIRALIK';
+                          setNewMulkiyet(v);
+                          if (v === 'KIRALIK') setNewKiralikKamyon(true);
+                        }}
+                      >
+                        <option value="OZMAL">Özmal (şirket)</option>
+                        <option value="KIRALIK">Kiralık</option>
+                      </select>
+                    </div>
+                    <div className="flex items-end">
+                      <label className="flex items-start gap-2 cursor-pointer w-full p-2 rounded-lg border border-teal-100 bg-teal-50/60">
+                        <input
+                          type="checkbox"
+                          className="mt-0.5"
+                          checked={newKiralikKamyon}
+                          onChange={(e) => {
+                            setNewKiralikKamyon(e.target.checked);
+                            if (e.target.checked) setNewMulkiyet('KIRALIK');
+                          }}
+                        />
+                        <span className="text-[10px] font-bold text-teal-900 leading-tight">
+                          Kiralık kamyon puantajına dahil et
+                        </span>
+                      </label>
+                    </div>
                   </div>
 
                   <div className="border-t pt-3 space-y-3">
@@ -2309,7 +2377,19 @@ export const IdariScreen: React.FC<IdariScreenProps> = ({
                               {ar.plaka}
                             </span>
                             <h4 className="font-bold text-slate-800 mt-2 text-xs">{ar.markaModel}</h4>
-                            <span className="text-[10px] text-slate-400 font-bold uppercase">{ar.aracTipi}</span>
+                            <div className="flex flex-wrap items-center gap-1 mt-1">
+                              <span className="text-[10px] text-slate-400 font-bold uppercase">{ar.aracTipi}</span>
+                              {(ar.kiralikKamyon || ar.mulkiyet === 'KIRALIK') && (
+                                <span className="text-[8px] font-black uppercase bg-teal-100 text-teal-800 px-1.5 py-0.5 rounded">
+                                  Kiralık kamyon
+                                </span>
+                              )}
+                              {ar.mulkiyet === 'OZMAL' && (
+                                <span className="text-[8px] font-black uppercase bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded">
+                                  Özmal
+                                </span>
+                              )}
+                            </div>
                           </div>
                           
                           <div className="flex flex-col items-end space-y-1.5">
@@ -2743,6 +2823,17 @@ export const IdariScreen: React.FC<IdariScreenProps> = ({
                 </CorporateReportLayout>
               </div>
             </div>
+          )}
+
+          {aracSubTab === 'kiralik_kamyon_puantaj' && setKiralikKamyonPuantaj && (
+            <KiralikKamyonPuantajTab
+              araclar={araclar}
+              personeller={personeller}
+              kayitlar={kiralikKamyonPuantaj}
+              setKayitlar={setKiralikKamyonPuantaj}
+              currentUser={currentUser}
+              addNotification={addNotification}
+            />
           )}
 
         </div>

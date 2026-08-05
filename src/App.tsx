@@ -54,7 +54,7 @@ import {
   KasaHareketi, AracBakim, Demisbas, KampOdasi, KampKaydi, KampYerleske, KampKat,
   HazirTutanak, CariKart, StokKart, EpostaGonderim, SahaFaaliyeti as SahaFaaliyetiType,
   OperatorFaaliyet, TaseronKesintiRaporu, TaseronEnerjiKaydi, TaseronYemekKaydi, MaaşOdeme, PersonelIslemGecmisi, CariKartIslem, StokKartIslem,
-  EvrakBaglantiGrubu, OnayliAnalizRaporu, ProgramliFaaliyet
+  EvrakBaglantiGrubu, OnayliAnalizRaporu, ProgramliFaaliyet, KiralikKamyonPuantajKaydi
 } from './types/erp';
 
 // Initial Mock Data
@@ -294,6 +294,7 @@ export default function App() {
   
   const [araclar, setAraclar] = useState<AracBakim[]>([]);
   const [demirbaslar, setDemirbaslar] = useState<Demisbas[]>([]);
+  const [kiralikKamyonPuantaj, setKiralikKamyonPuantaj] = useState<KiralikKamyonPuantajKaydi[]>([]);
   const [kampOdalari, setKampOdalari] = useState<KampOdasi[]>([]);
   const [kampKayitlari, setKampKayitlari] = useState<KampKaydi[]>([]);
   const [kampYerleskeleri, setKampYerleskeleri] = useState<KampYerleske[]>([]);
@@ -1229,6 +1230,17 @@ export default function App() {
           });
           list.sort((a, b) => new Date(b.tarih || 0).getTime() - new Date(a.tarih || 0).getTime());
           setAracKmLoglari(list);
+        })
+      );
+
+      deferredUnsubs.push(
+        onSnapshot(collection(db, 'kiralikKamyonPuantaj'), (snapshot) => {
+          const list: KiralikKamyonPuantajKaydi[] = [];
+          snapshot.forEach((docSnap) => {
+            list.push({ id: docSnap.id, ...docSnap.data() } as KiralikKamyonPuantajKaydi);
+          });
+          list.sort((a, b) => String(b.tarih || '').localeCompare(String(a.tarih || '')));
+          setKiralikKamyonPuantaj(list);
         })
       );
 
@@ -2391,6 +2403,16 @@ export default function App() {
     setAracKmLoglari(prev => {
       const next = typeof updater === 'function' ? updater(prev) : updater;
       syncListState('aracKmLoglari', prev, next, setAracKmLoglari);
+      return next;
+    });
+  };
+
+  const setKiralikKamyonPuantajWithSync = (
+    updater: KiralikKamyonPuantajKaydi[] | ((k: KiralikKamyonPuantajKaydi[]) => KiralikKamyonPuantajKaydi[])
+  ) => {
+    setKiralikKamyonPuantaj((prev) => {
+      const next = typeof updater === 'function' ? updater(prev) : updater;
+      syncListState('kiralikKamyonPuantaj', prev, next, setKiralikKamyonPuantaj);
       return next;
     });
   };
@@ -3780,6 +3802,10 @@ export default function App() {
                   yoklamalar={yoklamalar}
                   setYoklamalar={setYoklamalarWithSync}
                   saveYoklamalarNow={saveYoklamalarNow}
+                  kiralikKamyonPuantaj={kiralikKamyonPuantaj}
+                  setKiralikKamyonPuantaj={setKiralikKamyonPuantajWithSync}
+                  addNotification={addNotification}
+                  currentUser={currentUser}
                 />
               )}
 
