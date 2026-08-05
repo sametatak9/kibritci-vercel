@@ -4,6 +4,7 @@ import { createExcelWorkbook } from './exceljsLoader';
 import { KIBRITCI_COMPANY, loadKibritciLogoDataUrl } from './kibritciBrand';
 import { resolvePersonelUnvan } from './personelUnvanUtils';
 import { resolveKasaOdemeDurumu, isSoforKaynakliKasaHareketi } from './yolHarcamaUtils';
+import { ensureKasaFisFotoPersisted } from './sahaFaaliyetFotoStorage';
 
 function odemeLabel(d: KasaOdemeDurumu | null): string {
   if (d === 'BORC') return 'BORÇ';
@@ -40,40 +41,80 @@ function isOpenablePhotoUrl(url: string): boolean {
   return /^https?:\/\//i.test(u);
 }
 
-/** Excel hücresine tıklanınca orijinal fiş fotoğrafını tarayıcıda açan link */
-function setOriginalPhotoHyperlink(
-  cell: { value: unknown; font?: unknown; alignment?: unknown },
-  url: string | undefined | null
-): void {
+/** data: / kısa URL → mümkünse Storage https (Excel HYPERLINK için şart) */
+async function resolvePhotoHttpUrl(hareketId: string, url: string): Promise<string> {
   const raw = String(url || '').trim();
-  if (isOpenablePhotoUrl(raw)) {
+  if (!raw) return '';
+  if (isOpenablePhotoUrl(raw)) return raw;
+  try {
+    const persisted = await ensureKasaFisFotoPersisted(hareketId || `excel_${Date.now()}`, raw);
+    if (isOpenablePhotoUrl(persisted)) return persisted;
+  } catch (err) {
+    console.warn('[kasa-excel] fiş URL çözülemedi', hareketId, err);
+  }
+  return '';
+}
+
+/**
+ * Excel’de tıklanabilir orijinal foto linki.
+ * ExcelJS {hyperlink} nesnesi bazı sürümlerde açılmaz → HYPERLINK formülü kullanılır.
+ * http yoksa sayfa içi «Fis Fotograflari» satırına gider.
+ */
+function setOriginalPhotoHyperlink(
+  cell: {
+    value: unknown;
+    font?: unknown;
+    alignment?: unknown;
+    border?: unknown;
+  },
+  opts: {
+    httpUrl?: string;
+    /** 1-based Excel satırı — Fis Fotograflari sayfasında görsel */
+    fotoSheetRow?: number;
+  }
+): void {
+  const http = String(opts.httpUrl || '').trim();
+  const linkFont = {
+    color: { argb: 'FF0563C1' },
+    underline: true,
+    bold: true,
+    size: 9,
+  } as const;
+
+  if (isOpenablePhotoUrl(http)) {
+    // Çift tırnak kaçışı (formül içinde)
+    const safeUrl = http.replace(/"/g, '""');
     cell.value = {
-      text: 'Orijinali aç →',
-      hyperlink: raw,
-      tooltip: 'Orijinal fiş / fatura fotoğrafını tarayıcıda tam boyutta açar',
+      formula: `HYPERLINK("${safeUrl}","Orijinali aç →")`,
     };
-    cell.font = {
-      color: { argb: 'FF1D4ED8' },
-      underline: true,
-      bold: true,
-      size: 9,
-    };
+    cell.font = linkFont;
     cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
     return;
   }
-  if (raw.startsWith('data:image/')) {
-    cell.value = 'Gömülü (Excel)';
-    cell.font = { italic: true, size: 8, color: { argb: 'FF64748B' } };
-    cell.alignment = { vertical: 'middle', horizontal: 'center' };
+
+  if (opts.fotoSheetRow && opts.fotoSheetRow > 0) {
+    // Dahili sayfa linki — gömülü büyük görsele atlar
+    cell.value = {
+      text: 'Büyüğe git →',
+      hyperlink: `#'Fis Fotograflari'!E${opts.fotoSheetRow}`,
+      tooltip: 'Fiş Fotoğrafları sayfasındaki büyük görsele gider',
+    };
+    cell.font = linkFont;
+    cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
     return;
   }
-  cell.value = 'Yok';
+
+  cell.value = 'Link yok';
   cell.font = { italic: true, size: 8, color: { argb: 'FF94A3B8' } };
   cell.alignment = { vertical: 'middle', horizontal: 'center' };
 }
 
 /** Excel'e gömmek için görseli JPEG base64'e çevirir */
-async function loadImageAsJpegBase64(url: string, maxW = 640): Promise<string | null> {
+async function loadImageAsJpegBase64(
+  url: string,
+  maxW = 640,
+  quality = 0.78
+): Promise<string | null> {
   const raw = String(url || '').trim();
   if (!raw) return null;
 
@@ -97,7 +138,7 @@ async function loadImageAsJpegBase64(url: string, maxW = 640): Promise<string | 
           ctx.fillStyle = '#ffffff';
           ctx.fillRect(0, 0, w, h);
           ctx.drawImage(img, 0, 0, w, h);
-          const dataUrl = canvas.toDataURL('image/jpeg', 0.78);
+          const dataUrl = canvas.toDataURL('image/jpeg', quality);
           resolve(dataUrl.replace(/^data:image\/jpeg;base64,/i, '') || null);
         } catch {
           resolve(null);
@@ -109,8 +150,14 @@ async function loadImageAsJpegBase64(url: string, maxW = 640): Promise<string | 
     });
 
   try {
+    // Orijinale yakın gömme: büyük maxW ile canvas üzerinden
+    if (raw.startsWith('data:image/') && maxW >= 1600) {
+      return await fromCanvas(raw);
+    }
     if (raw.startsWith('data:image/')) {
       if (/^data:image\/jpeg/i.test(raw) || /^data:image\/jpg/i.test(raw)) {
+        // Küçük önizleme için yine de boyutlandır
+        if (maxW <= 400) return await fromCanvas(raw);
         return raw.replace(/^data:image\/[^;]+;base64,/i, '');
       }
       return await fromCanvas(raw);
@@ -237,6 +284,14 @@ export async function exportKasaExcel(
   const cikislar = kasaHareketleri.filter((k) => k.hareketTipi === 'ÇIKIŞ');
   const girisler = kasaHareketleri.filter((k) => k.hareketTipi === 'GİRİŞ');
   const buckets = groupByPersonel(cikislar, personeller);
+
+  // Fiş URL’lerini Excel HYPERLINK için https’e çevir (data: link olmaz)
+  const withFotoAll = cikislar.filter((k) => String(k.fisEvrakUrl || '').trim());
+  const httpUrlById = new Map<string, string>();
+  for (const kh of withFotoAll) {
+    const resolved = await resolvePhotoHttpUrl(kh.id, String(kh.fisEvrakUrl));
+    if (resolved) httpUrlById.set(kh.id, resolved);
+  }
 
   let totalIn = 0;
   let totalOut = 0;
@@ -417,6 +472,12 @@ export async function exportKasaExcel(
   });
   row += 1;
 
+  const pendingOriginalLinks: Array<{
+    hareketId: string;
+    cell: { value: unknown; font?: unknown; alignment?: unknown; border?: unknown };
+    rawUrl: string;
+  }> = [];
+
   for (const b of buckets) {
     // Grup başlığı
     kalem.mergeCells(row, 1, row, 8);
@@ -472,8 +533,10 @@ export async function exportKasaExcel(
           r.getCell(7).value = 'Önizleme yok';
           r.getCell(7).font = { italic: true, size: 8, color: { argb: 'FF94A3B8' } };
         }
-        setOriginalPhotoHyperlink(r.getCell(8), fotoUrl);
+        // Link satır no’su foto sayfası yazılınca doldurulacak
+        r.getCell(8).value = '…';
         r.getCell(8).border = thinBorder();
+        pendingOriginalLinks.push({ hareketId: kh.id, cell: r.getCell(8), rawUrl: fotoUrl });
       } else {
         r.getCell(7).value = 'Yok';
         r.getCell(7).font = { italic: true, size: 8, color: { argb: 'FF94A3B8' } };
@@ -520,9 +583,12 @@ export async function exportKasaExcel(
     }
   }
 
-  // ─── Sayfa 3: Fiş Fotoğrafları (büyük + orijinal link) ───
-  const withFoto = cikislar.filter((k) => String(k.fisEvrakUrl || '').trim());
-  const fotoSheet = workbook.addWorksheet('Fiş Fotoğrafları', {
+  // ─── Sayfa 3: Fis Fotograflari (büyük gömülü + çalışan orijinal link) ───
+  // Sayfa adı ASCII — Excel iç linkleri Türkçe karakterde bozulabiliyor
+  const withFoto = withFotoAll
+    .slice()
+    .sort((a, c) => String(a.tarih).localeCompare(String(c.tarih)));
+  const fotoSheet = workbook.addWorksheet('Fis Fotograflari', {
     pageSetup: { paperSize: 9, orientation: 'portrait', fitToPage: true, fitToWidth: 1 },
   });
   fotoSheet.columns = [
@@ -530,32 +596,36 @@ export async function exportKasaExcel(
     { width: 26 },
     { width: 14 },
     { width: 36 },
-    { width: 36 },
-    { width: 18 },
+    { width: 42 },
+    { width: 20 },
   ];
   row = await applyKasaAntet(workbook, fotoSheet, {
     title: 'HAFTALIK KASA — FİŞ / FATURA GÖRSELLERİ',
-    subtitle: `Dönem: ${startDate} — ${endDate} · ${withFoto.length} görsel · «Orijinali aç» ile tam boyut`,
+    subtitle: `Dönem: ${startDate} — ${endDate} · ${withFoto.length} görsel · «Orijinali aç» tarayıcıda tam boyut`,
     colCount: 6,
   });
 
   const fh = fotoSheet.getRow(row);
-  ['TARİH', 'PERSONEL', 'TUTAR', 'AÇIKLAMA', 'FİŞ FOTOĞRAFI', 'ORİJİNAL FOTO'].forEach((h, i) => {
-    const cell = fh.getCell(i + 1);
-    cell.value = h;
-    cell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 9 };
-    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E4E78' } };
-    cell.border = thinBorder();
-    cell.alignment = { horizontal: 'center', vertical: 'middle' };
-  });
+  ['TARİH', 'PERSONEL', 'TUTAR', 'AÇIKLAMA', 'FİŞ FOTOĞRAFI (BÜYÜK)', 'ORİJİNAL LİNK'].forEach(
+    (h, i) => {
+      const cell = fh.getCell(i + 1);
+      cell.value = h;
+      cell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 9 };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E4E78' } };
+      cell.border = thinBorder();
+      cell.alignment = { horizontal: 'center', vertical: 'middle' };
+    }
+  );
   row += 1;
+
+  const fotoRowById = new Map<string, number>();
 
   if (withFoto.length === 0) {
     fotoSheet.mergeCells(row, 1, row, 6);
     fotoSheet.getCell(row, 1).value = 'Bu aralıkta fiş görseli olan çıkış kaydı yok.';
     fotoSheet.getCell(row, 1).font = { italic: true, color: { argb: 'FF94A3B8' } };
   } else {
-    for (const kh of withFoto.sort((a, c) => String(a.tarih).localeCompare(String(c.tarih)))) {
+    for (const kh of withFoto) {
       const unvan = resolvePersonelUnvan(
         {
           personelId: kh.personelId,
@@ -565,7 +635,7 @@ export async function exportKasaExcel(
         personeller
       );
       const r = fotoSheet.getRow(row);
-      r.height = 160;
+      r.height = 220;
       [
         kh.tarih,
         unvan.label,
@@ -585,23 +655,38 @@ export async function exportKasaExcel(
       });
 
       const fotoUrl = String(kh.fisEvrakUrl || '').trim();
-      // Önizleme gömülü; orijinal tam boyut için yan sütundaki link
-      const b64 = await loadImageAsJpegBase64(fotoUrl, 960);
+      const httpUrl = httpUrlById.get(kh.id) || '';
+      // Büyük gömülü görsel (orijinale yakın)
+      const b64 = await loadImageAsJpegBase64(httpUrl || fotoUrl, 1800, 0.92);
       if (b64) {
         const imageId = workbook.addImage({ base64: b64, extension: 'jpeg' });
         fotoSheet.addImage(imageId, {
           tl: { col: 4, row: row - 1 },
-          ext: { width: 240, height: 148 },
+          ext: { width: 320, height: 200 },
           editAs: 'oneCell',
         });
       } else {
         r.getCell(5).value = 'Görsel yüklenemedi';
         r.getCell(5).font = { italic: true, color: { argb: 'FF94A3B8' }, size: 8 };
       }
-      setOriginalPhotoHyperlink(r.getCell(6), fotoUrl);
+
+      setOriginalPhotoHyperlink(r.getCell(6), {
+        httpUrl,
+        fotoSheetRow: row,
+      });
       r.getCell(6).border = thinBorder();
+      fotoRowById.set(kh.id, row);
       row += 1;
     }
+  }
+
+  // Kalem Kalem «ORİJİNAL FOTO» linklerini şimdi yaz (https HYPERLINK veya sayfa içi)
+  for (const pending of pendingOriginalLinks) {
+    setOriginalPhotoHyperlink(pending.cell, {
+      httpUrl: httpUrlById.get(pending.hareketId) || '',
+      fotoSheetRow: fotoRowById.get(pending.hareketId),
+    });
+    pending.cell.border = thinBorder();
   }
 
   const buffer = await workbook.xlsx.writeBuffer();
