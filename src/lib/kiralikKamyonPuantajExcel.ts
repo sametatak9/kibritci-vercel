@@ -3,6 +3,7 @@ import type { AracBakim, KiralikKamyonPuantajKaydi, Personel } from '../types/er
 import { createExcelWorkbook } from './exceljsLoader';
 import { KIBRITCI_COMPANY, loadKibritciLogoDataUrl } from './kibritciBrand';
 import { buildKiralikKamyonAyOzeti } from './kiralikKamyonPuantajReport';
+import { isDayActiveForPersonel } from './yoklamaUtils';
 
 const AY_ADLARI = [
   'Ocak',
@@ -146,15 +147,11 @@ export async function exportKiralikKamyonPuantajExcel(
   const days = Array.from({ length: gunSayisi }, (_, i) => i + 1);
   const ozet = buildKiralikKamyonAyOzeti(kayitlar, araclar, prefix, personeller);
 
+  // Özet zaten şoförü olan + ayda görünen araçlar
+  const aracIds = new Set(ozet.map((o) => o.aracId));
   const kamyonlar = araclar
-    .filter((a) => isKiralikKamyonArac(a))
+    .filter((a) => aracIds.has(a.id))
     .sort((a, b) => a.plaka.localeCompare(b.plaka, 'tr'));
-
-  // Özet satırlarında olmayan ama kayıtta olan araçlar da matrise girsin
-  const aracIds = new Set([
-    ...ozet.map((o) => o.aracId),
-    ...kamyonlar.map((a) => a.id),
-  ]);
 
   const kayitMap = new Map<string, KiralikKamyonPuantajKaydi>();
   for (const k of kayitlar) {
@@ -367,6 +364,7 @@ export async function exportKiralikKamyonPuantajExcel(
 
     let geldi = 0;
     let mesai = 0;
+    const soforPersonel = personeller.find((p) => p.id === arac?.sorumluPersonelId);
     days.forEach((d) => {
       const tarih = `${prefix}-${String(d).padStart(2, '0')}`;
       const k = kayitMap.get(`${aracId}|${tarih}`);
@@ -374,6 +372,15 @@ export async function exportKiralikKamyonPuantajExcel(
       c.border = thinBorder();
       c.alignment = { horizontal: 'center', vertical: 'middle' };
       c.font = { bold: true, size: 9 };
+      const dayOk = soforPersonel
+        ? isDayActiveForPersonel(soforPersonel, year, month, d)
+        : false;
+      if (!dayOk) {
+        c.value = '·';
+        c.font = { size: 8, color: { argb: 'FFCBD5E1' } };
+        c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF1F5F9' } };
+        return;
+      }
       if (k?.durum === 'Geldi') {
         c.value = 'G';
         c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD1FAE5' } };
@@ -457,16 +464,25 @@ export async function exportKiralikKamyonPuantajExcel(
     excelRow.getCell(2).font = { size: 8 };
 
     let total = 0;
+    const soforPersonel = personeller.find((p) => p.id === arac?.sorumluPersonelId);
     days.forEach((d) => {
       const tarih = `${prefix}-${String(d).padStart(2, '0')}`;
+      const dayOk = soforPersonel
+        ? isDayActiveForPersonel(soforPersonel, year, month, d)
+        : false;
+      const c = excelRow.getCell(2 + d);
+      c.border = thinBorder();
+      c.alignment = { horizontal: 'center' };
+      if (!dayOk) {
+        c.value = '';
+        c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF1F5F9' } };
+        return;
+      }
       const k = kayitMap.get(`${aracId}|${tarih}`);
       const hrs = k?.durum === 'Geldi' ? Number(k.mesaiSaati) || 0 : 0;
       total += hrs;
-      const c = excelRow.getCell(2 + d);
       c.value = hrs > 0 ? hrs : '';
       c.numFmt = '0.0';
-      c.border = thinBorder();
-      c.alignment = { horizontal: 'center' };
       if (hrs > 0) {
         c.font = { bold: true, size: 8, color: { argb: 'FF1E3A8A' } };
         c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDBEAFE' } };
@@ -510,7 +526,15 @@ export async function exportKiralikKamyonPuantajExcel(
   row += 1;
 
   const detayList = [...kayitMap.values()]
-    .filter((k) => k.durum === 'Geldi' || k.durum === 'Yok')
+    .filter((k) => {
+      if (k.durum !== 'Geldi' && k.durum !== 'Yok') return false;
+      const arac = araclar.find((a) => a.id === k.aracId);
+      const soforPersonel = personeller.find((p) => p.id === arac?.sorumluPersonelId);
+      if (!soforPersonel) return false;
+      const day = Number(String(k.tarih).slice(8, 10));
+      if (!day) return false;
+      return isDayActiveForPersonel(soforPersonel, year, month, day);
+    })
     .sort((a, b) => {
       const t = String(a.tarih).localeCompare(String(b.tarih));
       if (t !== 0) return t;

@@ -1,15 +1,25 @@
-import type { AracBakim, KiralikKamyonPuantajKaydi } from '../types/erp';
+import type { AracBakim, KiralikKamyonPuantajKaydi, Personel } from '../types/erp';
 import {
   buildKibritciReportHtml,
   downloadKibritciReportHtml,
   openKibritciReportPrint,
 } from './kibritciReportTemplate';
 import { loadKibritciReportAssets } from './kibritciBrand';
+import { isDayActiveForPersonel, isPersonelVisibleInMonth } from './yoklamaUtils';
 
 function isKiralikKamyonArac(a?: AracBakim | null): boolean {
   if (!a) return false;
   if (a.kiralikKamyon === true) return true;
   return a.mulkiyet === 'KIRALIK';
+}
+
+function resolveSofor(
+  personeller: Array<Pick<Personel, 'id' | 'ad' | 'soyad' | 'iseGirisTarihi' | 'istenCikisTarihi' | 'durum'>> | undefined,
+  arac?: AracBakim | null
+): Personel | null {
+  if (!arac?.sorumluPersonelId || !personeller?.length) return null;
+  const p = personeller.find((x) => x.id === arac.sorumluPersonelId);
+  return (p as Personel) || null;
 }
 const AY_ADLARI = [
   'Ocak',
@@ -61,7 +71,7 @@ export function buildKiralikKamyonAyOzeti(
   kayitlar: KiralikKamyonPuantajKaydi[],
   araclar: AracBakim[],
   periodYm: string,
-  personeller?: { id: string; ad: string; soyad: string }[]
+  personeller?: { id: string; ad: string; soyad: string; iseGirisTarihi?: string; istenCikisTarihi?: string; durum?: boolean | string }[]
 ): KiralikKamyonAyOzetSatir[] {
   const prefix = periodYm.slice(0, 7);
   const { year, month } = parsePeriod(prefix);
@@ -69,40 +79,48 @@ export function buildKiralikKamyonAyOzeti(
 
   const kamyonlar = araclar
     .filter((a) => isKiralikKamyonArac(a))
+    .filter((a) => {
+      const sofor = resolveSofor(personeller as Personel[] | undefined, a);
+      if (!sofor) return false;
+      return isPersonelVisibleInMonth(sofor, year, month);
+    })
     .sort((a, b) => a.plaka.localeCompare(b.plaka, 'tr'));
 
   const byArac = new Map<string, KiralikKamyonPuantajKaydi[]>();
   for (const k of kayitlar) {
     if (!String(k.tarih || '').startsWith(prefix)) continue;
+    const day = Number(String(k.tarih).slice(8, 10));
+    const arac = araclar.find((a) => a.id === k.aracId);
+    const sofor = resolveSofor(personeller as Personel[] | undefined, arac);
+    if (!sofor || !day || !isDayActiveForPersonel(sofor, year, month, day)) continue;
     const list = byArac.get(k.aracId) || [];
     list.push(k);
     byArac.set(k.aracId, list);
   }
 
-  const ids = new Set<string>([
-    ...kamyonlar.map((a) => a.id),
-    ...[...byArac.keys()],
-  ]);
+  const ids = new Set<string>([...kamyonlar.map((a) => a.id)]);
 
   const rows: KiralikKamyonAyOzetSatir[] = [];
   for (const aracId of ids) {
     const arac = kamyonlar.find((a) => a.id === aracId) || araclar.find((a) => a.id === aracId);
     const list = byArac.get(aracId) || [];
-    if (!arac && list.length === 0) continue;
+    if (!arac) continue;
 
-    const plaka = arac?.plaka || list[0]?.plaka || aracId;
-    const markaModel = arac?.markaModel || list[0]?.markaModel || '—';
+    const sofor = resolveSofor(personeller as Personel[] | undefined, arac);
+    let activeDays = 0;
+    for (let day = 1; day <= gunSayisi; day++) {
+      if (sofor && isDayActiveForPersonel(sofor, year, month, day)) activeDays += 1;
+    }
+
+    const plaka = arac.plaka || list[0]?.plaka || aracId;
+    const markaModel = arac.markaModel || list[0]?.markaModel || '—';
     let geldi = 0;
     let yok = 0;
     let toplamMesai = 0;
     const soforSet = new Set<string>();
     const kayitGunleri = new Set<string>();
 
-    // Araç kaydındaki sorumlu = şoför (birincil etiket)
-    if (arac?.sorumluPersonelId && personeller?.length) {
-      const p = personeller.find((x) => x.id === arac.sorumluPersonelId);
-      if (p) soforSet.add(`${p.ad} ${p.soyad}`.trim());
-    }
+    if (sofor) soforSet.add(`${sofor.ad} ${sofor.soyad}`.trim());
 
     for (const k of list) {
       kayitGunleri.add(k.tarih);
@@ -121,7 +139,7 @@ export function buildKiralikKamyonAyOzeti(
       markaModel,
       geldi,
       yok,
-      girilmedi: Math.max(0, gunSayisi - kayitGunleri.size),
+      girilmedi: Math.max(0, activeDays - kayitGunleri.size),
       toplamMesai,
       soforler: [...soforSet].sort((a, b) => a.localeCompare(b, 'tr')),
     });
@@ -160,7 +178,14 @@ export async function buildKiralikKamyonPuantajReportHtml(
     return p ? `${p.ad} ${p.soyad}`.trim() : '—';
   };
   const aylikKayitlar = kayitlar
-    .filter((k) => String(k.tarih || '').startsWith(prefix))
+    .filter((k) => {
+      if (!String(k.tarih || '').startsWith(prefix)) return false;
+      const day = Number(String(k.tarih).slice(8, 10));
+      const arac = araclar.find((a) => a.id === k.aracId);
+      const sofor = resolveSofor(personeller as Personel[] | undefined, arac);
+      if (!sofor || !day) return false;
+      return isDayActiveForPersonel(sofor, year, month, day);
+    })
     .sort((a, b) => {
       const t = String(a.tarih).localeCompare(String(b.tarih));
       if (t !== 0) return t;

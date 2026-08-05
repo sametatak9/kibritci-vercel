@@ -5,6 +5,7 @@ import { todayDateKey } from '../lib/dateKeyUtils';
 import { mesaiInputDisplayValue, parseMesaiInputValue } from '../lib/sahaFaaliyetUtils';
 import { openKiralikKamyonPuantajReport } from '../lib/kiralikKamyonPuantajReport';
 import { exportKiralikKamyonPuantajExcel } from '../lib/kiralikKamyonPuantajExcel';
+import { isDayActiveForPersonel, isPersonelVisibleInMonth } from '../lib/yoklamaUtils';
 export function isKiralikKamyonArac(a?: AracBakim | null): boolean {
   if (!a) return false;
   if (a.kiralikKamyon === true) return true;
@@ -17,6 +18,32 @@ function isAktifArac(a: AracBakim): boolean {
 
 export function kiralikKamyonPuantajDocId(aracId: string, tarih: string): string {
   return `kkp_${aracId}_${tarih}`;
+}
+
+function resolveAracSofor(
+  personeller: Personel[],
+  arac: AracBakim
+): Personel | null {
+  const id = String(arac.sorumluPersonelId || '').trim();
+  if (!id) return null;
+  return personeller.find((p) => p.id === id) || null;
+}
+
+/** Şoförü olan + seçili ayda istihdamda görünen kiralık kamyonlar */
+export function filterKiralikKamyonlarForPuantaj(
+  araclar: AracBakim[],
+  personeller: Personel[],
+  year: number,
+  month: number
+): AracBakim[] {
+  return araclar
+    .filter((a) => isKiralikKamyonArac(a) && isAktifArac(a))
+    .filter((a) => {
+      const sofor = resolveAracSofor(personeller, a);
+      if (!sofor) return false;
+      return isPersonelVisibleInMonth(sofor, year, month);
+    })
+    .sort((a, b) => a.plaka.localeCompare(b.plaka, 'tr'));
 }
 
 type Durum = 'Geldi' | 'Yok' | 'Girilmedi';
@@ -115,11 +142,25 @@ export const KiralikKamyonPuantajTab: React.FC<KiralikKamyonPuantajTabProps> = (
   );
 
   const kamyonlar = useMemo(
+    () => filterKiralikKamyonlarForPuantaj(araclar, personeller, selectedYear, selectedMonth),
+    [araclar, personeller, selectedYear, selectedMonth]
+  );
+
+  const soforsuzKamyonSayisi = useMemo(
     () =>
-      araclar
-        .filter((a) => isKiralikKamyonArac(a) && isAktifArac(a))
-        .sort((a, b) => a.plaka.localeCompare(b.plaka, 'tr')),
+      araclar.filter(
+        (a) => isKiralikKamyonArac(a) && isAktifArac(a) && !String(a.sorumluPersonelId || '').trim()
+      ).length,
     [araclar]
+  );
+
+  const isSoforDayActive = useCallback(
+    (arac: AracBakim, day: number): boolean => {
+      const sofor = resolveAracSofor(personeller, arac);
+      if (!sofor) return false;
+      return isDayActiveForPersonel(sofor, selectedYear, selectedMonth, day);
+    },
+    [personeller, selectedYear, selectedMonth]
   );
 
   const hydrate = useCallback(() => {
@@ -203,19 +244,21 @@ export const KiralikKamyonPuantajTab: React.FC<KiralikKamyonPuantajTabProps> = (
     setDirty(true);
   };
 
-  const handleCellClick = (aracId: string, day: number) => {
-    const cur = getCell(aracId, day);
+  const handleCellClick = (arac: AracBakim, day: number) => {
+    if (!isSoforDayActive(arac, day)) return;
+    const cur = getCell(arac.id, day);
     const next = cycleDurum(cur.durum);
-    patchCell(aracId, day, {
+    patchCell(arac.id, day, {
       durum: next,
       mesaiSaati: next === 'Geldi' ? cur.mesaiSaati : 0,
     });
   };
 
-  const handleMesaiChange = (aracId: string, day: number, hours: number) => {
+  const handleMesaiChange = (arac: AracBakim, day: number, hours: number) => {
+    if (!isSoforDayActive(arac, day)) return;
     const clamped = Math.max(0, Math.min(MAX_MESAI, hours));
-    const cur = getCell(aracId, day);
-    patchCell(aracId, day, {
+    const cur = getCell(arac.id, day);
+    patchCell(arac.id, day, {
       mesaiSaati: clamped,
       durum: clamped > 0 && cur.durum !== 'Yok' ? 'Geldi' : cur.durum,
     });
@@ -239,6 +282,7 @@ export const KiralikKamyonPuantajTab: React.FC<KiralikKamyonPuantajTabProps> = (
       for (const arac of kamyonlar) {
         const row = { ...(next[arac.id] || {}) };
         for (const day of daysArray) {
+          if (!isSoforDayActive(arac, day)) continue;
           const { isHoliday } = isSundayOrHoliday(day);
           if (isHoliday) continue;
           const cur = row[day] || emptyCell();
@@ -271,6 +315,7 @@ export const KiralikKamyonPuantajTab: React.FC<KiralikKamyonPuantajTabProps> = (
     let mesai = 0;
     for (const arac of kamyonlar) {
       for (const day of daysArray) {
+        if (!isSoforDayActive(arac, day)) continue;
         const c = draft[arac.id]?.[day];
         if (!c) continue;
         if (c.durum === 'Geldi') {
@@ -280,18 +325,14 @@ export const KiralikKamyonPuantajTab: React.FC<KiralikKamyonPuantajTabProps> = (
       }
     }
     return { geldi, yok, mesai };
-  }, [draft, kamyonlar, daysArray]);
+  }, [draft, kamyonlar, daysArray, isSoforDayActive]);
 
   const handleSaveMonth = async () => {
     if (kamyonlar.length === 0) {
-      alert('Kiralık kamyon bulunamadı.\n\nAraç Envanteri’nden kiralık kamyon olarak kayıt açın.');
-      return;
-    }
-
-    const eksikSofor = kamyonlar.filter((a) => !a.sorumluPersonelId);
-    if (eksikSofor.length > 0) {
       alert(
-        `Şoförü tanımlanmamış kamyon(lar):\n${eksikSofor.map((a) => a.plaka).join(', ')}\n\nAraç Envanteri’nde sorumlu personeli (şoför) seçip kaydedin.`
+        soforsuzKamyonSayisi > 0
+          ? `Listede şoförü tanımlı kiralık kamyon yok.\n\n${soforsuzKamyonSayisi} araç şoförsüz — Araç Envanteri’nden sorumlu şoför seçin.`
+          : 'Kiralık kamyon bulunamadı.\n\nAraç Envanteri’nden kiralık kamyon olarak kayıt açın ve şoför atayın.'
       );
       return;
     }
@@ -301,15 +342,23 @@ export const KiralikKamyonPuantajTab: React.FC<KiralikKamyonPuantajTabProps> = (
       const kaydeden = currentUser?.email || currentUser?.displayName || 'sistem';
       const now = new Date().toISOString();
       const toUpsert: KiralikKamyonPuantajKaydi[] = [];
+      const toRemoveKeys = new Set<string>();
 
       for (const arac of kamyonlar) {
         const soforId = arac.sorumluPersonelId || '';
         const soforAdi = soforLabel(personeller, soforId) || undefined;
 
         for (const day of daysArray) {
-          const c = getCell(arac.id, day);
           const tarih = dateKey(selectedYear, selectedMonth, day);
           const existing = kayitlar.find((k) => k.aracId === arac.id && k.tarih === tarih);
+
+          // İşe giriş öncesi / çıkış sonrası — kayıt yazılmaz; varsa silinir
+          if (!isSoforDayActive(arac, day)) {
+            if (existing) toRemoveKeys.add(`${arac.id}|${tarih}`);
+            continue;
+          }
+
+          const c = getCell(arac.id, day);
           if (c.durum === 'Girilmedi' && !existing) continue;
 
           toUpsert.push({
@@ -329,8 +378,13 @@ export const KiralikKamyonPuantajTab: React.FC<KiralikKamyonPuantajTabProps> = (
       }
 
       setKayitlar((prev) => {
-        const removeKeys = new Set(toUpsert.map((u) => `${u.aracId}|${u.tarih}`));
-        const without = prev.filter((k) => !removeKeys.has(`${k.aracId}|${k.tarih}`));
+        const upsertKeys = new Set(toUpsert.map((u) => `${u.aracId}|${u.tarih}`));
+        const without = prev.filter((k) => {
+          const key = `${k.aracId}|${k.tarih}`;
+          if (toRemoveKeys.has(key)) return false;
+          if (upsertKeys.has(key)) return false;
+          return true;
+        });
         return [...without, ...toUpsert];
       });
 
@@ -359,6 +413,7 @@ export const KiralikKamyonPuantajTab: React.FC<KiralikKamyonPuantajTabProps> = (
       const soforId = arac.sorumluPersonelId || '';
       const soforAdi = soforLabel(personeller, soforId) || undefined;
       for (const day of daysArray) {
+        if (!isSoforDayActive(arac, day)) continue;
         const c = getCell(arac.id, day);
         if (c.durum === 'Girilmedi') continue;
         const tarih = dateKey(selectedYear, selectedMonth, day);
@@ -377,7 +432,14 @@ export const KiralikKamyonPuantajTab: React.FC<KiralikKamyonPuantajTabProps> = (
         });
       }
     }
-    return [...map.values()];
+    // İşe giriş öncesi eski kayıtları rapora/Excel’e taşıma
+    return [...map.values()].filter((k) => {
+      const arac = kamyonlar.find((a) => a.id === k.aracId) || araclar.find((a) => a.id === k.aracId);
+      if (!arac) return false;
+      const day = Number(String(k.tarih).slice(8, 10));
+      if (!day) return false;
+      return isSoforDayActive(arac, day);
+    });
   };
 
   const handleAyiRaporla = async () => {
@@ -548,6 +610,14 @@ export const KiralikKamyonPuantajTab: React.FC<KiralikKamyonPuantajTabProps> = (
           <span className="bg-slate-100 text-slate-700 px-2.5 py-1 rounded-lg">
             Kiralık kamyon: {kamyonlar.length}
           </span>
+          {soforsuzKamyonSayisi > 0 && (
+            <span
+              className="bg-amber-50 text-amber-800 border border-amber-200 px-2.5 py-1 rounded-lg"
+              title="Şoförsüz araçlar puantaj listesinde gösterilmez"
+            >
+              Şoförsüz (gizli): {soforsuzKamyonSayisi}
+            </span>
+          )}
           <span className="bg-emerald-50 text-emerald-800 border border-emerald-100 px-2.5 py-1 rounded-lg">
             Geldi: {monthStats.geldi}
           </span>
@@ -593,10 +663,15 @@ export const KiralikKamyonPuantajTab: React.FC<KiralikKamyonPuantajTabProps> = (
         {kamyonlar.length === 0 ? (
           <div className="p-10 text-center space-y-2">
             <Truck className="mx-auto text-amber-700" size={28} />
-            <p className="text-xs font-bold text-amber-900">Kiralık kamyon tanımlı değil</p>
+            <p className="text-xs font-bold text-amber-900">
+              {soforsuzKamyonSayisi > 0
+                ? 'Şoförü tanımlı kiralık kamyon yok'
+                : 'Kiralık kamyon tanımlı değil'}
+            </p>
             <p className="text-[10px] text-amber-800 max-w-md mx-auto">
-              Araç Envanteri’nde mülkiyet <strong>Kiralık</strong>, şoförü sorumlu personel olarak
-              seçin ve <strong>Kiralık kamyon puantajına dahil et</strong> işaretleyin.
+              {soforsuzKamyonSayisi > 0
+                ? `${soforsuzKamyonSayisi} araç şoförsüz olduğu için listede görünmüyor. Araç Envanteri’nden sorumlu şoför seçin; şoförün işe giriş tarihinden itibaren günler açılır.`
+                : 'Araç Envanteri’nde mülkiyet Kiralık, sorumlu şoför seçin ve kiralık kamyon puantajına dahil edin.'}
             </p>
           </div>
         ) : (
@@ -653,27 +728,46 @@ export const KiralikKamyonPuantajTab: React.FC<KiralikKamyonPuantajTabProps> = (
               <tbody className="bg-white divide-y divide-slate-100 text-[11px]">
                 {kamyonlar.map((arac) => {
                   const soforAdi = soforLabel(personeller, arac.sorumluPersonelId);
+                  const sofor = resolveAracSofor(personeller, arac);
                   let totalGeldi = 0;
                   let totalMesai = 0;
 
                   const cells = daysArray.map((day) => {
-                    const cell = getCell(arac.id, day);
-                    if (cell.durum === 'Geldi') {
+                    const dayActive = isSoforDayActive(arac, day);
+                    const cell = dayActive ? getCell(arac.id, day) : emptyCell();
+                    if (dayActive && cell.durum === 'Geldi') {
                       totalGeldi += 1;
                       totalMesai += cell.mesaiSaati || 0;
                     }
                     const { isHoliday, isOfficial } = isSundayOrHoliday(day);
                     let tdClass = 'px-0.5 py-1.5 text-center min-w-9';
-                    if (isHoliday) {
+                    if (!dayActive) {
+                      tdClass += ' bg-slate-100/80';
+                    } else if (isHoliday) {
                       tdClass += isOfficial
                         ? ' bg-purple-100/50 border-x border-purple-200'
                         : ' bg-orange-100/50 border-x border-orange-200';
                     }
+
+                    if (!dayActive) {
+                      const hireHint = sofor?.iseGirisTarihi
+                        ? `Şoför işe giriş: ${sofor.iseGirisTarihi} — bu günden önce yoklama yok`
+                        : 'Şoför istihdam aralığı dışında';
+                      return (
+                        <td key={day} className={tdClass} title={hireHint}>
+                          <div className="w-7 h-7 mx-auto rounded-md border border-dashed border-slate-300 bg-slate-50 text-slate-300 text-[9px] font-bold flex items-center justify-center select-none">
+                            ·
+                          </div>
+                          <div className="mt-1 h-[18px]" />
+                        </td>
+                      );
+                    }
+
                     return (
                       <td key={day} className={tdClass}>
                         <button
                           type="button"
-                          onClick={() => handleCellClick(arac.id, day)}
+                          onClick={() => handleCellClick(arac, day)}
                           title={`${arac.plaka} · ${day}.${selectedMonth}.${selectedYear} · ${cell.durum}${
                             soforAdi ? ` · ${soforAdi}` : ''
                           }`}
@@ -697,7 +791,7 @@ export const KiralikKamyonPuantajTab: React.FC<KiralikKamyonPuantajTabProps> = (
                             )}
                             onChange={(e) => {
                               const parsed = parseMesaiInputValue(e.target.value);
-                              handleMesaiChange(arac.id, day, parsed ?? 0);
+                              handleMesaiChange(arac, day, parsed ?? 0);
                             }}
                             className={`w-7 text-[8px] font-bold font-mono text-center rounded border py-0.5 focus:outline-none focus:ring-1 focus:ring-teal-400 ${
                               isHoliday
@@ -722,18 +816,19 @@ export const KiralikKamyonPuantajTab: React.FC<KiralikKamyonPuantajTabProps> = (
                         <span className="inline-block mt-0.5 text-[7px] font-black uppercase bg-teal-100 text-teal-800 px-1 py-0.5 rounded">
                           Kiralık kamyon
                         </span>
-                        {soforAdi ? (
-                          <div
-                            className="mt-1.5 text-[10px] font-bold text-slate-800 bg-sky-50 border border-sky-100 rounded-md px-1.5 py-1 truncate max-w-[190px]"
-                            title={`Araç kaydındaki sorumlu: ${soforAdi}`}
-                          >
-                            👤 {soforAdi}
-                          </div>
-                        ) : (
-                          <div className="mt-1.5 text-[9px] font-bold text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-1.5 py-1">
-                            Şoför yok — Araç Envanteri’nden ekleyin
-                          </div>
-                        )}
+                        <div
+                          className="mt-1.5 text-[10px] font-bold text-slate-800 bg-sky-50 border border-sky-100 rounded-md px-1.5 py-1 truncate max-w-[190px]"
+                          title={`Araç kaydındaki sorumlu: ${soforAdi}${
+                            sofor?.iseGirisTarihi ? ` · işe giriş ${sofor.iseGirisTarihi}` : ''
+                          }`}
+                        >
+                          👤 {soforAdi}
+                          {sofor?.iseGirisTarihi ? (
+                            <span className="block text-[8px] font-semibold text-slate-500 mt-0.5">
+                              İşe giriş: {sofor.iseGirisTarihi}
+                            </span>
+                          ) : null}
+                        </div>
                       </td>
                       {cells}
                       <td className="px-2 py-2 text-center font-black text-emerald-700 border-l bg-emerald-50/30">
@@ -753,7 +848,8 @@ export const KiralikKamyonPuantajTab: React.FC<KiralikKamyonPuantajTabProps> = (
 
       <div className="shrink-0 text-[9px] text-slate-400 font-medium flex items-center gap-1.5 px-1">
         <CheckCircle size={11} className="text-teal-600" />
-        Hücreye tıklayarak gün girin · altına mesai yazın · şoför araç kaydından gelir ·{' '}
+        Hücreye tıklayarak gün girin · altına mesai yazın · yalnızca şoförü olan araçlar listelenir ·
+        şoförün işe girişinden önceki günler kapalı ·{' '}
         <strong className="text-slate-600">Ayı Kaydet</strong> /{' '}
         <strong className="text-slate-600">Ayı Raporla</strong> /{' '}
         <strong className="text-slate-600">Excel</strong>
