@@ -46,7 +46,7 @@ const ODEME_OPTIONS: { id: KasaOdemeDurumu; label: string; short: string; hint: 
 ];
 
 function odemeDurumuLabel(d?: KasaOdemeDurumu | null): string {
-  if (d === 'BORC') return 'KASA BORCU';
+  if (d === 'BORC') return 'BORÇ';
   if (d === 'PERSONEL_ODEDI') return 'PERSONEL ÖDEDİ';
   if (d === 'KASA_ODEDI') return 'KASA ÖDEDİ';
   return '';
@@ -150,21 +150,24 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
   const [savingKasa, setSavingKasa] = useState(false);
   const yolKasaSyncRef = useRef(false);
 
-  /** Onaylı şoför fişlerini kasaya tamamla (eksik kalanlar) */
-  const runYolKasaSync = async (silent = false) => {
+  /** Onaylı şoför fişlerini kasaya tamamla / hizala */
+  const runYolKasaSync = async (silent = false, forceFromNihai = false) => {
     try {
       const snap = await getDocs(collection(db, 'yolHarcamalari'));
       const list: YolHarcamasi[] = [];
       snap.forEach((d) => list.push({ id: d.id, ...(d.data() as Omit<YolHarcamasi, 'id'>) }));
-      const result = await syncApprovedYolHarcamalariToKasa(list);
+      const result = await syncApprovedYolHarcamalariToKasa(list, { forceFromNihai });
       if (!silent) {
         alert(
-          `Şoför fiş → kasa senkronu\n\nYeni: ${result.created} · Zaten vardı: ${result.skipped}` +
+          `Şoför fiş → kasa senkronu\n\nYeni: ${result.created} · Güncellenen: ${result.updated} · Aynı: ${result.skipped}` +
+            (forceFromNihai ? '\n(Nihai masraf tipine göre zorlandı)' : '') +
             (result.errors.length ? `\nHata: ${result.errors.slice(0, 3).join('; ')}` : '') +
             '\n\nTarih aralığını fiş tarihlerini kapsayacak şekilde genişletin.'
         );
-      } else if (result.created > 0) {
-        console.info(`[kasa] ${result.created} onaylı şoför fişi kasaya yazıldı`);
+      } else if (result.created > 0 || result.updated > 0) {
+        console.info(
+          `[kasa] şoför fiş sync: +${result.created} yeni, ~${result.updated} güncellendi`
+        );
       }
       return result;
     } catch (err) {
@@ -366,7 +369,7 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
         personeller
       );
       if (durum === 'BORC') {
-        add(`borc:${unvan.key}`, `KASA BORCU · ${unvan.label}`, 'BORC', tutar);
+        add(`borc:${unvan.key}`, `BORÇ · ${unvan.label}`, 'BORC', tutar);
         continue;
       }
       add(
@@ -773,18 +776,25 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
               Ödeme durumu özeti (seçili aralık)
             </h3>
             <p className="text-[10px] text-slate-500 mt-0.5">
-              BORÇ = kasanın ödemesi gereken · Personel ödedi · Kasa ödedi
+              Her çıkışta biri seçili olmalı: BORÇ · PERSONEL ÖDEDİ · KASA ÖDEDİ — aşağıda ayrı ve toplam
             </p>
           </div>
           <div className="flex flex-wrap gap-1.5 text-[10px] font-mono font-bold">
             <span className="bg-amber-50 border border-amber-200 text-amber-900 px-2 py-1 rounded-lg">
-              Kasa borcu ₺{odemeBazliOzet.totals.BORC.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
+              BORÇ ₺{odemeBazliOzet.totals.BORC.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
             </span>
             <span className="bg-violet-50 border border-violet-200 text-violet-900 px-2 py-1 rounded-lg">
-              Personel ₺{odemeBazliOzet.totals.PERSONEL_ODEDI.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
+              PERSONEL ÖDEDİ ₺{odemeBazliOzet.totals.PERSONEL_ODEDI.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
             </span>
             <span className="bg-slate-900 text-white px-2 py-1 rounded-lg">
-              Kasa ₺{odemeBazliOzet.totals.KASA_ODEDI.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
+              KASA ÖDEDİ ₺{odemeBazliOzet.totals.KASA_ODEDI.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
+            </span>
+            <span className="bg-rose-50 border border-rose-200 text-rose-900 px-2 py-1 rounded-lg">
+              TOPLAM ₺{(
+                odemeBazliOzet.totals.BORC +
+                odemeBazliOzet.totals.PERSONEL_ODEDI +
+                odemeBazliOzet.totals.KASA_ODEDI
+              ).toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
             </span>
           </div>
         </div>
@@ -1192,13 +1202,16 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
                             <span className="inline-block py-0.5 px-2 rounded-full text-[9px] font-extrabold bg-indigo-100 text-indigo-800 border border-indigo-200">ŞOFÖR FİŞ</span>
                           )}
                           {odeme === 'BORC' && (
-                            <span className="inline-block py-0.5 px-2 rounded-full text-[9px] font-extrabold bg-amber-100 text-amber-900 border border-amber-200">KASA BORCU</span>
+                            <span className="inline-block py-0.5 px-2 rounded-full text-[9px] font-extrabold bg-amber-100 text-amber-900 border border-amber-200">BORÇ</span>
                           )}
                           {odeme === 'PERSONEL_ODEDI' && (
                             <span className="inline-block py-0.5 px-2 rounded-full text-[9px] font-extrabold bg-violet-100 text-violet-800 border border-violet-200">PERSONEL ÖDEDİ</span>
                           )}
                           {odeme === 'KASA_ODEDI' && (
                             <span className="inline-block py-0.5 px-2 rounded-full text-[9px] font-extrabold bg-slate-100 text-slate-700 border border-slate-200">KASA ÖDEDİ</span>
+                          )}
+                          {kh.hareketTipi === 'ÇIKIŞ' && !odeme && (
+                            <span className="inline-block py-0.5 px-2 rounded-full text-[9px] font-extrabold bg-rose-100 text-rose-800 border border-rose-200">ÖDEME DURUMU SEÇİN</span>
                           )}
                         </div>
                       </div>
@@ -1314,7 +1327,7 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
                       )}
                       {odeme === 'BORC' && (
                         <span className="inline-block py-0.5 px-2 rounded-full text-[9px] font-extrabold bg-amber-100 text-amber-900 border border-amber-200">
-                          KASA BORCU
+                          BORÇ
                         </span>
                       )}
                       {odeme === 'PERSONEL_ODEDI' && (
@@ -1325,6 +1338,11 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
                       {odeme === 'KASA_ODEDI' && (
                         <span className="inline-block py-0.5 px-2 rounded-full text-[9px] font-extrabold bg-slate-100 text-slate-700 border border-slate-200">
                           KASA ÖDEDİ
+                        </span>
+                      )}
+                      {kh.hareketTipi === 'ÇIKIŞ' && !odeme && (
+                        <span className="inline-block py-0.5 px-2 rounded-full text-[9px] font-extrabold bg-rose-100 text-rose-800 border border-rose-200">
+                          ÖDEME DURUMU SEÇİN
                         </span>
                       )}
                       {kh.hareketTipi === 'ÇIKIŞ' && (
@@ -1444,9 +1462,15 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
               </div>
               <button
                 type="button"
-                onClick={() => void runYolKasaSync(false)}
+                onClick={() => {
+                  if (!window.confirm('Onaylı şoför fişlerini Haftalık Kasa ile senkronize et?')) return;
+                  const forceFromNihai = window.confirm(
+                    'Nihai masraf tipine göre ZORLA yeniden yazılsın mı?\n\nTamam = KASA→KASA ÖDEDİ, KENDİ→BORÇ (manuel PERSONEL ÖDEDİ de değişir)\nİptal = PERSONEL ÖDEDİ korunur; tutar/eksik kayıt hizalanır'
+                  );
+                  void runYolKasaSync(false, forceFromNihai);
+                }}
                 className="bg-violet-700 hover:bg-violet-800 border border-violet-800 text-white text-[11px] font-bold py-1.5 px-3 rounded-lg flex items-center space-x-1.5 transition cursor-pointer"
-                title="Onaylı şoför fişlerini Haftalık Kasa’ya yaz"
+                title="Onaylı şoför fişlerini Haftalık Kasa’ya yaz / hizala"
               >
                 <RefreshCw size={12} />
                 <span>Şoför Fiş → Kasa</span>
@@ -1621,7 +1645,7 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
               </div>
 
               {/* Statistical Summary Box inside Report */}
-              <div className="grid grid-cols-3 gap-4 border p-4 rounded-xl mb-6 bg-slate-50/50 text-xs">
+              <div className="grid grid-cols-3 gap-4 border p-4 rounded-xl mb-4 bg-slate-50/50 text-xs">
                 <div>
                   <p className="text-[9px] text-slate-400 font-bold uppercase">YAZDIRILAN GİRİŞ TOPLAMI</p>
                   <p className="text-sm font-black text-emerald-700 mt-1">₺{filteredHareketler.filter(k=>k.hareketTipi==='GİRİŞ').reduce((s,c)=>s+c.tutar,0).toLocaleString('tr-TR', {minimumFractionDigits:2})}</p>
@@ -1636,20 +1660,55 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
                 </div>
               </div>
 
+              {/* Ödeme durumu: BORÇ / PERSONEL ÖDEDİ / KASA ÖDEDİ — ayrı + toplam */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 border p-4 rounded-xl mb-6 bg-white text-xs">
+                <div className="rounded-lg border border-amber-200 bg-amber-50/80 p-3">
+                  <p className="text-[9px] text-amber-800 font-bold uppercase tracking-wide">BORÇ</p>
+                  <p className="text-sm font-black text-amber-900 mt-1 font-mono">
+                    ₺{odemeBazliOzet.totals.BORC.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
+                  </p>
+                </div>
+                <div className="rounded-lg border border-violet-200 bg-violet-50/80 p-3">
+                  <p className="text-[9px] text-violet-800 font-bold uppercase tracking-wide">PERSONEL ÖDEDİ</p>
+                  <p className="text-sm font-black text-violet-900 mt-1 font-mono">
+                    ₺{odemeBazliOzet.totals.PERSONEL_ODEDI.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
+                  </p>
+                </div>
+                <div className="rounded-lg border border-slate-300 bg-slate-100 p-3">
+                  <p className="text-[9px] text-slate-700 font-bold uppercase tracking-wide">KASA ÖDEDİ</p>
+                  <p className="text-sm font-black text-slate-900 mt-1 font-mono">
+                    ₺{odemeBazliOzet.totals.KASA_ODEDI.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
+                  </p>
+                </div>
+                <div className="rounded-lg border border-rose-200 bg-rose-50/80 p-3">
+                  <p className="text-[9px] text-rose-800 font-bold uppercase tracking-wide">TOPLAM (3’ü)</p>
+                  <p className="text-sm font-black text-rose-900 mt-1 font-mono">
+                    ₺{(
+                      odemeBazliOzet.totals.BORC +
+                      odemeBazliOzet.totals.PERSONEL_ODEDI +
+                      odemeBazliOzet.totals.KASA_ODEDI
+                    ).toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
+                  </p>
+                </div>
+              </div>
+
               {/* Data Table */}
               <div className="border border-slate-350 rounded-md overflow-hidden mb-8">
                 <table className="w-full text-[9px] border-collapse bg-white">
                   <thead>
                     <tr className="bg-slate-100 text-slate-800 border-b border-slate-300 font-bold">
                       <th className="p-2 border-r border-slate-300 w-24 text-left">Tarih</th>
-                      <th className="p-2 border-r border-slate-300 w-24 text-left">İşlem Tipi</th>
+                      <th className="p-2 border-r border-slate-300 w-20 text-left">İşlem</th>
+                      <th className="p-2 border-r border-slate-300 w-28 text-left">Ödeme durumu</th>
                       <th className="p-2 border-r border-slate-300 text-left">Açıklama</th>
-                      
-                      <th className="p-2 text-right w-36">İşlem Tutarı</th>
+                      <th className="p-2 border-r border-slate-300 w-28 text-left">Referans</th>
+                      <th className="p-2 text-right w-32">İşlem Tutarı</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredHareketler.map((kh, idx) => (
+                    {filteredHareketler.map((kh, idx) => {
+                      const odeme = resolveOdemeDurumu(kh);
+                      return (
                       <tr key={kh.id || idx} className="border-b border-slate-200 hover:bg-slate-50 font-medium">
                         <td className="p-2 border-r border-slate-300 font-mono text-slate-500">{kh.tarih}</td>
                         <td className="p-2 border-r border-slate-300 font-bold text-[9px]">
@@ -1657,13 +1716,30 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
                             {kh.hareketTipi}
                           </span>
                         </td>
-                        <td className="p-2 border-r border-slate-300 text-slate-800 font-semibold">{kh.aciklama}</td>
-                        <td className="p-2 border-r border-slate-300 font-mono text-slate-450 uppercase">{kh.referansTipi} {kh.referansId ? `[No: ${kh.referansId}]` : ""}</td>
+                        <td className={`p-2 border-r border-slate-300 font-extrabold text-[9px] uppercase ${
+                          odeme === 'BORC'
+                            ? 'text-amber-800'
+                            : odeme === 'PERSONEL_ODEDI'
+                              ? 'text-violet-800'
+                              : odeme === 'KASA_ODEDI'
+                                ? 'text-slate-800'
+                                : 'text-slate-400'
+                        }`}>
+                          {kh.hareketTipi === 'ÇIKIŞ' ? (odemeDurumuLabel(odeme) || '—') : '—'}
+                        </td>
+                        <td className="p-2 border-r border-slate-300 text-slate-800 font-semibold">
+                          {kh.aciklama}
+                          {kh.personelAdi ? ` · ${kh.personelAdi}` : ''}
+                        </td>
+                        <td className="p-2 border-r border-slate-300 font-mono text-slate-450 uppercase text-[8px]">
+                          {kh.referansTipi}{kh.referansId ? ` [${kh.referansId}]` : ''}
+                        </td>
                         <td className={`p-2 text-right font-mono font-bold ${kh.hareketTipi === 'GİRİŞ' ? 'text-emerald-700' : 'text-rose-700'}`}>
                           {kh.hareketTipi === 'GİRİŞ' ? '+' : '-'} ₺{kh.tutar.toLocaleString('tr-TR', {minimumFractionDigits:2})}
                         </td>
                       </tr>
-                    ))}
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>

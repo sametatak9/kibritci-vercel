@@ -433,7 +433,7 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
     try {
       const result = await syncApprovedYolHarcamalariToKasa(yolHarcamalari);
       alert(
-        `Kasa senkronu tamamlandı.\n\nYeni yazılan: ${result.created}\nZaten vardı: ${result.skipped}` +
+        `Kasa senkronu tamamlandı.\n\nYeni: ${result.created}\nGüncellenen: ${result.updated}\nDeğişmeyen: ${result.skipped}` +
           (result.errors.length
             ? `\nHata: ${result.errors.slice(0, 5).join('\n')}`
             : '') +

@@ -1,5 +1,13 @@
-import { KasaHareketi } from '../types/erp';
+import { KasaHareketi, KasaOdemeDurumu } from '../types/erp';
 import { createExcelWorkbook } from './exceljsLoader';
+import { resolveKasaOdemeDurumu } from './yolHarcamaUtils';
+
+function odemeLabel(d: KasaOdemeDurumu | null): string {
+  if (d === 'BORC') return 'BORÇ';
+  if (d === 'PERSONEL_ODEDI') return 'PERSONEL ÖDEDİ';
+  if (d === 'KASA_ODEDI') return 'KASA ÖDEDİ';
+  return '';
+}
 
 export async function exportKasaExcel(kasaHareketleri: KasaHareketi[], startDate: string, endDate: string): Promise<void> {
   const workbook = await createExcelWorkbook();
@@ -7,22 +15,20 @@ export async function exportKasaExcel(kasaHareketleri: KasaHareketi[], startDate
     pageSetup: { paperSize: 9, orientation: 'landscape', fitToPage: true, fitToWidth: 1 }
   });
 
-  // Top header
-  sheet.mergeCells('A1:D1');
+  sheet.mergeCells('A1:F1');
   const titleCell = sheet.getCell('A1');
   titleCell.value = 'Haftalık Kasa Raporu';
   titleCell.font = { name: 'Arial', size: 14, bold: true, color: { argb: 'FFFFFFFF' } };
   titleCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E4E78' } };
   titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
 
-  sheet.mergeCells('A2:D2');
+  sheet.mergeCells('A2:F2');
   const dateCell = sheet.getCell('A2');
   dateCell.value = `Dönem: ${startDate} - ${endDate}`;
   dateCell.font = { name: 'Arial', size: 11, italic: true };
   dateCell.alignment = { horizontal: 'center', vertical: 'middle' };
 
-  // Headers
-  const headers = ['TARİH', 'HAREKET TİPİ', 'AÇIKLAMA', 'TUTAR'];
+  const headers = ['TARİH', 'HAREKET TİPİ', 'ÖDEME DURUMU', 'AÇIKLAMA', 'PERSONEL', 'TUTAR'];
   const headerRow = sheet.addRow(headers);
   headerRow.eachCell((cell) => {
     cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
@@ -36,30 +42,42 @@ export async function exportKasaExcel(kasaHareketleri: KasaHareketi[], startDate
     };
   });
 
-  // Columns Width
   sheet.columns = [
-    { key: 'tarih', width: 15 },
-    { key: 'hareketTipi', width: 20 },
-    { key: 'aciklama', width: 50 },
-    { key: 'tutar', width: 15 }
+    { key: 'tarih', width: 14 },
+    { key: 'hareketTipi', width: 14 },
+    { key: 'odemeDurumu', width: 18 },
+    { key: 'aciklama', width: 42 },
+    { key: 'personel', width: 22 },
+    { key: 'tutar', width: 14 }
   ];
 
-  // Data Rows
   let totalIn = 0;
   let totalOut = 0;
+  let borc = 0;
+  let personel = 0;
+  let kasaOdedi = 0;
 
   kasaHareketleri.forEach(kh => {
+    const odeme = resolveKasaOdemeDurumu(kh);
     const row = sheet.addRow([
       kh.tarih,
       kh.hareketTipi,
+      kh.hareketTipi === 'ÇIKIŞ' ? odemeLabel(odeme) || 'KASA ÖDEDİ' : '—',
       kh.aciklama,
+      kh.personelAdi || kh.surucu || '',
       kh.tutar
     ]);
 
     if (kh.hareketTipi === 'GİRİŞ') totalIn += kh.tutar;
-    else totalOut += kh.tutar;
+    else {
+      totalOut += kh.tutar;
+      const d = odeme || 'KASA_ODEDI';
+      if (d === 'BORC') borc += kh.tutar;
+      else if (d === 'PERSONEL_ODEDI') personel += kh.tutar;
+      else kasaOdedi += kh.tutar;
+    }
 
-    row.getCell(4).numFmt = '#,##0.00 "₺"';
+    row.getCell(6).numFmt = '#,##0.00 "₺"';
 
     row.eachCell((cell) => {
       cell.border = {
@@ -68,27 +86,25 @@ export async function exportKasaExcel(kasaHareketleri: KasaHareketi[], startDate
       cell.alignment = { vertical: 'middle' };
     });
     row.getCell(2).alignment = { horizontal: 'center', vertical: 'middle' };
-    row.getCell(4).alignment = { horizontal: 'right', vertical: 'middle' };
+    row.getCell(3).alignment = { horizontal: 'center', vertical: 'middle' };
+    row.getCell(6).alignment = { horizontal: 'right', vertical: 'middle' };
   });
 
-  // Totals Row
   sheet.addRow([]);
-  const totalsRow = sheet.addRow(['', '', 'TOPLAM GİRİŞ:', totalIn]);
-  totalsRow.getCell(3).font = { bold: true };
-  totalsRow.getCell(4).font = { bold: true };
-  totalsRow.getCell(4).numFmt = '#,##0.00 "₺"';
+  const addTotal = (label: string, value: number, boldColor?: string) => {
+    const r = sheet.addRow(['', '', '', '', label, value]);
+    r.getCell(5).font = { bold: true, ...(boldColor ? { color: { argb: boldColor } } : {}) };
+    r.getCell(6).font = { bold: true, ...(boldColor ? { color: { argb: boldColor } } : {}) };
+    r.getCell(6).numFmt = '#,##0.00 "₺"';
+  };
 
-  const totalsOutRow = sheet.addRow(['', '', 'TOPLAM ÇIKIŞ:', totalOut]);
-  totalsOutRow.getCell(3).font = { bold: true };
-  totalsOutRow.getCell(4).font = { bold: true };
-  totalsOutRow.getCell(4).numFmt = '#,##0.00 "₺"';
+  addTotal('BORÇ:', borc);
+  addTotal('PERSONEL ÖDEDİ:', personel);
+  addTotal('KASA ÖDEDİ:', kasaOdedi);
+  addTotal('TOPLAM ÇIKIŞ (3’ü):', borc + personel + kasaOdedi, 'FFB91C1C');
+  addTotal('TOPLAM GİRİŞ:', totalIn);
+  addTotal('NET DURUM:', totalIn - totalOut, 'FF1E4E78');
 
-  const netRow = sheet.addRow(['', '', 'NET DURUM:', totalIn - totalOut]);
-  netRow.getCell(3).font = { bold: true, color: { argb: 'FF1E4E78' } };
-  netRow.getCell(4).font = { bold: true, color: { argb: 'FF1E4E78' } };
-  netRow.getCell(4).numFmt = '#,##0.00 "₺"';
-
-  // Export
   const buffer = await workbook.xlsx.writeBuffer();
   const blob = new Blob([buffer as BlobPart], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
   const url = window.URL.createObjectURL(blob);

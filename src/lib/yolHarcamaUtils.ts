@@ -77,16 +77,17 @@ export function resolveKasaOdemeDurumu(
   if (k.odemeDurumu === 'BORC' || k.odemeDurumu === 'PERSONEL_ODEDI' || k.odemeDurumu === 'KASA_ODEDI') {
     return k.odemeDurumu;
   }
-  if (k.harcamaKaynagi === 'KASA_HARCAMA') return 'KASA_ODEDI';
-  if (k.harcamaKaynagi === 'PERSONEL_HARCAMA') return 'PERSONEL_ODEDI';
 
+  // Şoför kaynaklı: masraf tipi / bayraklar, harcamaKaynagi'nden önce (eski karışık kayıtlar)
   if (isSoforKaynakliKasaHareketi(k)) {
     if (k.soforKasaHarcamasi || normalizeSoforMasrafTipi(k.masrafTipi) === 'KASA') {
       return 'KASA_ODEDI';
     }
-    // Şoför kendi cebinden → kasanın borcu (ödenmeli)
     if (k.soforOdemesi || String(k.id || '').startsWith('kh_yol_')) return 'BORC';
   }
+
+  if (k.harcamaKaynagi === 'KASA_HARCAMA') return 'KASA_ODEDI';
+  if (k.harcamaKaynagi === 'PERSONEL_HARCAMA') return 'PERSONEL_ODEDI';
 
   if (normalizeSoforMasrafTipi(k.masrafTipi) === 'KASA') return 'KASA_ODEDI';
   if (k.hareketTipi === 'ÇIKIŞ') return 'KASA_ODEDI';
@@ -94,9 +95,9 @@ export function resolveKasaOdemeDurumu(
 }
 
 export function kasaOdemeDurumuLabel(d?: KasaOdemeDurumu | null): string {
-  if (d === 'BORC') return 'Kasa borcu (ödenmeli)';
-  if (d === 'PERSONEL_ODEDI') return 'Personel ödedi';
-  if (d === 'KASA_ODEDI') return 'Kasa ödedi';
+  if (d === 'BORC') return 'BORÇ';
+  if (d === 'PERSONEL_ODEDI') return 'PERSONEL ÖDEDİ';
+  if (d === 'KASA_ODEDI') return 'KASA ÖDEDİ';
   return '';
 }
 
@@ -203,8 +204,15 @@ export function buildYolHarcamaKasaCikisPayload(
     String(item.tarih || '').slice(0, 10) ||
     todayDateKey();
   const surucu = String(item.surucu || '').trim() || 'Bilinmeyen';
-  const personelAdi =
+  let personelAdi =
     String(item.personelAdi || '').trim() || (tip === 'KENDI' ? surucu : '');
+  // Portal e-postası unvan olarak kalmasın
+  if (personelAdi.toLocaleLowerCase('tr-TR') === 'celal@kibritciinsaat.com') {
+    personelAdi = 'CELAL YILMAZ';
+  }
+  if (!personelAdi && surucu.toLocaleLowerCase('tr-TR') === 'celal@kibritciinsaat.com') {
+    personelAdi = 'CELAL YILMAZ';
+  }
   const fisNo = String(item.fisNo || '').trim();
   const aciklamaExtra = String(item.aciklama || '').trim();
   const isKendi = tip === 'KENDI';
@@ -241,7 +249,7 @@ export function buildYolHarcamaKasaCikisPayload(
   return payload;
 }
 
-/** Onaylı şoför fişlerini Haftalık Kasa'ya yazar (eksik kalanları tamamlar) */
+/** Onaylı şoför fişlerini Haftalık Kasa'ya yazar; mevcut kayıtları yol fişiyle hizalar */
 export async function syncApprovedYolHarcamalariToKasa(
   yolHarcamalari: Array<
     Pick<
@@ -256,12 +264,20 @@ export async function syncApprovedYolHarcamalariToKasa(
       | 'masrafTipi'
       | 'nihaiMasrafTipi'
       | 'durum'
+      | 'personelId'
+      | 'personelAdi'
     >
-  >
-): Promise<{ created: number; skipped: number; errors: string[] }> {
+  >,
+  options?: {
+    /** true ise PERSONEL_ODEDI dahil tüm alanları nihai masraf tipine göre yeniden yazar */
+    forceFromNihai?: boolean;
+  }
+): Promise<{ created: number; updated: number; skipped: number; errors: string[] }> {
   let created = 0;
+  let updated = 0;
   let skipped = 0;
   const errors: string[] = [];
+  const forceFromNihai = Boolean(options?.forceFromNihai);
 
   const approved = (yolHarcamalari || []).filter((y) => {
     const d = String(y.durum || '').toLocaleUpperCase('tr-TR');
@@ -272,25 +288,62 @@ export async function syncApprovedYolHarcamalariToKasa(
     if (!item?.id) continue;
     const kasaId = yolHarcamaKasaDocId(item.id);
     try {
-      const existing = await getDoc(doc(db, 'kasaHareketleri', kasaId));
-      if (existing.exists()) {
-        skipped += 1;
-        continue;
-      }
       const payload = buildYolHarcamaKasaCikisPayload(item);
       if (!payload.tutar || payload.tutar <= 0) {
         errors.push(`${item.id}: tutar geçersiz`);
         continue;
       }
-      await saveDocument('kasaHareketleri', payload);
-      created += 1;
+
+      const existing = await getDoc(doc(db, 'kasaHareketleri', kasaId));
+      if (!existing.exists()) {
+        await saveDocument('kasaHareketleri', payload);
+        created += 1;
+        continue;
+      }
+
+      const prev = existing.data() as Partial<KasaHareketi>;
+      const prevOdeme = resolveKasaOdemeDurumu(prev as KasaHareketi);
+
+      // Manuel PERSONEL_ODEDI seçimini koru (force değilse) — tutar/personel/masraf yine hizalanır
+      const keepPersonelOdedi =
+        !forceFromNihai && prevOdeme === 'PERSONEL_ODEDI';
+
+      const next: KasaHareketi = {
+        ...payload,
+        id: kasaId,
+        fisEvrakUrl: payload.fisEvrakUrl || prev.fisEvrakUrl || '',
+      };
+      if (keepPersonelOdedi) {
+        next.odemeDurumu = 'PERSONEL_ODEDI';
+        next.harcamaKaynagi = 'PERSONEL_HARCAMA';
+        // Masraf tipi yol nihai ile kalsın; ödeme durumu personel ödedi olarak işaretli
+      }
+
+      const changed =
+        Number(prev.tutar) !== Number(next.tutar) ||
+        String(prev.tarih || '') !== String(next.tarih || '') ||
+        String(prev.odemeDurumu || '') !== String(next.odemeDurumu || '') ||
+        String(prev.masrafTipi || '') !== String(next.masrafTipi || '') ||
+        Boolean(prev.soforOdemesi) !== Boolean(next.soforOdemesi) ||
+        Boolean(prev.soforKasaHarcamasi) !== Boolean(next.soforKasaHarcamasi) ||
+        String(prev.personelAdi || '') !== String(next.personelAdi || '') ||
+        String(prev.personelId || '') !== String(next.personelId || '') ||
+        String(prev.aciklama || '') !== String(next.aciklama || '');
+
+      if (!changed) {
+        skipped += 1;
+        continue;
+      }
+
+      await saveDocument('kasaHareketleri', next);
+      updated += 1;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       errors.push(`${item.fisNo || item.id}: ${msg}`);
     }
   }
 
-  return { created, skipped, errors };
+  return { created, updated, skipped, errors };
 }
 
 export function filterYolHarcamalariByRange(
@@ -441,19 +494,19 @@ function buildMasrafTableHtml(rows: RaporKalem[], toplam: number): string {
       </tbody>
       <tfoot>
         <tr style="background:#fffbeb;font-weight:700">
-          <td colspan="6" style="padding:6px 8px;border:1px solid #cbd5e1;text-align:right">Kasa borcu (ödenmesi gereken)</td>
+          <td colspan="6" style="padding:6px 8px;border:1px solid #cbd5e1;text-align:right">BORÇ</td>
           <td style="padding:6px 8px;border:1px solid #cbd5e1;text-align:right;color:#b45309">−${borcToplam.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺</td>
         </tr>
         <tr style="background:#f5f3ff;font-weight:700">
-          <td colspan="6" style="padding:6px 8px;border:1px solid #cbd5e1;text-align:right">Personel ödedi</td>
+          <td colspan="6" style="padding:6px 8px;border:1px solid #cbd5e1;text-align:right">PERSONEL ÖDEDİ</td>
           <td style="padding:6px 8px;border:1px solid #cbd5e1;text-align:right;color:#6d28d9">−${personelToplam.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺</td>
         </tr>
         <tr style="background:#eff6ff;font-weight:700">
-          <td colspan="6" style="padding:6px 8px;border:1px solid #cbd5e1;text-align:right">Kasa ödedi</td>
+          <td colspan="6" style="padding:6px 8px;border:1px solid #cbd5e1;text-align:right">KASA ÖDEDİ</td>
           <td style="padding:6px 8px;border:1px solid #cbd5e1;text-align:right;color:#1d4ed8">−${kasaToplam.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺</td>
         </tr>
         <tr style="background:#f1f5f9;font-weight:800">
-          <td colspan="6" style="padding:8px;border:1px solid #cbd5e1;text-align:right">TOPLAM</td>
+          <td colspan="6" style="padding:8px;border:1px solid #cbd5e1;text-align:right">TOPLAM (3’ü)</td>
           <td style="padding:8px;border:1px solid #cbd5e1;text-align:right;color:#b91c1c">−${toplam.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺</td>
         </tr>
       </tfoot>
@@ -516,7 +569,7 @@ export function buildSoforMasrafIadeReportHtml(options: {
     <div style="margin:12px 0;padding:10px 12px;background:#fff1f2;border:1px solid #fecdd3;border-radius:8px;font-size:11px;color:#9f1239">
       <p style="margin:2px 0">Kalem: <strong>${rows.length}</strong> · Toplam: <strong>−${toplam.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺</strong></p>
       <p style="margin:2px 0">Oluşturan: ${escapeHtml(options.olusturan || '—')} · ${new Date().toLocaleString('tr-TR')}</p>
-      <p style="margin:2px 0;font-style:italic">Kasaya yazılır: <strong>BORÇ</strong> = kasanın ödemesi gereken, <strong>Personel ödedi</strong>, <strong>Kasa ödedi</strong>.</p>
+      <p style="margin:2px 0;font-style:italic">Her çıkışta ödeme durumu: <strong>BORÇ</strong> · <strong>PERSONEL ÖDEDİ</strong> · <strong>KASA ÖDEDİ</strong> (ayrı + toplam).</p>
     </div>
     ${buildMasrafTableHtml(rows, toplam)}
     ${buildFotoGridHtml(rows)}
@@ -636,16 +689,16 @@ export function buildKasaCikisMailPlainText(
   const toplam = borc + personel + kasa;
   lines.push('────────────────────────');
   lines.push(
-    `Kasa borcu (ödenmesi gereken): −${borc.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺`
+    `BORÇ: −${borc.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺`
   );
   lines.push(
-    `Personel ödedi: −${personel.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺`
+    `PERSONEL ÖDEDİ: −${personel.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺`
   );
   lines.push(
-    `Kasa ödedi: −${kasa.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺`
+    `KASA ÖDEDİ: −${kasa.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺`
   );
   lines.push(
-    `TOPLAM: −${toplam.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺`
+    `TOPLAM (3’ü): −${toplam.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺`
   );
   return lines.join('\n');
 }
