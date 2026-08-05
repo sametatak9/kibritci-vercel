@@ -437,6 +437,8 @@ type RaporKalem = {
   personelAdi?: string;
   fotoUrl?: string;
   tipEtiket?: string;
+  /** SOFOR = şoför fişi; KASA = diğer kasa harcaması */
+  kaynakTipi?: 'SOFOR' | 'KASA';
   masrafTipi?: SoforMasrafTipi | string;
   odemeDurumu?: KasaOdemeDurumu | null;
 };
@@ -444,8 +446,138 @@ type RaporKalem = {
 function raporKalemKisiAdi(r: RaporKalem): string {
   const name = String(r.personelAdi || r.surucu || '').trim();
   if (!name) return 'Personel (adsız)';
-  if (name.toLocaleLowerCase('tr-TR') === 'celal@kibritciinsaat.com') return 'CELAL YILMAZ';
+  const low = name.toLocaleLowerCase('tr-TR');
+  if (low === 'celal@kibritciinsaat.com') return 'CELAL YILMAZ';
+  if (low === 'diğer' || low === 'diger') return 'Kasa harcaması';
   return name;
+}
+
+function raporKalemKaynak(r: RaporKalem): 'SOFOR' | 'KASA' {
+  if (r.kaynakTipi === 'SOFOR' || r.kaynakTipi === 'KASA') return r.kaynakTipi;
+  const tip = String(r.tipEtiket || '').toLocaleUpperCase('tr-TR');
+  if (tip.includes('ŞOFÖR') || tip.includes('SOFOR')) return 'SOFOR';
+  return 'KASA';
+}
+
+/** Şoför / Kasa kaynak özeti + genel toplam */
+function buildKaynakOzetHtml(rows: RaporKalem[]): string {
+  const soforRows = rows.filter((r) => raporKalemKaynak(r) === 'SOFOR');
+  const kasaRows = rows.filter((r) => raporKalemKaynak(r) === 'KASA');
+  const soforToplam = soforRows.reduce((s, r) => s + (Number(r.tutar) || 0), 0);
+  const kasaToplam = kasaRows.reduce((s, r) => s + (Number(r.tutar) || 0), 0);
+  const genel = soforToplam + kasaToplam;
+
+  return `<section style="margin:14px 0 18px">
+    <h3 style="font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:#1e3a5f;margin:0 0 10px">
+      Kaynak özeti — Şoför / Kasa ayrı + toplam
+    </h3>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:12px">
+      <div style="border:1px solid #c7d2fe;background:#eef2ff;border-radius:10px;padding:12px">
+        <div style="font-size:10px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:#3730a3">Şoför harcamaları</div>
+        <div style="font-size:18px;font-weight:900;color:#312e81;margin-top:4px">−${soforToplam.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺</div>
+        <div style="font-size:10px;color:#4338ca;margin-top:2px">${soforRows.length} kalem</div>
+      </div>
+      <div style="border:1px solid #bae6fd;background:#f0f9ff;border-radius:10px;padding:12px">
+        <div style="font-size:10px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:#075985">Kasa harcamaları</div>
+        <div style="font-size:18px;font-weight:900;color:#0c4a6e;margin-top:4px">−${kasaToplam.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺</div>
+        <div style="font-size:10px;color:#0369a1;margin-top:2px">${kasaRows.length} kalem</div>
+      </div>
+      <div style="border:1px solid #fecdd3;background:#fff1f2;border-radius:10px;padding:12px">
+        <div style="font-size:10px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:#9f1239">Genel toplam</div>
+        <div style="font-size:18px;font-weight:900;color:#be123c;margin-top:4px">−${genel.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺</div>
+        <div style="font-size:10px;color:#e11d48;margin-top:2px">${rows.length} kalem</div>
+      </div>
+    </div>
+  </section>`;
+}
+
+/** Kaynak gruplu tablo: önce Şoför, sonra Kasa; her grupta ödeme kırılımı + grup toplamı */
+function buildKaynakGrupluMasrafHtml(rows: RaporKalem[]): string {
+  const groups: Array<{ key: 'SOFOR' | 'KASA'; title: string; color: string }> = [
+    { key: 'SOFOR', title: 'ŞOFÖR HARCAMALARI', color: '#312e81' },
+    { key: 'KASA', title: 'KASA HARCAMALARI (diğer)', color: '#0c4a6e' },
+  ];
+
+  const sections = groups
+    .map((g) => {
+      const groupRows = rows.filter((r) => raporKalemKaynak(r) === g.key);
+      const grupToplam = groupRows.reduce((s, r) => s + (Number(r.tutar) || 0), 0);
+      const borc = groupRows
+        .filter((r) => raporKalemOdemeDurumu(r) === 'BORC')
+        .reduce((s, r) => s + (Number(r.tutar) || 0), 0);
+      const personel = groupRows
+        .filter((r) => raporKalemOdemeDurumu(r) === 'PERSONEL_ODEDI')
+        .reduce((s, r) => s + (Number(r.tutar) || 0), 0);
+      const kasaOdedi = groupRows
+        .filter((r) => raporKalemOdemeDurumu(r) === 'KASA_ODEDI')
+        .reduce((s, r) => s + (Number(r.tutar) || 0), 0);
+
+      const body = groupRows
+        .map((r, i) => {
+          const durum = raporKalemOdemeDurumu(r);
+          const tipColor =
+            durum === 'KASA_ODEDI' ? '#1d4ed8' : durum === 'BORC' ? '#b45309' : '#6d28d9';
+          return `<tr>
+        <td style="padding:6px 8px;border:1px solid #cbd5e1;text-align:center">${i + 1}</td>
+        <td style="padding:6px 8px;border:1px solid #cbd5e1;font-family:ui-monospace,monospace">${escapeHtml(r.tarih)}</td>
+        <td style="padding:6px 8px;border:1px solid #cbd5e1;font-weight:700">${escapeHtml(r.fisNo || '—')}</td>
+        <td style="padding:6px 8px;border:1px solid #cbd5e1;font-size:10px;font-weight:800;color:${tipColor}">${escapeHtml(kasaOdemeDurumuLabel(durum))}</td>
+        <td style="padding:6px 8px;border:1px solid #cbd5e1">${escapeHtml(r.aciklama || '—')}</td>
+        <td style="padding:6px 8px;border:1px solid #cbd5e1">${escapeHtml(raporKalemKisiAdi(r))}</td>
+        <td style="padding:6px 8px;border:1px solid #cbd5e1;text-align:right;font-weight:800;color:#b91c1c">−${Number(r.tutar || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺</td>
+      </tr>`;
+        })
+        .join('');
+
+      return `<div style="margin:0 0 20px;page-break-inside:avoid">
+      <div style="background:${g.color};color:#fff;padding:8px 12px;border-radius:8px 8px 0 0;display:flex;justify-content:space-between;gap:8px;align-items:center">
+        <strong style="font-size:12px;letter-spacing:.04em">${escapeHtml(g.title)}</strong>
+        <span style="font-size:11px;font-weight:800">${groupRows.length} kalem · −${grupToplam.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺</span>
+      </div>
+      <table style="width:100%;border-collapse:collapse;font-size:11px;margin:0">
+        <thead>
+          <tr style="background:#f1f5f9;color:#334155">
+            <th style="padding:6px;border:1px solid #cbd5e1">#</th>
+            <th style="padding:6px;border:1px solid #cbd5e1;text-align:left">Tarih</th>
+            <th style="padding:6px;border:1px solid #cbd5e1;text-align:left">Fiş No</th>
+            <th style="padding:6px;border:1px solid #cbd5e1;text-align:left">Ödeme durumu</th>
+            <th style="padding:6px;border:1px solid #cbd5e1;text-align:left">Açıklama</th>
+            <th style="padding:6px;border:1px solid #cbd5e1;text-align:left">Personel</th>
+            <th style="padding:6px;border:1px solid #cbd5e1;text-align:right">Çıkış (−)</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${body || '<tr><td colspan="7" style="padding:12px;text-align:center;color:#94a3b8">Bu grupta kayıt yok</td></tr>'}
+        </tbody>
+        <tfoot>
+          <tr style="background:#fffbeb;font-weight:700">
+            <td colspan="6" style="padding:6px 8px;border:1px solid #cbd5e1;text-align:right">BORÇ</td>
+            <td style="padding:6px 8px;border:1px solid #cbd5e1;text-align:right;color:#b45309">−${borc.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺</td>
+          </tr>
+          <tr style="background:#f5f3ff;font-weight:700">
+            <td colspan="6" style="padding:6px 8px;border:1px solid #cbd5e1;text-align:right">PERSONEL ÖDEDİ</td>
+            <td style="padding:6px 8px;border:1px solid #cbd5e1;text-align:right;color:#6d28d9">−${personel.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺</td>
+          </tr>
+          <tr style="background:#eff6ff;font-weight:700">
+            <td colspan="6" style="padding:6px 8px;border:1px solid #cbd5e1;text-align:right">KASA ÖDEDİ</td>
+            <td style="padding:6px 8px;border:1px solid #cbd5e1;text-align:right;color:#1d4ed8">−${kasaOdedi.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺</td>
+          </tr>
+          <tr style="background:#f1f5f9;font-weight:900">
+            <td colspan="6" style="padding:8px;border:1px solid #cbd5e1;text-align:right">${escapeHtml(g.title)} TOPLAM</td>
+            <td style="padding:8px;border:1px solid #cbd5e1;text-align:right;color:#b91c1c">−${grupToplam.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺</td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>`;
+    })
+    .join('');
+
+  const genel = rows.reduce((s, r) => s + (Number(r.tutar) || 0), 0);
+  return `${sections}
+    <div style="margin-top:8px;padding:12px 14px;background:#1e3a5f;color:#fff;border-radius:10px;display:flex;justify-content:space-between;align-items:center;gap:8px">
+      <strong style="font-size:12px;letter-spacing:.05em">GENEL TOPLAM (Şoför + Kasa)</strong>
+      <span style="font-size:16px;font-weight:900">−${genel.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺</span>
+    </div>`;
 }
 
 function raporKalemOdemeDurumu(r: RaporKalem): KasaOdemeDurumu {
@@ -697,23 +829,28 @@ export function buildKasaHarcamaAralikReportHtml(options: {
   const end = formatDateLabelTr(normalizeDateKey(options.endDate) || options.endDate);
   const rows: RaporKalem[] = [...options.items]
     .sort((a, b) => String(a.tarih).localeCompare(String(b.tarih)))
-    .map((r) => ({
-      id: r.id,
-      tarih: r.tarih,
-      fisNo: r.fisNo,
-      aciklama: r.aciklama,
-      tutar: Number(r.tutar) || 0,
-      surucu: r.surucu || (isSoforKaynakliKasaHareketi(r) ? 'Şoför' : r.referansTipi),
-      personelAdi: r.personelAdi,
-      fotoUrl: r.fisEvrakUrl,
-      tipEtiket: isSoforKaynakliKasaHareketi(r) ? '[Şoför] ' : '',
-      masrafTipi: resolveKasaRaporMasrafTipi(r) || r.masrafTipi || 'KASA',
-      odemeDurumu: resolveKasaOdemeDurumu(r),
-    }));
+    .map((r) => {
+      const sofor = isSoforKaynakliKasaHareketi(r);
+      return {
+        id: r.id,
+        tarih: r.tarih,
+        fisNo: r.fisNo,
+        aciklama: r.aciklama,
+        tutar: Number(r.tutar) || 0,
+        surucu: r.surucu || (sofor ? 'Şoför' : ''),
+        personelAdi: r.personelAdi || (!sofor ? 'Kasa harcaması' : undefined),
+        fotoUrl: r.fisEvrakUrl,
+        tipEtiket: sofor ? '[Şoför] ' : '[Kasa] ',
+        kaynakTipi: sofor ? ('SOFOR' as const) : ('KASA' as const),
+        masrafTipi: resolveKasaRaporMasrafTipi(r) || r.masrafTipi || 'KASA',
+        odemeDurumu: resolveKasaOdemeDurumu(r),
+      };
+    });
   const toplam = rows.reduce((s, r) => s + (Number(r.tutar) || 0), 0);
-  const soforToplam = options.items
-    .filter((x) => isSoforKaynakliKasaHareketi(x))
+  const soforToplam = rows
+    .filter((r) => r.kaynakTipi === 'SOFOR')
     .reduce((s, r) => s + (Number(r.tutar) || 0), 0);
+  const kasaDigerToplam = toplam - soforToplam;
   const title = 'KASA HARCAMA (ÇIKIŞ) RAPORU';
   const subtitle = `${start} — ${end}`;
   const subject = `Kibritçi — Kasa Harcama Raporu (${start} / ${end})`;
@@ -737,12 +874,13 @@ export function buildKasaHarcamaAralikReportHtml(options: {
   <div class="page">
     ${kibritciReportHeaderHtml(title, subtitle)}
     <div style="margin:12px 0;padding:10px 12px;background:#fff1f2;border:1px solid #fecdd3;border-radius:8px;font-size:11px;color:#9f1239">
-      <p style="margin:2px 0">Çıkış kalemi: <strong>${rows.length}</strong> · Toplam: <strong>−${toplam.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺</strong></p>
-      <p style="margin:2px 0">Şoför fişleri payı: <strong>−${soforToplam.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺</strong></p>
+      <p style="margin:2px 0">Çıkış kalemi: <strong>${rows.length}</strong> · Genel toplam: <strong>−${toplam.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺</strong></p>
+      <p style="margin:2px 0">Şoför: <strong>−${soforToplam.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺</strong> · Kasa (diğer): <strong>−${kasaDigerToplam.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺</strong></p>
       <p style="margin:2px 0">Oluşturan: ${escapeHtml(options.olusturan || '—')} · ${new Date().toLocaleString('tr-TR')}</p>
     </div>
+    ${buildKaynakOzetHtml(rows)}
     ${buildPersonelHarcamaOzetHtml(rows)}
-    ${buildMasrafTableHtml(rows, toplam)}
+    ${buildKaynakGrupluMasrafHtml(rows)}
     ${buildFotoGridHtml(rows)}
     <footer style="margin-top:20px;padding-top:10px;border-top:1px solid #e2e8f0;font-size:10px;color:#94a3b8;text-align:center">
       Kibritçi ERP · Haftalık Kasa · Aralık harcama dökümü
@@ -767,14 +905,28 @@ export function buildKasaCikisMailPlainText(
   let borc = 0;
   let personel = 0;
   let kasa = 0;
+  let soforSum = 0;
+  let kasaDigerSum = 0;
   const byKisi = new Map<string, number>();
   const lines: string[] = [
     'KASA HARCAMA / ÇIKIŞ DÖKÜMÜ',
     `Tarih aralığı: ${start} — ${end}`,
     `Kalem: ${rows.length}`,
     '',
-    '── KİŞİ BAZLI TOPLAM ──',
+    '── KAYNAK ÖZETİ ──',
   ];
+
+  rows.forEach((r) => {
+    const tutar = Number(r.tutar) || 0;
+    if (isSoforKaynakliKasaHareketi(r)) soforSum += tutar;
+    else kasaDigerSum += tutar;
+  });
+  lines.push(`Şoför harcamaları: −${soforSum.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺`);
+  lines.push(`Kasa harcamaları: −${kasaDigerSum.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺`);
+  lines.push(
+    `Genel toplam: −${(soforSum + kasaDigerSum).toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺`
+  );
+  lines.push('', '── KİŞİ BAZLI TOPLAM ──');
 
   rows.forEach((r) => {
     const who = String(r.personelAdi || r.surucu || 'Personel (adsız)').trim();
@@ -799,9 +951,10 @@ export function buildKasaCikisMailPlainText(
     else kasa += tutar;
 
     const who = String(r.personelAdi || r.surucu || '—').trim();
+    const kaynak = isSoforKaynakliKasaHareketi(r) ? 'ŞOFÖR' : 'KASA';
     const aciklama = String(r.aciklama || '—').replace(/\s+/g, ' ').trim();
     lines.push(
-      `${i + 1}) ${r.tarih} · ${kasaOdemeDurumuLabel(durum)} · −${tutar.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺`
+      `${i + 1}) ${r.tarih} · ${kaynak} · ${kasaOdemeDurumuLabel(durum)} · −${tutar.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺`
     );
     lines.push(`   ${aciklama.slice(0, 160)}${aciklama.length > 160 ? '…' : ''}`);
     lines.push(

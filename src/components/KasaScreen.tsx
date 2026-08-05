@@ -1563,9 +1563,25 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
             </button>
             <button 
               onClick={() => {
-                exportKasaExcel(filteredHareketler, appliedStartDate, appliedEndDate);
+                void (async () => {
+                  try {
+                    await exportKasaExcel(
+                      filteredHareketler,
+                      appliedStartDate,
+                      appliedEndDate,
+                      personeller
+                    );
+                  } catch (err) {
+                    console.error('[kasa-excel]', err);
+                    alert(
+                      'Kasa Excel oluşturulamadı:\n' +
+                        (err instanceof Error ? err.message : String(err))
+                    );
+                  }
+                })();
               }}
               className="bg-emerald-600 hover:bg-emerald-700 border border-emerald-700 text-white text-[11px] font-bold py-1.5 px-3 rounded-lg flex items-center space-x-1.5 transition cursor-pointer text-left"
+              title="Kibritçi antetli · kişi bazlı · fiş fotoğraflı Excel"
             >
               <FileText size={12} />
               <span>Kasa Excel</span>
