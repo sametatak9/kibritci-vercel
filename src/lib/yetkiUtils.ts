@@ -38,7 +38,8 @@ export type PortalPageKey = (typeof PORTAL_PAGES)[number]["key"];
 
 /** Mobil saha rolleri → erişilebilir panel sekmeleri */
 export const MOBILE_ROLE_ALLOWED_TABS: Record<string, PortalPageKey[]> = {
-  FORMEN: ['formen_ekrani', 'faaliyet_personel', 'saha_is_plan', 'rapor_programlama', 'personel'],
+  // Formen günlük planı yönetirken ana sayfadaki genel özeti de görebilir.
+  FORMEN: ['ana_sayfa', 'formen_ekrani', 'faaliyet_personel', 'saha_is_plan', 'rapor_programlama', 'personel'],
   GÜVENLİK: ['guvenlik_ekrani'],
   KAMPÇI: ['kampci_ekrani'],
   TESİSATÇI: ['tesisatci_ekrani'],
