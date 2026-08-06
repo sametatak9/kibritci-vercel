@@ -177,7 +177,7 @@ var MOBILE_ROLE_ALLOWED_TABS, MOBILE_ROLE_HOME_TAB;
 var init_yetkiUtils = __esm({
   "src/lib/yetkiUtils.ts"() {
     MOBILE_ROLE_ALLOWED_TABS = {
-      FORMEN: ["formen_ekrani", "faaliyet_personel", "rapor_programlama", "personel"],
+      FORMEN: ["formen_ekrani", "faaliyet_personel", "saha_is_plan", "rapor_programlama", "personel"],
       G\u00DCVENL\u0130K: ["guvenlik_ekrani"],
       KAMP\u00C7I: ["kampci_ekrani"],
       TES\u0130SAT\u00C7I: ["tesisatci_ekrani"],

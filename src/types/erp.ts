@@ -657,6 +657,38 @@ export interface ProgramliFaaliyet {
   asamalar: ProgramliFaaliyetAsama[];
 }
 
+/** Düz işçi ekiplerinin günlük plan / gerçekleşme ve kanıt kaydı.
+ * Saha faaliyetlerinden bağımsız tutulur; mevcut faaliyet akışını etkilemez. */
+export type SahaIsPlanDurum = 'PLANLANDI' | 'BASLADI' | 'KONTROLDE' | 'TAMAMLANDI' | 'EKSIK_KALDI';
+
+export interface SahaIsPlanKaniti {
+  url: string;
+  tarih: string;
+  not?: string;
+}
+
+export interface SahaIsPlani {
+  id: string;
+  tarih: string;
+  parsel: string;
+  blok: string;
+  isTanimi: string;
+  birim: string;
+  planlananMiktar: number;
+  gerceklesenMiktar: number;
+  personelIds: string[];
+  durum: SahaIsPlanDurum;
+  baslangicSaati?: string;
+  bitisSaati?: string;
+  baslangicKaniti?: SahaIsPlanKaniti;
+  bitisKaniti?: SahaIsPlanKaniti;
+  gunSonuNotu?: string;
+  engelNotu?: string;
+  olusturan?: string;
+  olusturmaTarihi: string;
+  guncellemeTarihi: string;
+}
+
 /** Ay bazlı saha faaliyet foto kolajı / dergi albümü */
 export interface SahaKolajFoto {
   id: string;
