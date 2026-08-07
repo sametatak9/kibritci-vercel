@@ -853,11 +853,10 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
             updates.cariKartId = summary.cariKartId || updates.cariKartId || '';
             updates.matchSummary = summary;
             // Elle kalem varsa stok eşleşmiş haliyle tut; yoksa AI/taslak
+            // FIX: irsaliye.kalemler undefined olabilir → her durumda [] fallback
             updates.kalemler = hasManualKalem
-              ? irsaliye.kalemler?.length
-                ? irsaliye.kalemler
-                : existingKalemler
-              : irsaliye.kalemler;
+              ? (irsaliye.kalemler?.length ? irsaliye.kalemler : existingKalemler)
+              : (irsaliye.kalemler || existing.kalemler || []);
             if (hints?.saId || existing.saId) updates.saId = hints?.saId || existing.saId;
             if (summary.cariUnvan) updates.firma = summary.cariUnvan;
 
@@ -905,7 +904,8 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
           }
         }
 
-        await updateDoc(doc(db, 'guvenlikGelenEvraklar', docId), updates);
+        // FIX: cleanUndefined ile undefined alanlar Firestore'a gönderilmez
+        await updateDoc(doc(db, 'guvenlikGelenEvraklar', docId), cleanUndefined(updates));
       } else {
         await updateDoc(doc(db, 'guvenlikGelenEvraklar', docId), {
           aiStatus: 'FAILED',
