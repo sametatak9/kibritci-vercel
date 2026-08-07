@@ -707,9 +707,9 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
     };
 
     try {
-      await updateDoc(doc(db, 'guvenlikGelenEvraklar', docId), {
+      await updateDoc(doc(db, 'guvenlikGelenEvraklar', docId), cleanUndefined({
         aiStatus: 'PARSING'
-      });
+      }));
 
       // Elle girilen firma/kalem/no — YZ boş okursa silmesin
       let existing: Record<string, any> = {};
@@ -907,17 +907,17 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
         // FIX: cleanUndefined ile undefined alanlar Firestore'a gönderilmez
         await updateDoc(doc(db, 'guvenlikGelenEvraklar', docId), cleanUndefined(updates));
       } else {
-        await updateDoc(doc(db, 'guvenlikGelenEvraklar', docId), {
+        await updateDoc(doc(db, 'guvenlikGelenEvraklar', docId), cleanUndefined({
           aiStatus: 'FAILED',
           aiError: response?.error || 'Bilinmeyen YZ hatası'
-        });
+        }));
       }
     } catch (err: any) {
       console.error("Background AI parsing error:", err);
-      await updateDoc(doc(db, 'guvenlikGelenEvraklar', docId), {
+      await updateDoc(doc(db, 'guvenlikGelenEvraklar', docId), cleanUndefined({
         aiStatus: 'FAILED',
         aiError: err?.message || 'Bağlantı hatası'
-      });
+      }));
     }
   };
 
@@ -1434,7 +1434,7 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
         }
       }
 
-      await setDoc(doc(db, 'guvenlikGelenEvraklar', editingEvrak.id), patch, { merge: true });
+      await setDoc(doc(db, 'guvenlikGelenEvraklar', editingEvrak.id), cleanUndefined(patch), { merge: true });
 
       showStatus('success', 'Evrak bilgileri güncellendi.');
       setEditingEvrak(null);
@@ -1496,7 +1496,7 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
           });
         }
       }
-      await updateDoc(doc(db, 'guvenlikGelenEvraklar', evrak.id), patch);
+      await updateDoc(doc(db, 'guvenlikGelenEvraklar', evrak.id), cleanUndefined(patch));
       showStatus('success', `Cari önerisi uygulandı: ${oneri.unvan}`);
     } catch (err) {
       console.error(err);
@@ -1516,7 +1516,7 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
             ? 'guvenlikTankerLoglari'
             : 'guvenlikZiyaretciLoglari';
 
-    await setDoc(doc(db, collectionName, record.id), patch, { merge: true });
+    await setDoc(doc(db, collectionName, record.id), cleanUndefined(patch), { merge: true });
 
     // Mıcır/stabilize düzenlemesi → fiş + gelen evrak senkron
     if (kind === 'tanker' && record.tip === 'MICIR_STABILIZE' && record.micirFisId) {
@@ -1534,7 +1534,7 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
 
       await setDoc(
         doc(db, 'micirStabilizeFisleri', record.micirFisId),
-        {
+        cleanUndefined({
           tarih,
           irsaliyeNo,
           plaka,
@@ -1543,14 +1543,14 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
           malzemeTipi,
           firmaUnvan: ENTO_MADEN_UNVAN,
           guncellenme: new Date().toISOString(),
-        },
+        }),
         { merge: true }
       );
 
       if (record.guvenlikEvrakId) {
         await setDoc(
           doc(db, 'guvenlikGelenEvraklar', record.guvenlikEvrakId),
-          {
+          cleanUndefined({
             evrakNo: irsaliyeNo,
             tarih,
             plaka,
@@ -1560,7 +1560,7 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
             firma: ENTO_MADEN_UNVAN,
             aciklama: `Kapı ${malzemeTipiLabel(malzemeTipi)} irsaliye teslimi · Plaka ${plaka} · ${formatMicirMiktarLabel(tonaj, kiloKg)}`,
             kalemler: buildMicirKalemler(record.micirFisId, tonaj, malzemeTipi, kiloKg),
-          },
+          }),
           { merge: true }
         );
       }
@@ -1835,11 +1835,11 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
       const archiveRef = doc(collection(db, 'guvenlikNobetArsivleri'));
       const archiveId = archiveRef.id;
 
-      await setDoc(archiveRef, {
+      await setDoc(archiveRef, cleanUndefined({
         id: archiveId,
         ...archivePayload,
         raporHtml,
-      });
+      }));
 
       if (addNotification) {
         const shiftText =
@@ -1973,7 +1973,7 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
           const timePart = String(log.zaman || getIslemZamani()).slice(11);
           return setDoc(
             doc(db, 'guvenlikGirisCikisLoglari', id),
-            { islemTarihi, zaman: `${islemTarihi}T${timePart || '12:00:00.000Z'}` },
+            cleanUndefined({ islemTarihi, zaman: `${islemTarihi}T${timePart || '12:00:00.000Z'}` }),
             { merge: true }
           );
         })
@@ -2001,7 +2001,7 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
           const timePart = String(log.girisZamani || getIslemZamani()).slice(11);
           return setDoc(
             doc(db, 'guvenlikAracLoglari', id),
-            { islemTarihi, girisZamani: `${islemTarihi}T${timePart || '12:00:00.000Z'}` },
+            cleanUndefined({ islemTarihi, girisZamani: `${islemTarihi}T${timePart || '12:00:00.000Z'}` }),
             { merge: true }
           );
         })
@@ -2029,7 +2029,7 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
           const timePart = String(log.girisZamani || getIslemZamani()).slice(11);
           return setDoc(
             doc(db, 'guvenlikSuTankeriLoglari', id),
-            { islemTarihi, girisZamani: `${islemTarihi}T${timePart || '12:00:00.000Z'}` },
+            cleanUndefined({ islemTarihi, girisZamani: `${islemTarihi}T${timePart || '12:00:00.000Z'}` }),
             { merge: true }
           );
         })
@@ -2092,7 +2092,7 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
         firmaAdi: firmaEtiketi(personel),
       };
 
-      await setDoc(doc(db, 'guvenlikGirisCikisLoglari', logId), logData);
+      await setDoc(doc(db, 'guvenlikGirisCikisLoglari', logId), cleanUndefined(logData));
       if (addNotification) {
         addNotification(`${personel.ad} ${personel.soyad} için şantiyeye ${tip} kaydı yapıldı.`);
       }
@@ -2132,7 +2132,7 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
         kaydeden: currentUser?.email || 'guvenlik_gate'
       };
 
-      await setDoc(doc(db, 'guvenlikAracLoglari', logId), logData);
+      await setDoc(doc(db, 'guvenlikAracLoglari', logId), cleanUndefined(logData));
       if (addNotification) {
         addNotification(`${plaka.toUpperCase().trim()} plakalı araç (${aracFirma}) şantiyeye giriş yaptı.`);
       }
@@ -2151,10 +2151,10 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
     try {
       const matchedArac = iceridekiAraclar.find(a => a.id === id);
       const vehiclePlaka = matchedArac ? matchedArac.plaka : id;
-      await setDoc(doc(db, 'guvenlikAracLoglari', id), {
+      await setDoc(doc(db, 'guvenlikAracLoglari', id), cleanUndefined({
         durum: 'ÇIKTI',
         cikisZamani: getIslemZamani()
-      }, { merge: true });
+      }), { merge: true });
       if (addNotification) {
         addNotification(`${vehiclePlaka} plakalı araç şantiyeden çıkış yaptı.`);
       }
@@ -2259,7 +2259,7 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
         logData.onayDurumu = 'YONETICI_ONAYINDA';
       }
 
-      await setDoc(doc(db, 'guvenlikTankerLoglari', logId), logData);
+      await setDoc(doc(db, 'guvenlikTankerLoglari', logId), cleanUndefined(logData));
 
       // Mıcır/Stabilize = ENTO MADEN kapı irsaliyesi → yönetici onayı sonrası irsaliye + cari (+ SA)
       if (isMicir && micirFisId && guvenlikEvrakId && irsaliyeId) {
@@ -2284,11 +2284,11 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
           olusturulma: new Date().toISOString(),
           guncellenme: new Date().toISOString(),
         };
-        await setDoc(doc(db, 'micirStabilizeFisleri', micirFisId), fis);
+        await setDoc(doc(db, 'micirStabilizeFisleri', micirFisId), cleanUndefined(fis));
         const saNotu = saMatch ? ` · SA ${saMatch.sa.saId}` : '';
         await setDoc(
           doc(db, 'guvenlikGelenEvraklar', guvenlikEvrakId),
-          {
+          cleanUndefined({
             id: guvenlikEvrakId,
             evrakNo: fis.irsaliyeNo,
             evrakTuru: 'İRSALİYE',
@@ -2316,7 +2316,7 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
               saKalemId: saMatch?.kalem.id,
             })),
             aiStatus: 'SKIPPED',
-          },
+          }),
           { merge: true }
         );
       }
@@ -2404,7 +2404,7 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
 
       await setDoc(
         doc(db, 'guvenlikTankerLoglari', id),
-        { durum: 'ÇIKTI', cikisZamani: getIslemZamani() },
+        cleanUndefined({ durum: 'ÇIKTI', cikisZamani: getIslemZamani() }),
         { merge: true }
       );
       if (addNotification) {
@@ -2443,7 +2443,7 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
         kartNo: `ZK-${Math.floor(1000 + Math.random() * 9000)}`
       };
 
-      await setDoc(doc(db, 'guvenlikZiyaretciLoglari', id), logData);
+      await setDoc(doc(db, 'guvenlikZiyaretciLoglari', id), cleanUndefined(logData));
       if (addNotification) {
         addNotification(`Ziyaretçi ${ziyaretciAd} (${logData.firma}) şantiyeye giriş yaptı.`);
       }
@@ -2467,10 +2467,10 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
     try {
       const matchedGuest = aktifZiyaretciler.find(z => z.id === id);
       const guestName = matchedGuest ? matchedGuest.adSoyad : id;
-      await setDoc(doc(db, 'guvenlikZiyaretciLoglari', id), {
+      await setDoc(doc(db, 'guvenlikZiyaretciLoglari', id), cleanUndefined({
         durum: 'ÇIKTI',
         cikisZamani: getIslemZamani()
-      }, { merge: true });
+      }), { merge: true });
       if (addNotification) {
         addNotification(`Ziyaretçi ${guestName} şantiyeden çıkış yaptı.`);
       }
