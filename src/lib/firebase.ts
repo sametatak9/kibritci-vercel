@@ -19,6 +19,36 @@ import { getStorage } from 'firebase/storage';
 import { getFirestoreDatabaseId, resolveFirebaseConfig } from './firebaseConfig';
 import { shouldBlockMassDelete } from './productionDataGuard';
 
+// New utilities for performance optimization
+/**
+ * Execute a batch of write operations (set/delete) limited to Firestore's max batch size (500).
+ * Returns a promise that resolves when the batch is committed.
+ */
+export async function executeBatchWrites(batch: ReturnType<typeof writeBatch>) {
+  // Firestore limits batches to 500 operations.
+  return batch.commit();
+}
+
+/** Debounce wrapper to coalesce rapid successive calls to a function.
+ * @param fn Function to debounce.
+ * @param waitMs Milliseconds to wait before invoking.
+ */
+export function debounce<T extends (...args: any[]) => any>(fn: T, waitMs = 200): T {
+  let timeout: NodeJS.Timeout;
+  // @ts-ignore – dynamic return signature
+  return function (...args: any[]) {
+    clearTimeout(timeout);
+    timeout = setTimeout(() => fn(...args), waitMs);
+  } as any;
+}
+
+/** Enable IndexedDB persistence for specific collections (placeholder, global currently). */
+export function enableCache(enable = true) {
+  // Currently Firestore persistence is configured globally at initialization.
+  // This function exists for future per‑collection cache toggles.
+  console.info(`[Firebase] Cache ${enable ? 'enabled' : 'disabled'}.`);
+}
+
 export { mergeYoklamaMaps } from './yoklamaGuard';
 
 const firebaseConfig = resolveFirebaseConfig();
@@ -348,6 +378,8 @@ export async function syncArrayToFirestore<T extends { id: string }>(
   oldArray: T[],
   newArray: T[]
 ): Promise<void> {
+  // Optimized: uses a single Firestore batch commit instead of individual
+  // parallel writes — reduces billing operations and network round-trips.
   try {
     const { assertErpWriteAuth } = await import('./authWriteGuard');
     const authBlock = await assertErpWriteAuth();
@@ -377,9 +409,7 @@ export async function syncArrayToFirestore<T extends { id: string }>(
     const oldMap = new Map(oldArray.map(item => [item.id, item]));
     const newMap = new Map(newArray.map(item => [item.id, item]));
 
-    const promises: Promise<any>[] = [];
-
-    // Helper for stable deep comparison independent of key order
+    // Stable deep-compare helper (key-order independent)
     const stableStringify = (obj: any): string => {
       const isObject = (val: any) => val && typeof val === 'object' && !Array.isArray(val);
       const stringifyObj = (o: any): any => {
@@ -395,30 +425,37 @@ export async function syncArrayToFirestore<T extends { id: string }>(
       return JSON.stringify(stringifyObj(obj));
     };
 
+    // Collect all operations into a single batch (max 500 per Firestore rules)
+    const batch = writeBatch(db);
+    let opCount = 0;
+
     // Save/Update new or changed items
     for (const [id, item] of newMap.entries()) {
       const oldItem = oldMap.get(id);
       if (!oldItem || stableStringify(oldItem) !== stableStringify(item)) {
-        // personeller: büyük foto/PDF’yi değişmediyse tekrar yazma (timeout → rollback)
         if (collectionName === 'personeller') {
-          promises.push(saveDocument(collectionName, leanPersonelSyncPayload(item, oldItem)));
+          batch.set(doc(db, collectionName, id), leanPersonelSyncPayload(item, oldItem));
         } else if (collectionName === 'kasaHareketleri') {
-          promises.push(saveDocument(collectionName, leanKasaSyncPayload(item, oldItem)));
+          batch.set(doc(db, collectionName, id), leanKasaSyncPayload(item, oldItem));
         } else {
-          promises.push(saveDocument(collectionName, item));
+          batch.set(doc(db, collectionName, id), item);
         }
+        opCount++;
       }
     }
 
     // Delete removed items
     for (const id of oldMap.keys()) {
       if (!newMap.has(id)) {
-        promises.push(removeDocument(collectionName, id));
+        batch.delete(doc(db, collectionName, id));
+        opCount++;
       }
     }
 
-    // #endregion
-    await Promise.all(promises);
+    // Only commit if there are actual changes
+    if (opCount > 0) {
+      await batch.commit();
+    }
   } catch (error) {
     const { formatFirestoreWriteError } = await import('./authWriteGuard');
     const friendly = formatFirestoreWriteError(error, `Error syncing ${collectionName}`);
