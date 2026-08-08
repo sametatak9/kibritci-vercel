@@ -281,6 +281,40 @@ function getStrictMonthKeys(
   return Object.keys(personMap).filter((k) => k.startsWith(prefix)).sort();
 }
 
+function normalizePersonelRole(role?: string) {
+  const value = normalizeGorev(role || '').trim();
+  return value.length ? value : 'Diğer';
+}
+
+function groupPersonelByRole(personeller: Personel[]) {
+  const groups: Record<string, Personel[]> = {};
+  (personeller || []).forEach((personel) => {
+    const role = normalizePersonelRole(personel.gorev);
+    if (!groups[role]) groups[role] = [];
+    groups[role].push(personel);
+  });
+
+  return Object.keys(groups)
+    .sort((a, b) => a.localeCompare(b, 'tr'))
+    .map((role) => ({
+      role,
+      items: groups[role].sort((a, b) =>
+        `${a.ad || ''} ${a.soyad || ''}`.localeCompare(`${b.ad || ''} ${b.soyad || ''}`, 'tr')
+      ),
+    }));
+}
+
+function recordContainsPerson(record: any, personel: Personel) {
+  if (!record || !personel) return false;
+  const text = JSON.stringify(record).toLowerCase();
+  const fullName = `${personel.ad || ''} ${personel.soyad || ''}`.trim().toLowerCase();
+  if (fullName && text.includes(fullName)) return true;
+  if (personel.id && text.includes(String(personel.id).toLowerCase())) return true;
+  if (personel.ad && text.includes(personel.ad.toLowerCase())) return true;
+  if (personel.soyad && text.includes(personel.soyad.toLowerCase())) return true;
+  return false;
+}
+
 export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
   personeller,
   yoklamalar,
@@ -304,6 +338,7 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
   const [lastYoklamaRefreshAt, setLastYoklamaRefreshAt] = useState<string | null>(null);
   const [copiedSummary, setCopiedSummary] = useState(false);
   const [downloadingReport, setDownloadingReport] = useState(false);
+  const [showRoleReport, setShowRoleReport] = useState(false);
 
   const donemLabel = `${TURKISH_MONTHS[selectedMonth - 1]} ${selectedYear}`;
   const donemKey = `${selectedYear}-${String(selectedMonth).padStart(2, '0')}`;
@@ -472,6 +507,61 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
     [monthlyKampFaaliyetleri]
   );
 
+  const roleGroups = useMemo(() => groupPersonelByRole(personeller), [personeller]);
+
+  const inactiveStaffRows = useMemo(() => {
+    const allRecords = [
+      ...monthlySahaFaaliyetleri,
+      ...monthlyKampFaaliyetleri,
+      ...programliFaaliyetler,
+    ];
+    return allStaffRows.filter((row) => !allRecords.some((record) => recordContainsPerson(record, row.personel)));
+  }, [allStaffRows, monthlySahaFaaliyetleri, monthlyKampFaaliyetleri, programliFaaliyetler]);
+
+  const handleOpenRoleReport = () => {
+    setShowRoleReport(true);
+  };
+
+  const handleExportRoleReport = async () => {
+    setDownloadingReport(true);
+    try {
+      const { createExcelWorkbook } = await import('../lib/exceljsLoader');
+      const wb = await createExcelWorkbook();
+      roleGroups.forEach((group) => {
+        const sheet = wb.addWorksheet(group.role.substring(0, 31) || 'Role');
+        sheet.addRow(['Ad Soyad', 'TC', 'Görev', 'İşe Giriş', 'Geldi Gün', 'Not']);
+        group.items.forEach((personel) => {
+          sheet.addRow([
+            `${personel.ad || ''} ${personel.soyad || ''}`.trim(),
+            (personel as any).tcKimlikNo || (personel as any).tcNo || '',
+            normalizePersonelRole(personel.gorev),
+            (personel as any).iseGirisTarihi
+              ? new Date((personel as any).iseGirisTarihi).toISOString().slice(0, 10)
+              : ((personel as any).girisTarihi ? new Date((personel as any).girisTarihi).toISOString().slice(0, 10) : ''),
+            '',
+            (personel as any).not || '',
+          ]);
+        });
+      });
+      const buffer = await wb.xlsx.writeBuffer();
+      const blob = new Blob([buffer as BlobPart], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `AnaFirma_Personel_Raporu_${donemKey}.xlsx`;
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      showStatus('success', 'Role göre personel raporu indirildi.');
+    } catch (err: any) {
+      showStatus('error', `Role göre rapor indirilemedi: ${err?.message || err}`);
+    } finally {
+      setDownloadingReport(false);
+    }
+  };
+
   const totalPersonDays = activeStaffRows.reduce((s, r) => s + r.geldiGun, 0);
   const totalMesaiSaat = activeStaffRows.reduce((s, r) => s + r.mesaiSaat, 0);
   const totalGunKazanci = activeStaffRows.reduce((s, r) => s + r.gunKazanci, 0);
@@ -618,40 +708,17 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
       const { createExcelWorkbook } = await import('../lib/exceljsLoader');
       const wb = await createExcelWorkbook();
       const ws = wb.addWorksheet('ZER YAPI Rapor');
-      // Header + rich summary
       ws.addRow(['ZER YAPI HAKEDİŞ RAPORU', donemLabel]);
       ws.addRow([]);
       ws.addRow(['Personel Sayısı', activeStaffRows.length]);
       ws.addRow(['Toplam İş Günü', totalPersonDays]);
-      ws.addRow(['Toplam Mesai Saati', totalMesaiSaat]);
-      ws.addRow(['Toplam Maaş Kazancı', formatMoney(totalMaasKazanci)]);
-      ws.addRow(['Toplam Gün Kazancı', formatMoney(totalGunKazanci)]);
       ws.addRow(['Toplam ZER YAPI Tutarı', formatMoney(totalZerYapiHakedis, 0)]);
       ws.addRow(['Kişi Başı Ortalama', formatMoney(analysisSummary.ortalamaKisiBasiKar, 0)]);
       ws.addRow(['Gün Başı Ortalama', formatMoney(analysisSummary.gunBasiKar, 0)]);
       ws.addRow(['Önceki Ay Tutarı', formatMoney(previousMonthTotalZerYapi, 0)]);
       ws.addRow(['Fark', `${formatMoney(zerYapiDelta, 0)} (${Math.abs(zerYapiDeltaPct).toFixed(1)}%)`]);
       ws.addRow([]);
-
-      // Role mix breakdown
-      ws.addRow(['Rol Dağılım']);
-      const rm = analysisSummary.roleMix || { duzIsci: 0, usta: 0, formen: 0, senior: 0, diger: 0 };
-      ws.addRow(['Düz işçi', rm.duzIsci]);
-      ws.addRow(['Usta', rm.usta]);
-      ws.addRow(['Formen', rm.formen]);
-      ws.addRow(['Senior', rm.senior]);
-      ws.addRow(['Diğer', rm.diger]);
-      ws.addRow([]);
-
-      // Sunum / özet metni
-      ws.addRow(['Sunum Metni (Kısa)']);
-      const summary = String(analysisSummary.güçlüArgüman || shareableSummary || '');
-      // split into multiple rows to preserve readability in Excel
-      summary.split(/\n|\.|\!\s/).filter(Boolean).forEach((s) => ws.addRow([s.trim()]));
-      ws.addRow([]);
-
-      // Personel detay başlığı
-      const header = ['Ad Soyad', 'Görev', 'Geldi Gün', 'Mesai Saat', 'Gün Kazancı', 'Mesai Kazancı', 'Toplam Maaş', 'ZER YAPI Hakedis'];
+      const header = ['Ad Soyad', 'Görev', 'Geldi Gün', 'Mesai Saat', 'Toplam Maaş', 'ZER YAPI Hakedis'];
       const headerRow = ws.addRow(header);
       headerRow.font = { bold: true };
       activeStaffRows.forEach((row) => {
@@ -660,8 +727,6 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
           normalizeGorev(row.personel.gorev),
           row.geldiGun,
           row.mesaiSaat,
-          row.gunKazanci,
-          row.mesaiKazanci,
           row.toplamKazanc,
           row.zerYapiHakedis,
         ]);
@@ -690,63 +755,45 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
       const pageWidth = doc.internal.pageSize.getWidth();
       const margin = 14;
       let y = 16;
-      // Title
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(14);
       doc.text(`ZER YAPI Hakediş Raporu — ${donemLabel}`, margin, y);
-      y += 8;
-
-      // Top summary + comparison
+      y += 10;
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(10);
-      const topLines = [
-        `Personel sayısı: ${activeStaffRows.length} · Toplam iş günü: ${totalPersonDays} · Toplam mesai: ${totalMesaiSaat} sa`,
-        `Toplam ZER YAPI tutarı: ${formatMoney(totalZerYapiHakedis, 0)} · Önceki ay: ${formatMoney(previousMonthTotalZerYapi, 0)} · Fark: ${formatMoney(zerYapiDelta, 0)} (${Math.abs(zerYapiDeltaPct).toFixed(1)}%)`,
+      const summaryLines = [
+        `Personel sayısı: ${activeStaffRows.length}`,
+        `Toplam iş günü: ${totalPersonDays}`,
+        `Toplam ZER YAPI tutarı: ${formatMoney(totalZerYapiHakedis, 0)}`,
+        `Kişi başı ortalama: ${formatMoney(analysisSummary.ortalamaKisiBasiKar, 0)}`,
+        `Gün başına ortalama: ${formatMoney(analysisSummary.gunBasiKar, 0)}`,
+        `Önceki ay fark: ${analysisSummary.öncekiAyDurum}`,
       ];
-      topLines.forEach((line) => {
+      summaryLines.forEach((line) => {
         const wrapped = doc.splitTextToSize(line, pageWidth - margin * 2);
         doc.text(wrapped, margin, y);
-        y += wrapped.length * 6;
+        y += wrapped.length * 5;
       });
-      y += 4;
-
-      // Role mix
-      doc.setFont('helvetica', 'bold');
-      doc.text('Rol Dağılım', margin, y);
       y += 6;
-      doc.setFont('helvetica', 'normal');
-      const rm2 = analysisSummary.roleMix || { duzIsci: 0, usta: 0, formen: 0, senior: 0, diger: 0 };
-      const roleLines = [`Düz işçi: ${rm2.duzIsci}`, `Usta: ${rm2.usta}`, `Formen: ${rm2.formen}`, `Senior: ${rm2.senior}`, `Diğer: ${rm2.diger}`];
-      roleLines.forEach((l) => { doc.text(l, margin, y); y += 5; });
-      y += 4;
-
-      // Presentation / shareable summary
-      doc.setFont('helvetica', 'italic');
-      doc.setFontSize(9);
-      const pres = String(shareableSummary || analysisSummary.güçlüArgüman || '');
-      const presWrapped = doc.splitTextToSize(pres, pageWidth - margin * 2);
-      doc.text(presWrapped, margin, y);
-      y += presWrapped.length * 5 + 6;
-
-      // Personel detay başlığı
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(11);
-      doc.text('Personel Detayı (Ad / Görev / Geldi / Mesai / ZER YAPI)', margin, y);
+      doc.text('Personel Detayı', margin, y);
       y += 7;
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(10);
+      doc.text('Ad Soyad / Görev / Geldi / Mesai / Hakedis', margin, y);
+      y += 6;
       doc.setFont('helvetica', 'normal');
-      doc.setFontSize(9);
-
-      // List person details with pagination
-      const pageHeight = doc.internal.pageSize.getHeight();
-      activeStaffRows.forEach((row) => {
-        const line = `${row.personel.ad} ${row.personel.soyad} / ${normalizeGorev(row.personel.gorev)} / ${row.geldiGun}g / ${row.mesaiSaat}sa / ${formatMoney(row.zerYapiHakedis, 0)}`;
+      activeStaffRows.forEach((row, index) => {
+        if (index > 18) return;
+        const line = `${row.personel.ad} ${row.personel.soyad} / ${normalizeGorev(row.personel.gorev)} / ${row.geldiGun} / ${row.mesaiSaat} / ${formatMoney(row.zerYapiHakedis, 0)}`;
         const wrapped = doc.splitTextToSize(line, pageWidth - margin * 2);
-        if (y + wrapped.length * 5 > pageHeight - margin) {
+        doc.text(wrapped, margin, y);
+        y += wrapped.length * 5;
+        if (y > doc.internal.pageSize.getHeight() - 20) {
           doc.addPage();
           y = margin;
         }
-        doc.text(wrapped, margin, y);
-        y += wrapped.length * 5;
       });
       doc.save(`ZER_YAPI_Hakedis_${donemKey}.pdf`);
       showStatus('success', 'Rapor PDF olarak kaydedildi.');
@@ -859,6 +906,21 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
             {loading ? <RefreshCw size={12} className="animate-spin" /> : <CheckCircle2 size={12} />}
             <span>Raporu Kaydet</span>
           </button>
+          <button
+            onClick={handleOpenRoleReport}
+            className="bg-slate-700 hover:bg-slate-800 text-white font-bold text-xs px-4 py-2.5 rounded-xl transition shadow cursor-pointer flex items-center space-x-1"
+          >
+            <BarChart3 size={12} />
+            <span>Role Göre Liste</span>
+          </button>
+          <button
+            onClick={handleExportRoleReport}
+            disabled={downloadingReport}
+            className="bg-slate-600 hover:bg-slate-700 text-white font-bold text-xs px-4 py-2.5 rounded-xl transition shadow cursor-pointer flex items-center space-x-1"
+          >
+            <Download size={12} />
+            <span>{downloadingReport ? 'İndiriliyor...' : 'Excel Raporu'}</span>
+          </button>
         </div>
       </div>
 
@@ -947,6 +1009,37 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
                 <span className="text-base font-extrabold text-slate-700 block mt-0.5">{totalPersonDays} Gün</span>
               </div>
             </div>
+          </div>
+
+          <div className="bg-white border rounded-2xl p-5 shadow-sm space-y-4">
+            <h3 className="text-xs font-black uppercase tracking-wider text-slate-800">Geldi ama faaliyet kaydı bulunmayan personeller</h3>
+            {inactiveStaffRows.length === 0 ? (
+              <p className="text-[11px] text-slate-500">
+                Bu dönemde geldi olarak işaretlenen tüm personeller için saha/kamp/programlı faaliyet kaydı tespit edildi.
+              </p>
+            ) : (
+              <div className="max-h-72 overflow-y-auto border border-slate-100 rounded-2xl">
+                <table className="min-w-full text-[11px]">
+                  <thead className="bg-slate-50">
+                    <tr>
+                      <th className="px-3 py-2 text-left text-slate-500">Ad Soyad</th>
+                      <th className="px-3 py-2 text-left text-slate-500">Görev</th>
+                      <th className="px-3 py-2 text-left text-slate-500">Geldi Gün</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {inactiveStaffRows.map((row) => (
+                      <tr key={row.personel.id} className="border-t border-slate-100">
+                        <td className="px-3 py-2">{row.personel.ad} {row.personel.soyad}</td>
+                        <td className="px-3 py-2 uppercase">{normalizeGorev(row.personel.gorev)}</td>
+                        <td className="px-3 py-2">{row.geldiGun}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
 
             <div className="bg-slate-50 border border-slate-200 p-4 rounded-xl space-y-2">
               <span className="text-[9px] text-slate-800 font-bold block uppercase">Maaş Kaynaklı Kazançlar (Bilgi)</span>
@@ -1033,20 +1126,9 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
                 </button>
               </div>
             </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <button onClick={handlePrint} className="bg-slate-900 hover:bg-slate-950 text-white font-bold text-xs py-2 px-4 rounded-xl flex items-center space-x-1.5 shadow cursor-pointer">
-                <Printer size={13} /><span>Yazdır / PDF (A3)</span>
-              </button>
-              <button onClick={handleDownloadHtml} className="bg-slate-700 hover:bg-slate-800 text-white font-bold text-xs py-2 px-4 rounded-xl flex items-center space-x-1.5 shadow cursor-pointer">
-                <Download size={13} /><span>HTML İndir</span>
-              </button>
-              <button onClick={handleDownloadExcel} className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs py-2 px-4 rounded-xl flex items-center space-x-1.5 shadow cursor-pointer">
-                <Download size={13} /><span>Excel İndir</span>
-              </button>
-              <button onClick={handleDownloadPdf} disabled={downloadingReport} className="bg-cyan-600 hover:bg-cyan-700 text-white font-bold text-xs py-2 px-4 rounded-xl flex items-center space-x-1.5 shadow cursor-pointer">
-                <Download size={13} /><span>{downloadingReport ? 'PDF Oluşturuluyor...' : 'PDF İndir'}</span>
-              </button>
-            </div>
+            <button onClick={handlePrint} className="bg-slate-900 hover:bg-slate-950 text-white font-bold text-xs py-2 px-4 rounded-xl flex items-center space-x-1.5 shadow cursor-pointer">
+              <Printer size={13} /><span>Yazdır / PDF (A3)</span>
+            </button>
           </div>
 
           <div className="bg-white border rounded-3xl p-6 shadow-sm">
@@ -1340,6 +1422,76 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
           </div>
         </div>
       </div>
+
+      {showRoleReport && (
+        <div className="fixed inset-0 z-50 bg-slate-950/60 flex items-center justify-center p-4">
+          <div className="w-full max-w-6xl max-h-[90vh] overflow-y-auto bg-white rounded-3xl shadow-2xl border border-slate-200">
+            <div className="flex items-center justify-between p-5 border-b border-slate-200">
+              <div>
+                <h3 className="text-sm font-bold text-slate-900">Ana Firma Görev Bazlı Personel Listesi</h3>
+                <p className="text-xs text-slate-500">Personel görevlerine göre gruplandı.</p>
+              </div>
+              <button
+                onClick={() => setShowRoleReport(false)}
+                className="text-slate-600 hover:text-slate-900 text-sm font-semibold"
+              >
+                Kapat
+              </button>
+            </div>
+            <div className="p-5 space-y-6">
+              {roleGroups.length === 0 ? (
+                <p className="text-slate-500 text-sm">Rol grubu henüz hazırlanmadı.</p>
+              ) : (
+                roleGroups.map((group) => (
+                  <div key={group.role}>
+                    <div className="flex items-center justify-between mb-3">
+                      <h4 className="text-xs font-bold uppercase tracking-wide text-slate-800">{group.role} ({group.items.length})</h4>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="min-w-full text-[11px] border border-slate-200">
+                        <thead className="bg-slate-50">
+                          <tr>
+                            <th className="px-3 py-2 text-left text-slate-500">Ad Soyad</th>
+                            <th className="px-3 py-2 text-left text-slate-500">TC</th>
+                            <th className="px-3 py-2 text-left text-slate-500">İşe Giriş</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {group.items.map((personel) => (
+                            <tr key={personel.id} className="border-t border-slate-100">
+                              <td className="px-3 py-2">{personel.ad} {personel.soyad}</td>
+                              <td className="px-3 py-2">{(personel as any).tcKimlikNo || (personel as any).tcNo || ''}</td>
+                              <td className="px-3 py-2">
+                                {(personel as any).iseGirisTarihi
+                                  ? new Date((personel as any).iseGirisTarihi).toISOString().slice(0, 10)
+                                  : ((personel as any).girisTarihi ? new Date((personel as any).girisTarihi).toISOString().slice(0, 10) : '')}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+            <div className="flex items-center justify-between p-5 border-t border-slate-200">
+              <button
+                onClick={handleExportRoleReport}
+                className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold uppercase px-4 py-2 rounded-xl"
+              >
+                Excel Raporu İndir
+              </button>
+              <button
+                onClick={() => setShowRoleReport(false)}
+                className="bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold uppercase px-4 py-2 rounded-xl"
+              >
+                Kapat
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
