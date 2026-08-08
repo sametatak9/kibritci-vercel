@@ -12,6 +12,7 @@ import {
   exportSeciliPersonelExcel,
   exportTaseronPersonelExcel,
   exportTumFirmalarPersonelExcel,
+  openPersonelListeRaporu,
 } from '../lib/taseronPersonelExcelExport';
 import { printAnaFirmaGorevPersonelReport } from '../lib/anaFirmaGorevPersonelRapor';
 import {
@@ -1101,6 +1102,19 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
     printAnaFirmaGorevPersonelReport(personeller, { onlyActive: showOnlyActive });
   };
 
+  const handleOpenSeciliPersonelRaporu = () => {
+    try {
+      openPersonelListeRaporu({
+        rows: filteredPersonel,
+        onlyActive: showOnlyActive,
+        title: `${CANONICAL_ANA_FIRMA_ADI} — ${firmaFilterSummary} Personel Listesi`,
+        subtitle: 'Seçili filtre · firma bazlı şık rapor',
+      });
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Rapor oluşturulamadı.');
+    }
+  };
+
   const handleExportSeciliExcel = async () => {
     if (filteredPersonel.length === 0) {
       alert('Dışa aktarılacak personel bulunamadı. Filtreleri kontrol edin.');
@@ -1973,6 +1987,15 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
               title={`Listedeki ${filteredPersonel.length} personeli CSV/HTML olarak dışa aktar`}
             >
               <Download size={12} /> Dışa Aktar ({filteredPersonel.length})
+            </button>
+            <button
+              type="button"
+              onClick={handleOpenSeciliPersonelRaporu}
+              disabled={filteredPersonel.length === 0}
+              className="flex items-center gap-1.5 text-[10px] font-bold px-3 py-2 bg-[#1e4e78] text-white rounded-xl hover:bg-[#173b5b] disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+              title="Ekrandaki seçili filtreyle antetli, yazdırılabilir personel listesi raporu aç"
+            >
+              <Printer size={12} /> Şık Rapor ({filteredPersonel.length})
             </button>
             <button
               type="button"
