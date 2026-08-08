@@ -4,7 +4,7 @@ import {
   Truck, Tent, Clock, ClipboardList, Sparkles, ChevronRight, Activity, FileSpreadsheet
 } from 'lucide-react';
 import { Personel, AylikYoklamaMap, AracBakim, KampKaydi, KampOdasi, HazirTutanak, KasaHareketi, SahaFaaliyeti } from '../types/erp';
-import { getYoklamaDay, iterateMonthYoklama, isDayActiveForPersonel, asYoklamaGunMap, parseYoklamaDateKey } from '../lib/yoklamaUtils';
+import { getYoklamaDay, iterateMonthYoklama, isDayActiveForPersonel, asYoklamaGunMap, parseYoklamaDateKey, normalizeTurkishName } from '../lib/yoklamaUtils';
 import { PersonelIdCard } from './PersonelIdCard';
 import { db } from '../lib/firebase';
 import { collection, getDocs } from 'firebase/firestore';
@@ -176,12 +176,12 @@ export const PersonelKartlariScreen: React.FC<PersonelKartlariScreenProps> = ({
 
   const personelSahaFaaliyetleri = useMemo(() => {
     if (!selectedPersonnel) return [] as SahaFaaliyeti[];
+    const normalizedSelectedName = normalizeTurkishName(`${selectedPersonnel.ad} ${selectedPersonnel.soyad}`);
     return sahaFaaliyetleri
       .filter((f) => {
         if (f.personelId === selectedPersonnel.id) return true;
-        const fullName = `${selectedPersonnel.ad} ${selectedPersonnel.soyad}`.trim().toLowerCase();
         return (f.aktifPersonelListesi || []).some(
-          (n) => String(n).trim().toLowerCase() === fullName
+          (n) => normalizeTurkishName(String(n)) === normalizedSelectedName
         );
       })
       .sort((a, b) => String(b.tarih || '').localeCompare(String(a.tarih || ''), 'tr'));
