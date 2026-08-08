@@ -1,20 +1,12 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Users, UserPlus, Trash2, CreditCard as Edit3, Camera, Search, ShieldCheck, Mail, Phone, MapPin, DollarSign, UserX, FileText, CloudUpload as UploadCloud, CircleCheck as CheckCircle2, CircleAlert as AlertCircle, Loader as Loader2, Building2, History, Download, Printer, RefreshCw, ListPlus } from 'lucide-react';
-import { CariKart, CariKartIslem, Personel } from '../types/erp';
+import { Users, UserPlus, Trash2, CreditCard as Edit3, Camera, Search, ShieldCheck, Mail, Phone, MapPin, Tent, DollarSign, UserX, FileText, CloudUpload as UploadCloud, CircleCheck as CheckCircle2, CircleAlert as AlertCircle, Loader as Loader2, Building2, History, Download } from 'lucide-react';
+import { CariKart, CariKartIslem, KampKaydi, KampOdasi, Personel, SahaFaaliyeti } from '../types/erp';
 import { fetchApiJson } from '../lib/apiClient';
 import { compressImage } from '../lib/imageCompress';
-import { exportPersonelRows } from '../lib/reportExport';
 import { saveDocument } from '../lib/firebase';
 import { kibritciLogoHtml } from '../lib/kibritciBrand';
 import { findNearDuplicateCariNames, normalizeCardName } from '../lib/duplicateNameUtils';
-import {
-  exportAnaFirmaPersonelExcel,
-  exportSeciliPersonelExcel,
-  exportTaseronPersonelExcel,
-  exportTumFirmalarPersonelExcel,
-  openPersonelListeRaporu,
-} from '../lib/taseronPersonelExcelExport';
-import { printAnaFirmaGorevPersonelReport } from '../lib/anaFirmaGorevPersonelRapor';
+import { normalizeTurkishName } from '../lib/yoklamaUtils';
 import {
   AKVIZYON_GOREV,
   displayPersonelGorev,
@@ -60,6 +52,9 @@ interface PersonelScreenProps {
   cariKartlar?: CariKart[];
   setCariKartlar?: React.Dispatch<React.SetStateAction<CariKart[]>>;
   setCariIslemGecmisi?: React.Dispatch<React.SetStateAction<CariKartIslem[]>>;
+  kampKayitlari?: KampKaydi[];
+  kampOdalari?: KampOdasi[];
+  sahaFaaliyetleri?: SahaFaaliyeti[];
 }
 
 const TASERON_MANUEL_KEY = '__MANUEL__';
@@ -126,6 +121,9 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
   cariKartlar = [],
   setCariKartlar,
   setCariIslemGecmisi,
+  kampKayitlari = [],
+  kampOdalari = [],
+  sahaFaaliyetleri = [],
 }) => {
   const [searchTerm, setSearchTerm] = useState("");
   /** Boş = tüm firmalar; 'ANA_FIRMA' veya taşeron firma adı */
@@ -138,10 +136,8 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
   const [dismissDateStr, setDismissDateStr] = useState<string>("");
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [historyPersonel, setHistoryPersonel] = useState<Personel | null>(null);
-  const [exportFormat, setExportFormat] = useState<'html' | 'csv'>('csv');
-  const [gorevReportMode, setGorevReportMode] = useState<'SIRALA' | 'AYRI_RAPOR'>('SIRALA');
   const [showOnlyActive, setShowOnlyActive] = useState(false);
-  const [showOnlyMissingTcIban, setShowOnlyMissingTcIban] = useState(false);
+  const [sortMode, setSortMode] = useState<'NAME_ASC' | 'NAME_DESC' | 'DATE_NEWEST' | 'DATE_OLDEST'>('NAME_ASC');
 
   // SGK PDF parsing states
   const [regMethod, setRegMethod] = useState<'manual' | 'sgk_pdf'>('manual');
@@ -934,10 +930,29 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
     return new Set(listOdemeEngelleri(personeller).map((e) => e.personel.id));
   }, [personeller]);
 
-  const missingTcIbanIds = useMemo(
-    () => new Set(getPersonellerWithMissingTcIban(personeller).map((r) => r.personel.id)),
-    [personeller]
-  );
+  const personelSahaTagData = useMemo(() => {
+    const byId = new Set<string>();
+    const normalizedNames = new Set<string>();
+    sahaFaaliyetleri.forEach((f) => {
+      if (f.personelId) byId.add(String(f.personelId));
+      (f.aktifPersonelListesi || []).forEach((name) => {
+        if (!name) return;
+        normalizedNames.add(normalizeTurkishName(String(name)));
+      });
+    });
+    return { byId, normalizedNames };
+  }, [sahaFaaliyetleri]);
+
+  const personelCampData = useMemo(() => {
+    const activeCamp = new Set<string>();
+    const anyCamp = new Set<string>();
+    kampKayitlari.forEach((k) => {
+      if (!k.personelId) return;
+      anyCamp.add(k.personelId);
+      if (String(k.durum).toUpperCase() === 'AKTIF') activeCamp.add(k.personelId);
+    });
+    return { activeCamp, anyCamp };
+  }, [kampKayitlari]);
 
   const filteredPersonel = personeller.filter((p) => {
     // Kampçının eklediği, yönetici onayı bekleyen personeller listede görünmez (Onay Havuzu'nda onaylanır)
@@ -959,227 +974,53 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
     );
   });
 
+  const personelQualityMap = useMemo(() => {
+    const tcCount = new Map<string, number>();
+    const nameCount = new Map<string, number>();
+    personeller.forEach((p) => {
+      const tc = String(p.tcNo || '').trim();
+      if (tc) tcCount.set(tc, (tcCount.get(tc) || 0) + 1);
+      const name = `${p.ad} ${p.soyad}`.trim().toLowerCase();
+      if (name) nameCount.set(name, (nameCount.get(name) || 0) + 1);
+    });
+    return { tcCount, nameCount };
+  }, [personeller]);
+
+  const parseDateValue = (value: string) => {
+    if (!value) return 0;
+    const parts = value.split('.').map((part) => Number(part));
+    if (parts.length === 3 && parts.every((num) => !Number.isNaN(num))) {
+      return new Date(parts[2], parts[1] - 1, parts[0]).getTime();
+    }
+    const parsed = Date.parse(value);
+    return Number.isNaN(parsed) ? 0 : parsed;
+  };
+
+  const visiblePersonel = useMemo(() => {
+    const sorted = filteredPersonel.slice();
+    switch (sortMode) {
+      case 'NAME_DESC':
+        return sorted.sort((a, b) =>
+          `${b.ad} ${b.soyad}`.localeCompare(`${a.ad} ${a.soyad}`, 'tr', { sensitivity: 'base' })
+        );
+      case 'DATE_NEWEST':
+        return sorted.sort(
+          (a, b) => parseDateValue(b.iseGirisTarihi || '') - parseDateValue(a.iseGirisTarihi || '')
+        );
+      case 'DATE_OLDEST':
+        return sorted.sort(
+          (a, b) => parseDateValue(a.iseGirisTarihi || '') - parseDateValue(b.iseGirisTarihi || '')
+        );
+      default:
+        return sorted.sort((a, b) =>
+          `${a.ad} ${a.soyad}`.localeCompare(`${b.ad} ${b.soyad}`, 'tr', { sensitivity: 'base' })
+        );
+    }
+  }, [filteredPersonel, sortMode]);
+
   const handleShowHistory = (p: Personel) => {
     setHistoryPersonel(p);
     setShowHistoryModal(true);
-  };
-
-  const exportFilterLabel = useMemo(() => {
-    if (firmaFilters.length === 0) return 'Tumu';
-    if (firmaFilters.length === 1) {
-      if (firmaFilters[0] === 'ANA_FIRMA') return 'Kibritci_Insaat';
-      return firmaFilters[0].replace(/\s+/g, '_');
-    }
-    return `${firmaFilters.length}_Firma`;
-  }, [firmaFilters]);
-
-  const exportFilteredPersonel = () => {
-    if (filteredPersonel.length === 0) {
-      alert('Dışa aktarılacak personel bulunamadı. Filtreleri kontrol edin.');
-      return;
-    }
-    const cols = [
-      { key: 'ad', label: 'Ad' },
-      { key: 'soyad', label: 'Soyad' },
-      { key: 'tcNo', label: 'TC No' },
-      { key: 'gorev', label: 'Görev' },
-      { key: 'telefonNo', label: 'Telefon' },
-      { key: 'iseGirisTarihi', label: 'İşe Giriş' },
-      { key: 'sgkDurumu', label: 'SGK' },
-      { key: 'firmaAdi', label: 'Firma' },
-    ];
-    const activeSuffix = showOnlyActive ? '_Aktif' : '';
-
-    const gorevKeyOf = (p: Personel) => displayPersonelGorev(p);
-    const safeFileKey = (raw: string) =>
-      String(raw || '')
-        .trim()
-        .replace(/[^a-zA-Z0-9ğüşıöçĞÜŞİÖÇ]+/g, '_')
-        .replace(/^_+|_+$/g, '') || 'GOREV';
-
-    const rowOf = (p: Personel) => ({
-      ad: p.ad,
-      soyad: p.soyad,
-      tcNo: p.tcNo,
-      gorev: gorevKeyOf(p),
-      telefonNo: p.telefonNo,
-      iseGirisTarihi: p.iseGirisTarihi,
-      sgkDurumu: p.sgkDurumu,
-      firmaAdi: p.firmaAdi || '',
-    });
-
-    if (gorevReportMode === 'AYRI_RAPOR') {
-      const byGorev = new Map<string, Personel[]>();
-      for (const p of filteredPersonel) {
-        const key = gorevKeyOf(p);
-        const list = byGorev.get(key) || [];
-        list.push(p);
-        byGorev.set(key, list);
-      }
-
-      const gorevKeys = Array.from(byGorev.keys()).sort((a, b) =>
-        a.localeCompare(b, 'tr', { sensitivity: 'base' })
-      );
-
-      let total = 0;
-      for (const key of gorevKeys) {
-        const group = (byGorev.get(key) || [])
-          .slice()
-          .sort((a, b) => `${a.ad} ${a.soyad}`.localeCompare(`${b.ad} ${b.soyad}`, 'tr'));
-
-        const rows = group.map(rowOf);
-        total += rows.length;
-
-        exportPersonelRows(
-          rows,
-          cols,
-          `Kibritci_Personel_${exportFilterLabel}${activeSuffix}_${safeFileKey(key)}_${Date.now()}`,
-          exportFormat
-        );
-      }
-
-      alert(`${total} personel için ${gorevKeys.length} ayrı rapor indirildi.`);
-      return;
-    }
-
-    // SIRALA: tek dosya, önce göreve sonra isme göre
-    const rows = filteredPersonel
-      .slice()
-      .sort((a, b) => {
-        const ga = gorevKeyOf(a);
-        const gb = gorevKeyOf(b);
-        const d = ga.localeCompare(gb, 'tr', { sensitivity: 'base' });
-        if (d !== 0) return d;
-        return `${a.ad} ${a.soyad}`.localeCompare(`${b.ad} ${b.soyad}`, 'tr');
-      })
-      .map(rowOf);
-
-    exportPersonelRows(
-      rows,
-      cols,
-      `Kibritci_Personel_${exportFilterLabel}${activeSuffix}_GOREV_SIRALI_${Date.now()}`,
-      exportFormat
-    );
-  };
-
-  const handleExportAllTaseronExcel = async () => {
-    try {
-      const count = await exportTaseronPersonelExcel({
-        personeller,
-        onlyActive: showOnlyActive,
-      });
-      alert(`${count} taşeron personeli Excel olarak indirildi.`);
-    } catch (err) {
-      alert(err instanceof Error ? err.message : 'Excel oluşturulamadı.');
-    }
-  };
-
-  const handleExportTumFirmalarExcel = async () => {
-    try {
-      const count = await exportTumFirmalarPersonelExcel({
-        personeller,
-        onlyActive: showOnlyActive,
-      });
-      alert(`${count} personel (tüm firmalar) Excel olarak indirildi.`);
-    } catch (err) {
-      alert(err instanceof Error ? err.message : 'Excel oluşturulamadı.');
-    }
-  };
-
-  const handleExportAnaFirmaExcel = async () => {
-    try {
-      const count = await exportAnaFirmaPersonelExcel({
-        personeller,
-        onlyActive: showOnlyActive,
-      });
-      alert(`${count} ana firma personeli Excel olarak indirildi (göreve göre gruplu).`);
-    } catch (err) {
-      alert(err instanceof Error ? err.message : 'Excel oluşturulamadı.');
-    }
-  };
-
-  const handlePrintAnaFirmaGorevRapor = () => {
-    printAnaFirmaGorevPersonelReport(personeller, { onlyActive: showOnlyActive });
-  };
-
-  const handleOpenSeciliPersonelRaporu = () => {
-    try {
-      openPersonelListeRaporu({
-        rows: filteredPersonel,
-        onlyActive: showOnlyActive,
-        title: `${CANONICAL_ANA_FIRMA_ADI} — ${firmaFilterSummary} Personel Listesi`,
-        subtitle: 'Seçili filtre · firma bazlı şık rapor',
-      });
-    } catch (err) {
-      alert(err instanceof Error ? err.message : 'Rapor oluşturulamadı.');
-    }
-  };
-
-  const handleExportSeciliExcel = async () => {
-    if (filteredPersonel.length === 0) {
-      alert('Dışa aktarılacak personel bulunamadı. Filtreleri kontrol edin.');
-      return;
-    }
-    try {
-      const gorevKeyOf = (p: Personel) => displayPersonelGorev(p);
-      const safeFileKey = (raw: string) =>
-        String(raw || '')
-          .trim()
-          .replace(/[^a-zA-Z0-9ğüşıöçĞÜŞİÖÇ]+/g, '_')
-          .replace(/^_+|_+$/g, '') || 'GOREV';
-
-      if (gorevReportMode === 'AYRI_RAPOR') {
-        const byGorev = new Map<string, Personel[]>();
-        for (const p of filteredPersonel) {
-          const key = gorevKeyOf(p);
-          const list = byGorev.get(key) || [];
-          list.push(p);
-          byGorev.set(key, list);
-        }
-
-        const gorevKeys = Array.from(byGorev.keys()).sort((a, b) =>
-          a.localeCompare(b, 'tr', { sensitivity: 'base' })
-        );
-
-        let total = 0;
-        for (const key of gorevKeys) {
-          const group = (byGorev.get(key) || [])
-            .slice()
-            .sort((a, b) => `${a.ad} ${a.soyad}`.localeCompare(`${b.ad} ${b.soyad}`, 'tr'));
-
-          const count = await exportSeciliPersonelExcel({
-            rows: group,
-            onlyActive: showOnlyActive,
-            title: `${CANONICAL_ANA_FIRMA_ADI} — ${firmaFilterSummary} Personel Listesi · ${key}`,
-            fileNamePrefix: `Secili_${exportFilterLabel}_${safeFileKey(key)}`,
-          });
-          total += count;
-        }
-
-        alert(`${total} personel için ${gorevKeys.length} ayrı Excel raporu indirildi.`);
-        return;
-      }
-
-      const rows = filteredPersonel
-        .slice()
-        .sort((a, b) => {
-          const ga = gorevKeyOf(a);
-          const gb = gorevKeyOf(b);
-          const d = ga.localeCompare(gb, 'tr', { sensitivity: 'base' });
-          if (d !== 0) return d;
-          return `${a.ad} ${a.soyad}`.localeCompare(`${b.ad} ${b.soyad}`, 'tr');
-        });
-
-      const count = await exportSeciliPersonelExcel({
-        rows,
-        onlyActive: showOnlyActive,
-        title: `${CANONICAL_ANA_FIRMA_ADI} — ${firmaFilterSummary} Personel Listesi (Göreve göre sırala)`,
-        fileNamePrefix: `Secili_${exportFilterLabel}_GOREV_SIRALI`,
-      });
-      alert(`${count} personel (seçili filtre) Excel olarak indirildi.`);
-    } catch (err) {
-      alert(err instanceof Error ? err.message : 'Excel oluşturulamadı.');
-    }
   };
 
   const generateHistoryReport = () => {
@@ -1851,234 +1692,151 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
       <div className="flex-1 bg-white border border-[#e2e8f0] rounded-2xl flex flex-col overflow-hidden shadow-sm">
 
         {/* Search header bar */}
-        <div className="p-4 border-b border-slate-100 flex items-center justify-between gap-4 bg-slate-550/10">
-          <div className="flex items-center space-x-2">
-            <Users size={16} className="text-[#f59e0b]" />
-            <h4 className="font-display font-bold text-sm text-slate-800 uppercase tracking-widest col-span-2">
-              Kayıtlı Personel Kadrosu
-            </h4>
-          </div>
+<div className="p-4 border-b border-slate-100 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between bg-slate-550/10">
+            <div className="flex items-center gap-2 flex-wrap w-full lg:w-auto">
+              <Users size={16} className="text-[#f59e0b]" />
+              <div>
+                <h4 className="font-display font-bold text-sm text-slate-800 uppercase tracking-widest">
+                  Kayıtlı Personel Kadrosu
+                </h4>
+                <p className="text-[11px] text-slate-500 mt-1">
+                  Gösterilen: {visiblePersonel.length} / Toplam: {personeller.length} · Sıralama: {sortMode === 'NAME_ASC' ? 'A → Z' : sortMode === 'NAME_DESC' ? 'Z → A' : sortMode === 'DATE_NEWEST' ? 'Yeni → Eski' : 'Eski → Yeni'}
+                </p>
+              </div>
+            </div>
 
-          <div className="flex items-center gap-2 flex-wrap">
-            <div className="relative" ref={firmaFilterRef}>
-              <button
-                type="button"
-                onClick={() => setFirmaFilterOpen((v) => !v)}
-                className={`text-[10px] font-bold px-3 py-2 rounded-xl border cursor-pointer max-w-[240px] truncate inline-flex items-center gap-1.5 ${
-                  firmaFilters.length > 0
-                    ? 'bg-amber-50 text-amber-900 border-amber-300'
-                    : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
-                }`}
-                title="Firma seç (çoklu)"
-              >
-                <Building2 size={12} className="shrink-0" />
-                <span className="truncate">{firmaFilterSummary}</span>
-                {firmaFilters.length > 0 && (
-                  <span className="shrink-0 bg-amber-600 text-white rounded-md px-1.5 py-0.5 text-[9px]">
-                    {firmaFilters.length}
-                  </span>
-                )}
-              </button>
-              {firmaFilterOpen && (
-                <div className="absolute left-0 top-full mt-1 z-40 w-72 max-h-72 overflow-hidden bg-white border border-slate-200 rounded-xl shadow-lg flex flex-col">
-                  <div className="px-3 py-2 border-b border-slate-100 flex items-center justify-between gap-2 bg-slate-50">
-                    <span className="text-[10px] font-black uppercase tracking-wide text-slate-600">
-                      Firma seç
-                    </span>
-                    <div className="flex items-center gap-1">
-                      <button
-                        type="button"
-                        onClick={() => setFirmaFilters([])}
-                        className="text-[9px] font-bold px-2 py-1 rounded-lg bg-white border border-slate-200 text-slate-600 hover:bg-slate-100 cursor-pointer"
-                      >
-                        Tümü
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setFirmaFilters(['ANA_FIRMA'])}
-                        className="text-[9px] font-bold px-2 py-1 rounded-lg bg-slate-900 text-white hover:bg-black cursor-pointer"
-                      >
-                        Sadece Ana Firma
-                      </button>
-                    </div>
-                  </div>
-                  <div className="overflow-y-auto p-2 space-y-0.5">
-                    {firmaFilterOptions.map(([key, label]) => {
-                      const checked = firmaFilters.includes(key);
-                      return (
-                        <label
-                          key={key}
-                          className={`flex items-center gap-2 px-2 py-1.5 rounded-lg cursor-pointer text-[11px] font-semibold ${
-                            checked ? 'bg-amber-50 text-amber-950' : 'hover:bg-slate-50 text-slate-700'
-                          }`}
-                        >
-                          <input
-                            type="checkbox"
-                            checked={checked}
-                            onChange={() => toggleFirmaFilter(key)}
-                            className="rounded border-slate-300 text-amber-600 focus:ring-amber-500 cursor-pointer"
-                          />
-                          <span className="truncate">{label}</span>
-                        </label>
-                      );
-                    })}
-                  </div>
-                  {firmaFilters.length > 0 && (
-                    <div className="px-3 py-2 border-t border-slate-100 text-[9px] text-slate-500 font-medium">
-                      Seçili firmaların personeli listeleniyor · {filteredPersonel.length} kişi
+            <div className="flex flex-col gap-3 w-full lg:w-auto">
+              <div className="flex flex-col gap-3 md:flex-row md:items-center md:gap-2 flex-wrap">
+                <div className="relative" ref={firmaFilterRef}>
+                  <button
+                    type="button"
+                    onClick={() => setFirmaFilterOpen((v) => !v)}
+                    className={`text-[10px] font-bold px-3 py-2 rounded-xl border cursor-pointer max-w-full truncate inline-flex items-center gap-1.5 ${
+                      firmaFilters.length > 0
+                        ? 'bg-amber-50 text-amber-900 border-amber-300'
+                        : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                    }`}
+                    title="Firma seç (çoklu)"
+                  >
+                    <Building2 size={12} className="shrink-0" />
+                    <span className="truncate">{firmaFilterSummary}</span>
+                    {firmaFilters.length > 0 && (
+                      <span className="shrink-0 bg-amber-600 text-white rounded-md px-1.5 py-0.5 text-[9px]">
+                        {firmaFilters.length}
+                      </span>
+                    )}
+                  </button>
+                  {firmaFilterOpen && (
+                    <div className="absolute left-0 top-full mt-1 z-40 w-72 max-h-72 overflow-hidden bg-white border border-slate-200 rounded-xl shadow-lg flex flex-col">
+                      <div className="px-3 py-2 border-b border-slate-100 flex items-center justify-between gap-2 bg-slate-50">
+                        <span className="text-[10px] font-black uppercase tracking-wide text-slate-600">
+                          Firma seç
+                        </span>
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => setFirmaFilters([])}
+                            className="text-[9px] font-bold px-2 py-1 rounded-lg bg-white border border-slate-200 text-slate-600 hover:bg-slate-100 cursor-pointer"
+                          >
+                            Tümü
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setFirmaFilters(['ANA_FIRMA'])}
+                            className="text-[9px] font-bold px-2 py-1 rounded-lg bg-slate-900 text-white hover:bg-black cursor-pointer"
+                          >
+                            Sadece Ana Firma
+                          </button>
+                        </div>
+                      </div>
+                      <div className="overflow-y-auto p-2 space-y-0.5">
+                        {firmaFilterOptions.map(([key, label]) => {
+                          const checked = firmaFilters.includes(key);
+                          return (
+                            <label
+                              key={key}
+                              className={`flex items-center gap-2 px-2 py-1.5 rounded-lg cursor-pointer text-[11px] font-semibold ${
+                                checked ? 'bg-amber-50 text-amber-950' : 'hover:bg-slate-50 text-slate-700'
+                              }`}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={() => toggleFirmaFilter(key)}
+                                className="rounded border-slate-300 text-amber-600 focus:ring-amber-500 cursor-pointer"
+                              />
+                              <span className="truncate">{label}</span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                      {firmaFilters.length > 0 && (
+                        <div className="px-3 py-2 border-t border-slate-100 text-[9px] text-slate-500 font-medium">
+                          Seçili firmaların personeli listeleniyor · {filteredPersonel.length} kişi
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
-              )}
+
+                <select
+                  value={odemeFilter}
+                  onChange={(e) => setOdemeFilter(e.target.value as 'ALL' | 'TC' | 'IBAN' | 'ENGEL')}
+                  className="text-[10px] font-bold px-3 py-2 rounded-xl border border-slate-200 bg-white text-slate-700 cursor-pointer"
+                  title="Eksik TC / IBAN / Ödeme engeli"
+                >
+                  <option value="ALL">Ödeme: Tümü</option>
+                  <option value="TC">Eksik TC</option>
+                  <option value="IBAN">Eksik/Geçersiz IBAN</option>
+                  <option value="ENGEL">Ödeme Engeli (Ana Firma)</option>
+                </select>
+
+                <button
+                  type="button"
+                  onClick={() => setShowOnlyActive((prev) => !prev)}
+                  className={`text-[10px] font-bold px-3 py-2 rounded-xl border cursor-pointer ${showOnlyActive ? 'bg-emerald-600 text-white border-emerald-700' : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'}`}
+                  title="Sadece aktif personel göster"
+                >
+                  {showOnlyActive ? 'Sadece Aktifler' : 'Tümü Göster'}
+                </button>
+
+                <select
+                  value={sortMode}
+                  onChange={(e) => setSortMode(e.target.value as 'NAME_ASC' | 'NAME_DESC' | 'DATE_NEWEST' | 'DATE_OLDEST')}
+                  className="text-[10px] font-bold px-3 py-2 rounded-xl border border-slate-200 bg-white text-slate-700 cursor-pointer"
+                  title="Sıralama seçeneği"
+                >
+                  <option value="NAME_ASC">Ada göre A → Z</option>
+                  <option value="NAME_DESC">Ada göre Z → A</option>
+                  <option value="DATE_NEWEST">İşe giriş: Yeni → Eski</option>
+                  <option value="DATE_OLDEST">İşe giriş: Eski → Yeni</option>
+                </select>
+              </div>
+
+              <div className="relative w-full max-w-xs">
+                <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-400">
+                  <span className="text-xs">🔍</span>
+                </span>
+                <input
+                  type="text"
+                  placeholder="İsim, soyisim veya görev ile filtrele..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="w-full text-[10px] font-bold pl-9 pr-3 py-2 rounded-xl border border-slate-200 bg-white text-slate-700 outline-none focus:border-slate-400"
+                />
+              </div>
             </div>
-            <select
-              value={odemeFilter}
-              onChange={(e) => setOdemeFilter(e.target.value as 'ALL' | 'TC' | 'IBAN' | 'ENGEL')}
-              className="text-[10px] font-bold px-3 py-2 rounded-xl border border-slate-200 bg-white text-slate-700 cursor-pointer"
-              title="Eksik TC / IBAN / Ödeme engeli"
-            >
-              <option value="ALL">Ödeme: Tümü</option>
-              <option value="TC">Eksik TC</option>
-              <option value="IBAN">Eksik/Geçersiz IBAN</option>
-              <option value="ENGEL">Ödeme Engeli (Ana Firma)</option>
-            </select>
-            <button
-              type="button"
-              onClick={() => setShowOnlyActive((prev) => !prev)}
-              className={`text-[10px] font-bold px-3 py-2 rounded-xl border cursor-pointer ${showOnlyActive ? 'bg-emerald-600 text-white border-emerald-700' : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'}`}
-            >
-              {showOnlyActive ? 'Sadece Aktifler: AÇIK' : 'Sadece Aktifleri Göster'}
-            </button>
-            <button
-              type="button"
-              onClick={() => setShowOnlyMissingTcIban((prev) => !prev)}
-              title={`TC veya IBAN bilgisi eksik/hatalı ${missingTcIbanIds.size} personeli göster`}
-              className={`text-[10px] font-bold px-3 py-2 rounded-xl border cursor-pointer flex items-center gap-1.5 ${
-                showOnlyMissingTcIban
-                  ? 'bg-red-600 text-white border-red-700'
-                  : 'bg-white text-red-600 border-red-200 hover:bg-red-50'
-              }`}
-            >
-              <AlertCircle size={12} />
-              Eksik TC/IBAN {missingTcIbanIds.size > 0 && `(${missingTcIbanIds.size})`}
-            </button>
-            <select
-              value={exportFormat}
-              onChange={(e) => setExportFormat(e.target.value as 'html' | 'csv')}
-              className="text-[10px] font-bold px-2 py-2 rounded-xl border border-slate-200 bg-white text-slate-700 cursor-pointer"
-              title="Dışa aktarma formatı"
-            >
-              <option value="csv">Excel (CSV)</option>
-              <option value="html">HTML</option>
-            </select>
-            <select
-              value={gorevReportMode}
-              onChange={(e) => setGorevReportMode(e.target.value as 'SIRALA' | 'AYRI_RAPOR')}
-              className="text-[10px] font-bold px-2 py-2 rounded-xl border border-slate-200 bg-white text-slate-700 cursor-pointer"
-              title="Personel raporu göreve göre"
-            >
-              <option value="SIRALA">Göreve göre sırala</option>
-              <option value="AYRI_RAPOR">Görevlere göre ayrı rapor</option>
-            </select>
-            <button
-              type="button"
-              onClick={exportFilteredPersonel}
-              className="flex items-center gap-1.5 text-[10px] font-bold px-3 py-2 bg-slate-900 text-white rounded-xl hover:bg-black cursor-pointer"
-              title={`Listedeki ${filteredPersonel.length} personeli CSV/HTML olarak dışa aktar`}
-            >
-              <Download size={12} /> Dışa Aktar ({filteredPersonel.length})
-            </button>
-            <button
-              type="button"
-              onClick={handleOpenSeciliPersonelRaporu}
-              disabled={filteredPersonel.length === 0}
-              className="flex items-center gap-1.5 text-[10px] font-bold px-3 py-2 bg-[#1e4e78] text-white rounded-xl hover:bg-[#173b5b] disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
-              title="Ekrandaki seçili filtreyle antetli, yazdırılabilir personel listesi raporu aç"
-            >
-              <Printer size={12} /> Şık Rapor ({filteredPersonel.length})
-            </button>
-            <button
-              type="button"
-              onClick={() => void handleExportSeciliExcel()}
-              disabled={filteredPersonel.length === 0}
-              className="flex items-center gap-1.5 text-[10px] font-bold px-3 py-2 bg-emerald-700 text-white rounded-xl hover:bg-emerald-800 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
-              title="Ekrandaki seçili firma filtresindeki personeli Excel (.xlsx) olarak indir"
-            >
-              <Download size={12} /> Seçili Excel ({filteredPersonel.length})
-            </button>
-            <button
-              type="button"
-              onClick={handlePrintAnaFirmaGorevRapor}
-              className="flex items-center gap-1.5 text-[10px] font-bold px-3 py-2 bg-indigo-900 text-white rounded-xl hover:bg-indigo-950 cursor-pointer"
-              title="Ana firma personelini görev gruplarına göre yazdırılabilir rapor olarak aç"
-            >
-              <Printer size={12} /> Ana Firma Görev Raporu
-            </button>
-            <button
-              type="button"
-              onClick={() => void handleExportAnaFirmaExcel()}
-              className="flex items-center gap-1.5 text-[10px] font-bold px-3 py-2 bg-indigo-700 text-white rounded-xl hover:bg-indigo-800 cursor-pointer"
-              title="Yalnızca ana firma (Kibritçi İnşaat) personelini Excel (.xlsx) olarak indir — göreve göre gruplu"
-            >
-              <Download size={12} /> Ana Firma Excel
-            </button>
-            <button
-              type="button"
-              onClick={() => void handleExportTumFirmalarExcel()}
-              className="flex items-center gap-1.5 text-[10px] font-bold px-3 py-2 bg-sky-700 text-white rounded-xl hover:bg-sky-800 cursor-pointer"
-              title="Ana firma dahil tüm firmaların personelini Excel (.xlsx) olarak indir"
-            >
-              <Download size={12} /> Tüm Firmalar Excel
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                const today = new Date().toISOString().slice(0, 10);
-                const bas = new Date();
-                bas.setDate(bas.getDate() - 6);
-                setListeDonemBas(bas.toISOString().slice(0, 10));
-                setListeDonemBit(today);
-                setListePreview(null);
-                setListeParseErrors([]);
-                setListeModalOpen(true);
-              }}
-              className="flex items-center gap-1.5 text-[10px] font-bold px-3 py-2 bg-orange-700 text-white rounded-xl hover:bg-orange-800 cursor-pointer"
-              title="Haftalık taşeron personel listesini toplu güncelle (liste bazlı)"
-            >
-              <ListPlus size={12} /> Taşeron Liste Güncelle
-            </button>
-            <button
-              type="button"
-              onClick={() => void handleExportAllTaseronExcel()}
-              className="flex items-center gap-1.5 text-[10px] font-bold px-3 py-2 bg-amber-600 text-white rounded-xl hover:bg-amber-700 cursor-pointer"
-              title="Tüm taşeron firma personelini Excel (.xlsx) olarak indir"
-            >
-              <Download size={12} /> Taşeron Excel
-            </button>
-            <div className="relative w-64">
-            <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-400">
-              <span className="text-xs">🔍</span>
-            </span>
-            <input
-              type="text"
-              placeholder="İsim veya soyisim ile filtrele..."
-              className="w-full bg-slate-50 text-xs border border-slate-200 rounded-xl py-2 pl-9 pr-4 text-slate-700 focus:outline-none  transition duration-150"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-            />
           </div>
-          </div>
-        </div>
 
         {/* Scrollable list grid */}
         <div className="flex-1 overflow-y-auto p-4 space-y-3">
-          {filteredPersonel.length === 0 ? (
+          {visiblePersonel.length === 0 ? (
             <div className="h-full flex flex-col items-center justify-center text-slate-400 py-16 space-y-2">
               <span className="text-3xl">👤</span>
               <p className="text-xs font-medium">Uyanık personel kaydı bulunamadı.</p>
             </div>
           ) : (
-            filteredPersonel.map((p) => {
+            visiblePersonel.map((p) => {
               const isActive = p.durum;
               const isSelected = selectedPersonel?.id === p.id;
 
@@ -2104,29 +1862,64 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
                         <span className="text-xs font-bold text-slate-500">{p.ad[0]}{p.soyad[0]}</span>
                       )}
                     </div>
-                    <div>
-                      <h4 className="font-semibold text-slate-900 flex items-center gap-2 flex-wrap">
-                        {p.ad} {p.soyad}
+                    <div className="min-w-0">
+                      <h4 className="font-semibold text-slate-900 flex flex-wrap items-center gap-2">
+                        <span className="truncate min-w-0">{p.ad} {p.soyad}</span>
                         <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
                           is_aktif_status(p.durum) ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
                         }`}>
                           {is_aktif_status(p.durum) ? "Aktif" : "Pasif"}
                         </span>
-                        {!is_aktif_status(p.durum) && p.istenCikisTarihi && (
-                          <span className="text-[10px] bg-red-50 text-rose-700 border border-rose-100 px-2 py-0.5 rounded-full font-bold">
-                            Ayrılış: {p.istenCikisTarihi}
-                          </span>
-                        )}
-                        {(p.firmaTipi === 'TASERON' || isTaseronPersonel(p)) && (
+                        {p.firmaTipi === 'TASERON' && (
                           <span className="text-[10px] bg-amber-50 text-amber-700 border border-amber-100 px-2 py-0.5 rounded-full font-bold">
                             {p.firmaAdi || 'Taşeron'} · Yoklama/maaş yok
                           </span>
                         )}
-                        {(p.personelGrubu === 'IDARI' || p.departman === 'İDARİ') && (
-                          <span className="text-[10px] bg-sky-50 text-sky-800 border border-sky-100 px-2 py-0.5 rounded-full font-bold">
-                            İdari · Yoklama yok
+                      </h4>
+                      <div className="mt-1 flex flex-wrap gap-2">
+                        {(!p.ad || !p.soyad || !p.tcNo || !p.iseGirisTarihi) && (
+                          <span className="text-[10px] bg-rose-50 text-rose-800 border border-rose-200 px-2 py-0.5 rounded-full font-bold">
+                            Eksik Bilgi
                           </span>
                         )}
+                        {personelQualityMap.tcCount.get(String(p.tcNo || '').trim())! > 1 && (
+                          <span className="text-[10px] bg-rose-50 text-rose-800 border border-rose-200 px-2 py-0.5 rounded-full font-bold">
+                            Çift TC
+                          </span>
+                        )}
+                        {personelQualityMap.nameCount.get(`${p.ad} ${p.soyad}`.trim().toLowerCase())! > 1 && (
+                          <span className="text-[10px] bg-rose-50 text-rose-800 border border-rose-200 px-2 py-0.5 rounded-full font-bold">
+                            Çift İsim
+                          </span>
+                        )}
+                        {(personelSahaTagData.byId.has(p.id) || personelSahaTagData.normalizedNames.has(normalizeTurkishName(`${p.ad} ${p.soyad}`))) && (
+                          <span className="text-[10px] bg-emerald-50 text-emerald-800 border border-emerald-200 px-2 py-0.5 rounded-full font-bold">
+                            Saha Kayıtlı
+                          </span>
+                        )}
+                        {personelCampData.activeCamp.has(p.id) ? (
+                          <span className="text-[10px] bg-blue-50 text-blue-800 border border-blue-200 px-2 py-0.5 rounded-full font-bold">
+                            Kamp Aktif
+                          </span>
+                        ) : personelCampData.anyCamp.has(p.id) ? (
+                          <span className="text-[10px] bg-sky-50 text-sky-800 border border-sky-200 px-2 py-0.5 rounded-full font-bold">
+                            Kamp Geçmiş
+                          </span>
+                        ) : null}
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap gap-1 mt-2 text-[10px] text-slate-400 font-medium">
+                      {p.istenCikisTarihi && (
+                        <span className="bg-red-50 text-rose-700 border border-rose-100 px-2 py-0.5 rounded-full font-bold">
+                          Ayrılış: {p.istenCikisTarihi}
+                        </span>
+                      )}
+                      {(p.personelGrubu === 'IDARI' || p.departman === 'İDARİ') && (
+                        <span className="bg-sky-50 text-sky-800 border border-sky-100 px-2 py-0.5 rounded-full font-bold">
+                          İdari · Yoklama yok
+                        </span>
+                      )}
+                    </div>
                         {(() => {
                           const eksikler = getPersonelMissingDocs(p);
                           if (eksikler.length === 0) return null;

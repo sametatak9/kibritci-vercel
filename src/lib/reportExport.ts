@@ -170,11 +170,104 @@ export async function exportHistoryReport(options: {
   );
 }
 
+function escapeHtml(value: string): string {
+  return String(value ?? '').replace(/</g, '&lt;').replace(/\n/g, '<br/>');
+}
+
+function buildPersonelTableHtml(
+  rows: Record<string, string>[],
+  columns: { key: string; label: string }[]
+): string {
+  const head = columns.map((c) => `<th style="padding:10px 8px;border:1px solid #e2e8f0;text-align:left;background:#f8fafc;color:#0f172a">${escapeHtml(c.label)}</th>`).join('');
+  const body = rows
+    .map(
+      (r) =>
+        `<tr>${columns.map((c) => `<td style="padding:9px 8px;border:1px solid #e2e8f0;vertical-align:top">${escapeHtml(r[c.key] ?? '')}</td>`).join('')}</tr>`
+    )
+    .join('');
+  return `<table style="width:100%;border-collapse:collapse;font-size:12px;margin-top:12px">` +
+    `<thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
+}
+
+function buildGroupedPersonelHtml(
+  rows: Record<string, string>[],
+  columns: { key: string; label: string }[],
+  groupByFirma: boolean,
+  groupByRole: boolean
+): string {
+  if (!groupByFirma) {
+    return buildPersonelTableHtml(rows, columns);
+  }
+
+  const firmaKey = columns.find((c) => c.key === 'firmaAdi')?.key;
+  const roleKey = columns.find((c) => c.key === 'gorev')?.key;
+  if (!firmaKey) {
+    return buildPersonelTableHtml(rows, columns);
+  }
+
+  const firms = rows.reduce<Record<string, Record<string, Record<string, string>[]>>>(
+    (acc, row) => {
+      const firma = row[firmaKey] || 'Firma Bilgisi Yok';
+      const gorev = (groupByRole && roleKey ? row[roleKey] : 'Personel') || 'Diğer';
+      acc[firma] = acc[firma] || {};
+      acc[firma][gorev] = acc[firma][gorev] || [];
+      acc[firma][gorev].push(row);
+      return acc;
+    },
+    {}
+  );
+
+  const groupHtml = Object.keys(firms)
+    .sort((a, b) => a.localeCompare(b, 'tr', { sensitivity: 'base' }))
+    .map((firma) => {
+      const subgroups = firms[firma];
+      const counts = Object.values(subgroups).reduce((sum, arr) => sum + arr.length, 0);
+      const sections = Object.keys(subgroups)
+        .sort((a, b) => a.localeCompare(b, 'tr', { sensitivity: 'base' }))
+        .map((gorev) => {
+          const groupRows = subgroups[gorev];
+          const rowsHtml = groupRows
+            .map(
+              (r) =>
+                `<tr>${columns.map((c) => `<td style="padding:9px 8px;border:1px solid #e2e8f0;vertical-align:top">${escapeHtml(r[c.key] ?? '')}</td>`).join('')}</tr>`
+            )
+            .join('');
+          return `
+            <tr style="background:#eff6ff">
+              <td colspan="${columns.length}" style="padding:10px 12px;font-weight:700;color:#1d4ed8;border:1px solid #e2e8f0">${escapeHtml(gorev)} · ${groupRows.length} kişi</td>
+            </tr>
+            ${rowsHtml}`;
+        })
+        .join('');
+
+      const head = columns.map((c) => `<th style="padding:10px 8px;border:1px solid #e2e8f0;text-align:left;background:#f8fafc;color:#0f172a">${escapeHtml(c.label)}</th>`).join('');
+      return `
+        <section style="margin-bottom:32px">
+          <div style="padding:16px 18px;border:1px solid #c7d2fe;border-radius:14px;background:#eff6ff;margin-bottom:14px">
+            <div style="font-size:15px;font-weight:800;color:#1e3a8a;margin-bottom:4px">Firma: ${escapeHtml(firma)}</div>
+            <div style="font-size:12px;color:#334155">${counts} personel · ${Object.keys(subgroups).length} görev grubu</div>
+          </div>
+          <table style="width:100%;border-collapse:collapse;font-size:12px">` +
+          `<thead><tr>${head}</tr></thead><tbody>${sections}</tbody></table>
+        </section>`;
+    })
+    .join('');
+
+  return groupHtml;
+}
+
 export function exportPersonelRows(
   rows: Record<string, string>[],
   columns: { key: string; label: string }[],
   fileName: string,
-  format: 'html' | 'csv'
+  format: 'html' | 'csv',
+  options?: {
+    title?: string;
+    subtitle?: string;
+    meta?: string[];
+    groupByFirma?: boolean;
+    groupByRole?: boolean;
+  }
 ): void {
   if (rows.length === 0) {
     alert('Dışa aktarılacak personel seçilmedi.');
@@ -189,16 +282,17 @@ export function exportPersonelRows(
     return;
   }
 
-  const head = columns.map((c) => `<th>${c.label}</th>`).join('');
-  const body = rows
-    .map(
-      (r) =>
-        `<tr>${columns.map((c) => `<td>${String(r[c.key] ?? '').replace(/</g, '&lt;')}</td>`).join('')}</tr>`
-    )
-    .join('');
+  const bodyHtml = buildGroupedPersonelHtml(
+    rows,
+    columns,
+    Boolean(options?.groupByFirma),
+    Boolean(options?.groupByRole)
+  );
   const html = buildKibritciReportHtml({
-    title: 'Personel Dışa Aktarım',
-    bodyHtml: `<table style="width:100%;border-collapse:collapse;font-size:11px"><thead><tr style="background:#f1f5f9">${head}</tr></thead><tbody>${body}</tbody></table>`,
+    title: options?.title || 'Personel Dışa Aktarım',
+    subtitle: options?.subtitle,
+    meta: options?.meta,
+    bodyHtml,
   });
   downloadKibritciReportHtml(html, fileName.endsWith('.html') ? fileName : `${fileName}.html`);
 }
