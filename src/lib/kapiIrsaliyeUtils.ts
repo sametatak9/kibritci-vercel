@@ -42,6 +42,14 @@ export type KapiMatchSummary = {
   saMatched?: boolean;
 };
 
+function withSaMatchSummary(summary: KapiMatchSummary, saId: string): KapiMatchSummary {
+  return {
+    ...summary,
+    saId: saId || '',
+    saMatched: Boolean(saId),
+  };
+}
+
 function normTr(s: string): string {
   return String(s || '')
     .trim()
@@ -340,11 +348,7 @@ export async function upsertKapiDraftIrsaliye(opts: {
   await saveDocument('irsaliyeler', irsaliye);
   return {
     irsaliye,
-    summary: {
-      ...summary,
-      saId: saId || undefined,
-      saMatched: Boolean(saId),
-    },
+    summary: withSaMatchSummary(summary, saId),
   };
 }
 
@@ -428,8 +432,9 @@ export async function finalizeKapiIrsaliyeApproval(opts: {
     appendCariIslemOnce(opts.setCariIslemGecmisi, cariRow);
   }
 
+  const stokBagliKalemler = linkedKalemler.filter((k) => Boolean(k.stokKartId));
   applyStokGirisFromKalemler({
-    kalemler: linkedKalemler,
+    kalemler: stokBagliKalemler,
     belgeNo: irsaliye.irsaliyeNo,
     tarih: opts.tarih,
     supplier: firmaUnvan,
@@ -444,11 +449,7 @@ export async function finalizeKapiIrsaliyeApproval(opts: {
 
   return {
     irsaliye,
-    summary: {
-      ...summary,
-      saId: saId || undefined,
-      saMatched: Boolean(saId),
-    },
+    summary: withSaMatchSummary(summary, saId),
   };
 }
 

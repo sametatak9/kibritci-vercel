@@ -2794,7 +2794,7 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
             stokKartlar: stokKartlarLive,
             setStokKartlar: setStokKartlarLive,
           });
-          await updateDoc(doc(db, 'guvenlikGelenEvraklar', e.id), {
+          await updateDoc(doc(db, 'guvenlikGelenEvraklar', e.id), cleanUndefined({
             durum: 'ONAYLANDI',
             onaylayanYonetici: onaylayan,
             islenenEvrakTuru: 'İRSALİYE',
@@ -2804,7 +2804,7 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
             firma: summary.cariUnvan || e.firma || '',
             kalemler: matched.kalemler,
             onayTarihi: new Date().toISOString(),
-          });
+          }));
           showStatus('success', `İrsaliye onaylandı · ${formatKapiMatchLabel(summary)}`);
         } else {
           await updateDoc(doc(db, 'guvenlikGelenEvraklar', e.id), {

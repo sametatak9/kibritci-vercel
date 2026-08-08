@@ -16,7 +16,7 @@ import {
   KampOdasi,
   Personel,
 } from '../types/erp';
-import { db, saveDocument } from '../lib/firebase';
+import { db, cleanUndefined, saveDocument } from '../lib/firebase';
 import { evictActiveKampResidentsForPersonel } from '../lib/kampPlacementUtils';
 import { compressImage } from '../lib/imageCompress';
 import { collection, doc, setDoc, onSnapshot, updateDoc, deleteDoc, getDocs } from 'firebase/firestore';
@@ -1877,15 +1877,15 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
           `${label}${saId ? `\nSA: ${saId}` : ' (SA bağlı değil)'}\n` +
           (matched.summary.cariMatched
             ? '→ Mevcut cari kartın altına işlem kaydı yazılacak.\n'
-            : '→ Cari yoksa onayda yeni tedarikçi kartı açılacak.\n') +
+            : '→ Cari eşleşmezse cari işlem yazılmaz; evrak yine arşivlenir.\n') +
           (matched.summary.stokLinked
             ? `→ ${matched.summary.stokLinked} stok kartına giriş işlenecek.\n`
-            : '→ Eşleşmeyen kalemler için stok kartı açılıp giriş işlenecek.\n')
+            : '→ Stok eşleşmezse stok hareketi yazılmaz; kalem irsaliyede kalır.\n')
       );
       if (!ok) return;
 
       const { cari, stok } = await loadLiveCariStok();
-      const { summary, kalemler: finalKalemler } = await finalizeKapiIrsaliyeApproval({
+      const { irsaliye, summary } = await finalizeKapiIrsaliyeApproval({
         guvenlikEvrakId: docItem.id,
         irsaliyeNo: docItem.evrakNo || docItem.id,
         firma: matched.summary.cariUnvan || docItem.firma || '',
@@ -1896,7 +1896,6 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
         cariKartlar: cari,
         stokKartlar: stok,
         setIrsaliyeler,
-        setCariKartlar,
         setCariIslemGecmisi,
         setStokKartlar,
         setStokIslemGecmisi,
@@ -1905,7 +1904,7 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
         irsaliyeler,
       });
 
-      await updateDoc(doc(db, 'guvenlikGelenEvraklar', docItem.id), {
+      await updateDoc(doc(db, 'guvenlikGelenEvraklar', docItem.id), cleanUndefined({
         durum: 'ONAYLANDI',
         onaylayanYonetici: currentUser?.email || 'Yönetici',
         islenenEvrakTuru: 'İRSALİYE',
@@ -1915,11 +1914,11 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
         evrakNo: docItem.evrakNo || docItem.id,
         firma: summary.cariUnvan || docItem.firma || '',
         tarih: docItem.tarih || new Date().toISOString().split('T')[0],
-        kalemler: finalKalemler,
+        kalemler: irsaliye.kalemler,
         saId: saId || '',
         donusumKaynagi: saId ? 'KAPI_SA_ESLESME' : 'KAPI_EVRAK',
         onayTarihi: new Date().toISOString(),
-      });
+      }));
 
       if (addNotification) {
         addNotification(`Kapı irsaliyesi onaylandı (${docItem.evrakNo || docItem.id}) · ${formatKapiMatchLabel(summary)}`);
@@ -2240,7 +2239,7 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
         setIrsaliyeFirma(rematched.summary.cariUnvan || irsaliyeFirma);
         setIrsaliyeKalemler(rematched.kalemler);
 
-        const { summary, kalemler: finalKalemler } = await finalizeKapiIrsaliyeApproval({
+        const { irsaliye, summary } = await finalizeKapiIrsaliyeApproval({
           guvenlikEvrakId: docId,
           irsaliyeNo,
           firma: rematched.summary.cariUnvan || irsaliyeFirma,
@@ -2251,7 +2250,6 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
           cariKartlar: liveCari,
           stokKartlar: liveStok,
           setIrsaliyeler,
-          setCariKartlar,
           setCariIslemGecmisi,
           setStokKartlar,
           setStokIslemGecmisi,
@@ -2260,7 +2258,7 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
           irsaliyeler,
         });
 
-        await updateDoc(doc(db, 'guvenlikGelenEvraklar', docId), {
+        await updateDoc(doc(db, 'guvenlikGelenEvraklar', docId), cleanUndefined({
           durum: 'ONAYLANDI',
           onaylayanYonetici: currentUser?.email || 'Yönetici',
           islenenEvrakTuru: type,
@@ -2270,13 +2268,13 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
           evrakNo: irsaliyeNo,
           firma: summary.cariUnvan || irsaliyeFirma,
           tarih: irsaliyeTarih,
-          kalemler: finalKalemler,
+          kalemler: irsaliye.kalemler,
           saId: String(activeGateDoc?.saId || summary.saId || '').trim() || '',
           donusumKaynagi: String(activeGateDoc?.saId || summary.saId || '').trim()
             ? 'KAPI_SA_ESLESME'
             : 'KAPI_EVRAK',
           onayTarihi: new Date().toISOString(),
-        });
+        }));
 
         if (addNotification) {
           addNotification(
@@ -2286,14 +2284,12 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
 
         alert(
           `İrsaliye onaylandı.\n${formatKapiMatchLabel(summary)}\n` +
-            (summary.cariCreated
-              ? 'Yeni cari kart açıldı; işlem altına yazıldı.\n'
-              : summary.cariMatched
-                ? 'Mevcut cari kartın altına işlem kaydı yazıldı.\n'
-                : 'Cari bağlanamadı.\n') +
-            (summary.stokCreated
-              ? `${summary.stokCreated} yeni stok kartı açıldı; giriş işlendi.`
-              : 'Stok girişleri işlendi.')
+            (summary.cariMatched
+              ? 'Mevcut cari kartın altına işlem kaydı yazıldı.\n'
+              : 'Cari eşleşmedi; evrak ve irsaliye arşivlendi.\n') +
+            (summary.stokLinked
+              ? `${summary.stokLinked}/${summary.stokTotal} stok kalemine giriş işlendi.`
+              : 'Stok eşleşmedi; kalemler irsaliyede kaldı, stok hareketi yazılmadı.')
         );
         setActiveGateDoc(null);
         return;
