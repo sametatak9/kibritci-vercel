@@ -14,8 +14,15 @@ export const ToastProvider: React.FC = () => {
     const handleToast = (e: Event) => {
       const customEvent = e as CustomEvent;
       const message = customEvent.detail?.message || String(customEvent.detail);
-      const isError = message.toLowerCase().includes('hata') || message.toLowerCase().includes('error');
-      const isSuccess = message.toLowerCase().includes('başarılı') || message.toLowerCase().includes('kaydedildi') || message.toLowerCase().includes('silindi');
+      const displayMessage = /FIRESTORE_TIMEOUT/i.test(String(message))
+        ? 'Bağlantı zaman aşımı. Ağınızı kontrol edip tekrar deneyin; yoklama büyük belgede tutulduğu için PC’de biraz sürebilir.'
+        : message;
+      const isError =
+        displayMessage.toLowerCase().includes('hata') ||
+        displayMessage.toLowerCase().includes('error') ||
+        displayMessage.toLowerCase().includes('zaman aşımı') ||
+        /FIRESTORE_TIMEOUT/i.test(String(message));
+      const isSuccess = displayMessage.toLowerCase().includes('başarılı') || displayMessage.toLowerCase().includes('kaydedildi') || displayMessage.toLowerCase().includes('silindi');
       
       let type: 'info' | 'success' | 'warning' | 'error' = 'info';
       if (isError) type = 'error';
@@ -27,7 +34,7 @@ export const ToastProvider: React.FC = () => {
       
       const newToast: Toast = {
         id: Math.random().toString(36).substr(2, 9),
-        message,
+        message: displayMessage,
         type
       };
 

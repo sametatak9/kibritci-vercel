@@ -27,8 +27,51 @@ export function isMermerciGorev(gorev?: string): boolean {
   return normalizeGorevKey(gorev).includes('MERMERCI');
 }
 
+export function isSoforGorev(gorev?: string): boolean {
+  const g = normalizeGorevKey(gorev);
+  return (
+    g.includes('SOFOR') ||
+    g.includes('SOFÖR') ||
+    g.includes('SURUCU') ||
+    g.includes('LOJISTIK') ||
+    g === 'DRIVER'
+  );
+}
+
+export function isOperatorGorev(gorev?: string): boolean {
+  const g = normalizeGorevKey(gorev);
+  return (
+    g.includes('OPERATOR') ||
+    g.includes('OPERATÖR') ||
+    g.includes('IS MAKINE') ||
+    g.includes('ISMAKINE') ||
+    g.includes('JCB') ||
+    g.includes('EXCAVATOR') ||
+    g.includes('KEKO')
+  );
+}
+
 export function isKampciGorev(gorev?: string): boolean {
-  return normalizeGorevKey(gorev).includes('KAMPCI');
+  const g = normalizeGorevKey(gorev);
+  // KAMPÇI / Kampçı / KAMP GÖREVLİSİ / KAMP PERSONEL
+  return (
+    g.includes('KAMPCI') ||
+    g.includes('KAMP GOREV') ||
+    g === 'KAMP PERSONEL' ||
+    g === 'KAMP PERSONELI' ||
+    (g.includes('KAMP') && (g.includes('PERSONEL') || g.includes('GOREV')))
+  );
+}
+
+/** Şenör (ölçüm / topograf yardımcı) — Kampçı yoklamasında takip edilir */
+export function isSenorGorev(gorev?: string): boolean {
+  const g = normalizeGorevKey(gorev);
+  return g.includes('SENOR') || g.includes('SENÖR') || g === 'CHAINMAN';
+}
+
+/** Kampçı günlük / aylık yoklama listesi: kampçı + şenör */
+export function isKampciYoklamaKapsami(gorev?: string): boolean {
+  return isKampciGorev(gorev) || isSenorGorev(gorev);
 }
 
 export function isFormenGorev(gorev?: string): boolean {
@@ -37,10 +80,17 @@ export function isFormenGorev(gorev?: string): boolean {
   return g.includes('FORMEN') || g.includes('FORMAN');
 }
 
+/** Formen günlük yoklama / faaliyet havuzundan hariç tutulan roller */
 export function isKampciTesisatciMermerci(gorev?: string): boolean {
   if (!gorev) return false;
-  const g = normalizeGorevKey(gorev);
-  return g.includes('KAMPCI') || g.includes('TESISATCI') || g.includes('MERMERCI');
+  return (
+    isKampciGorev(gorev) ||
+    isSenorGorev(gorev) ||
+    isTesisatciGorev(gorev) ||
+    isMermerciGorev(gorev) ||
+    isSoforGorev(gorev) ||
+    isOperatorGorev(gorev)
+  );
 }
 
 /** @deprecated Kampçı yoklaması artık yalnızca kampçı — isKampciGorev kullanın */
@@ -139,7 +189,7 @@ export function personHasGeldiInMonth(
   return found;
 }
 
-function parseFlexibleDateParts(
+export function parseFlexibleDateParts(
   raw?: string
 ): { year: number; month: number; day: number } | null {
   if (!raw) return null;

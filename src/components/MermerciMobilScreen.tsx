@@ -1,16 +1,26 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Gem, ClipboardList, Camera, CheckCircle, RefreshCw, LogOut, Pencil, Trash2, Calendar
+  Gem, ClipboardList, Camera, CheckCircle, RefreshCw, LogOut, Pencil, Trash2, Calendar, Printer
 } from 'lucide-react';
 import { collection, deleteDoc, doc, onSnapshot, setDoc } from 'firebase/firestore';
 import { AylikYoklamaMap, MermerciFaaliyet, Personel, SahaFaaliyeti } from '../types/erp';
 import { db, cleanUndefined } from '../lib/firebase';
 import { compressImage } from '../lib/imageCompress';
 import { todayDateKey, formatDateLabelTr, normalizeDateKey } from '../lib/dateKeyUtils';
-import { applySahaMesaiToYoklama, normalizeMesaiHours } from '../lib/sahaFaaliyetUtils';
+import {
+  applySahaMesaiToYoklama,
+  mesaiInputDisplayValue,
+  normalizeMesaiHours,
+  setMesaiHoursInMap,
+} from '../lib/sahaFaaliyetUtils';
 import { ensureSahaFaaliyetFotolarPersisted } from '../lib/sahaFaaliyetFotoStorage';
 import { isMermerciGorev } from '../lib/yoklamaUtils';
+import { resolveGeldiRolPersonelIds } from '../lib/mobilRolEtiketUtils';
 import { PARSEL_BLOK_MAP, PARSEL_LIST, defaultBlokForParsel } from '../data/parselBlokMap';
+import {
+  buildMobilGunlukFaaliyetReportHtml,
+  openMobilGunlukFaaliyetReport,
+} from '../lib/mobilGunlukFaaliyetReport';
 import { KampGunlukYoklamaTab } from './KampGunlukYoklamaTab';
 
 interface MermerciMobilScreenProps {
@@ -87,6 +97,23 @@ export const MermerciMobilScreen: React.FC<MermerciMobilScreenProps> = ({
     () => faaliyetler.filter((f) => normalizeDateKey(f.tarih) === normalizeDateKey(faaliyetTarih)),
     [faaliyetler, faaliyetTarih]
   );
+
+  const handleTopluRaporla = () => {
+    if (gunlukFaaliyetler.length === 0) {
+      showStatus('error', 'Bu tarihte birleştirilecek faaliyet kaydı yok.');
+      return;
+    }
+    const html = buildMobilGunlukFaaliyetReportHtml({
+      rol: 'MERMERCİ',
+      anchorDate: faaliyetTarih,
+      records: gunlukFaaliyetler,
+      olusturan: currentUser?.email || 'Mermerci',
+    });
+    openMobilGunlukFaaliyetReport(
+      html,
+      `Mermerci Günlük Rapor — ${formatDateLabelTr(faaliyetTarih)}`
+    );
+  };
 
   const blokOptions = PARSEL_BLOK_MAP[parsel] || [];
 
@@ -174,14 +201,15 @@ export const MermerciMobilScreen: React.FC<MermerciMobilScreenProps> = ({
       if (mesaiMap && Object.keys(mesaiMap).length > 0) {
         aktifPersonelListesi = Object.keys(mesaiMap);
       } else {
-        const self = mermerciPersoneller.find(
-          (p) => String(p.eposta || '').trim().toLowerCase() === kaydedenEmail
+        aktifPersonelListesi = resolveGeldiRolPersonelIds(
+          personeller,
+          yoklamalar,
+          normalizeDateKey(faaliyetTarih),
+          'MERMERCI',
+          { ensureEmail: kaydedenEmail }
         );
-        if (self?.id) aktifPersonelListesi = [self.id];
-        else if (existing?.aktifPersonelListesi?.length) {
+        if (aktifPersonelListesi.length === 0 && existing?.aktifPersonelListesi?.length) {
           aktifPersonelListesi = [...existing.aktifPersonelListesi];
-        } else if (mermerciPersoneller.length === 1) {
-          aktifPersonelListesi = [mermerciPersoneller[0].id];
         }
       }
 
@@ -474,13 +502,14 @@ export const MermerciMobilScreen: React.FC<MermerciMobilScreenProps> = ({
                     <p className="text-[10px] text-amber-700 italic">MERMERCİ görevli personel bulunamadı.</p>
                   ) : (
                     <div className="max-h-44 overflow-y-auto space-y-1">
-                      {mermerciPersoneller.map((p) => {
-                        const hrs = personelMesaiSaatleri[p.id] || 0;
+                      {                      mermerciPersoneller.map((p) => {
+                        const hrs = personelMesaiSaatleri[p.id];
+                        const hasHrs = Number(hrs) > 0;
                         return (
                           <div
                             key={p.id}
                             className={`flex items-center justify-between gap-2 border rounded-lg px-2 py-1.5 ${
-                              hrs > 0 ? 'bg-amber-100 border-amber-300' : 'bg-white border-slate-200'
+                              hasHrs ? 'bg-amber-100 border-amber-300' : 'bg-white border-slate-200'
                             }`}
                           >
                             <span className="text-[9px] font-bold text-slate-800 truncate">
@@ -491,12 +520,12 @@ export const MermerciMobilScreen: React.FC<MermerciMobilScreenProps> = ({
                               min={0}
                               max={14}
                               step={0.5}
-                              value={hrs}
+                              placeholder="—"
+                              value={mesaiInputDisplayValue(hrs)}
                               onChange={(e) =>
-                                setPersonelMesaiSaatleri((prev) => ({
-                                  ...prev,
-                                  [p.id]: Number(e.target.value) || 0,
-                                }))
+                                setPersonelMesaiSaatleri((prev) =>
+                                  setMesaiHoursInMap(prev, p.id, e.target.value)
+                                )
                               }
                               className="w-16 text-center text-[10px] font-bold border rounded-lg py-1"
                             />
@@ -530,9 +559,20 @@ export const MermerciMobilScreen: React.FC<MermerciMobilScreenProps> = ({
           </div>
 
           <div className="bg-white border border-slate-200 rounded-2xl p-4 space-y-3 shadow-sm">
-            <h4 className="text-[10px] font-black uppercase tracking-wider text-slate-700">
-              {formatDateLabelTr(faaliyetTarih)} — Kayıtlar ({gunlukFaaliyetler.length})
-            </h4>
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <h4 className="text-[10px] font-black uppercase tracking-wider text-slate-700">
+                {formatDateLabelTr(faaliyetTarih)} — Kayıtlar ({gunlukFaaliyetler.length})
+              </h4>
+              <button
+                type="button"
+                onClick={handleTopluRaporla}
+                disabled={gunlukFaaliyetler.length === 0}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-violet-700 text-white text-[9px] font-black uppercase tracking-wide disabled:opacity-40 cursor-pointer"
+              >
+                <Printer size={12} />
+                Toplu Raporla ({gunlukFaaliyetler.length})
+              </button>
+            </div>
             {gunlukFaaliyetler.length === 0 ? (
               <p className="text-[11px] text-slate-400 italic">Bu tarihte faaliyet yok.</p>
             ) : (

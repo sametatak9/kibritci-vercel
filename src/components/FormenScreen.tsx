@@ -8,8 +8,9 @@ import {
 } from 'lucide-react';
 import { Personel, AylikYoklamaMap, YoklamaDurum, SahaFaaliyeti as SahaFaaliyetiType, SahaFaaliyetTipi } from '../types/erp';
 import { db, saveDocument } from '../lib/firebase';
+import { assertErpWriteAuth, formatFirestoreWriteError } from '../lib/authWriteGuard';
 import { compressImage } from '../lib/imageCompress';
-import { buildPersonelListForMonth, getYoklamaDay, isDayActiveForPersonel, isTaseronPersonel, isIdariPersonel, setYoklamaDay, isKampciTesisatciMermerci } from '../lib/yoklamaUtils';
+import { buildPersonelListForMonth, getYoklamaDay, isDayActiveForPersonel, isTaseronPersonel, isIdariPersonel, setYoklamaDay, isKampciTesisatciMermerci, isSoforGorev, isOperatorGorev } from '../lib/yoklamaUtils';
 import { buildFormenGunlukOzet } from '../lib/gunlukAkisUtils';
 import { buildWhatsAppUrl, isLegacySahaRecord } from '../lib/mobilOnayUtils';
 import {
@@ -30,6 +31,8 @@ import { KibritciLogo } from './KibritciLogo';
 import { wrapCorporateReportHtml } from '../lib/corporateReportHtml';
 import { KIBRITCI_LOGO_PATH } from '../lib/kibritciBrand';
 import type { SahaFaaliyetSaveSource } from '../lib/sahaFaaliyetPersistence';
+import { FAALIYET_ETIKET_ONSETLERI, normalizeFaaliyetEtiketi } from '../lib/faaliyetEtiketUtils';
+import { AylikPuantajMobilPanel } from './AylikPuantajMobilPanel';
 
 interface FormenScreenProps {
   personeller: Personel[];
@@ -144,15 +147,30 @@ export const FormenScreen: React.FC<FormenScreenProps> = ({
   const [presentIds, setPresentIds] = useState<string[]>([]);
   const [absentIds, setAbsentIds] = useState<string[]>([]);
   const [mesaiSaatleri, setMesaiSaatleri] = useState<Record<string, number>>({});
+  const [attendanceTouchedIds, setAttendanceTouchedIds] = useState<string[]>([]);
   const [hasLocalAttendanceDraft, setHasLocalAttendanceDraft] = useState(false);
-  const [spotlightMesai, setSpotlightMesai] = useState<string>('0');
-  const [lastAttendanceSaveAt, setLastAttendanceSaveAt] = useState<string | null>(null);
+  const [spotlightMesai, setSpotlightMesai] = useState<string>('');
+  const [lastAttendanceSaveAt, setLastAttendanceSaveAt] = useState<string | null>(() => {
+    try {
+      return localStorage.getItem('formen_gunluk_yoklama_last');
+    } catch {
+      return null;
+    }
+  });
+
+  const filterFormenPuantajPersonel = React.useCallback((p: Personel) => {
+    if (isTaseronPersonel(p) || isIdariPersonel(p)) return false;
+    if (isSoforGorev(p.gorev) || isOperatorGorev(p.gorev)) return false;
+    if (isKampciTesisatciMermerci(p.gorev)) return false;
+    return true;
+  }, []);
 
   // 2. SAHA FAALİYETİ STATE
   const [isNiteligi, setIsNiteligi] = useState('');
   const [parsel, setParsel] = useState('Parsel Bölge 157/46');
   const [blok, setBlok] = useState('GENEL SAHA');
   const [aciklama, setAciklama] = useState('');
+  const [isEtiketi, setIsEtiketi] = useState('');
   const [fotoUrls, setFotoUrls] = useState<string[]>([]);
   const [faaliyetPersonelIds, setFaaliyetPersonelIds] = useState<string[]>([]);
   const [faaliyetPersonelSearch, setFaaliyetPersonelSearch] = useState('');
@@ -203,6 +221,7 @@ export const FormenScreen: React.FC<FormenScreenProps> = ({
   const [isCikisTalepleriList, setIsCikisTalepleriList] = useState<any[]>([]);
   const [isGuncellemeTalepleriList, setIsGuncellemeTalepleriList] = useState<any[]>([]);
   const [savingAttendance, setSavingAttendance] = useState(false);
+  const [savingFaaliyet, setSavingFaaliyet] = useState(false);
 
   // Quick select lists
   const isNitelikleriList = [
@@ -220,13 +239,22 @@ export const FormenScreen: React.FC<FormenScreenProps> = ({
 
   const parsellerList = PARSEL_LIST;
 
-  const monthPersonelList = buildPersonelListForMonth(personeller, yoklamalar, year, month);
-  const activeStaff = monthPersonelList.filter((p) => {
-    if (isTaseronPersonel(p) || isIdariPersonel(p)) return false;
-    // Kampçı, Tesisatçı ve Mermerci personeller Kampçı ekranında listelenecektir.
-    if (isKampciTesisatciMermerci(p.gorev)) return false;
-    return isDayActiveForPersonel(p, year, month, day, yoklamalar[p.id] as any);
-  });
+  const monthPersonelList = useMemo(
+    () => buildPersonelListForMonth(personeller, yoklamalar, year, month),
+    [personeller, yoklamalar, year, month]
+  );
+  const activeStaff = useMemo(
+    () =>
+      monthPersonelList.filter((p) => {
+        if (isTaseronPersonel(p) || isIdariPersonel(p)) return false;
+        if (isSoforGorev(p.gorev) || isOperatorGorev(p.gorev)) return false;
+        if (isKampciTesisatciMermerci(p.gorev)) return false;
+        return isDayActiveForPersonel(p, year, month, day, yoklamalar[p.id] as any);
+      }),
+    [monthPersonelList, yoklamalar, year, month, day]
+  );
+  const presentIdSet = useMemo(() => new Set(presentIds), [presentIds]);
+  const absentIdSet = useMemo(() => new Set(absentIds), [absentIds]);
   const assignedPersonelOnSelectedDate = useMemo(() => {
     const ids = new Set<string>();
     selectedDateFaaliyetleri.forEach((f) => {
@@ -236,17 +264,19 @@ export const FormenScreen: React.FC<FormenScreenProps> = ({
     return ids;
   }, [selectedDateFaaliyetleri, editingFaaliyetId]);
 
-  const faaliyetPersonelPoolBase = activeStaff.filter(
-    (p) => presentIds.includes(p.id) && !assignedPersonelOnSelectedDate.has(p.id)
+  const faaliyetPersonelPoolBase = useMemo(
+    () => activeStaff.filter((p) => presentIdSet.has(p.id) && !assignedPersonelOnSelectedDate.has(p.id)),
+    [activeStaff, presentIdSet, assignedPersonelOnSelectedDate]
   );
-  const filteredFaaliyetPersonelPool = faaliyetPersonelPoolBase.filter((p) => {
+  const filteredFaaliyetPersonelPool = useMemo(() => {
     const q = faaliyetPersonelSearch.trim().toLocaleLowerCase('tr-TR');
-    if (!q) return true;
-    return (
-      `${p.ad} ${p.soyad}`.toLocaleLowerCase('tr-TR').includes(q) ||
-      String(p.gorev || '').toLocaleLowerCase('tr-TR').includes(q)
+    if (!q) return faaliyetPersonelPoolBase;
+    return faaliyetPersonelPoolBase.filter(
+      (p) =>
+        `${p.ad} ${p.soyad}`.toLocaleLowerCase('tr-TR').includes(q) ||
+        String(p.gorev || '').toLocaleLowerCase('tr-TR').includes(q)
     );
-  });
+  }, [faaliyetPersonelPoolBase, faaliyetPersonelSearch]);
 
   const parseDateParts = (dateStr: string) => {
     const [y, m, d] = String(dateStr || '').split('-').map(Number);
@@ -381,6 +411,7 @@ export const FormenScreen: React.FC<FormenScreenProps> = ({
 
   useEffect(() => {
     setHasLocalAttendanceDraft(false);
+    setAttendanceTouchedIds([]);
   }, [selectedDate]);
 
   // Load and subscribe to Personnel entry requests from Firestore
@@ -455,38 +486,56 @@ export const FormenScreen: React.FC<FormenScreenProps> = ({
   const getDisplayName = (ad?: string, soyad?: string): string =>
     `${ad || '-'} ${soyad || ''}`.trim();
 
-  const remainingStaff = activeStaff.filter(p => !presentIds.includes(p.id) && !absentIds.includes(p.id));
-  const filteredRemaining = remainingStaff.filter(p => 
-    `${p.ad} ${p.soyad}`.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    (p.gorev || '').toLowerCase().includes(searchQuery.toLowerCase())
+  const remainingStaff = useMemo(
+    () => activeStaff.filter((p) => !presentIdSet.has(p.id) && !absentIdSet.has(p.id)),
+    [activeStaff, presentIdSet, absentIdSet]
   );
+  const filteredRemaining = useMemo(() => {
+    const q = searchQuery.toLowerCase();
+    if (!q) return remainingStaff;
+    return remainingStaff.filter(
+      (p) =>
+        `${p.ad} ${p.soyad}`.toLowerCase().includes(q) ||
+        (p.gorev || '').toLowerCase().includes(q)
+    );
+  }, [remainingStaff, searchQuery]);
 
   // Spotlight staff (the first unmarked employee in the pile)
   const spotlightStaff = filteredRemaining[0] || null;
 
   const setMesaiWithDraft = (id: string, value: number) => {
-    setHasLocalAttendanceDraft(true);
     const safe = Number.isFinite(value) ? Math.max(0, Math.min(24, value)) : 0;
-    setMesaiSaatleri(prev => ({ ...prev, [id]: safe }));
+    touchAttendance(id);
+    setMesaiSaatleri((prev) => {
+      const next = { ...prev };
+      if (safe <= 0) delete next[id];
+      else next[id] = safe;
+      return next;
+    });
+  };
+
+  const touchAttendance = (id: string) => {
+    setHasLocalAttendanceDraft(true);
+    setAttendanceTouchedIds((prev) => (prev.includes(id) ? prev : [...prev, id]));
   };
 
   // Actions
   const handleMarkPresent = (id: string, mesai: number = 0) => {
-    setHasLocalAttendanceDraft(true);
+    touchAttendance(id);
     setPresentIds(prev => [...prev.filter(x => x !== id), id]);
     setAbsentIds(prev => prev.filter(x => x !== id));
     setMesaiSaatleri(prev => ({ ...prev, [id]: Math.max(0, Math.min(24, mesai)) }));
   };
 
   const handleMarkAbsent = (id: string) => {
-    setHasLocalAttendanceDraft(true);
+    touchAttendance(id);
     setAbsentIds(prev => [...prev.filter(x => x !== id), id]);
     setPresentIds(prev => prev.filter(x => x !== id));
     setMesaiSaatleri(prev => ({ ...prev, [id]: 0 }));
   };
 
   const handleResetMark = (id: string) => {
-    setHasLocalAttendanceDraft(true);
+    touchAttendance(id);
     setPresentIds(prev => prev.filter(x => x !== id));
     setAbsentIds(prev => prev.filter(x => x !== id));
     setMesaiSaatleri(prev => {
@@ -497,8 +546,9 @@ export const FormenScreen: React.FC<FormenScreenProps> = ({
   };
 
   const handleMarkAllPresent = () => {
-    setHasLocalAttendanceDraft(true);
     const unmarkedIds = remainingStaff.map(p => p.id);
+    setHasLocalAttendanceDraft(true);
+    setAttendanceTouchedIds((prev) => Array.from(new Set([...prev, ...unmarkedIds])));
     setPresentIds(prev => Array.from(new Set([...prev, ...unmarkedIds])));
     setAbsentIds(prev => prev.filter(id => !unmarkedIds.includes(id)));
     const copy = { ...mesaiSaatleri };
@@ -508,51 +558,81 @@ export const FormenScreen: React.FC<FormenScreenProps> = ({
     setMesaiSaatleri(copy);
   };
 
-  // Digital Signature Save
+  // Digital Signature Save — yalnızca dokunulan personelin SEÇİLİ GÜNÜ yazılır (tam harita gönderme)
   const handleSaveYoklama = async () => {
     if (savingAttendance) return;
     setSavingAttendance(true);
     try {
-      const next = { ...yoklamalar };
+      const authBlock = await assertErpWriteAuth();
+      if (authBlock) {
+        showStatus('error', authBlock);
+        return;
+      }
+      const idsToWrite =
+        attendanceTouchedIds.length > 0
+          ? attendanceTouchedIds
+          : [...presentIds, ...absentIds];
 
-      activeStaff.forEach(p => {
-        const dayData = getYoklamaDay(next[p.id], year, month, day);
+      if (idsToWrite.length === 0) {
+        showStatus('error', 'Kaydedilecek işaretli personel yok. Önce Geldi / Yok seçin.');
+        return;
+      }
 
-        if (presentIds.includes(p.id)) {
-          next[p.id] = setYoklamaDay(next[p.id], year, month, day, {
-            ...(dayData || { durum: 'Girilmedi' as YoklamaDurum, mesaiSaati: 0 }),
+      // Kritik: sadece değişen gün hücreleri — tam yoklama haritası gönderilmez
+      // (aksi halde yerel Girilmedi kayıtları sunucudaki dolu Temmuz günlerini ezebilir)
+      const sparse: AylikYoklamaMap = {};
+      const gonderen = currentUser?.email || 'formen';
+
+      idsToWrite.forEach((pid) => {
+        if (presentIds.includes(pid)) {
+          sparse[pid] = setYoklamaDay(sparse[pid], year, month, day, {
             durum: 'Geldi',
-            mesaiSaati: mesaiSaatleri[p.id] || 0,
-            gonderen: currentUser?.email || 'formen',
+            mesaiSaati: mesaiSaatleri[pid] || 0,
+            gonderen,
           });
-        } else if (absentIds.includes(p.id)) {
-          next[p.id] = setYoklamaDay(next[p.id], year, month, day, {
-            ...(dayData || { durum: 'Girilmedi' as YoklamaDurum, mesaiSaati: 0 }),
+        } else if (absentIds.includes(pid)) {
+          sparse[pid] = setYoklamaDay(sparse[pid], year, month, day, {
             durum: 'Yok',
             mesaiSaati: 0,
-            gonderen: currentUser?.email || 'formen',
+            gonderen,
           });
         } else {
-          // Sıfırlanan / işaretsiz personel — Geldi/Yok kaydını temizle
-          next[p.id] = setYoklamaDay(next[p.id], year, month, day, {
+          // Bilinçli sıfırlama — yalnızca bu gün
+          sparse[pid] = setYoklamaDay(sparse[pid], year, month, day, {
             durum: 'Girilmedi',
             mesaiSaati: 0,
-            gonderen: currentUser?.email || 'formen',
+            gonderen,
           });
         }
       });
 
       if (saveYoklamalarNow) {
-        await saveYoklamalarNow(next);
+        await saveYoklamalarNow(sparse);
       } else {
-        setYoklamalar(next);
+        setYoklamalar((prev) => {
+          const merged = { ...prev };
+          for (const [pid, days] of Object.entries(sparse)) {
+            merged[pid] = { ...(merged[pid] || {}), ...(days as object) } as any;
+          }
+          return merged;
+        });
       }
 
       setHasLocalAttendanceDraft(false);
-      setLastAttendanceSaveAt(new Date().toLocaleString('tr-TR'));
-      showStatus('success', `📅 ${selectedDate} Tarihli Yoklama ve Mesai Saatleri, Formen imzasıyla başarıyla sisteme kaydedildi ve ana programa gönderildi!`);
+      setAttendanceTouchedIds([]);
+      const stamp = new Date().toLocaleString('tr-TR');
+      setLastAttendanceSaveAt(stamp);
+      try {
+        localStorage.setItem('formen_gunluk_yoklama_last', stamp);
+      } catch {
+        /* ignore */
+      }
+      showStatus(
+        'success',
+        `📅 ${selectedDate} · ${idsToWrite.length} personel kaydedildi (diğer günler korunur). Ana programda aynı tarihi kontrol edin.`
+      );
     } catch (err: any) {
-      showStatus('error', `Yoklama kaydedilemedi: ${err?.message || 'Bilinmeyen hata'}`);
+      showStatus('error', formatFirestoreWriteError(err, err?.message || 'Yoklama kaydedilemedi'));
     } finally {
       setSavingAttendance(false);
     }
@@ -636,34 +716,6 @@ ${satirlar
     printWin.document.close();
     printWin.focus();
     setTimeout(() => printWin.print(), 250);
-  };
-
-  const handleExportAylikPuantajCsv = () => {
-    const daysInMonth = new Date(year, month, 0).getDate();
-    const days = Array.from({ length: daysInMonth }, (_, i) => i + 1);
-    const rows: string[][] = [
-      ['Personel', 'Gorev', ...days.map((d) => String(d)), 'Gelen Gun', 'Toplam Mesai (saat)'],
-    ];
-
-    monthPersonelList.forEach((p) => {
-      const map = yoklamalar[p.id] as any;
-      let geldi = 0;
-      let toplamMesai = 0;
-      const dayCells = days.map((d) => {
-        if (!isDayActiveForPersonel(p, year, month, d, map)) return 'C';
-        const dayData = getYoklamaDay(map, year, month, d);
-        const durum = dayData?.durum || 'Girilmedi';
-        const mesai = Number(dayData?.mesaiSaati || 0);
-        if (durum === 'Geldi') geldi += 1;
-        toplamMesai += mesai;
-        return mesai > 0 ? `${durum} (+${mesai})` : durum;
-      });
-      rows.push([`${p.ad} ${p.soyad}`, p.gorev || '-', ...dayCells, String(geldi), toplamMesai.toFixed(2)]);
-    });
-
-    const periodLabel = `${year}-${String(month).padStart(2, '0')}`;
-    downloadCsv(rows, `Formen_Aylik_Puantaj_${periodLabel}.csv`);
-    showStatus('success', 'Aylik puantaj CSV raporu indirildi.');
   };
 
   // Quick status helper
@@ -779,6 +831,7 @@ ${satirlar
   const resetFaaliyetForm = () => {
     setIsNiteligi('');
     setAciklama('');
+    setIsEtiketi('');
     setFotoUrls([]);
     setSahaUstaSayisi(0);
     setSahaIsciSayisi(0);
@@ -797,6 +850,7 @@ ${satirlar
     setParsel(sf.parsel);
     setBlok(sf.blok);
     setAciklama(sf.aciklama || '');
+    setIsEtiketi(sf.isEtiketi || '');
     setFotoUrls(getFaaliyetFotolar(sf));
     setFaaliyetPersonelIds(Array.isArray(sf.aktifPersonelListesi) ? [...sf.aktifPersonelListesi] : []);
     setSahaUstaSayisi(sf.ustaSayisi || 0);
@@ -821,18 +875,42 @@ ${satirlar
     const hasPrev = previousMesaiMap && Object.values(previousMesaiMap).some((h) => Number(h) > 0);
     if (!hasNew && !hasPrev) return;
 
-    let next = { ...yoklamalar };
+    const dk = normalizeDateKey(tarih);
+    if (!dk) return;
+    const [y, m, d] = dk.split('-').map(Number);
     const gonderen = formenEmail || 'FORMEN_MOBIL';
+
+    let working = { ...yoklamalar };
     if (hasPrev) {
-      next = applySahaMesaiToYoklama(next, tarih, previousMesaiMap, gonderen, 'subtract');
+      working = applySahaMesaiToYoklama(working, tarih, previousMesaiMap, gonderen, 'subtract');
     }
     if (hasNew) {
-      next = applySahaMesaiToYoklama(next, tarih, mesaiMap, gonderen, 'add');
+      working = applySahaMesaiToYoklama(working, tarih, mesaiMap, gonderen, 'add');
     }
+
+    // Sadece bu tarihe dokunan personelleri yaz
+    const touchedIds = new Set([
+      ...Object.keys(mesaiMap || {}),
+      ...Object.keys(previousMesaiMap || {}),
+    ]);
+    const sparse: AylikYoklamaMap = {};
+    for (const pid of touchedIds) {
+      const dayData = getYoklamaDay(working[pid], y, m, d);
+      if (!dayData) continue;
+      sparse[pid] = setYoklamaDay(sparse[pid], y, m, d, dayData);
+    }
+    if (Object.keys(sparse).length === 0) return;
+
     if (saveYoklamalarNow) {
-      await saveYoklamalarNow(next);
+      await saveYoklamalarNow(sparse);
     } else {
-      setYoklamalar(next);
+      setYoklamalar((prev) => {
+        const merged = { ...prev };
+        for (const [pid, days] of Object.entries(sparse)) {
+          merged[pid] = { ...(merged[pid] || {}), ...(days as object) } as any;
+        }
+        return merged;
+      });
     }
   };
 
@@ -852,6 +930,7 @@ ${satirlar
 
   const handleSaveFaaliyet = async (e: React.SyntheticEvent) => {
     e.preventDefault();
+    if (savingFaaliyet) return;
     if (!isNiteligi) {
       showStatus('error', 'Lütfen iş niteliğini giriniz veya şablondan seçiniz!');
       return;
@@ -880,6 +959,9 @@ ${satirlar
       parsel,
       blok,
       aciklama,
+      isEtiketi: isEtiketi || previousRecord?.isEtiketi || undefined,
+      ilerlemeDurumu: previousRecord?.ilerlemeDurumu || (isEtiketi ? 'BASLAMADI' : undefined),
+      ilerlemeKayitlari: previousRecord?.ilerlemeKayitlari,
       fotoUrls: fotoUrls.length ? fotoUrls : undefined,
       fotoUrl: fotoUrls[0] || undefined,
       aktifPersonelListesi: faaliyetPersonelIds,
@@ -903,6 +985,7 @@ ${satirlar
       iceriAktarimDurumu: previousRecord?.iceriAktarimDurumu || 'BEKLIYOR',
     };
 
+    setSavingFaaliyet(true);
     try {
       await saveSahaFaaliyetNow!(faaliyetPayload, 'formen_mobil');
       if (!editingFaaliyetId) {
@@ -916,8 +999,19 @@ ${satirlar
         );
       }
     } catch (err: any) {
-      showStatus('error', `Faaliyet gönderilemedi: ${err?.message || 'Bağlantı hatası'}`);
+      const raw = String(err?.message || 'Bağlantı hatası');
+      const low = raw.toLowerCase();
+      const msg =
+        low.includes('failed to fetch dynamically imported module') ||
+        low.includes('importing a module script failed') ||
+        low.includes('not a valid javascript mime') ||
+        low.includes('text/html')
+          ? 'Sayfa güncellenmiş (eski önbellek). Ctrl+F5 ile yenileyip kaydı tekrar deneyin.'
+          : raw;
+      showStatus('error', `Faaliyet gönderilemedi: ${msg}`);
       return;
+    } finally {
+      setSavingFaaliyet(false);
     }
 
     if (editingFaaliyetId) {
@@ -1487,7 +1581,12 @@ ${satirlar
                           <div className="flex items-center space-x-1">
                             <button
                               type="button"
-                              onClick={() => setSpotlightMesai(m => Math.max(0, Number(m) - 1).toString())}
+                              onClick={() =>
+                                setSpotlightMesai((m) => {
+                                  const next = Math.max(0, Number(m || 0) - 1);
+                                  return next <= 0 ? '' : String(next);
+                                })
+                              }
                               className="w-5 h-5 rounded bg-slate-800 flex items-center justify-center font-black text-xs hover:bg-slate-750 active:scale-90"
                             >
                               -
@@ -1496,13 +1595,28 @@ ${satirlar
                               type="number"
                               min="0"
                               max="12"
+                              placeholder="—"
                               value={spotlightMesai}
-                              onChange={(e) => setSpotlightMesai(e.target.value)}
+                              onChange={(e) => {
+                                const raw = e.target.value;
+                                if (!raw.trim()) {
+                                  setSpotlightMesai('');
+                                  return;
+                                }
+                                const n = Number(raw);
+                                if (!Number.isFinite(n) || n <= 0) {
+                                  setSpotlightMesai('');
+                                  return;
+                                }
+                                setSpotlightMesai(String(Math.min(12, n)));
+                              }}
                               className="w-9 bg-slate-950 border border-slate-800 text-center font-black text-amber-400 text-xs py-0.5 rounded focus:outline-none focus:ring-1 focus:ring-amber-500"
                             />
                             <button
                               type="button"
-                              onClick={() => setSpotlightMesai(m => Math.min(12, Number(m) + 1).toString())}
+                              onClick={() =>
+                                setSpotlightMesai((m) => String(Math.min(12, Number(m || 0) + 1)))
+                              }
                               className="w-5 h-5 rounded bg-slate-800 flex items-center justify-center font-black text-xs hover:bg-slate-750 active:scale-90"
                             >
                               +
@@ -1646,7 +1760,7 @@ ${satirlar
                     </div>
 
                     <p className="text-[9px] text-slate-500 leading-snug">
-                      Bu kayıt, şantiye müdürlüğüne dijital imzalı resmi yoklama olarak iletilecektir. İşaretli durumları kontrol ettikten sonra kilitleyin.
+                      Yalnızca dokunduğunuz personeller güncellenir. İşaretlemediğiniz eski yoklama kayıtları silinmez; yeniden işaretleyip kaydederseniz değişir.
                     </p>
 
                     {/* Simulated hand signature block from user account info */}
@@ -1993,6 +2107,40 @@ ${satirlar
                       />
                     </div>
 
+                    <div className="space-y-1.5">
+                      <label className="font-bold text-slate-500 uppercase text-[8px] tracking-wider block">
+                        İş Etiketi
+                      </label>
+                      <select
+                        value={isEtiketi}
+                        onChange={(e) => setIsEtiketi(normalizeFaaliyetEtiketi(e.target.value))}
+                        className="w-full bg-slate-50 border border-slate-200 p-1.5 rounded-xl focus:outline-none focus:ring-1 focus:ring-amber-500 text-[10px] font-bold text-slate-800"
+                      >
+                        <option value="">— Etiket seç (opsiyonel) —</option>
+                        {FAALIYET_ETIKET_ONSETLERI.map((o) => (
+                          <option key={o} value={o}>
+                            {o}
+                          </option>
+                        ))}
+                      </select>
+                      <div className="flex flex-wrap gap-1">
+                        {FAALIYET_ETIKET_ONSETLERI.map((o) => (
+                          <button
+                            type="button"
+                            key={o}
+                            onClick={() => setIsEtiketi(o)}
+                            className={`py-1 px-2 rounded-lg text-[8px] font-bold border transition ${
+                              isEtiketi === o
+                                ? 'bg-amber-100 border-amber-300 text-slate-900'
+                                : 'bg-slate-50 hover:bg-slate-100 border-slate-200 text-slate-600'
+                            }`}
+                          >
+                            {o}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
                     <div className="space-y-1.5 border border-slate-200 rounded-2xl p-3 bg-slate-50/60">
                       <div className="flex items-center justify-between gap-2">
                         <label className="font-bold text-slate-600 uppercase text-[8px] tracking-wider block">DB Personel Görevlendirme (Yeni Metod)</label>
@@ -2074,11 +2222,22 @@ ${satirlar
                                       setPersonelMesaiDraft((prev) => ({ ...prev, [pid]: raw }));
                                     }}
                                     onBlur={() => {
-                                      const raw = personelMesaiDraft[pid] ?? '';
+                                      const raw = (personelMesaiDraft[pid] ?? '').trim().replace(',', '.');
                                       const parsed = parseFloat(raw);
-                                      const safe = normalizeSahaMesaiHours(
-                                        Number.isFinite(parsed) ? parsed : 0
-                                      );
+                                      if (!raw || !Number.isFinite(parsed) || parsed <= 0) {
+                                        setPersonelMesaiSaatleri((prev) => {
+                                          const next = { ...prev };
+                                          delete next[pid];
+                                          return next;
+                                        });
+                                        setPersonelMesaiDraft((prev) => {
+                                          const next = { ...prev };
+                                          delete next[pid];
+                                          return next;
+                                        });
+                                        return;
+                                      }
+                                      const safe = normalizeSahaMesaiHours(parsed);
                                       setPersonelMesaiSaatleri((prev) => ({ ...prev, [pid]: safe }));
                                       setPersonelMesaiDraft((prev) => ({
                                         ...prev,
@@ -2209,10 +2368,17 @@ ${satirlar
                     {/* Submit activity report */}
                     <button
                       type="submit"
-                      className="w-full bg-amber-500 hover:bg-amber-600 text-slate-950 font-black text-[10px] py-2.5 px-4 rounded-xl transition duration-150 shadow-md flex items-center justify-center space-x-1.5 cursor-pointer border-b-4 border-amber-700"
+                      disabled={savingFaaliyet}
+                      className="w-full bg-amber-500 hover:bg-amber-600 disabled:opacity-60 disabled:cursor-wait text-slate-950 font-black text-[10px] py-2.5 px-4 rounded-xl transition duration-150 shadow-md flex items-center justify-center space-x-1.5 cursor-pointer border-b-4 border-amber-700"
                     >
                       <Send size={12} />
-                      <span>{editingFaaliyetId ? 'GÜNCELLE' : 'KAYDET'}</span>
+                      <span>
+                        {savingFaaliyet
+                          ? 'KAYDEDİLİYOR…'
+                          : editingFaaliyetId
+                            ? 'GÜNCELLE'
+                            : 'KAYDET'}
+                      </span>
                     </button>
 
                   </div>
@@ -3013,96 +3179,20 @@ _Lütfen bu personelin sigorta giriş işlemlerini başlatınız._`}
               )}
 
               {activeTab === 'aylik_puantaj' && (
-                <div className="space-y-3.5 animate-in fade-in duration-150">
-                  <div className="bg-white rounded-3xl border p-4 shadow-xs space-y-3">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center space-x-2">
-                        <FileText size={14} className="text-amber-500" />
-                        <span className="font-bold text-[10px] uppercase tracking-wider text-slate-900">AYLIK GÜNCEL PUANTAJ TABLOSU</span>
-                      </div>
-                      <span className="text-[9px] font-mono font-bold text-slate-500">
-                        {String(month).padStart(2, '0')}/{year}
-                      </span>
-                    </div>
-                    <p className="text-[9px] text-slate-500 leading-snug">
-                      Bu tablo, ana sistemdeki yoklama verisiyle aynı kaynaktan canlı okunur. Çıkışı gelen personelin çıkış sonrası günleri otomatik kapanır.
-                    </p>
-                    <div className="grid grid-cols-2 gap-2">
-                      <button
-                        type="button"
-                        onClick={handleExportAylikPuantajCsv}
-                        className="w-full bg-amber-500 hover:bg-amber-600 text-slate-950 font-black text-[10px] py-2.5 rounded-xl transition"
-                      >
-                        CSV İndir
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setActiveTab('yoklama')}
-                        className="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 font-black text-[10px] py-2.5 rounded-xl transition"
-                      >
-                        Yoklama Sekmesine Dön
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="bg-white rounded-3xl border p-3 shadow-xs">
-                    <div className="overflow-x-auto border rounded-2xl bg-slate-50">
-                      <table className="w-full text-left border-collapse min-w-[900px]">
-                        <thead>
-                          <tr className="bg-slate-100 border-b border-slate-200">
-                            <th className="p-2 text-[9px] font-black uppercase text-slate-600 tracking-wider sticky left-0 bg-slate-100 z-10">Personel</th>
-                            {Array.from({ length: new Date(year, month, 0).getDate() }, (_, i) => i + 1).map((d) => (
-                              <th key={d} className="p-2 text-center text-[9px] font-black uppercase text-slate-600 tracking-wider">
-                                {d}
-                              </th>
-                            ))}
-                            <th className="p-2 text-center text-[9px] font-black uppercase text-slate-600 tracking-wider">Gelen</th>
-                            <th className="p-2 text-center text-[9px] font-black uppercase text-slate-600 tracking-wider">Mesai</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {monthPersonelList.map((p) => {
-                            const personMap = yoklamalar[p.id] as any;
-                            let geldiCount = 0;
-                            let mesaiToplam = 0;
-                            return (
-                              <tr key={p.id} className="border-b border-slate-150 hover:bg-slate-100/60">
-                                <td className="p-2 sticky left-0 bg-white z-10">
-                                  <div className="text-[10px] font-bold text-slate-900 leading-tight">{p.ad} {p.soyad}</div>
-                                  <div className="text-[8px] text-slate-500">{p.gorev || '-'}</div>
-                                </td>
-                                {Array.from({ length: new Date(year, month, 0).getDate() }, (_, i) => i + 1).map((d) => {
-                                  const active = isDayActiveForPersonel(p, year, month, d, personMap);
-                                  if (!active) {
-                                    return (
-                                      <td key={d} className="p-1 text-center bg-violet-50 text-violet-400 text-[9px] font-bold">
-                                        Ç
-                                      </td>
-                                    );
-                                  }
-                                  const data = getYoklamaDay(personMap, year, month, d);
-                                  const durum = data?.durum || 'Girilmedi';
-                                  const mesai = Number(data?.mesaiSaati || 0);
-                                  if (durum === 'Geldi') geldiCount += 1;
-                                  mesaiToplam += mesai;
-                                  return (
-                                    <td key={d} className="p-1 text-center">
-                                      <span className="text-[9px] font-bold text-slate-700">{durum === 'Geldi' ? 'G' : durum === 'Yok' ? 'Y' : durum === 'İzinli' ? 'İ' : durum === 'Raporlu' ? 'R' : durum === 'Pazar' ? 'P' : durum === 'Tatil' ? 'T' : '-'}</span>
-                                      {mesai > 0 && <span className="block text-[7px] font-mono text-amber-700">+{mesai}</span>}
-                                    </td>
-                                  );
-                                })}
-                                <td className="p-1 text-center text-[9px] font-black text-emerald-700">{geldiCount}</td>
-                                <td className="p-1 text-center text-[9px] font-black text-amber-700">{mesaiToplam.toFixed(1)}</td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                </div>
+                <AylikPuantajMobilPanel
+                  personeller={personeller}
+                  filterPersonel={filterFormenPuantajPersonel}
+                  yoklamalar={yoklamalar}
+                  setYoklamalar={setYoklamalar}
+                  saveYoklamalarNow={saveYoklamalarNow}
+                  currentUser={currentUser}
+                  gonderenFallback="formen"
+                  storageKey="aylik_puantaj_last_formen"
+                  title="FORMEN AYLIK YOKLAMA / MESAİ"
+                  onStatus={(type, text) => showStatus(type, text)}
+                />
               )}
+
 
             </div>
 

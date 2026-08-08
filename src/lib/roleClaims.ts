@@ -1,6 +1,16 @@
 /** Firebase Auth custom claims + Firestore rules ile paylaşılan rol sabitleri */
 
-export const MOBILE_ROLES = ['FORMEN', 'GÜVENLİK', 'KAMPÇI', 'LOJİSTİK', 'DEPOCU', 'ANAHTARCI'] as const;
+export const MOBILE_ROLES = [
+  'FORMEN',
+  'GÜVENLİK',
+  'KAMPÇI',
+  'TESİSATÇI',
+  'MERMERCİ',
+  'LOJİSTİK',
+  'OPERATÖR',
+  'DEPOCU',
+  'ANAHTARCI',
+] as const;
 
 export const FINANCE_DESK_ROLES = [
   'YÖNETİCİ',
@@ -43,10 +53,36 @@ export function normalizeClaimRole(yetki?: string | null): string {
     GUVENLIK: 'GÜVENLİK',
     LOJISTIK: 'LOJİSTİK',
     DEPO: 'DEPOCU',
+    ŞÖFÖR: 'LOJİSTİK',
     ŞOFÖR: 'LOJİSTİK',
+    SOFÖR: 'LOJİSTİK',
     SOFOR: 'LOJİSTİK',
+    DRIVER: 'LOJİSTİK',
+    TESISATCI: 'TESİSATÇI',
+    TESİSATCI: 'TESİSATÇI',
+    MERMERCI: 'MERMERCİ',
+    OPERATOR: 'OPERATÖR',
+    OPERATÖR: 'OPERATÖR',
   };
   return aliases[v] ?? v;
+}
+
+/** Firestore rules ile uyumlu: AKTIF (ASCII) → AKTİF (Türkçe İ) */
+export function normalizeClaimDurum(durum?: string | null): string {
+  const raw = String(durum || 'ONAY BEKLİYOR').trim();
+  if (!raw) return 'ONAY BEKLİYOR';
+  const upper = raw.toLocaleUpperCase('tr-TR');
+  // ASCII I / Turkish İ / mixed "AKTIF"
+  const compact = upper.replace(/\s+/g, '');
+  if (compact === 'AKTİF' || compact === 'AKTIF' || compact === 'ACTIVE') return 'AKTİF';
+  if (compact === 'KISITLI' || compact.replace(/İ/g, 'I') === 'KISITLI') return 'KISITLI';
+  if (upper.includes('ONAY') && upper.includes('BEK')) return 'ONAY BEKLİYOR';
+  return upper;
+}
+
+export function isActivePortalDurum(durum?: string | null): boolean {
+  const n = normalizeClaimDurum(durum);
+  return n === 'AKTİF';
 }
 
 export function buildAuthCustomClaims(input: {
@@ -58,7 +94,7 @@ export function buildAuthCustomClaims(input: {
   return {
     email,
     role: normalizeClaimRole(input.yetki),
-    durum: String(input.durum || 'ONAY BEKLİYOR').trim(),
+    durum: normalizeClaimDurum(input.durum),
   };
 }
 

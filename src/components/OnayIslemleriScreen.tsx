@@ -2,12 +2,31 @@ import React, { useState, useEffect } from 'react';
 import { 
   ShieldCheck, CheckCircle, Clock, Send, Users, AlertCircle, FileText, ShoppingCart, 
   Truck, CreditCard, ChevronRight, PenTool, Check, CheckCircle2, UserCheck, Eye, Trash2,
-  FileUp, ExternalLink, MessageSquare, AlertTriangle, Sparkles, Package, Tent, X
+  FileUp, ExternalLink, MessageSquare, AlertTriangle, Sparkles, Package, Tent, X, HardHat
 } from 'lucide-react';
-import { SatinAlmaTalebi, Irsaliye, Fatura, CariKart, CariKartIslem, StokKart, StokKartIslem } from '../types/erp';
-import { db, saveDocument } from '../lib/firebase';
+import {
+  SatinAlmaTalebi,
+  Irsaliye,
+  Fatura,
+  CariKart,
+  CariKartIslem,
+  StokKart,
+  StokKartIslem,
+  KampKaydi,
+  KampOdasi,
+  Personel,
+} from '../types/erp';
+import { db, cleanUndefined, saveDocument } from '../lib/firebase';
+import { evictActiveKampResidentsForPersonel } from '../lib/kampPlacementUtils';
 import { compressImage } from '../lib/imageCompress';
 import { collection, doc, setDoc, onSnapshot, updateDoc, deleteDoc, getDocs } from 'firebase/firestore';
+import {
+  buildYolHarcamaKasaCikisPayload,
+  appendSoforFisToPersonelGecmis,
+  syncApprovedYolHarcamalariToKasa,
+  yolHarcamaKasaDocId,
+} from '../lib/yolHarcamaUtils';
+import { formatFirestoreWriteError } from '../lib/authWriteGuard';
 import {
   buildSingleApprovalUpdate,
   buildWhatsAppUrl,
@@ -21,14 +40,17 @@ import { fetchApiJson } from '../lib/apiClient';
 import { GuvenlikEvrakOnayHavuzu } from './GuvenlikEvrakOnayHavuzu';
 import { DijitalOnayScreen } from './DijitalOnayScreen';
 import { ImzaOnizlemeStrip } from './ImzaOnizlemeStrip';
+import { ImageLightbox } from './ImageLightbox';
 import { AcilOnayBadge } from './AcilOnayBadge';
 import { VidanjorFisOnayPanel } from './VidanjorFisOnayPanel';
+import { YildirimTankerFisOnayPanel } from './YildirimTankerFisOnayPanel';
 import { MicirFisOnayPanel } from './MicirFisOnayPanel';
 import { KibritciLogo } from './KibritciLogo';
 import {
   doubleCheckKapiMatch,
   finalizeKapiIrsaliyeApproval,
   formatKapiMatchLabel,
+  suggestSatinAlmaForKapiEvrak,
   KAPI_EVRAK_KAYNAK,
 } from '../lib/kapiIrsaliyeUtils';
 import {
@@ -36,6 +58,11 @@ import {
   buildCariEvrakHistory,
   resolveCariKartId,
 } from '../lib/evrakCariStokSync';
+import {
+  buildCariIslemFromOperatorFaaliyet,
+  makineEtiketi,
+} from '../lib/taseronUtils';
+import type { OperatorFaaliyet } from '../types/erp';
 import { pickPrimaryFotoUrl } from '../lib/guvenlikEvrakFotolar';
 import { toAiParsePayload } from '../lib/guvenlikFotoStorage';
 
@@ -57,6 +84,12 @@ interface OnayIslemleriScreenProps {
   stokKartlar?: StokKart[];
   setStokKartlar?: React.Dispatch<React.SetStateAction<StokKart[]>>;
   setStokIslemGecmisi?: React.Dispatch<React.SetStateAction<StokKartIslem[]>>;
+  personeller?: Personel[];
+  setPersoneller?: React.Dispatch<React.SetStateAction<Personel[]>>;
+  kampKayitlari?: KampKaydi[];
+  setKampKayitlari?: React.Dispatch<React.SetStateAction<KampKaydi[]>>;
+  kampOdalari?: KampOdasi[];
+  setKampOdalari?: React.Dispatch<React.SetStateAction<KampOdasi[]>>;
 }
 
 export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
@@ -77,8 +110,13 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
   stokKartlar = [],
   setStokKartlar,
   setStokIslemGecmisi,
+  setPersoneller,
+  kampKayitlari = [],
+  setKampKayitlari,
+  kampOdalari = [],
+  setKampOdalari,
 }) => {
-  const [activeTab, setActiveTab] = useState<'satin_alma' | 'guvenlik_belgeleri' | 'kampci_belgeleri' | 'tesisat_mermer_belgeleri' | 'formen_belgeleri' | 'gunluk_loglar' | 'sofor_talepleri' | 'depocu_talepleri' | 'gecmis' | 'imzalar' | 'anahtarci_tutanaklari'>('satin_alma');
+  const [activeTab, setActiveTab] = useState<'satin_alma' | 'guvenlik_belgeleri' | 'kampci_belgeleri' | 'tesisat_mermer_belgeleri' | 'operator_belgeleri' | 'formen_belgeleri' | 'gunluk_loglar' | 'sofor_talepleri' | 'depocu_talepleri' | 'gecmis' | 'imzalar' | 'anahtarci_tutanaklari'>('satin_alma');
   const [selectedYoneticiEmail, setSelectedYoneticiEmail] = useState<string>('');
   const [stampText, setStampText] = useState<string>('🔵 ŞİRKET GENEL MÜDÜRÜ (E-İMZA)');
   const [customStamp, setCustomStamp] = useState<string>('');
@@ -99,11 +137,18 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
   const [kampFaaliyetler, setKampFaaliyetler] = useState<any[]>([]);
   const [tesisatciFaaliyetler, setTesisatciFaaliyetler] = useState<any[]>([]);
   const [mermerciFaaliyetler, setMermerciFaaliyetler] = useState<any[]>([]);
+  const [operatorKesintiFaaliyetler, setOperatorKesintiFaaliyetler] = useState<any[]>([]);
+  const [operatorSahaFaaliyetler, setOperatorSahaFaaliyetler] = useState<any[]>([]);
   const [bekleyenKampPersonelleri, setBekleyenKampPersonelleri] = useState<any[]>([]);
   const [gunlukAkisRaporlari, setGunlukAkisRaporlari] = useState<any[]>([]);
 
   const [aracOnayTalepleri, setAracOnayTalepleri] = useState<any[]>([]);
   const [yolHarcamalari, setYolHarcamalari] = useState<any[]>([]);
+  const [soforFisLightbox, setSoforFisLightbox] = useState<{
+    url: string;
+    title: string;
+  } | null>(null);
+  const yolKasaSyncDoneRef = React.useRef(false);
 
   // Security Gate Document Approval States
   const [gelenEvraklar, setGelenEvraklar] = useState<any[]>([]);
@@ -212,6 +257,16 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
       });
       list.sort((a, b) => new Date(b.tarih || 0).getTime() - new Date(a.tarih || 0).getTime());
       setYolHarcamalari(list);
+
+      // Onaylı ama kasaya düşmemiş fişleri bir kez otomatik tamamla
+      if (!yolKasaSyncDoneRef.current && list.some((x) => String(x.durum || '').includes('ONAYLANDI'))) {
+        yolKasaSyncDoneRef.current = true;
+        void syncApprovedYolHarcamalariToKasa(list).then((r) => {
+          if (r.created > 0) {
+            console.info(`[yol-kasa-sync] ${r.created} eksik kasa kaydı tamamlandı`);
+          }
+        });
+      }
     });
 
     return () => {
@@ -285,32 +340,66 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
     }
   };
 
-  const handleApproveYolHarcamasi = async (item: any) => {
-    if (!window.confirm(`${item.tutar} TL tutarındaki yol harcamasını onaylıyor musunuz?`)) return;
+  const handleApproveYolHarcamasi = async (
+    item: any,
+    nihaiMasrafTipi: 'KENDI' | 'KASA'
+  ) => {
+    const tipLabel =
+      nihaiMasrafTipi === 'KENDI'
+        ? 'ŞOFÖR KENDİ HARCAMASI (şoföre ödenecek)'
+        : 'KASA HARCAMASI (şirket kasasına işlenecek)';
+    if (
+      !window.confirm(
+        `${item.tutar} TL · ${tipLabel}\n\nOnaylıyor musunuz?\n(Şoför beyanı: ${
+          item.masrafTipi === 'KASA' ? 'Kasa' : item.masrafTipi === 'KENDI' ? 'Kendi' : 'Belirtilmemiş'
+        })`
+      )
+    ) {
+      return;
+    }
     try {
+      const payload = buildYolHarcamaKasaCikisPayload(
+        { ...item, nihaiMasrafTipi },
+        nihaiMasrafTipi
+      );
+      if (!payload.tutar || payload.tutar <= 0) {
+        alert('Tutar geçersiz; kasa kaydı oluşturulamadı.');
+        return;
+      }
+
+      // Önce kasa çıkışı — başarısızsa onay yazılmaz
+      await saveDocument('kasaHareketleri', payload);
+
       await updateDoc(doc(db, 'yolHarcamalari', item.id), {
         durum: 'ONAYLANDI',
+        nihaiMasrafTipi,
+        masrafTipi: item.masrafTipi || nihaiMasrafTipi,
         onaylayanYonetici: currentUser?.email || 'Sistem Yöneticisi',
-        onayTarihi: new Date().toISOString()
+        onayTarihi: new Date().toISOString(),
+        kasaHareketId: payload.id,
       });
 
-      const kasaRef = doc(db, 'kasaHareketleri', `kh_yol_${item.id}`);
-      await setDoc(kasaRef, {
-        id: `kh_yol_${item.id}`,
-        tarih: item.tarih || new Date().toISOString().split('T')[0],
-        hareketTipi: 'ÇIKIŞ',
-        tutar: parseFloat(item.tutar) || 0,
-        aciklama: `Şöför Yol Harcaması (Ödeme: ${item.surucu || 'Bilinmeyen'}) - ${item.aciklama || ''}`,
-        referansTipi: 'DİĞER',
-        fisEvrakUrl: item.faturaFotoUrl || '',
-        soforOdemesi: true,
-        surucu: item.surucu || 'Bilinmeyen'
-      });
+      if (item.personelId) {
+        await appendSoforFisToPersonelGecmis({
+          personelId: item.personelId,
+          yolHarcamaId: item.id,
+          tarih: item.tarih,
+          tutar: Number(item.tutar) || 0,
+          fisNo: item.fisNo,
+          aciklama: item.aciklama,
+          masrafTipi: nihaiMasrafTipi,
+          durum: 'ONAYLANDI',
+        });
+      }
 
-      alert("🎉 Yol harcaması onaylandı ve Haftalık Kasa'ya işlendi (şöföre ödemeler listesine notlandı).");
+      alert(
+        nihaiMasrafTipi === 'KENDI'
+          ? 'Onaylandı: Şoföre iade / kasa borcu olarak Haftalık Kasa çıkışına işlendi.\n\nNot: Haftalık Kasa’da tarih aralığını fiş tarihini kapsayacak şekilde genişletin.'
+          : 'Onaylandı: Kasa harcaması olarak Haftalık Kasa çıkışına işlendi.\n\nNot: Haftalık Kasa’da tarih aralığını fiş tarihini kapsayacak şekilde genişletin.'
+      );
     } catch (err) {
-      console.error(err);
-      alert("Hata oluştu.");
+      console.error('[yol-harcama-onay]', err);
+      alert(`Kasa kaydı / onay başarısız: ${formatFirestoreWriteError(err)}`);
     }
   };
 
@@ -322,10 +411,37 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
         onaylayanYonetici: currentUser?.email || 'Sistem Yöneticisi',
         onayTarihi: new Date().toISOString()
       });
+      // Daha önce onaylanıp kasaya düşmüşse çıkışı geri al
+      try {
+        await deleteDoc(doc(db, 'kasaHareketleri', yolHarcamaKasaDocId(item.id)));
+      } catch {
+        /* yoksa sorun değil */
+      }
       alert("Harcama reddedildi.");
     } catch (err) {
       console.error(err);
-      alert("Reddetme işlemi başarısız.");
+      alert(`Reddetme işlemi başarısız: ${formatFirestoreWriteError(err)}`);
+    }
+  };
+
+  const handleSyncYolHarcamalariToKasa = async () => {
+    if (!window.confirm(
+      'Onaylanmış şoför fişlerinden Haftalık Kasa’da eksik olanları şimdi tamamlamak ister misiniz?'
+    )) {
+      return;
+    }
+    try {
+      const result = await syncApprovedYolHarcamalariToKasa(yolHarcamalari);
+      alert(
+        `Kasa senkronu tamamlandı.\n\nYeni: ${result.created}\nGüncellenen: ${result.updated}\nDeğişmeyen: ${result.skipped}` +
+          (result.errors.length
+            ? `\nHata: ${result.errors.slice(0, 5).join('\n')}`
+            : '') +
+          '\n\nHaftalık Kasa’da tarih aralığını fiş tarihlerini kapsayacak şekilde açın.'
+      );
+    } catch (err) {
+      console.error('[yol-kasa-sync]', err);
+      alert(`Senkron başarısız: ${formatFirestoreWriteError(err)}`);
     }
   };
 
@@ -516,6 +632,24 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
     };
   }, []);
 
+  // Operatör taşeron kesinti + saha faaliyetleri (onay havuzu)
+  useEffect(() => {
+    const unsubKesinti = onSnapshot(collection(db, 'operatorFaaliyetleri'), (snapshot) => {
+      const list: any[] = [];
+      snapshot.forEach((d) => list.push({ id: d.id, ...d.data() }));
+      setOperatorKesintiFaaliyetler(list);
+    });
+    const unsubSaha = onSnapshot(collection(db, 'operatorSahaFaaliyetleri'), (snapshot) => {
+      const list: any[] = [];
+      snapshot.forEach((d) => list.push({ id: d.id, ...d.data() }));
+      setOperatorSahaFaaliyetler(list);
+    });
+    return () => {
+      unsubKesinti();
+      unsubSaha();
+    };
+  }, []);
+
   // Kampçının kurduğu, yönetici onayı bekleyen personeller
   useEffect(() => {
     const unsub = onSnapshot(collection(db, 'personeller'), (snapshot) => {
@@ -588,7 +722,37 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
       }
 
       const docRef = doc(db, type === 'sayim' ? 'kampDepoSayimlari' : 'kampGunlukFaaliyetleri', id);
-      const updateData = buildSingleApprovalUpdate(currentUser?.email || 'yonetici@kibritci.com', role);
+      const updateData: Record<string, unknown> = buildSingleApprovalUpdate(
+        currentUser?.email || 'yonetici@kibritci.com',
+        role
+      );
+
+      // Faaliyet onayında o gün Geldi tüm kampçıları listeye göm (kısmi liste olsa bile birleştir)
+      if (type === 'faaliyet') {
+        try {
+          const { getDoc, getDocs: getAll } = await import('firebase/firestore');
+          const snap = await getDoc(docRef);
+          const raw = snap.exists() ? (snap.data() as any) : null;
+          const existingList: string[] = Array.isArray(raw?.aktifPersonelListesi)
+            ? raw.aktifPersonelListesi.map((x: unknown) => String(x || '').trim()).filter(Boolean)
+            : [];
+          const { mergeGeldiKampciIntoList } = await import('../lib/mobilRolEtiketUtils');
+          const { fetchYoklamaMap } = await import('../lib/yoklamaPersistence');
+          const persSnap = await getAll(collection(db, 'personeller'));
+          const personeller = persSnap.docs.map((d) => ({ id: d.id, ...d.data() })) as any[];
+          const yoklamalar = await fetchYoklamaMap();
+          const tarih = String(raw?.tarih || new Date().toISOString().slice(0, 10));
+          const merged = mergeGeldiKampciIntoList(existingList, personeller, yoklamalar, tarih, {
+            ensureEmail: raw?.kaydedenKampci || null,
+          });
+          if (merged.length > 0) {
+            updateData.aktifPersonelListesi = merged;
+            updateData.personelId = merged[0];
+          }
+        } catch (repairErr) {
+          console.warn('[kamp-onay] personel listesi onarımı atlandı:', repairErr);
+        }
+      }
 
       await updateDoc(docRef, updateData);
       alert(`Kamp ${type === 'sayim' ? 'depo sayımı' : 'günlük faaliyeti'} onaylandı ve ana programa aktarıldı.`);
@@ -673,8 +837,196 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
     }
   };
 
+  const isOperatorKesintiPending = (d: any) => {
+    if (d.onayDurumu === 'ONAYLANDI' || d.onayDurumu === 'REDDEDİLDİ') return false;
+    if (d.durum === 'ONAYLANDI' || d.durum === 'REDDEDİLDİ') return false;
+    return (
+      d.onayDurumu === 'BEKLEMEDE' ||
+      d.durum === 'ONAY BEKLİYOR' ||
+      d.durum === 'BEKLEMEDE'
+    );
+  };
+
+  const approveOperatorKesintiCore = async (id: string, role: string, silent = false) => {
+    const raw = operatorKesintiFaaliyetler.find((x) => x.id === id);
+    if (!raw) {
+      if (!silent) alert('Kayıt bulunamadı.');
+      return false;
+    }
+    const updateData = {
+      ...buildSingleApprovalUpdate(currentUser?.email || 'yonetici@kibritci.com', role),
+      onayDurumu: 'ONAYLANDI',
+    };
+    await updateDoc(doc(db, 'operatorFaaliyetleri', id), updateData);
+    const cariIslem = buildCariIslemFromOperatorFaaliyet({ ...raw, ...updateData } as OperatorFaaliyet);
+    if (cariIslem && setCariIslemGecmisi) {
+      setCariIslemGecmisi((prev) => {
+        const rest = (prev || []).filter((x) => x.id !== cariIslem.id && x.islemId !== id);
+        return [cariIslem, ...rest];
+      });
+    }
+    return true;
+  };
+
+  const handleApproveOperatorKesinti = async (id: string) => {
+    try {
+      const matchedUser = kullanicilar.find((u) => u.email?.toLowerCase() === currentUser?.email?.toLowerCase());
+      const role = matchedUser?.yetki || 'YÖNETİCİ';
+      if (!canApproveMobilDocuments(role, currentUser?.email)) {
+        alert('Bu belgeyi onaylama yetkiniz bulunmuyor.');
+        return;
+      }
+      const ok = await approveOperatorKesintiCore(id, role);
+      if (ok) alert('Operatör taşeron kesinti kaydı onaylandı; cari geçmişe işlendi.');
+    } catch (err) {
+      console.error(err);
+      alert('Onaylama sırasında hata oluştu.');
+    }
+  };
+
+  const rejectOperatorKesintiCore = async (id: string) => {
+    await updateDoc(doc(db, 'operatorFaaliyetleri', id), {
+      onayDurumu: 'REDDEDİLDİ',
+      durum: 'REDDEDİLDİ',
+      onaylayanYonetici: currentUser?.email || 'yonetici',
+      onayTarihi: new Date().toISOString(),
+    });
+  };
+
+  const handleRejectOperatorKesinti = async (id: string) => {
+    if (!window.confirm('Bu kesinti kaydını reddetmek istediğinize emin misiniz?')) return;
+    try {
+      await rejectOperatorKesintiCore(id);
+      alert('Kesinti kaydı reddedildi.');
+    } catch (err) {
+      console.error(err);
+      alert('Reddetme başarısız.');
+    }
+  };
+
+  const syncOperatorSahaMesaiOnApprove = async (saha: any) => {
+    const mesaiMap = saha?.personelMesaiSaatleri as Record<string, number> | undefined;
+    if (saha?.faaliyetGrubu !== 'MESAI' || !mesaiMap || Object.keys(mesaiMap).length === 0) return;
+    // Kayıt anında zaten yoklamaya işlendiyse çift yazma
+    if (saha?.mesaiYoklamayaIslendi) return;
+    const { fetchYoklamaMap, persistYoklamaDocument } = await import('../lib/yoklamaPersistence');
+    const { applySahaMesaiToYoklama, ensureGeldiForPersoneller } = await import('../lib/sahaFaaliyetUtils');
+    const { getYoklamaDay, setYoklamaDay } = await import('../lib/yoklamaUtils');
+    const { normalizeDateKey } = await import('../lib/dateKeyUtils');
+    const tarih = normalizeDateKey(saha.tarih);
+    const gonderen = String(saha.kaydeden || currentUser?.email || 'operator');
+    let draft = await fetchYoklamaMap();
+    // Eski bekleyen kayıtlar: onayda mesai + Geldi
+    const gelidi = ensureGeldiForPersoneller(draft, tarih, Object.keys(mesaiMap), gonderen);
+    draft = gelidi.next;
+    draft = applySahaMesaiToYoklama(draft, tarih, mesaiMap, gonderen, 'add');
+    const [y, m, d] = tarih.split('-').map(Number);
+    const sparse: Record<string, unknown> = {};
+    const touched = new Set([...Object.keys(mesaiMap), ...gelidi.touchedIds]);
+    for (const pid of touched) {
+      const cell = getYoklamaDay(draft[pid], y, m, d);
+      if (!cell) continue;
+      sparse[pid] = setYoklamaDay({}, y, m, d, cell) as any;
+    }
+    if (Object.keys(sparse).length === 0) return;
+    const result = await persistYoklamaDocument(sparse as any, 'sync');
+    if (!result.ok) {
+      console.warn('Operatör mesai yoklama yazılamadı:', result.error);
+    }
+  };
+
+  const handleApproveOperatorSaha = async (id: string) => {
+    try {
+      const matchedUser = kullanicilar.find((u) => u.email?.toLowerCase() === currentUser?.email?.toLowerCase());
+      const role = matchedUser?.yetki || 'YÖNETİCİ';
+      if (!canApproveMobilDocuments(role, currentUser?.email)) {
+        alert('Bu belgeyi onaylama yetkiniz bulunmuyor.');
+        return;
+      }
+      const saha = operatorSahaFaaliyetler.find((x) => x.id === id);
+      const updateData = buildSingleApprovalUpdate(currentUser?.email || 'yonetici@kibritci.com', role);
+      await updateDoc(doc(db, 'operatorSahaFaaliyetleri', id), updateData);
+      if (saha) {
+        try {
+          await syncOperatorSahaMesaiOnApprove(saha);
+        } catch (mesaiErr) {
+          console.warn('Mesai yoklama senkronu:', mesaiErr);
+        }
+      }
+      if (saha?.bagliOperatorFaaliyetId) {
+        await approveOperatorKesintiCore(String(saha.bagliOperatorFaaliyetId), role, true);
+      }
+      alert(
+        saha?.bagliOperatorFaaliyetId
+          ? 'Operatör saha faaliyeti ve bağlı taşeron kesinti onaylandı (reel kayıt).'
+          : 'Operatör saha faaliyeti onaylandı (reel kayıt).'
+      );
+    } catch (err) {
+      console.error(err);
+      alert('Onaylama sırasında hata oluştu.');
+    }
+  };
+
+  const handleRejectOperatorSaha = async (id: string) => {
+    if (!window.confirm('Bu operatör faaliyetini reddetmek istediğinize emin misiniz?')) return;
+    try {
+      const saha = operatorSahaFaaliyetler.find((x) => x.id === id);
+      await updateDoc(doc(db, 'operatorSahaFaaliyetleri', id), {
+        durum: 'REDDEDİLDİ',
+        onaylayanYonetici: currentUser?.email || 'yonetici',
+        onayTarihi: new Date().toISOString(),
+      });
+      // Kayıtta yazılmış mesaiyi geri al
+      if (
+        saha?.faaliyetGrubu === 'MESAI' &&
+        saha?.personelMesaiSaatleri &&
+        (saha as any).mesaiYoklamayaIslendi
+      ) {
+        try {
+          const { fetchYoklamaMap, persistYoklamaDocument } = await import('../lib/yoklamaPersistence');
+          const { applySahaMesaiToYoklama } = await import('../lib/sahaFaaliyetUtils');
+          const { getYoklamaDay, setYoklamaDay } = await import('../lib/yoklamaUtils');
+          const { normalizeDateKey } = await import('../lib/dateKeyUtils');
+          const tarih = normalizeDateKey(saha.tarih);
+          const gonderen = String(saha.kaydeden || currentUser?.email || 'operator');
+          let draft = await fetchYoklamaMap();
+          draft = applySahaMesaiToYoklama(
+            draft,
+            tarih,
+            saha.personelMesaiSaatleri as Record<string, number>,
+            gonderen,
+            'subtract'
+          );
+          const [y, m, d] = tarih.split('-').map(Number);
+          const sparse: Record<string, unknown> = {};
+          for (const pid of Object.keys(saha.personelMesaiSaatleri as object)) {
+            const cell = getYoklamaDay(draft[pid], y, m, d);
+            if (!cell) continue;
+            sparse[pid] = setYoklamaDay({}, y, m, d, cell) as any;
+          }
+          if (Object.keys(sparse).length > 0) {
+            await persistYoklamaDocument(sparse as any, 'sync');
+          }
+        } catch (mesaiErr) {
+          console.warn('Red mesai geri alma:', mesaiErr);
+        }
+      }
+      if (saha?.bagliOperatorFaaliyetId) {
+        try {
+          await rejectOperatorKesintiCore(String(saha.bagliOperatorFaaliyetId));
+        } catch {
+          /* ignore */
+        }
+      }
+      alert('Faaliyet reddedildi.');
+    } catch (err) {
+      console.error(err);
+      alert('Reddetme başarısız.');
+    }
+  };
+
   const handleApproveCikis = async (item: any) => {
-    if (!window.confirm(`${item.personelIsim} için işten çıkış işlemini onaylamak istiyor musunuz?`)) return;
+    if (!window.confirm(`${item.personelIsim} için işten çıkış işlemini onaylamak istiyor musunuz?\n\nAktif kamp oda kaydı varsa otomatik tahliye edilir.`)) return;
     try {
       // 1. Update request status to ONAYLANDI
       await updateDoc(doc(db, 'personelCikisTalepleri', item.id), {
@@ -684,12 +1036,49 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
       });
 
       // 2. Set actual personnel as inactive and save exit date
-      await updateDoc(doc(db, 'personeller', item.personelId), {
-        durum: false,
-        istenCikisTarihi: item.cikisTarihi
-      });
+      if (item.personelId) {
+        await updateDoc(doc(db, 'personeller', item.personelId), {
+          durum: false,
+          istenCikisTarihi: item.cikisTarihi
+        });
+      }
 
-      alert(`🎉 ${item.personelIsim} için işten çıkış işlemi onaylandı ve personel inaktif edildi!`);
+      // 3. Local personel state (App effect + anında UI)
+      if (setPersoneller && item.personelId) {
+        setPersoneller((prev) =>
+          prev.map((p) =>
+            p.id === item.personelId
+              ? { ...p, durum: false, istenCikisTarihi: item.cikisTarihi }
+              : p
+          )
+        );
+      }
+
+      // 4. Kamp çıkışı (aktif oda kaydı varsa)
+      let kampNot = '';
+      if (item.personelId || item.personelIsim) {
+        try {
+          const result = await evictActiveKampResidentsForPersonel({
+            personelId: item.personelId,
+            personelIsim: item.personelIsim,
+            cikisTarihi: item.cikisTarihi || new Date().toISOString().slice(0, 10),
+            kampOdalari,
+            kampKayitlari,
+          });
+          if (result.evictedCount > 0) {
+            setKampKayitlari?.(result.kampKayitlari);
+            setKampOdalari?.(result.kampOdalari);
+            kampNot = `\nKamp odasından otomatik tahliye: ${result.evictedCount} kayıt.`;
+            void addNotification?.(
+              `${item.personelIsim} işten çıkış onaylandı — kamptan ${result.evictedCount} oda kaydı tahliye edildi.`
+            );
+          }
+        } catch (kampErr) {
+          console.warn('Kamp tahliye atlandı:', kampErr);
+        }
+      }
+
+      alert(`🎉 ${item.personelIsim} için işten çıkış onaylandı ve personel pasife alındı.${kampNot}`);
     } catch (err) {
       console.error(err);
       alert("İşlem onaylanırken bir hata oluştu.");
@@ -1027,10 +1416,11 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
   });
 
   const pendingWaybills = irsaliyeler.filter(doc => {
-    // Vidanjör / mıcır-stabilize / kapı evrak özel panelden yönetilir
+    // Vidanjör / mıcır-stabilize / Yıldırım / kapı evrak özel panelden yönetilir
     if (
       doc.kaynak === 'VIDANJOR_FIS' ||
       doc.kaynak === 'MICIR_STABILIZE_FIS' ||
+      doc.kaynak === 'YILDIRIM_TANKER_FIS' ||
       doc.kaynak === KAPI_EVRAK_KAYNAK
     ) {
       return false;
@@ -1082,7 +1472,37 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
     return canApproveMobilDocuments(currentUserRole, currentUser?.email);
   });
 
-  const tesisatMermerCount = pendingTesisatciFaaliyetler.length + pendingMermerciFaaliyetler.length;
+  const pendingOperatorSaha = operatorSahaFaaliyetler.filter((doc) => {
+    if (!isMobilDocPending(doc)) return false;
+    // Eski kayıtlar durum boşsa onaylı say — yalnızca açık ONAY BEKLİYOR / BEKLEMEDE
+    if (!doc.durum || doc.durum === 'KAYITLI') return false;
+    return canApproveMobilDocuments(currentUserRole, currentUser?.email);
+  });
+
+  const linkedKesintiIds = new Set(
+    pendingOperatorSaha
+      .map((s) => s.bagliOperatorFaaliyetId)
+      .filter(Boolean)
+      .map((id) => String(id))
+  );
+
+  const pendingOperatorKesintiler = operatorKesintiFaaliyetler.filter((doc) => {
+    if (!isOperatorKesintiPending(doc)) return false;
+    // Saha faaliyetine bağlı kesinti saha kartından onaylanır (çift listeleme yok)
+    if (linkedKesintiIds.has(String(doc.id))) return false;
+    return canApproveMobilDocuments(currentUserRole, currentUser?.email);
+  });
+
+  const operatorOnayCount = pendingOperatorKesintiler.length + pendingOperatorSaha.length;
+
+  const pendingYildirimGateCount = gelenEvraklar.filter(
+    (x) => x.durum === 'BEKLEMEDE' && x.kaynak === 'YILDIRIM_TANKER_FIS'
+  ).length;
+
+  const tesisatMermerCount =
+    pendingTesisatciFaaliyetler.length +
+    pendingMermerciFaaliyetler.length +
+    pendingYildirimGateCount;
 
   const pendingGunlukAkis = gunlukAkisRaporlari.filter(
     (doc) =>
@@ -1098,12 +1518,13 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
   const pendingSayimCount = depoSayimTalepleri.length;
   const pendingDepocuCount = pendingStokCount + pendingSayimCount;
 
-  // Vidanjör / mıcır-stabilize özel panelde onaylanır — genel güvenlik sihirbazına düşmesin
+  // Vidanjör / mıcır-stabilize / Yıldırım Tanker özel panelde onaylanır — genel güvenlik sihirbazına düşmesin
   const pendingGateDocs = gelenEvraklar.filter(
     (x) =>
       x.durum === 'BEKLEMEDE' &&
       x.kaynak !== 'VIDANJOR_FIS' &&
-      x.kaynak !== 'MICIR_STABILIZE_FIS'
+      x.kaynak !== 'MICIR_STABILIZE_FIS' &&
+      x.kaynak !== 'YILDIRIM_TANKER_FIS'
   );
   const pendingVidanjorGateCount = gelenEvraklar.filter(
     (x) => x.durum === 'BEKLEMEDE' && x.kaynak === 'VIDANJOR_FIS'
@@ -1121,6 +1542,7 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
     pendingKampFaaliyetler.length +
     bekleyenKampPersonelleri.length +
     tesisatMermerCount +
+    operatorOnayCount +
     pendingGunlukAkis.length +
     pendingSoforCount +
     pendingDepocuCount +
@@ -1138,6 +1560,7 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
     | 'guvenlik_belgeleri'
     | 'kampci_belgeleri'
     | 'tesisat_mermer_belgeleri'
+    | 'operator_belgeleri'
     | 'formen_belgeleri'
     | 'gunluk_loglar'
     | 'sofor_talepleri'
@@ -1157,6 +1580,7 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
     { id: 'guvenlik_belgeleri', label: 'Güvenlik Belgeleri', shortLabel: 'Güvenlik', count: guvenlikCount, icon: Truck },
     { id: 'kampci_belgeleri', label: 'Kampçı Belgeleri', shortLabel: 'Kampçı', count: kampciCount, icon: Package },
     { id: 'tesisat_mermer_belgeleri', label: 'Tesisatçı & Mermerci', shortLabel: 'Tesisat/Mermer', count: tesisatMermerCount, icon: FileText },
+    { id: 'operator_belgeleri', label: 'Operatör Belgeleri', shortLabel: 'Operatör', count: operatorOnayCount, icon: HardHat },
     { id: 'formen_belgeleri', label: 'Formen Belgeleri', shortLabel: 'Formen', count: pendingPersonelCount, icon: UserCheck },
     { id: 'gunluk_loglar', label: 'Günlük Loglar', shortLabel: 'Loglar', count: pendingGunlukAkis.length, icon: FileText },
     { id: 'sofor_talepleri', label: 'Şoför Talepleri', shortLabel: 'Şoför', count: pendingSoforCount, icon: Truck },
@@ -1396,8 +1820,11 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
       alert(
         `İkinci kontrol tamam.\n${formatKapiMatchLabel(matched.summary)}` +
           (matched.summary.unmatchedKalemler?.length
-            ? `\nEşleşmeyen: ${matched.summary.unmatchedKalemler.join(', ')}`
-            : '\nMevcut cari/stok kartlarına bağlandı (yeni kart açılmadı).')
+            ? `\nEşleşmeyen (onayda stok kartı açılır): ${matched.summary.unmatchedKalemler.join(', ')}`
+            : '\nMevcut cari/stok kartlarına bağlandı.') +
+          (matched.summary.cariMatched
+            ? ''
+            : '\nCari yoksa onayda yeni tedarikçi kartı açılır.')
       );
     } catch (err) {
       console.error(err);
@@ -1406,8 +1833,7 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
   };
 
   /**
-   * Listeden tek tık: 2× eşleştir → mevcut cari altına işlem + stok giriş → onayla.
-   * Yeni cari/stok kartı açmaz.
+   * Listeden tek tık: 2× eşleştir → cari/stok oluştur veya bağla → onayla.
    */
   const handleQuickApproveGateIrsaliye = async (docItem: any) => {
     const tur = docItem?.evrakTuru || 'İRSALİYE';
@@ -1424,28 +1850,47 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
     try {
       const matched = await rematchGateIrsaliye(docItem.firma || '', docItem.kalemler || []);
       const label = formatKapiMatchLabel(matched.summary);
+      let saId = String(docItem.saId || '').trim();
+      if (!saId) {
+        const oneriler = suggestSatinAlmaForKapiEvrak({
+          firma: matched.summary.cariUnvan || docItem.firma,
+          cariKartId: matched.summary.cariKartId || docItem.cariKartId,
+          kalemler: matched.kalemler,
+          satinAlmaTalepleri,
+          irsaliyeler,
+          limit: 3,
+        });
+        const top = oneriler[0];
+        if (top && top.score >= 40) {
+          const bind = window.confirm(
+            `Akıllı eşleşme: ${top.saId} · ${top.cariFirma}\n(${top.reason})\n\n` +
+              `İlgili satın alma talebine irsaliye bağlamak ister misiniz?\n` +
+              `• Evet → karşılaştırma · • Hayır → arşiv/doğrudan sevk`
+          );
+          if (bind) saId = top.saId;
+        }
+      }
       const ok = window.confirm(
         `Güvenlik irsaliyesini eşleştirip onaylayayım mı?\n\n` +
           `No: ${docItem.evrakNo || docItem.id}\n` +
           `Firma: ${matched.summary.cariUnvan || docItem.firma || '—'}\n` +
-          `${label}\n` +
+          `${label}${saId ? `\nSA: ${saId}` : ' (SA bağlı değil)'}\n` +
           (matched.summary.cariMatched
             ? '→ Mevcut cari kartın altına işlem kaydı yazılacak.\n'
-            : '→ Cari bulunamadı; unvan serbest kaydedilecek (yeni kart açılmaz).\n') +
+            : '→ Cari eşleşmezse cari işlem yazılmaz; evrak yine arşivlenir.\n') +
           (matched.summary.stokLinked
             ? `→ ${matched.summary.stokLinked} stok kartına giriş işlenecek.\n`
-            : '→ Eşleşen stok yok; miktar artırılmaz.\n') +
-          `\nYeni cari/stok kartı açılmaz.`
+            : '→ Stok eşleşmezse stok hareketi yazılmaz; kalem irsaliyede kalır.\n')
       );
       if (!ok) return;
 
       const { cari, stok } = await loadLiveCariStok();
-      const { summary } = await finalizeKapiIrsaliyeApproval({
+      const { irsaliye, summary } = await finalizeKapiIrsaliyeApproval({
         guvenlikEvrakId: docItem.id,
         irsaliyeNo: docItem.evrakNo || docItem.id,
         firma: matched.summary.cariUnvan || docItem.firma || '',
         tarih: docItem.tarih || new Date().toISOString().split('T')[0],
-        fotoUrl: docItem.fotoUrl || '',
+        fotoUrl: pickPrimaryFotoUrl(docItem) || docItem.fotoUrl || '',
         kalemler: matched.kalemler,
         onaylayan: currentUser?.email || 'Yönetici',
         cariKartlar: cari,
@@ -1454,9 +1899,12 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
         setCariIslemGecmisi,
         setStokKartlar,
         setStokIslemGecmisi,
+        saId: saId || undefined,
+        satinAlmaTalepleri,
+        irsaliyeler,
       });
 
-      await updateDoc(doc(db, 'guvenlikGelenEvraklar', docItem.id), {
+      await updateDoc(doc(db, 'guvenlikGelenEvraklar', docItem.id), cleanUndefined({
         durum: 'ONAYLANDI',
         onaylayanYonetici: currentUser?.email || 'Yönetici',
         islenenEvrakTuru: 'İRSALİYE',
@@ -1466,14 +1914,16 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
         evrakNo: docItem.evrakNo || docItem.id,
         firma: summary.cariUnvan || docItem.firma || '',
         tarih: docItem.tarih || new Date().toISOString().split('T')[0],
-        kalemler: matched.kalemler,
+        kalemler: irsaliye.kalemler,
+        saId: saId || '',
+        donusumKaynagi: saId ? 'KAPI_SA_ESLESME' : 'KAPI_EVRAK',
         onayTarihi: new Date().toISOString(),
-      });
+      }));
 
       if (addNotification) {
         addNotification(`Kapı irsaliyesi onaylandı (${docItem.evrakNo || docItem.id}) · ${formatKapiMatchLabel(summary)}`);
       }
-      alert(`Onaylandı.\n${formatKapiMatchLabel(summary)}\nCari altına kayıt yazıldı (varsa); stok girişleri işlendi.`);
+      alert(`Onaylandı.\n${formatKapiMatchLabel(summary)}\nCari ve stok kayıtları işlendi.`);
     } catch (err) {
       console.error(err);
       alert('Hızlı onay başarısız. Formdan kontrol edip tekrar deneyin.');
@@ -1789,7 +2239,7 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
         setIrsaliyeFirma(rematched.summary.cariUnvan || irsaliyeFirma);
         setIrsaliyeKalemler(rematched.kalemler);
 
-        const { summary } = await finalizeKapiIrsaliyeApproval({
+        const { irsaliye, summary } = await finalizeKapiIrsaliyeApproval({
           guvenlikEvrakId: docId,
           irsaliyeNo,
           firma: rematched.summary.cariUnvan || irsaliyeFirma,
@@ -1803,9 +2253,12 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
           setCariIslemGecmisi,
           setStokKartlar,
           setStokIslemGecmisi,
+          saId: String(activeGateDoc?.saId || '').trim() || undefined,
+          satinAlmaTalepleri,
+          irsaliyeler,
         });
 
-        await updateDoc(doc(db, 'guvenlikGelenEvraklar', docId), {
+        await updateDoc(doc(db, 'guvenlikGelenEvraklar', docId), cleanUndefined({
           durum: 'ONAYLANDI',
           onaylayanYonetici: currentUser?.email || 'Yönetici',
           islenenEvrakTuru: type,
@@ -1815,9 +2268,13 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
           evrakNo: irsaliyeNo,
           firma: summary.cariUnvan || irsaliyeFirma,
           tarih: irsaliyeTarih,
-          kalemler: rematched.kalemler,
+          kalemler: irsaliye.kalemler,
+          saId: String(activeGateDoc?.saId || summary.saId || '').trim() || '',
+          donusumKaynagi: String(activeGateDoc?.saId || summary.saId || '').trim()
+            ? 'KAPI_SA_ESLESME'
+            : 'KAPI_EVRAK',
           onayTarihi: new Date().toISOString(),
-        });
+        }));
 
         if (addNotification) {
           addNotification(
@@ -1829,8 +2286,10 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
           `İrsaliye onaylandı.\n${formatKapiMatchLabel(summary)}\n` +
             (summary.cariMatched
               ? 'Mevcut cari kartın altına işlem kaydı yazıldı.\n'
-              : 'Cari bulunamadı; yeni kart açılmadı.\n') +
-            'Stok eşleşen kalemlere giriş işlendi.'
+              : 'Cari eşleşmedi; evrak ve irsaliye arşivlendi.\n') +
+            (summary.stokLinked
+              ? `${summary.stokLinked}/${summary.stokTotal} stok kalemine giriş işlendi.`
+              : 'Stok eşleşmedi; kalemler irsaliyede kaldı, stok hareketi yazılmadı.')
         );
         setActiveGateDoc(null);
         return;
@@ -1885,7 +2344,12 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
       setActiveGateDoc(null);
     } catch (err) {
       console.error(err);
-      alert("Kaydedilirken veritabanı hatası oluştu!");
+      const detail = formatFirestoreWriteError(err) || (err instanceof Error ? err.message : String(err || ''));
+      alert(
+        detail
+          ? `Kaydedilirken hata oluştu:\n${detail}`
+          : 'Kaydedilirken veritabanı hatası oluştu!'
+      );
     }
   };
 
@@ -2094,12 +2558,15 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
               setCariKartlar={setCariKartlar}
               setIrsaliyeler={setIrsaliyeler}
               setCariIslemGecmisi={setCariIslemGecmisi}
+              satinAlmaTalepleri={satinAlmaTalepleri}
+              irsaliyeler={irsaliyeler}
               addNotification={addNotification}
             />
             <GuvenlikEvrakOnayHavuzu
               pendingGateDocs={pendingGateDocs}
               pendingWaybills={pendingWaybills}
               pendingInvoices={pendingInvoices}
+              irsaliyeler={irsaliyeler}
               signatureText={signatureText}
               setActiveDocForDetail={setActiveDocForDetail}
               handleApproveDocument={handleApproveDocument}
@@ -2175,6 +2642,10 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
                 setCariKartlar={setCariKartlar}
                 setIrsaliyeler={setIrsaliyeler}
                 setCariIslemGecmisi={setCariIslemGecmisi}
+                faturalar={faturalar}
+                setFaturalar={setFaturalar}
+                satinAlmaTalepleri={satinAlmaTalepleri}
+                irsaliyeler={irsaliyeler}
                 addNotification={addNotification}
               />
 
@@ -2370,10 +2841,25 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
 
           {activeTab === 'tesisat_mermer_belgeleri' && (
             <div className="space-y-6">
-              {tesisatMermerCount === 0 ? (
-                <div className="text-center py-16 text-slate-400 text-sm">
-                  Onay bekleyen tesisatçı / mermerci faaliyeti bulunmuyor.
-                </div>
+              <YildirimTankerFisOnayPanel
+                currentUser={currentUser}
+                cariKartlar={cariKartlar}
+                setCariKartlar={setCariKartlar}
+                setIrsaliyeler={setIrsaliyeler}
+                setCariIslemGecmisi={setCariIslemGecmisi}
+                faturalar={faturalar}
+                setFaturalar={setFaturalar}
+                satinAlmaTalepleri={satinAlmaTalepleri}
+                irsaliyeler={irsaliyeler}
+                addNotification={addNotification}
+              />
+
+              {pendingTesisatciFaaliyetler.length + pendingMermerciFaaliyetler.length === 0 ? (
+                pendingYildirimGateCount === 0 ? (
+                  <div className="text-center py-8 text-slate-400 text-sm">
+                    Onay bekleyen tesisatçı / mermerci faaliyeti bulunmuyor.
+                  </div>
+                ) : null
               ) : (
                 [
                   { type: 'tesisatci' as const, title: 'Tesisatçı Faaliyet Onayları', items: pendingTesisatciFaaliyetler },
@@ -2436,6 +2922,109 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
                     </div>
                   )
                 )
+              )}
+            </div>
+          )}
+
+          {activeTab === 'operator_belgeleri' && (
+            <div className="space-y-6">
+              {operatorOnayCount === 0 ? (
+                <div className="text-center py-8 text-slate-400 text-sm">
+                  Onay bekleyen operatör faaliyeti / taşeron kesinti kaydı yok.
+                </div>
+              ) : (
+                <>
+                  {pendingOperatorKesintiler.length > 0 && (
+                    <div className="space-y-3">
+                      <h3 className="font-display font-black text-xs text-slate-600 tracking-wider flex items-center gap-2 uppercase">
+                        <HardHat size={14} className="text-rose-600" />
+                        Taşeron Kesinti Onayları ({pendingOperatorKesintiler.length})
+                      </h3>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {pendingOperatorKesintiler.map((docItem) => (
+                          <div key={docItem.id} className="bg-white border border-rose-100 p-4 rounded-2xl space-y-3">
+                            <div className="flex justify-between gap-2">
+                              <span className="font-mono bg-rose-50 border border-rose-200 text-rose-700 text-[10px] font-bold px-2 py-0.5 rounded-md">
+                                KESİNTİ · {makineEtiketi(docItem as OperatorFaaliyet)}
+                              </span>
+                              <span className="text-[10px] text-slate-500 font-mono font-bold">{docItem.tarih}</span>
+                            </div>
+                            <p className="text-xs font-bold text-slate-800">{docItem.yapilanIs}</p>
+                            <p className="text-[10px] text-slate-500">
+                              {docItem.operatorIsim} · {docItem.firmaAdi} · {docItem.baslangicSaat}–{docItem.bitisSaat} ({Number(docItem.calismaSuresi || 0).toFixed(1)} sa)
+                            </p>
+                            {docItem.fotoUrl && (
+                              <img src={docItem.fotoUrl} alt="" className="max-h-36 w-full object-cover rounded-xl border" />
+                            )}
+                            <div className="flex gap-2 pt-2 border-t border-slate-100">
+                              <button
+                                type="button"
+                                onClick={() => void handleRejectOperatorKesinti(docItem.id)}
+                                className="flex-1 bg-red-950 hover:bg-red-900 text-red-300 py-1.5 rounded-lg text-[10px] font-black"
+                              >
+                                Reddet
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => void handleApproveOperatorKesinti(docItem.id)}
+                                className="flex-1 bg-rose-600 hover:bg-rose-700 text-white py-1.5 rounded-lg text-[10px] font-black"
+                              >
+                                Onayla
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {pendingOperatorSaha.length > 0 && (
+                    <div className="space-y-3">
+                      <h3 className="font-display font-black text-xs text-slate-600 tracking-wider flex items-center gap-2 uppercase">
+                        <HardHat size={14} className="text-amber-600" />
+                        Operatör Saha Faaliyet Onayları ({pendingOperatorSaha.length})
+                      </h3>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {pendingOperatorSaha.map((docItem) => (
+                          <div key={docItem.id} className="bg-white border border-amber-100 p-4 rounded-2xl space-y-3">
+                            <div className="flex justify-between gap-2">
+                              <span className="font-mono bg-amber-50 border border-amber-200 text-amber-800 text-[10px] font-bold px-2 py-0.5 rounded-md">
+                                {docItem.faaliyetGrubu === 'MESAI' ? 'MESAİ' : 'NORMAL'} · {docItem.isNiteligi || '—'}
+                              </span>
+                              <span className="text-[10px] text-slate-500 font-mono font-bold">{docItem.tarih}</span>
+                            </div>
+                            <p className="text-[10px] text-slate-500">
+                              {docItem.parsel} / {docItem.blok}
+                              {docItem.taseronKesinti ? ` · Taşeron: ${docItem.taseronFirmaAdi || '—'}` : ''}
+                              {docItem.isKaydiEtiketi || docItem.aracPlaka
+                                ? ` · ${docItem.isKaydiEtiketi || docItem.aracPlaka}`
+                                : ''}
+                            </p>
+                            <p className="text-xs text-slate-800">{docItem.aciklama || '—'}</p>
+                            {docItem.fotoUrl && (
+                              <img src={docItem.fotoUrl} alt="" className="max-h-36 w-full object-cover rounded-xl border" />
+                            )}
+                            <div className="flex gap-2 pt-2 border-t border-slate-100">
+                              <button
+                                type="button"
+                                onClick={() => void handleRejectOperatorSaha(docItem.id)}
+                                className="flex-1 bg-red-950 hover:bg-red-900 text-red-300 py-1.5 rounded-lg text-[10px] font-black"
+                              >
+                                Reddet
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => void handleApproveOperatorSaha(docItem.id)}
+                                className="flex-1 bg-amber-600 hover:bg-amber-700 text-white py-1.5 rounded-lg text-[10px] font-black"
+                              >
+                                Onayla
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </>
               )}
             </div>
           )}
@@ -3393,13 +3982,21 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
           {activeTab === 'sofor_talepleri' && (
             <div className="space-y-6">
               {/* Header */}
-              <div className="border bg-white p-4.5 rounded-2xl border-slate-200 flex justify-between items-center text-xs text-slate-800">
+              <div className="border bg-white p-4.5 rounded-2xl border-slate-200 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 text-xs text-slate-800">
                 <div className="space-y-1">
                   <span className="text-sky-400 font-bold block text-[11px] tracking-widest uppercase">🚛 ŞÖFÖR MOBİL PANELİ TALEPLERİ</span>
                   <p className="text-slate-400 leading-relaxed text-[11px]">
                     Şoförler tarafından eklenen yeni araç kartı talepleri ile seyahat yol harcamalarını (fiş/fatura) buradan inceleyip onaylayabilirsiniz. Onaylanan harcamalar otomatik olarak haftalık kasaya işlenir.
                   </p>
                 </div>
+                <button
+                  type="button"
+                  onClick={() => void handleSyncYolHarcamalariToKasa()}
+                  className="shrink-0 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[10px] px-3 py-2 rounded-xl cursor-pointer"
+                  title="Onaylı fişleri Haftalık Kasa’ya yaz"
+                >
+                  Onaylıları Kasaya Yaz
+                </button>
               </div>
 
               {/* 1. ARAÇ KARTLARI TALEPLERİ */}
@@ -3486,8 +4083,11 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
                         <div className="space-y-2">
                           <div className="flex justify-between items-start">
                             <div>
-                              <span className="font-bold text-xs text-slate-800">{item.surucu || 'Bilinmeyen Şöför'}</span>
+                              <span className="font-bold text-xs text-slate-800">{item.personelAdi || item.surucu || 'Bilinmeyen Şöför'}</span>
                               <p className="text-[10px] text-slate-500 mt-0.5 font-mono">Tarih: {item.tarih}</p>
+                              {item.personelId && (
+                                <p className="text-[9px] text-emerald-700 font-bold mt-0.5">Personel kartına bağlı</p>
+                              )}
                             </div>
                             <div className="text-right">
                               <span className="text-xs font-black text-rose-600 font-mono block">{item.tutar} TL</span>
@@ -3503,35 +4103,95 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
                           <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-100 space-y-1">
                             <span className="text-[8px] font-bold text-slate-400 block uppercase">Açıklama:</span>
                             <p className="text-[10px] text-slate-700">{item.aciklama}</p>
+                            {item.fisNo && (
+                              <p className="text-[10px] font-mono font-bold text-slate-800 pt-1">
+                                Fiş No: {item.fisNo}
+                              </p>
+                            )}
+                            <p className="text-[10px] pt-1">
+                              <span className="text-[8px] font-bold text-slate-400 uppercase">Şoför beyanı: </span>
+                              <span
+                                className={`font-black ${
+                                  item.masrafTipi === 'KASA' ? 'text-sky-700' : 'text-rose-700'
+                                }`}
+                              >
+                                {item.masrafTipi === 'KASA'
+                                  ? 'Kasa harcaması'
+                                  : item.masrafTipi === 'KENDI'
+                                    ? 'Kendi harcaması'
+                                    : 'Belirtilmemiş'}
+                              </span>
+                            </p>
+                            {item.nihaiMasrafTipi && (
+                              <p className="text-[10px]">
+                                <span className="text-[8px] font-bold text-slate-400 uppercase">
+                                  Yönetici nihai:{' '}
+                                </span>
+                                <span className="font-black text-slate-800">
+                                  {item.nihaiMasrafTipi === 'KASA'
+                                    ? 'Kasa harcaması'
+                                    : 'Şoför kendi / iade'}
+                                </span>
+                              </p>
+                            )}
                           </div>
 
                           {item.faturaFotoUrl && (
-                            <div className="border border-slate-100 rounded-xl overflow-hidden bg-slate-50 flex flex-col items-center justify-center p-2">
-                              <span className="text-[8px] font-bold text-slate-500 uppercase tracking-wider block mb-1">📷 Harcama Belgesi (Fiş/Fatura)</span>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setSoforFisLightbox({
+                                  url: item.faturaFotoUrl,
+                                  title: `${item.surucu || 'Şoför'} · ${item.fisNo || item.tarih || 'Fiş'} · ${item.tutar} TL`,
+                                })
+                              }
+                              className="w-full border border-slate-100 rounded-xl overflow-hidden bg-slate-50 flex flex-col items-center justify-center p-2 cursor-pointer hover:border-sky-300 hover:bg-sky-50/40 transition group text-left"
+                              title="Büyütmek için tıklayın"
+                            >
+                              <span className="text-[8px] font-bold text-slate-500 uppercase tracking-wider block mb-1 group-hover:text-sky-700">
+                                📷 Harcama Belgesi — büyüt / indir
+                              </span>
                               <img
                                 src={item.faturaFotoUrl}
                                 alt="Fis Görseli"
-                                className="max-h-40 max-w-full rounded object-contain"
+                                className="max-h-40 max-w-full rounded object-contain pointer-events-none"
+                                referrerPolicy="no-referrer"
                               />
-                            </div>
+                            </button>
                           )}
                         </div>
 
                         <div className="space-y-2 mt-3">
                           {item.durum === 'ONAY BEKLİYOR' && (
-                            <div className="flex space-x-2 pt-2 border-t">
-                              <button
-                                onClick={() => handleApproveYolHarcamasi(item)}
-                                className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-1.5 rounded-xl text-[10px] transition cursor-pointer"
-                              >
-                                Onayla & Kasaya Aktar
-                              </button>
-                              <button
-                                onClick={() => handleRejectYolHarcamasi(item)}
-                                className="bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-100 font-bold py-1.5 px-3 rounded-xl text-[10px] transition cursor-pointer"
-                              >
-                                Reddet
-                              </button>
+                            <div className="pt-2 border-t space-y-2">
+                              <p className="text-[9px] font-bold text-slate-500 uppercase tracking-wide">
+                                Nihai ayrım (yönetici)
+                              </p>
+                              <div className="flex flex-col sm:flex-row gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => handleApproveYolHarcamasi(item, 'KENDI')}
+                                  className="flex-1 bg-rose-600 hover:bg-rose-700 text-white font-bold py-2 rounded-xl text-[10px] transition cursor-pointer"
+                                  title="Şoföre iade / ödeme"
+                                >
+                                  Şoföre öde (Kendi)
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleApproveYolHarcamasi(item, 'KASA')}
+                                  className="flex-1 bg-sky-600 hover:bg-sky-700 text-white font-bold py-2 rounded-xl text-[10px] transition cursor-pointer"
+                                  title="Şirket kasası harcaması"
+                                >
+                                  Kasaya işle (Kasa)
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleRejectYolHarcamasi(item)}
+                                  className="bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-100 font-bold py-2 px-3 rounded-xl text-[10px] transition cursor-pointer"
+                                >
+                                  Reddet
+                                </button>
+                              </div>
                             </div>
                           )}
                           {item.durum !== 'ONAY BEKLİYOR' && (
@@ -4033,6 +4693,15 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
 
           </div>
         </div>
+      )}
+
+      {soforFisLightbox && (
+        <ImageLightbox
+          url={soforFisLightbox.url}
+          title={soforFisLightbox.title}
+          fileName={`sofor-fis-${soforFisLightbox.title.slice(0, 40)}`}
+          onClose={() => setSoforFisLightbox(null)}
+        />
       )}
 
     </div>

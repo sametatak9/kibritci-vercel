@@ -30,10 +30,46 @@ function dateKey(d: string): string {
   return String(d || todayIso()).replace(/-/g, '');
 }
 
+/** SA ile irsaliye bağını bul: saId, SA doc id veya kalem.saKalemId */
 export function findIrsaliyelerForSa(sa: SatinAlmaTalebi, irsaliyeler: Irsaliye[]): Irsaliye[] {
-  const saId = sa.saId || '';
-  if (!saId) return [];
-  return irsaliyeler.filter((ir) => ir.saId === saId);
+  const saId = String(sa.saId || '').trim();
+  const saDocId = String(sa.id || '').trim();
+  const kalemIds = new Set(
+    (sa.kalemler || []).map((k) => String(k.id || '').trim()).filter(Boolean)
+  );
+  if (!saId && !saDocId && kalemIds.size === 0) return [];
+
+  return (irsaliyeler || []).filter((ir) => {
+    const irSa = String(ir.saId || '').trim();
+    if (saId && irSa === saId) return true;
+    if (saDocId && irSa === saDocId) return true;
+    if (kalemIds.size === 0) return false;
+    return (ir.kalemler || []).some((k) => {
+      const kid = String(k.saKalemId || '').trim();
+      return Boolean(kid && kalemIds.has(kid));
+    });
+  });
+}
+
+/**
+ * Kalem üzerinden bulunan ama saId yazılmamış irsaliyelere SA no'sunu yazar (yumuşak onarım).
+ * Rapor / dönüşüm sonrası state senkronu için.
+ */
+export function ensureIrsaliyeSaBaglari(
+  sa: SatinAlmaTalebi,
+  irsaliyeler: Irsaliye[]
+): { irsaliyeler: Irsaliye[]; repairedIds: string[] } {
+  const saId = String(sa.saId || '').trim();
+  if (!saId) return { irsaliyeler, repairedIds: [] };
+  const linkedIds = new Set(findIrsaliyelerForSa(sa, irsaliyeler).map((ir) => ir.id));
+  const repairedIds: string[] = [];
+  const next = irsaliyeler.map((ir) => {
+    if (!linkedIds.has(ir.id)) return ir;
+    if (String(ir.saId || '').trim() === saId) return ir;
+    repairedIds.push(ir.id);
+    return { ...ir, saId };
+  });
+  return { irsaliyeler: next, repairedIds };
 }
 
 export function findFaturalarForIrsaliye(ir: Irsaliye, faturalar: Fatura[]): Fatura[] {
@@ -151,6 +187,7 @@ export function buildIrsaliyeFromSatinAlma(
     saId: sa.saId,
     onayDurumu: 'ONAY BEKLİYOR',
     kalemler,
+    donusumKaynagi: 'SA_DONUSUM',
   };
 
   let warning: string | undefined;
@@ -159,6 +196,91 @@ export function buildIrsaliyeFromSatinAlma(
   }
 
   return { irsaliye, alreadyExists: existing, warning };
+}
+
+/**
+ * Satın alma (sipariş) → N adet irsaliye üretir.
+ * Her irsaliye aynı kalemleri içerir (tonaj/yük birimi durumunda
+ * kullanıcı miktarı irsaliye ekranında günceller).
+ *
+ * Örnek kullanım: 20 araç mıcır siparişi → 20 adet irsaliye
+ */
+export function buildMultiIrsaliyeFromSatinAlma(
+  sa: SatinAlmaTalebi,
+  adet: number,
+  opts?: {
+    irsaliyeler?: Irsaliye[];
+    cariKartlar?: CariKart[];
+    stokKartlar?: StokKart[];
+    tarih?: string;
+    /** Her irsaliyeye bölünmüş miktar mı kullanılsın? Varsayılan: false (tam miktar) */
+    bolunmuslu?: boolean;
+  }
+): { irsaliyeler: Irsaliye[]; alreadyExists: Irsaliye[]; warning?: string } {
+  if (adet < 1) throw new Error('En az 1 irsaliye üretilmelidir.');
+  if (adet > 500) throw new Error('Tek seferde en fazla 500 irsaliye üretilebilir.');
+
+  const tarih = opts?.tarih || todayIso();
+  const cari =
+    sa.cariKartId ||
+    resolveCariKartId(sa.cariFirma, opts?.cariKartlar || []).cariKartId ||
+    undefined;
+
+  const existing = findIrsaliyelerForSa(sa, opts?.irsaliyeler || []);
+
+  const dateK = dateKey(tarih);
+  // Sıralı token üret: IRS-20250725-001, IRS-20250725-002 ...
+  const existingNos = new Set((opts?.irsaliyeler || []).map((ir) => ir.irsaliyeNo));
+  const baseNo = `IRS-${dateK}`;
+  let seqStart = 1;
+  while (existingNos.has(`${baseNo}-${String(seqStart).padStart(3, '0')}`)) {
+    seqStart++;
+  }
+
+  const irsaliyeler: Irsaliye[] = [];
+  for (let i = 0; i < adet; i++) {
+    const seq = seqStart + i;
+    const irsaliyeNo = `${baseNo}-${String(seq).padStart(3, '0')}`;
+
+    const rawKalemler: IrsaliyeItem[] = (sa.kalemler || []).map((k: SatinAlmaItem, idx) => {
+      let miktar = Number(k.miktar) || 0;
+      // Bölünmüş mod: toplam miktarı irsaliye sayısına böl (tam sayı bölümü)
+      if (opts?.bolunmuslu && adet > 1) {
+        miktar = Math.ceil(miktar / adet);
+      }
+      return {
+        id: `iri_multi_${sa.id}_${seq}_${idx}_${shortToken()}`,
+        saKalemId: k.id,
+        stokKartId: k.stokKartId,
+        urunAdi: k.urunAdi,
+        miktar,
+        birim: k.birim || 'ADET',
+      };
+    });
+
+    const kalemler = opts?.stokKartlar
+      ? linkIrsaliyeKalemler(rawKalemler, opts.stokKartlar)
+      : rawKalemler;
+
+    irsaliyeler.push({
+      id: `ir_multi_${sa.id}_${seq}_${Date.now() + i}`,
+      irsaliyeId: `IR-${dateK}-${String(seq).padStart(3, '0')}`,
+      irsaliyeNo,
+      tarih,
+      firma: sa.cariFirma,
+      cariKartId: cari,
+      saId: sa.saId,
+      onayDurumu: 'ONAY BEKLİYOR',
+      kalemler,
+    });
+  }
+
+  let warning: string | undefined;
+  if (existing.length > 0) {
+    warning = `Bu sipariş için zaten ${existing.length} irsaliye var. ${adet} yeni irsaliye eklenecek.`;
+  }
+
+  return { irsaliyeler, alreadyExists: existing, warning };
 }
 
 export type IrsaliyeToFaturaResult = {
@@ -266,6 +388,7 @@ export function buildFaturaFromIrsaliyeler(
     durum: 'KONTROL BEKLEYOR',
     kalemler,
     bagliIrsaliyeler: irsaliyeler.map((ir) => ir.id),
+    donusumKaynagi: 'IR_FATURA',
   };
 
   let warning: string | undefined;
@@ -330,7 +453,7 @@ export function buildFaturaFromSatinAlma(
   };
 }
 
-/** İrsaliyeleri faturaya bağladıktan sonra irsaliye kayıtlarını güncelle */
+/** İrsaliyeleri faturaya bağladıktan sonra irsaliye kayıtlarını güncelle (yumuşak bağ — kilit yok) */
 export function linkIrsaliyelerToFatura(
   irsaliyeler: Irsaliye[],
   fatura: Fatura
@@ -347,23 +470,185 @@ export function linkIrsaliyelerToFatura(
   });
 }
 
+/** Fatura–irsaliye bağını kaldır (düzenleme / hata düzeltme) */
+export function unlinkIrsaliyeFromFatura(
+  irsaliyeler: Irsaliye[],
+  fatura: Fatura,
+  irsaliyeIdOrNo: string
+): Irsaliye[] {
+  return irsaliyeler.map((ir) => {
+    if (ir.id !== irsaliyeIdOrNo && ir.irsaliyeNo !== irsaliyeIdOrNo) return ir;
+    if (ir.faturaNo && ir.faturaNo !== fatura.faturaNo) return ir;
+    return { ...ir, faturaNo: undefined };
+  });
+}
+
+/** Faturanın bagliIrsaliyeler listesini güncelle; çıkarılan irsaliyelerin faturaNo'sunu temizle */
+export function syncFaturaIrsaliyeBaglari(
+  fatura: Fatura,
+  nextBagliIds: string[],
+  irsaliyeler: Irsaliye[]
+): { fatura: Fatura; irsaliyeler: Irsaliye[] } {
+  const prev = new Set(fatura.bagliIrsaliyeler || []);
+  const next = new Set(nextBagliIds);
+  const removed = [...prev].filter((id) => !next.has(id));
+  const added = [...next].filter((id) => !prev.has(id));
+
+  let nextIrs = irsaliyeler;
+  for (const id of removed) {
+    nextIrs = unlinkIrsaliyeFromFatura(nextIrs, fatura, id);
+  }
+  const patchedFatura: Fatura = { ...fatura, bagliIrsaliyeler: nextBagliIds };
+  if (added.length) {
+    nextIrs = linkIrsaliyelerToFatura(nextIrs, patchedFatura);
+  }
+  return { fatura: patchedFatura, irsaliyeler: nextIrs };
+}
+
+/** Seçilen irsaliyelerin aynı cariye ait olup olmadığını kontrol et */
+export function assertSameCariIrsaliyeler(irsaliyeler: Irsaliye[]): {
+  ok: boolean;
+  message?: string;
+  cariKartId?: string;
+  firma?: string;
+} {
+  if (!irsaliyeler.length) {
+    return { ok: false, message: 'En az bir irsaliye seçin.' };
+  }
+  const cariIds = new Set(
+    irsaliyeler.map((ir) => String(ir.cariKartId || '').trim()).filter(Boolean)
+  );
+  const firmas = new Set(
+    irsaliyeler.map((ir) => String(ir.firma || '').trim().toLocaleLowerCase('tr-TR')).filter(Boolean)
+  );
+  if (cariIds.size > 1) {
+    return { ok: false, message: 'Seçilen irsaliyeler farklı cari kartlara ait; tek faturaya bağlanamaz.' };
+  }
+  if (cariIds.size === 0 && firmas.size > 1) {
+    return { ok: false, message: 'Seçilen irsaliyeler farklı firmalara ait; tek faturaya bağlanamaz.' };
+  }
+  return {
+    ok: true,
+    cariKartId: cariIds.size === 1 ? [...cariIds][0] : undefined,
+    firma: irsaliyeler[0]?.firma,
+  };
+}
+
+export type EvrakZincirOzet = {
+  siparis: boolean;
+  sevk: number;
+  fatura: number;
+  /** Faturaya bağlanmış sevk irsaliye adedi */
+  faturayaBagliSevk: number;
+  /** Henüz faturaya bağlanmamış sevk */
+  faturasizSevk: number;
+  tamamlandi: boolean;
+  /** Kısa durum cümlesi (rapor / rozet) */
+  durumMetni: string;
+};
+
+/** Fiyatı 0 kalan IR→FAT dönüşümü: gerçek fatura girişi değil, taslak mali bağ */
+export function isTaslakMaliBagFatura(
+  ft: Pick<Fatura, 'genelToplam' | 'toplamTutar' | 'donusumKaynagi' | 'bagliIrsaliyeler'>
+): boolean {
+  const tutar = Number(ft.genelToplam ?? ft.toplamTutar ?? 0);
+  if (tutar > 0) return false;
+  if (ft.donusumKaynagi === 'IR_FATURA') return true;
+  return (ft.bagliIrsaliyeler || []).length > 0;
+}
+
+/** Gerçek tedarikçi faturası (matrah/toplam > 0) */
+export function isGercekFaturaGirisi(ft: Pick<Fatura, 'genelToplam' | 'toplamTutar'>): boolean {
+  return Number(ft.genelToplam ?? ft.toplamTutar ?? 0) > 0;
+}
+
+/** İrsaliyedeki hizmet miktarı (vidanjör çekim / kalem ADET) */
+export function irsaliyeHizmetMiktari(ir: Irsaliye): {
+  miktar: number;
+  birim: string;
+  etiket: string;
+} {
+  if (Number(ir.cekimAdedi) > 0) {
+    return { miktar: Number(ir.cekimAdedi), birim: 'ADET', etiket: 'çekim' };
+  }
+  let cekim = 0;
+  let diger = 0;
+  let digerBirim = 'ADET';
+  for (const k of ir.kalemler || []) {
+    const ad = String(k.urunAdi || '').toLocaleLowerCase('tr-TR');
+    const m = Number(k.miktar) || 0;
+    if (ad.includes('çekim') || ad.includes('cekim') || ad.includes('vidanj')) {
+      cekim += m;
+    } else {
+      diger += m;
+      if (k.birim) digerBirim = String(k.birim);
+    }
+  }
+  if (cekim > 0) return { miktar: cekim, birim: 'ADET', etiket: 'çekim' };
+  if (diger > 0) return { miktar: diger, birim: digerBirim, etiket: 'hizmet' };
+  return { miktar: 0, birim: 'ADET', etiket: 'çekim' };
+}
+
 export function describeEvrakZinciri(
   sa: SatinAlmaTalebi | undefined,
   irsaliyeler: Irsaliye[],
   faturalar: Fatura[]
-): { siparis: boolean; sevk: number; fatura: number; tamamlandi: boolean } {
-  const sevk = sa ? findIrsaliyelerForSa(sa, irsaliyeler).length : 0;
+): EvrakZincirOzet {
   const relatedIrs = sa ? findIrsaliyelerForSa(sa, irsaliyeler) : [];
-  const faturaCount = relatedIrs.reduce(
-    (n, ir) => n + findFaturalarForIrsaliye(ir, faturalar).length,
-    0
-  );
-  const linkedFt = faturalar.filter((ft) => ft.saId && sa && ft.saId === sa.saId).length;
-  const fatura = Math.max(faturaCount, linkedFt);
+  const sevk = relatedIrs.length;
+  const ftIds = new Set<string>();
+  let faturayaBagliSevk = 0;
+  for (const ir of relatedIrs) {
+    const linked = findFaturalarForIrsaliye(ir, faturalar);
+    if (linked.some((ft) => isGercekFaturaGirisi(ft))) faturayaBagliSevk += 1;
+    for (const ft of linked) ftIds.add(ft.id);
+  }
+  if (sa?.saId) {
+    const sid = String(sa.saId).trim();
+    for (const ft of faturalar) {
+      if (String(ft.saId || '').trim() === sid) ftIds.add(ft.id);
+    }
+  }
+  const linkedFats = [...ftIds]
+    .map((id) => faturalar.find((f) => f.id === id))
+    .filter((ft): ft is Fatura => Boolean(ft));
+  const gercekFaturaSayisi = linkedFats.filter((ft) => isGercekFaturaGirisi(ft)).length;
+  const taslakSayisi = linkedFats.filter((ft) => isTaslakMaliBagFatura(ft)).length;
+  const fatura = linkedFats.length;
+  const faturasizSevk = Math.max(0, sevk - faturayaBagliSevk);
+  const tamamlandi = Boolean(sa) && sevk > 0 && gercekFaturaSayisi > 0 && faturasizSevk === 0;
+
+  let durumMetni: string;
+  if (!sa) {
+    durumMetni = sevk
+      ? `${sevk} irsaliye · ${
+          gercekFaturaSayisi
+            ? `${gercekFaturaSayisi} fatura`
+            : taslakSayisi
+              ? 'taslak bağ var (gerçek fatura yok)'
+              : 'fatura bekliyor'
+        }`
+      : 'Zincir seçimi yok';
+  } else if (sevk === 0) {
+    durumMetni = 'SA’ya bağlı irsaliye yok — dönüşüm henüz kurulmadı';
+  } else if (gercekFaturaSayisi === 0) {
+    durumMetni =
+      taslakSayisi > 0
+        ? `${sevk} sevk irsaliyesi · taslak mali bağ var — gerçek fatura girişi yok`
+        : `${sevk} sevk irsaliyesi oluştu — henüz faturaya bağlanmadı`;
+  } else if (faturasizSevk > 0) {
+    durumMetni = `${faturayaBagliSevk}/${sevk} irsaliye faturaya bağlandı · ${faturasizSevk} bekliyor`;
+  } else {
+    durumMetni = `${sevk} irsaliye faturaya bağlandı · zincir tamam`;
+  }
+
   return {
     siparis: Boolean(sa),
     sevk,
     fatura,
-    tamamlandi: Boolean(sa) && sevk > 0 && fatura > 0,
+    faturayaBagliSevk,
+    faturasizSevk,
+    tamamlandi,
+    durumMetni,
   };
 }

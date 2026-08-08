@@ -61,6 +61,40 @@ export function getFaaliyetFotolar(sf: FaaliyetFotoKaynak | null | undefined): s
   return single ? [single] : [];
 }
 
+/** İlerleme kayıtlarındaki aşama fotoğrafları */
+export function getFaaliyetIlerlemeFotolar(
+  sf: { ilerlemeKayitlari?: Array<{ fotoUrls?: string[] | null }> } | null | undefined
+): string[] {
+  if (!sf?.ilerlemeKayitlari?.length) return [];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const kayit of sf.ilerlemeKayitlari) {
+    for (const raw of kayit.fotoUrls || []) {
+      const url = coerceFotoUrl(raw);
+      if (url && !seen.has(url)) {
+        seen.add(url);
+        out.push(url);
+      }
+    }
+  }
+  return out;
+}
+
+/** Ana kayıt + ilerleme fotoğrafları (gösterim / rapor) */
+export function getFaaliyetTumFotolar(sf: FaaliyetFotoKaynak | null | undefined): string[] {
+  const main = getFaaliyetFotolar(sf);
+  const ilerleme = getFaaliyetIlerlemeFotolar(sf as { ilerlemeKayitlari?: Array<{ fotoUrls?: string[] }> });
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const url of [...main, ...ilerleme]) {
+    if (!seen.has(url)) {
+      seen.add(url);
+      out.push(url);
+    }
+  }
+  return out;
+}
+
 export function getFaaliyetFoto(sf: FaaliyetFotoKaynak | null | undefined): string {
   return getFaaliyetFotolar(sf)[0] || '';
 }
@@ -98,6 +132,8 @@ export function filterFormenDayFaaliyetleri(
       if (!isFaaliyetOnDate(f, targetDate)) return false;
       if (f.kaynakEkran === 'IDARI_SAHA') return false;
       if (f.kaynakEkran === 'FORMEN_MOBIL') return true;
+      // Yönetim günlük programından atanan görevler — tüm formenler görür
+      if (f.kaynakEkran === 'GUNLUK_PROGRAM' && f.programaGonderildi !== false) return true;
       return formenOwnsSahaRecord(f, formenEmail, formenUid);
     })
     .sort((a, b) => String(b.id).localeCompare(String(a.id), 'tr'));
@@ -107,6 +143,39 @@ export function normalizeMesaiHours(raw: number): number {
   const safe = Number.isFinite(raw) ? raw : 0;
   const clamped = Math.max(0, Math.min(MAX_SAHA_MESAI_SAATI, safe));
   return Math.round(clamped * 2) / 2;
+}
+
+/** Input'ta çakılı 0 göstermemek için — boş / 0 → '' */
+export function mesaiInputDisplayValue(hours: number | undefined | null): string {
+  if (hours == null || hours === 0 || !Number.isFinite(Number(hours))) return '';
+  return String(hours);
+}
+
+/**
+ * Mesai input parse: boş veya ≤0 → null (alan silinsin).
+ * Geçerli değer → normalize edilmiş saat.
+ */
+export function parseMesaiInputValue(raw: string): number | null {
+  const t = String(raw || '')
+    .trim()
+    .replace(',', '.');
+  if (!t) return null;
+  const n = parseFloat(t);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return normalizeMesaiHours(n);
+}
+
+/** Record içinden mesai saatini güncelle / sil */
+export function setMesaiHoursInMap(
+  prev: Record<string, number>,
+  personelId: string,
+  raw: string
+): Record<string, number> {
+  const next = { ...prev };
+  const parsed = parseMesaiInputValue(raw);
+  if (parsed == null) delete next[personelId];
+  else next[personelId] = parsed;
+  return next;
 }
 
 export function isMesaiSahaFaaliyet(f?: Pick<SahaFaaliyeti, 'faaliyetTipi'> | null): boolean {
@@ -147,6 +216,44 @@ export function applySahaMesaiToYoklama(
   }
 
   return next;
+}
+
+/**
+ * Faaliyet kaydında yoklama durumu yoksa (Girilmedi / boş) → Geldi.
+ * Mevcut Yok / İzinli / Geldi ezilmez.
+ */
+export function ensureGeldiForPersoneller(
+  yoklamalar: AylikYoklamaMap,
+  tarih: string,
+  personelIds: string[],
+  gonderen: string
+): { next: AylikYoklamaMap; touchedIds: string[] } {
+  const dk = normalizeDateKey(tarih);
+  const ids = [...new Set((personelIds || []).map((id) => String(id || '').trim()).filter(Boolean))];
+  if (!dk || ids.length === 0) return { next: yoklamalar, touchedIds: [] };
+
+  const [y, m, d] = dk.split('-').map(Number);
+  let next: AylikYoklamaMap = { ...yoklamalar };
+  const touchedIds: string[] = [];
+
+  for (const personelId of ids) {
+    const dayData = getYoklamaDay(next[personelId], y, m, d);
+    const durum = String(dayData?.durum || 'Girilmedi').trim();
+    const needsGeldi = !dayData || !durum || durum === 'Girilmedi';
+    if (!needsGeldi) continue;
+
+    next = {
+      ...next,
+      [personelId]: setYoklamaDay(next[personelId], y, m, d, {
+        durum: 'Geldi',
+        mesaiSaati: normalizeMesaiHours(Number(dayData?.mesaiSaati) || 0),
+        gonderen,
+      }),
+    };
+    touchedIds.push(personelId);
+  }
+
+  return { next, touchedIds };
 }
 
 export function formatMesaiFaaliyetLabel(f: SahaFaaliyeti, personeller: { id: string; ad: string; soyad: string }[]): string {

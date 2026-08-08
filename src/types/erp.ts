@@ -117,13 +117,19 @@ export interface Irsaliye {
   micirFisId?: string;
   tonaj?: number;
   kiloKg?: number;
-  malzemeTipi?: 'MICIR' | 'STABILIZE' | string;
+  malzemeTipi?: 'MICIR' | 'STABILIZE' | 'TAS_TOZU' | string;
   icmeSuyuAdet?: number;
   sanayiSuyuAdet?: number;
+  damacaAdet?: number;
   cariKartId?: string;
   guvenlikEvrakId?: string;
   onaylayanYonetici?: string;
   onayTarihi?: string;
+  /**
+   * Dönüşüm / eşleşme kaynağı (görsel rozet + mutabakat).
+   * SA_DONUSUM | KAPI_SA_ESLESME | KAPI_EVRAK | MANUEL_BAGLAMA
+   */
+  donusumKaynagi?: string;
 }
 
 /** Kampçı — Şeker Vidanjör çekim fişi (yönetici onayından sonra irsaliye + cari) */
@@ -136,6 +142,9 @@ export interface VidanjorFis {
   fisGorselUrl?: string;
   firmaUnvan: string;
   cariKartId?: string;
+  /** Eşleşen satın alma — onayda irsaliye.saId */
+  saId?: string;
+  saKalemId?: string;
   irsaliyeId?: string;
   /** Güvenlik sekmesi o günün gelen evrak listesindeki kayıt id */
   guvenlikEvrakId?: string;
@@ -159,10 +168,13 @@ export interface MicirStabilizeFis {
   tonaj: number;
   /** İrsaliyedeki kilo — kapıda tam girilir */
   kiloKg?: number;
-  malzemeTipi: 'MICIR' | 'STABILIZE';
+  malzemeTipi: 'MICIR' | 'STABILIZE' | 'TAS_TOZU';
   fisGorselUrl?: string;
   firmaUnvan: string;
   cariKartId?: string;
+  /** Eşleşen satın alma talebi — yönetici onayında irsaliye.saId */
+  saId?: string;
+  saKalemId?: string;
   irsaliyeId?: string;
   guvenlikEvrakId?: string;
   kapıLogId?: string;
@@ -175,7 +187,7 @@ export interface MicirStabilizeFis {
   guncellenme?: string;
 }
 
-/** Tesisatçı — Yıldırım Tanker su fişi (irsaliye niteliğinde) */
+/** Tesisatçı — Yıldırım Tanker su irsaliye fişi (yönetici onayından sonra irsaliye + cari) */
 export interface YildirimTankerFis {
   id: string;
   tarih: string;
@@ -187,10 +199,17 @@ export interface YildirimTankerFis {
   fisGorselUrl?: string;
   firmaUnvan: string;
   cariKartId?: string;
+  /** Eşleşen satın alma — onayda irsaliye.saId */
+  saId?: string;
+  saKalemId?: string;
   irsaliyeId?: string;
   guvenlikEvrakId?: string;
   kapıLogId?: string;
   kaydeden?: string;
+  durum?: 'YONETICI_ONAYINDA' | 'ONAYLANDI' | 'REDDEDILDI';
+  onaylayanYonetici?: string;
+  onayTarihi?: string;
+  redNedeni?: string;
   olusturulma: string;
   guncellenme?: string;
 }
@@ -259,6 +278,60 @@ export interface MermerciFaaliyet {
   guncellenme?: string;
 }
 
+/** Şöför mobil — saha/nakliye faaliyeti (Faaliyeti Olan Personeller besler) */
+export interface SoforSahaFaaliyet {
+  id: string;
+  tarih: string;
+  faaliyetGrubu: 'NORMAL' | 'MESAI';
+  isNiteligi: string;
+  parsel: string;
+  blok: string;
+  aciklama: string;
+  fotoUrl?: string | null;
+  fotoUrls?: string[];
+  aktifPersonelListesi?: string[];
+  personelMesaiSaatleri?: Record<string, number>;
+  durum?: string;
+  kaydeden?: string;
+  kaynakEkran?: 'SOFOR_MOBIL';
+  olusturulma?: string;
+  guncellenme?: string;
+}
+
+/** Operatör mobil — iş makinesi saha faaliyeti (Faaliyeti Olan Personeller besler) */
+export interface OperatorSahaFaaliyet {
+  id: string;
+  tarih: string;
+  faaliyetGrubu: 'NORMAL' | 'MESAI';
+  isNiteligi: string;
+  parsel: string;
+  blok: string;
+  aciklama: string;
+  fotoUrl?: string | null;
+  fotoUrls?: string[];
+  aktifPersonelListesi?: string[];
+  personelMesaiSaatleri?: Record<string, number>;
+  durum?: string;
+  kaydeden?: string;
+  kaynakEkran?: 'OPERATOR_MOBIL';
+  olusturulma?: string;
+  guncellenme?: string;
+  /** Mesai taşeron kesintisi */
+  taseronKesinti?: boolean;
+  taseronFirmaId?: string;
+  taseronFirmaAdi?: string;
+  bagliOperatorFaaliyetId?: string;
+  /** Mesai saatleri yoklamaya kaydedildiğinde true (onayda çift yazmayı önler) */
+  mesaiYoklamayaIslendi?: boolean;
+  /** İş makinesi */
+  aracId?: string;
+  aracPlaka?: string;
+  makineKaynak?: 'DEMIRBAS' | 'KIRALIK' | 'MANUEL';
+  makineManuelAd?: string;
+  operatorTipi?: 'JCB' | 'KATO' | 'KİRALIK' | 'DİĞER' | string;
+  isKaydiEtiketi?: string;
+}
+
 export interface FaturaItem {
   id: string;
   urunAdi: string;
@@ -288,7 +361,11 @@ export interface Fatura {
   kalemler: FaturaItem[];
   bagliIrsaliyeler: string[];
   eImzalar?: string[];
+  /** IR_FATURA | SA_DONUSUM | MANUEL_BAGLAMA | ARSIV */
+  donusumKaynagi?: string;
 }
+
+export type KasaOdemeDurumu = 'BORC' | 'PERSONEL_ODEDI' | 'KASA_ODEDI';
 
 export interface KasaHareketi {
   id: string;
@@ -299,6 +376,52 @@ export interface KasaHareketi {
   referansTipi: 'DİĞER' | 'FATURA' | 'İRSALİYE' | 'MAAS' | 'SATIN ALMA';
   referansId?: string;
   fisEvrakUrl?: string;
+/**
+   * Çıkış ödeme durumu (kasaya yazılır):
+   * BORC = kasanın personele/şoföre ödemesi gereken borç (henüz kasa ödemedi)
+   * PERSONEL_ODEDI = personel cebinden ödedi
+   * KASA_ODEDI = şirket kasasından ödendi
+   */
+  odemeDurumu?: KasaOdemeDurumu;
+  /** @deprecated — odemeDurumu tercih edilir; eski kayıt uyumu */
+  harcamaKaynagi?: 'KASA_HARCAMA' | 'PERSONEL_HARCAMA';
+  /** Personel / borç sahibi */
+  personelId?: string;
+  personelAdi?: string;
+  /** Şoför kendi cebinden → iade / ödeme (eksi bakiye + şoföre ödenir) */
+  soforOdemesi?: boolean;
+  /** Şoför üzerinden şirket kasası harcaması (şoföre iade yok) */
+  soforKasaHarcamasi?: boolean;
+  /** Nihai masraf tipi (KENDI | KASA) */
+  masrafTipi?: SoforMasrafTipi;
+  surucu?: string;
+  fisNo?: string;
+}
+
+/** Şoför evrak beyanı / yönetici nihai ayrımı */
+export type SoforMasrafTipi = 'KENDI' | 'KASA';
+
+/** Şoför — yol / masraf fişi (onay sonrası Haftalık Kasa) */
+export interface YolHarcamasi {
+  id: string;
+  tarih: string;
+  tutar: number;
+  aciklama: string;
+  fisNo: string;
+  faturaFotoUrl?: string;
+  /** Şoför / portal hesabının eşleştiği personel kartı */
+  personelId?: string;
+  personelAdi?: string;
+  kaydedenEmail?: string;
+  durum: 'ONAY BEKLİYOR' | 'ONAYLANDI' | 'REDDEDİLDİ' | string;
+  surucu?: string;
+  /** Şoförün gönderirken seçtiği: kendi harcaması mı, kasa mı */
+  masrafTipi?: SoforMasrafTipi;
+  /** Yönetici onayında nihai ayrım (yoksa masrafTipi) */
+  nihaiMasrafTipi?: SoforMasrafTipi;
+  onaylayanYonetici?: string;
+  onayTarihi?: string;
+  olusturulma?: string;
 }
 
 export interface AracBakim {
@@ -316,6 +439,26 @@ export interface AracBakim {
   sigortaTarihi: string;
   durum: 'AKTIF' | 'PASIF' | 'BAKIMDA';
   notlar: string;
+  /** Özmal şirket aracı / kiralık (kamyon puantajı) */
+  mulkiyet?: 'OZMAL' | 'KIRALIK';
+  /** Kiralık kamyon puantaj listesine dahil */
+  kiralikKamyon?: boolean;
+}
+
+/** Kiralık kamyon günlük puantaj kaydı — araç envanter + şoför (personel) */
+export interface KiralikKamyonPuantajKaydi {
+  id: string;
+  tarih: string;
+  aracId: string;
+  plaka: string;
+  markaModel?: string;
+  soforPersonelId?: string;
+  soforAdi?: string;
+  durum: 'Geldi' | 'Yok' | 'Girilmedi';
+  mesaiSaati?: number;
+  notlar?: string;
+  kaydeden?: string;
+  updatedAt?: string;
 }
 
 export interface KmLor {
@@ -424,6 +567,22 @@ export interface KampFaaliyet {
 
 export type SahaFaaliyetTipi = 'NORMAL' | 'MESAI_SAHA';
 
+export type FaaliyetIlerlemeDurumu = 'BASLAMADI' | 'DEVAM' | 'TAMAMLANDI';
+
+export interface FaaliyetIlerlemeKaydi {
+  id: string;
+  tarih: string;
+  yorum: string;
+  fotoUrls?: string[];
+  yazar?: string;
+  yazarRol?: string;
+  /**
+   * Opsiyonel aşama — zorunlu değil.
+   * Temizlik vb. işlerde başlangıç/devam/bitiş foto ayrımı için.
+   */
+  asama?: 'BASLANGIC' | 'ILERLEME' | 'BITIS';
+}
+
 export interface SahaFaaliyeti {
   id: string;
   personelId: string;
@@ -444,9 +603,15 @@ export interface SahaFaaliyeti {
   kaydeden?: string;
   kaydedenUid?: string;
   kaydedenFormen?: string;
+  /** Mobil onay durumu (operatör vb.) */
+  durum?: string;
   programaGonderildi?: boolean;
   programaGonderimTarihi?: string;
   iceriAktarimDurumu?: 'BEKLIYOR' | 'AKTARILDI';
+  /** İş grubu etiketi — KIRIM İŞLERİ, DRENAJ İŞLERİ vb. */
+  isEtiketi?: string;
+  ilerlemeDurumu?: FaaliyetIlerlemeDurumu;
+  ilerlemeKayitlari?: FaaliyetIlerlemeKaydi[];
 }
 
 export interface SahaGunRaporArsiv {
@@ -464,6 +629,9 @@ export interface SahaGunRaporArsiv {
     raporlu: number;
   };
   aciklama?: string;
+  genelNotlar?: string;
+  kaynak?: string;
+  htmlOzet?: string;
 }
 
 export type ProgramliFaaliyetAsamaAnahtari = 'BASLANGIC' | 'ILERLEME' | 'TAMAMLANMA';
@@ -487,6 +655,38 @@ export interface ProgramliFaaliyet {
   olusturanUid?: string;
   durum: 'PLANLANDI' | 'DEVAM_EDIYOR' | 'TAMAMLANDI';
   asamalar: ProgramliFaaliyetAsama[];
+}
+
+/** Düz işçi ekiplerinin günlük plan / gerçekleşme ve kanıt kaydı.
+ * Saha faaliyetlerinden bağımsız tutulur; mevcut faaliyet akışını etkilemez. */
+export type SahaIsPlanDurum = 'PLANLANDI' | 'BASLADI' | 'KONTROLDE' | 'TAMAMLANDI' | 'EKSIK_KALDI';
+
+export interface SahaIsPlanKaniti {
+  url: string;
+  tarih: string;
+  not?: string;
+}
+
+export interface SahaIsPlani {
+  id: string;
+  tarih: string;
+  parsel: string;
+  blok: string;
+  isTanimi: string;
+  birim: string;
+  planlananMiktar: number;
+  gerceklesenMiktar: number;
+  personelIds: string[];
+  durum: SahaIsPlanDurum;
+  baslangicSaati?: string;
+  bitisSaati?: string;
+  baslangicKaniti?: SahaIsPlanKaniti;
+  bitisKaniti?: SahaIsPlanKaniti;
+  gunSonuNotu?: string;
+  engelNotu?: string;
+  olusturan?: string;
+  olusturmaTarihi: string;
+  guncellemeTarihi: string;
 }
 
 /** Ay bazlı saha faaliyet foto kolajı / dergi albümü */
@@ -611,7 +811,11 @@ export interface OperatorFaaliyet {
   kesintiYansitildi?: boolean;
   makineKaynak?: 'DEMIRBAS' | 'KIRALIK' | 'MANUEL';
   makineManuelAd?: string;
+  /** Örn. "Demirbaş JCB makinesi iş kaydı" — arşiv/liste etiketı */
+  isKaydiEtiketi?: string;
   onayDurumu: 'BEKLEMEDE' | 'ONAYLANDI' | 'REDDEDİLDİ';
+  /** Onay havuzu ile uyum (isMobilDocPending) */
+  durum?: 'ONAY BEKLİYOR' | 'BEKLEMEDE' | 'ONAYLANDI' | 'REDDEDİLDİ' | string;
   kaydedenKullanici?: string;
   kayitTarihi?: string;
 }
@@ -633,6 +837,10 @@ export interface TaseronEnerjiKaydi {
   elektrik: TaseronSayacOlcum;
   su: TaseronSayacOlcum;
   dogalgaz: TaseronSayacOlcum;
+  /** Hangi kalemler kesintiye dahil (yoksa fark>0 olanlar) */
+  aktifKalemler?: Array<'ELEKTRIK' | 'SU' | 'DOGALGAZ'>;
+  /** Neden / açıklama (kime neden kesildi) */
+  aciklama?: string;
   olusturmaTarihi: string;
   olusturanKullanici?: string;
 }
@@ -663,6 +871,8 @@ export interface TaseronKesintiRaporu {
   faaliyetler: OperatorFaaliyet[];
   enerjiDetay?: TaseronEnerjiKaydi;
   yemekOzet?: { sabah: number; ogle: number; aksam: number; gunSayisi: number };
+  /** Ana firma (demirbaş) vs kiralık makine kesintisi — karışmasın */
+  makineKaynakGrup?: 'ANA_FIRMA' | 'KIRALIK';
   onayDurumu: 'TASLAK' | 'ONAYLANDI' | 'GONDERILDI';
   olusturanKullanici: string;
   olusturmaTarihi: string;
@@ -724,6 +934,8 @@ export interface CariKartIslem {
   tutar?: number;
   tarih: string;
   belgeNo?: string;
+  /** İş makinesi / sayaç kesinti kanıt fotoğrafı */
+  fotoUrl?: string;
 }
 
 export interface StokKartIslem {

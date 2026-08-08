@@ -25,6 +25,12 @@ export function buildKibritciReportHtml(options: {
   });
 
   const watermarkUrl = options.assets?.watermarkDataUrl || getKibritciWatermarkUrl();
+  // HTML tablolarında \n → <br/> + pre-wrap sayfa israfına yol açar; düz metinde korunur.
+  const isRichHtml = /<(table|section|div|ul|ol|p|h[1-6]|article)\b/i.test(options.bodyHtml);
+  const contentHtml = isRichHtml
+    ? options.bodyHtml.replace(/\n\s*/g, '')
+    : options.bodyHtml.replace(/\n/g, '<br/>');
+  const contentClass = isRichHtml ? 'content content-rich' : 'content content-plain';
 
   return `<!DOCTYPE html>
 <html lang="tr">
@@ -39,12 +45,14 @@ export function buildKibritciReportHtml(options: {
     .page > *:not(.watermark) { position: relative; z-index: 1; }
     .head { padding: 24px 28px 0; background: transparent; }
     .meta { padding: 12px 28px; background: #f8fafc; border-bottom: 1px solid #e2e8f0; }
-    .content { padding: 24px 28px; font-size: 13px; line-height: 1.65; white-space: pre-wrap; }
+    .content { padding: 24px 28px; font-size: 13px; line-height: 1.65; }
+    .content-plain { white-space: pre-wrap; }
+    .content-rich { white-space: normal; line-height: 1.4; }
     .foot { padding: 16px 28px; font-size: 10px; color: #64748b; border-top: 2px solid #1e4e78; text-align: center; line-height: 1.6; }
     .foot .company { font-weight: 700; color: #1e4e78; }
     .kibritci-logo { background: transparent !important; }
     table { background: transparent; }
-    @media print { body { padding: 0; background: #fff; } .page { border: none; box-shadow: none; } }
+    @media print { body { padding: 0; background: #fff; } .page { border: none; box-shadow: none; border-radius: 0; } .content { padding: 12px 16px; } .head { padding: 12px 16px 0; } .meta { padding: 8px 16px; } .foot { padding: 10px 16px; } }
   </style>
 </head>
 <body>
@@ -55,7 +63,7 @@ export function buildKibritciReportHtml(options: {
       ${kibritciReportHeaderHtml(options.title, options.subtitle, { headerDataUrl: options.assets?.headerDataUrl })}
     </div>
     ${metaRows ? `<div class="meta">${metaRows}</div>` : ''}
-    <div class="content">${options.bodyHtml.replace(/\n/g, '<br/>')}</div>
+    <div class="${contentClass}">${contentHtml}</div>
     <div class="foot">
       <div class="company">${KIBRITCI_COMPANY.legalName}</div>
       ${KIBRITCI_COMPANY.address}<br/>

@@ -36,7 +36,8 @@
     "birbesan:seed": "node scripts/seed-birbesan-stok-catalog.mjs --execute",
     "birbesan:dedupe": "node scripts/seed-birbesan-stok-catalog.mjs --execute --dedupe-only",
     "birbesan:faturalar:dry-run": "node scripts/seed-birbesan-faturalar.mjs --dry-run",
-    "birbesan:faturalar": "node scripts/seed-birbesan-faturalar.mjs --execute"
+    "birbesan:faturalar": "node scripts/seed-birbesan-faturalar.mjs --execute",
+    "cron:akvizyon-nobet": "node scripts/cron-akvizyon-nobet.mjs"
   },
   "dependencies": {
     "@google/genai": "^2.10.0",

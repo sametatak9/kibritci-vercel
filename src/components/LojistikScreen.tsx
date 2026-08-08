@@ -1,14 +1,17 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { 
   Truck, Plus, Trash2, Camera, CheckCircle, Search, AlertCircle, 
-  FileText, Calendar, Printer, Phone, MapPin, Wallet, ClipboardList, Clock, Check, X
+  FileText, Calendar, Printer, Phone, MapPin, Wallet, ClipboardList, Clock, Check, X, Image as ImageIcon, LogOut
 } from 'lucide-react';
-import { AracBakim, Personel } from '../types/erp';
+import { AracBakim, AylikYoklamaMap, KasaOdemeDurumu, Personel } from '../types/erp';
 import { compressImage } from '../lib/imageCompress';
 import { db } from '../lib/firebase';
 import { collection, onSnapshot, doc, setDoc, deleteDoc, updateDoc } from 'firebase/firestore';
 import { CorporateReportLayout } from './CorporateReportLayout';
 import { KibritciLogo } from './KibritciLogo';
+import { RolMobilFaaliyetYoklamaPanel } from './RolMobilFaaliyetYoklamaPanel';
+import { KampGunlukYoklamaTab } from './KampGunlukYoklamaTab';
+import { matchSoforPersonel } from '../lib/personelUnvanUtils';
 
 interface LojistikScreenProps {
   irsaliyeler: any[];
@@ -19,8 +22,13 @@ interface LojistikScreenProps {
   aracKmLoglari: any[];
   setAracKmLoglari: any;
   currentUser?: any;
+  personeller?: Personel[];
+  yoklamalar?: AylikYoklamaMap;
+  setYoklamalar?: (updater: AylikYoklamaMap | ((y: AylikYoklamaMap) => AylikYoklamaMap)) => void;
+  saveYoklamalarNow?: (next: AylikYoklamaMap) => Promise<void>;
   onSignOut?: () => void;
   isStandalone?: boolean;
+  addNotification?: (mesaj: string, meta?: Record<string, unknown>) => void | Promise<void>;
 }
 
 export const LojistikScreen: React.FC<LojistikScreenProps> = ({
@@ -29,10 +37,26 @@ export const LojistikScreen: React.FC<LojistikScreenProps> = ({
   aracKmLoglari,
   setAracKmLoglari,
   currentUser,
+  personeller: personellerProp = [],
+  yoklamalar = {},
+  setYoklamalar,
+  saveYoklamalarNow,
   onSignOut,
-  isStandalone = false
+  isStandalone = false,
+  addNotification,
 }) => {
-  const [activeTab, setActiveTab] = useState<'günlük_rutin' | 'günlük_faaliyet' | 'haftalık_km' | 'araç_kartı' | 'rotalar' | 'yol_harcaması' | 'mini_raporlar' | 'aylik_rapor'>('günlük_rutin');
+  const [activeTab, setActiveTab] = useState<
+    | 'günlük_rutin'
+    | 'günlük_faaliyet'
+    | 'saha_faaliyet'
+    | 'yoklama'
+    | 'haftalık_km'
+    | 'araç_kartı'
+    | 'rotalar'
+    | 'yol_harcaması'
+    | 'mini_raporlar'
+    | 'aylik_rapor'
+  >('saha_faaliyet');
   const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
 
   const getMaintenanceAlerts = (a: AracBakim) => {
@@ -63,7 +87,8 @@ export const LojistikScreen: React.FC<LojistikScreenProps> = ({
   };
 
   // Synchronized Firestore Collections
-  const [personeller, setPersoneller] = useState<Personel[]>([]);
+  const [personellerLive, setPersonellerLive] = useState<Personel[]>([]);
+  const personeller = personellerLive.length > 0 ? personellerLive : personellerProp;
   const [gunlukRutinLoglar, setGunlukRutinLoglar] = useState<any[]>([]);
   const [haftalikKmLoglar, setHaftalikKmLoglar] = useState<any[]>([]);
   const [aracTalepleri, setAracTalepleri] = useState<any[]>([]);
@@ -94,7 +119,7 @@ export const LojistikScreen: React.FC<LojistikScreenProps> = ({
       snap.forEach((doc) => {
         list.push({ id: doc.id, ...doc.data() } as Personel);
       });
-      setPersoneller(list);
+      setPersonellerLive(list);
     });
 
     const unsubG = onSnapshot(collection(db, 'gunlukRutinKmLoglari'), (snap) => {
@@ -167,7 +192,25 @@ export const LojistikScreen: React.FC<LojistikScreenProps> = ({
     setTimeout(() => setStatusMessage(null), 4000);
   };
 
-  const currentChauffeurName = currentUser?.displayName || currentUser?.ad || currentUser?.email || 'Şöför';
+  const matchedSoforPersonel = React.useMemo(
+    () => matchSoforPersonel(currentUser, personeller),
+    [currentUser, personeller]
+  );
+
+  const soforPersonelAdi = matchedSoforPersonel
+    ? `${matchedSoforPersonel.ad} ${matchedSoforPersonel.soyad}`.trim()
+    : '';
+
+  /** Personel kartı / ad-soyad öncelikli; e-posta unvan olarak kullanılmaz */
+  const currentChauffeurName =
+    soforPersonelAdi ||
+    (currentUser?.ad || currentUser?.soyad
+      ? `${currentUser?.ad || ''} ${currentUser?.soyad || ''}`.trim()
+      : '') ||
+    (currentUser?.displayName && !String(currentUser.displayName).includes('@')
+      ? String(currentUser.displayName).trim()
+      : '') ||
+    'Şöför';
 
   // ==========================================
   // TAB 1: GÜNLÜK RUTIN (SABAH / AKŞAM KM)
@@ -499,19 +542,36 @@ export const LojistikScreen: React.FC<LojistikScreenProps> = ({
   // TAB 5: YOL HARCAMASI (FİŞ / FATURA YÜKLE)
   // ==========================================
   const [harcamaTutar, setHarcamaTutar] = useState('');
+  const [harcamaMasrafTipi, setHarcamaMasrafTipi] = useState<'KENDI' | 'KASA' | ''>('');
   const [harcamaAciklama, setHarcamaAciklama] = useState('');
+  const [harcamaFisNo, setHarcamaFisNo] = useState('');
   const [harcamaTarih, setHarcamaTarih] = useState(new Date().toISOString().split('T')[0]);
   const [faturaFotoBase64, setFaturaFotoBase64] = useState<string | null>(null);
   const [compressing, setCompressing] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [iadeRaporStart, setIadeRaporStart] = useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 14);
+    return d.toISOString().split('T')[0];
+  });
+  const [iadeRaporEnd, setIadeRaporEnd] = useState(new Date().toISOString().split('T')[0]);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
+  const galleryInputRef = useRef<HTMLInputElement>(null);
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    // Aynı fotoğrafı tekrar seçebilmek / kamera yeniden açılabilsin
+    e.target.value = '';
     if (!file) return;
 
     setCompressing(true);
     try {
-      const compressed = await compressImage(file);
+      const rawBase64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (ev) => resolve(String(ev.target?.result || ''));
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+      const compressed = await compressImage(rawBase64);
       setFaturaFotoBase64(compressed);
     } catch (err) {
       console.error(err);
@@ -524,31 +584,118 @@ export const LojistikScreen: React.FC<LojistikScreenProps> = ({
   const handleSaveYolHarcamasi = async (e: React.FormEvent) => {
     e.preventDefault();
     const amount = parseFloat(harcamaTutar) || 0;
+    const fisNo = String(harcamaFisNo || '').trim();
     if (amount <= 0 || !harcamaAciklama) {
       alert('Lütfen geçerli bir Tutar ve Açıklama belirtin!');
+      return;
+    }
+    if (!fisNo) {
+      alert('Fiş numarası zorunludur.');
+      return;
+    }
+    if (harcamaMasrafTipi !== 'KENDI' && harcamaMasrafTipi !== 'KASA') {
+      alert('Evrak tipi seçin: Kendi harcamanız mı, yoksa kasa harcaması mı?');
       return;
     }
 
     try {
       const hId = `harcama_${Date.now()}`;
+      let fotoUrl = faturaFotoBase64 || '';
+      if (fotoUrl) {
+        try {
+          const { ensureYolHarcamaFotoPersisted } = await import('../lib/sahaFaaliyetFotoStorage');
+          fotoUrl = await ensureYolHarcamaFotoPersisted(hId, fotoUrl);
+        } catch (err) {
+          console.warn('Yol harcama foto Storage atlandı', err);
+        }
+      }
       await setDoc(doc(db, 'yolHarcamalari', hId), {
         id: hId,
         tarih: harcamaTarih,
         tutar: amount,
         aciklama: harcamaAciklama,
-        faturaFotoUrl: faturaFotoBase64 || '',
+        fisNo,
+        faturaFotoUrl: fotoUrl,
         durum: 'ONAY BEKLİYOR',
-        surucu: currentChauffeurName
+        surucu: soforPersonelAdi || currentChauffeurName,
+        kaydedenEmail: currentUser?.email || '',
+        personelId: matchedSoforPersonel?.id || null,
+        personelAdi: matchedSoforPersonel
+          ? `${matchedSoforPersonel.ad} ${matchedSoforPersonel.soyad}`.trim()
+          : null,
+        masrafTipi: harcamaMasrafTipi,
+        olusturulma: new Date().toISOString(),
       });
 
-      showStatus('success', 'Yol harcaması ve evrak görseli başarıyla yöneticilere gönderildi!');
+      if (matchedSoforPersonel?.id) {
+        const { appendSoforFisToPersonelGecmis } = await import('../lib/yolHarcamaUtils');
+        await appendSoforFisToPersonelGecmis({
+          personelId: matchedSoforPersonel.id,
+          yolHarcamaId: hId,
+          tarih: harcamaTarih,
+          tutar: amount,
+          fisNo,
+          aciklama: harcamaAciklama,
+          masrafTipi: harcamaMasrafTipi,
+          durum: 'ONAY BEKLİYOR',
+        });
+      }
+
+      showStatus(
+        'success',
+        harcamaMasrafTipi === 'KENDI'
+          ? matchedSoforPersonel
+            ? `Kendi harcamanız yönetici onayına gönderildi · Personel: ${matchedSoforPersonel.ad} ${matchedSoforPersonel.soyad}`
+            : 'Kendi harcamanız yönetici onayına gönderildi (onay sonrası size ödenir).'
+          : matchedSoforPersonel
+            ? `Kasa harcaması yönetici onayına gönderildi · Personel: ${matchedSoforPersonel.ad} ${matchedSoforPersonel.soyad}`
+            : 'Kasa harcaması yönetici onayına gönderildi (şirket kasasına işlenir).'
+      );
       setHarcamaTutar('');
       setHarcamaAciklama('');
+      setHarcamaFisNo('');
+      setHarcamaMasrafTipi('');
       setFaturaFotoBase64(null);
     } catch (err) {
       console.error(err);
       showStatus('error', 'Harcama kaydı gönderilemedi.');
     }
+  };
+
+  const handleSoforIadeRaporu = async () => {
+    const { filterYolHarcamalariByRange, buildSoforMasrafIadeReportHtml, openSoforMasrafIadeReport } =
+      await import('../lib/yolHarcamaUtils');
+    const items = filterYolHarcamalariByRange(
+      yolHarcamalari,
+      iadeRaporStart,
+      iadeRaporEnd,
+      currentChauffeurName
+    ).map((x) => ({
+      id: x.id,
+      tarih: x.tarih,
+      fisNo: x.fisNo,
+      aciklama: x.aciklama,
+      tutar: Number(x.tutar) || 0,
+      surucu: x.surucu,
+      personelAdi: x.personelAdi || soforPersonelAdi || currentChauffeurName,
+      fotoUrl: x.faturaFotoUrl,
+      masrafTipi: x.nihaiMasrafTipi || x.masrafTipi || 'KENDI',
+      odemeDurumu: (
+        (x.nihaiMasrafTipi || x.masrafTipi) === 'KASA' ? 'KASA_ODEDI' : 'BORC'
+      ) as KasaOdemeDurumu,
+    }));
+    if (items.length === 0) {
+      alert('Seçili aralıkta masraf kaydı yok.');
+      return;
+    }
+    const html = buildSoforMasrafIadeReportHtml({
+      startDate: iadeRaporStart,
+      endDate: iadeRaporEnd,
+      items,
+      surucuFiltre: currentChauffeurName,
+      olusturan: currentChauffeurName,
+    });
+    openSoforMasrafIadeReport(html, 'Şoför Masraf İade Raporu');
   };
 
   // ==========================================
@@ -559,50 +706,73 @@ export const LojistikScreen: React.FC<LojistikScreenProps> = ({
   };
 
   return (
-    <div className="min-h-full bg-slate-50 text-slate-800 p-4 lg:p-6 font-sans flex flex-col">
+    <div className="min-h-full w-full max-w-[100vw] min-w-0 overflow-x-hidden bg-slate-50 text-slate-800 p-2.5 sm:p-4 lg:p-6 font-sans flex flex-col box-border">
       
       {/* Upper Status Notifications */}
       {statusMessage && (
-        <div className={`fixed bottom-4 right-4 z-50 p-4 rounded-xl shadow-lg border text-xs font-bold transition-all duration-300 flex items-center space-x-2 animate-bounce ${
+        <div className={`fixed bottom-4 left-3 right-3 sm:left-auto sm:right-4 sm:max-w-sm z-50 p-3 sm:p-4 rounded-xl shadow-lg border text-xs font-bold transition-all duration-300 flex items-start gap-2 ${
           statusMessage.type === 'success' ? 'bg-emerald-50 text-emerald-800 border-emerald-200' : 'bg-rose-50 text-rose-800 border-rose-200'
         }`}>
-          <span>{statusMessage.type === 'success' ? '✅' : '❌'}</span>
-          <span>{statusMessage.text}</span>
+          <span className="shrink-0">{statusMessage.type === 'success' ? '✅' : '❌'}</span>
+          <span className="min-w-0 break-words">{statusMessage.text}</span>
         </div>
       )}
 
       {/* Main Container */}
-      <div className="max-w-7xl mx-auto space-y-5">
+      <div className="w-full max-w-7xl mx-auto space-y-3 sm:space-y-5 min-w-0">
         
         {/* Upper Dashboard Widget */}
-        <div className="bg-gradient-to-r from-slate-100 to-indigo-800 rounded-3xl p-5 lg:p-6 text-white shadow-lg border border-slate-800">
-          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-            <div className="flex items-center space-x-3">
-              <div className="p-3 bg-white/10 rounded-2xl">
-                <Truck className="h-6 w-6 text-white" />
+        <div className="bg-gradient-to-r from-slate-800 to-indigo-800 rounded-2xl sm:rounded-3xl p-3 sm:p-5 lg:p-6 text-white shadow-lg border border-slate-800 overflow-hidden">
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 sm:gap-4 min-w-0">
+            <div className="flex items-start gap-2.5 sm:gap-3 min-w-0 flex-1">
+              <div className="p-2.5 sm:p-3 bg-white/10 rounded-2xl shrink-0">
+                <Truck className="h-5 w-5 sm:h-6 sm:w-6 text-white" />
               </div>
-              <div>
-                <h1 className="font-semibold text-base tracking-tight">Şöför Mobil Paneli</h1>
-                <p className="text-[11px] text-slate-100 mt-0.5">
-                  Giriş Yapan Yetkili: <span className="font-bold">{currentChauffeurName}</span>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-start justify-between gap-2">
+                  <h1 className="font-semibold text-sm sm:text-base tracking-tight leading-tight">Şöför Mobil Paneli</h1>
+                  {isStandalone && onSignOut && (
+                    <button
+                      type="button"
+                      onClick={onSignOut}
+                      className="shrink-0 p-2 rounded-xl bg-white/10 border border-white/20 text-white cursor-pointer"
+                      title="Çıkış"
+                    >
+                      <LogOut size={14} />
+                    </button>
+                  )}
+                </div>
+                <p className="text-[10px] sm:text-[11px] text-slate-100 mt-1 flex flex-wrap items-center gap-1.5">
+                  <span className="min-w-0 break-words">
+                    Yetkili: <span className="font-bold">{soforPersonelAdi}</span>
+                  </span>
+                  {matchedSoforPersonel ? (
+                    <span className="text-[9px] font-bold text-emerald-800 bg-emerald-50 border border-emerald-100 px-1.5 py-0.5 rounded-full shrink-0">
+                      Eşleşti
+                    </span>
+                  ) : (
+                    <span className="text-[9px] font-bold text-amber-800 bg-amber-50 border border-amber-100 px-1.5 py-0.5 rounded-full shrink-0">
+                      Personel eşleşmesi yok
+                    </span>
+                  )}
                 </p>
               </div>
             </div>
             
             {/* Quick Stats Grid */}
-            <div className="grid grid-cols-3 gap-3 text-center">
-              <div className="bg-white/10 px-3 py-1.5 rounded-xl border border-white/5">
-                <span className="text-[10px] text-slate-500 block">Sistem Vasıtaları</span>
+            <div className="grid grid-cols-3 gap-1.5 sm:gap-3 text-center w-full md:w-auto min-w-0">
+              <div className="bg-white/10 px-1.5 sm:px-3 py-1.5 rounded-xl border border-white/10 min-w-0">
+                <span className="text-[8px] sm:text-[10px] text-slate-300 block truncate">Vasıta</span>
                 <span className="text-sm font-bold font-mono">{araclar.length}</span>
               </div>
-              <div className="bg-white/10 px-3 py-1.5 rounded-xl border border-white/5">
-                <span className="text-[10px] text-slate-500 block">Bekleyen Onaylar</span>
+              <div className="bg-white/10 px-1.5 sm:px-3 py-1.5 rounded-xl border border-white/10 min-w-0">
+                <span className="text-[8px] sm:text-[10px] text-slate-300 block truncate">Onay</span>
                 <span className="text-sm font-bold font-mono text-amber-300">
                   {aracTalepleri.filter(t => t.durum === 'ONAY BEKLİYOR').length + yolHarcamalari.filter(y => y.durum === 'ONAY BEKLİYOR').length}
                 </span>
               </div>
-              <div className="bg-white/10 px-3 py-1.5 rounded-xl border border-white/5">
-                <span className="text-[10px] text-slate-500 block">Kayıtlı Rotalar</span>
+              <div className="bg-white/10 px-1.5 sm:px-3 py-1.5 rounded-xl border border-white/10 min-w-0">
+                <span className="text-[8px] sm:text-[10px] text-slate-300 block truncate">Rota</span>
                 <span className="text-sm font-bold font-mono">{seyahatRotalari.length}</span>
               </div>
             </div>
@@ -610,7 +780,7 @@ export const LojistikScreen: React.FC<LojistikScreenProps> = ({
         </div>
 
         {/* Navigation Tabs */}
-        <div className="flex space-x-1.5 overflow-x-auto p-1 bg-white/80 backdrop-blur-xs rounded-2xl border border-slate-200 shrink-0 select-none scrollbar-none">
+        <div className="flex gap-1.5 overflow-x-auto overscroll-x-contain p-1 bg-white/80 backdrop-blur-xs rounded-2xl border border-slate-200 shrink-0 select-none scrollbar-none w-full max-w-full min-w-0 touch-pan-x">
           <button 
             onClick={() => setActiveTab('günlük_rutin')}
             className={`px-4 py-2 rounded-xl text-xs font-bold transition duration-150 shrink-0 cursor-pointer ${activeTab === 'günlük_rutin' ? 'bg-slate-900 text-white shadow-sm shadow-slate-500/10' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'}`}
@@ -621,9 +791,21 @@ export const LojistikScreen: React.FC<LojistikScreenProps> = ({
             onClick={() => setActiveTab('günlük_faaliyet')}
             className={`px-4 py-2 rounded-xl text-xs font-bold transition duration-150 shrink-0 cursor-pointer ${activeTab === 'günlük_faaliyet' ? 'bg-slate-900 text-white shadow-sm shadow-slate-500/10' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'}`}
           >
-            📝 Günlük Faaliyet Kaydı
+            📝 Sevk / KM Faaliyet
           </button>
-          <button 
+          <button
+            onClick={() => setActiveTab('saha_faaliyet')}
+            className={`px-4 py-2 rounded-xl text-xs font-bold transition duration-150 shrink-0 cursor-pointer ${activeTab === 'saha_faaliyet' ? 'bg-sky-700 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'}`}
+          >
+            🏗️ Saha Faaliyet (Normal/Mesai)
+          </button>
+          <button
+            onClick={() => setActiveTab('yoklama')}
+            className={`px-4 py-2 rounded-xl text-xs font-bold transition duration-150 shrink-0 cursor-pointer ${activeTab === 'yoklama' ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'}`}
+          >
+            ✅ Şöför Yoklama
+          </button>
+          <button
             onClick={() => setActiveTab('haftalık_km')}
             className={`px-4 py-2 rounded-xl text-xs font-bold transition duration-150 shrink-0 cursor-pointer ${activeTab === 'haftalık_km' ? 'bg-slate-900 text-white shadow-sm shadow-slate-500/10' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'}`}
           >
@@ -662,14 +844,14 @@ export const LojistikScreen: React.FC<LojistikScreenProps> = ({
         </div>
 
         {/* Dynamic Content Grid */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 sm:gap-5 min-w-0 w-full">
           
           {/* Main Work Area (Left 2 Columns) */}
-          <div className="lg:col-span-2 space-y-5">
+          <div className="lg:col-span-2 space-y-3 sm:space-y-5 min-w-0 w-full overflow-x-hidden">
             
             {/* TAB 1: GÜNLÜK RUTİN */}
             {activeTab === 'günlük_rutin' && (
-              <div className="bg-white border border-slate-200 rounded-3xl p-5 space-y-4 shadow-xs">
+              <div className="bg-white border border-slate-200 rounded-2xl sm:rounded-3xl p-3 sm:p-5 space-y-4 shadow-xs min-w-0 overflow-hidden">
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between border-b pb-3 gap-2">
                   <div>
                     <h2 className="text-sm font-bold text-slate-800 flex items-center space-x-1.5">
@@ -762,9 +944,39 @@ export const LojistikScreen: React.FC<LojistikScreenProps> = ({
               </div>
             )}
 
+            {activeTab === 'saha_faaliyet' && (
+              <div className="bg-white border border-slate-200 rounded-2xl sm:rounded-3xl p-2.5 sm:p-5 shadow-xs animate-in fade-in duration-150 min-w-0 overflow-x-hidden">
+                <RolMobilFaaliyetYoklamaPanel
+                  rol="SOFOR"
+                  personeller={personeller}
+                  yoklamalar={yoklamalar}
+                  setYoklamalar={setYoklamalar}
+                  saveYoklamalarNow={saveYoklamalarNow}
+                  currentUser={currentUser}
+                  addNotification={addNotification}
+                  showYoklamaTab={false}
+                  initialSubTab="faaliyet"
+                />
+              </div>
+            )}
+
+            {activeTab === 'yoklama' && (
+              <div className="bg-white border border-slate-200 rounded-2xl sm:rounded-3xl p-2.5 sm:p-5 shadow-xs animate-in fade-in duration-150 min-w-0 overflow-x-hidden">
+                <KampGunlukYoklamaTab
+                  personeller={personeller}
+                  yoklamalar={yoklamalar}
+                  setYoklamalar={setYoklamalar}
+                  saveYoklamalarNow={saveYoklamalarNow}
+                  currentUser={currentUser}
+                  addNotification={addNotification}
+                  personelKapsami="sofor"
+                />
+              </div>
+            )}
+
             {/* TAB: GÜNLÜK FAALİYET KAYDI */}
             {activeTab === 'günlük_faaliyet' && (
-              <div className="bg-white border border-slate-200 rounded-3xl p-5 space-y-4 shadow-xs animate-in fade-in duration-150">
+              <div className="bg-white border border-slate-200 rounded-2xl sm:rounded-3xl p-3 sm:p-5 space-y-4 shadow-xs min-w-0 overflow-hidden animate-in fade-in duration-150">
                 <div className="border-b pb-3">
                   <h2 className="text-sm font-bold text-slate-800 flex items-center space-x-1.5">
                     <span>📝 Günlük Sevk ve Sürücü Faaliyet Kaydı</span>
@@ -897,7 +1109,7 @@ export const LojistikScreen: React.FC<LojistikScreenProps> = ({
 
             {/* TAB 2: HAFTALIK KM GİRİŞİ */}
             {activeTab === 'haftalık_km' && (
-              <div className="bg-white border border-slate-200 rounded-3xl p-5 space-y-4 shadow-xs">
+              <div className="bg-white border border-slate-200 rounded-2xl sm:rounded-3xl p-3 sm:p-5 space-y-4 shadow-xs min-w-0 overflow-hidden">
                 <div className="border-b pb-3">
                   <h2 className="text-sm font-bold text-slate-800 flex items-center space-x-1.5">
                     <span>📊 Haftalık Kilometre Takibi</span>
@@ -991,7 +1203,7 @@ export const LojistikScreen: React.FC<LojistikScreenProps> = ({
 
             {/* TAB 3: ARAÇ KARTI VE ONAY TALEBİ */}
             {activeTab === 'araç_kartı' && (
-              <div className="bg-white border border-slate-200 rounded-3xl p-5 space-y-4 shadow-xs">
+              <div className="bg-white border border-slate-200 rounded-2xl sm:rounded-3xl p-3 sm:p-5 space-y-4 shadow-xs min-w-0 overflow-hidden">
                 <div className="border-b pb-3">
                   <h2 className="text-sm font-bold text-slate-800 flex items-center space-x-1.5">
                     <span>🚗 Yeni Araç Kartı &amp; Bakım Limiti Tanımlama</span>
@@ -1094,7 +1306,7 @@ export const LojistikScreen: React.FC<LojistikScreenProps> = ({
 
             {/* TAB 4: SEYAHAT ROTARI */}
             {activeTab === 'rotalar' && (
-              <div className="bg-white border border-slate-200 rounded-3xl p-5 space-y-4 shadow-xs">
+              <div className="bg-white border border-slate-200 rounded-2xl sm:rounded-3xl p-3 sm:p-5 space-y-4 shadow-xs min-w-0 overflow-hidden">
                 <div className="border-b pb-3">
                   <h2 className="text-sm font-bold text-slate-800 flex items-center space-x-1.5">
                     <span>📍 Seyahat Rotası &amp; Rotalandırma</span>
@@ -1185,16 +1397,64 @@ export const LojistikScreen: React.FC<LojistikScreenProps> = ({
 
             {/* TAB 5: YOL HARCAMASI */}
             {activeTab === 'yol_harcaması' && (
-              <div className="bg-white border border-slate-200 rounded-3xl p-5 space-y-4 shadow-xs">
+              <div className="bg-white border border-slate-200 rounded-2xl sm:rounded-3xl p-3 sm:p-5 space-y-4 shadow-xs min-w-0 overflow-hidden">
                 <div className="border-b pb-3">
                   <h2 className="text-sm font-bold text-slate-800 flex items-center space-x-1.5">
                     <span>💳 Yol Harcaması (Fiş / Fatura) Girişi</span>
                   </h2>
-                  <p className="text-[10px] text-slate-500">Yaptığınız yol harcamalarını (yakıt, otoban vs.) fiş görseli ile yükleyin, onay sonrası şöför ödemelerinize işlensin.</p>
+                  <p className="text-[10px] text-slate-500">
+                    Evrak gönderirken tipi seçin: <strong>kendi harcamanızı</strong> size öderiz;
+                    <strong> kasa harcamasını</strong> şirket kasasına işleriz. Nihai ayrımı yönetici onayında yapar.
+                  </p>
                 </div>
 
                 <form onSubmit={handleSaveYolHarcamasi} className="space-y-4">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold text-slate-500 uppercase">Evrak tipi *</label>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setHarcamaMasrafTipi('KENDI')}
+                        className={`text-left rounded-xl border px-3 py-2.5 transition cursor-pointer ${
+                          harcamaMasrafTipi === 'KENDI'
+                            ? 'border-rose-400 bg-rose-50 ring-2 ring-rose-200'
+                            : 'border-slate-200 bg-white hover:bg-slate-50'
+                        }`}
+                      >
+                        <span className="block text-[11px] font-black text-slate-900">Kendi harcamam</span>
+                        <span className="block text-[9px] text-slate-500 mt-0.5">
+                          Cebimden ödedim — onay sonrası bana iade edilir
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setHarcamaMasrafTipi('KASA')}
+                        className={`text-left rounded-xl border px-3 py-2.5 transition cursor-pointer ${
+                          harcamaMasrafTipi === 'KASA'
+                            ? 'border-sky-400 bg-sky-50 ring-2 ring-sky-200'
+                            : 'border-slate-200 bg-white hover:bg-slate-50'
+                        }`}
+                      >
+                        <span className="block text-[11px] font-black text-slate-900">Kasa harcaması</span>
+                        <span className="block text-[9px] text-slate-500 mt-0.5">
+                          Şirket kasası / şirket hesabı — kasaya işlenir, bana ödenmez
+                        </span>
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-bold text-slate-500 uppercase">Fiş No *</label>
+                      <input
+                        type="text"
+                        placeholder="Örn: A-14582"
+                        value={harcamaFisNo}
+                        onChange={(e) => setHarcamaFisNo(e.target.value)}
+                        required
+                        className="w-full rounded-xl border border-slate-300 px-3 py-2 text-xs focus:ring-2 focus:ring-slate-900 focus:border-slate-900/20 text-slate-800 font-mono font-bold"
+                      />
+                    </div>
                     <div className="space-y-1">
                       <label className="text-[10px] font-bold text-slate-500 uppercase">Tutar (TL)</label>
                       <input 
@@ -1229,27 +1489,44 @@ export const LojistikScreen: React.FC<LojistikScreenProps> = ({
                     />
                   </div>
 
-                  {/* Receipt Upload */}
+                  {/* Receipt Upload — kamera ve galeri ayrı (mobilde capture şart) */}
                   <div className="space-y-2">
                     <label className="text-[10px] font-bold text-slate-500 uppercase flex items-center space-x-1.5">
-                      <span>📷 Fiş / Fatura Görseli Yükle (Kamera veya Dosya)</span>
+                      <span>📷 Fiş / Fatura Görseli</span>
                     </label>
                     
-                    <div className="flex items-center space-x-3">
+                    <div className="flex flex-wrap items-center gap-2">
                       <button
                         type="button"
-                        onClick={() => fileInputRef.current?.click()}
-                        className="bg-slate-100 hover:bg-slate-250 border border-slate-200 text-slate-700 font-bold py-2 px-4 rounded-xl text-xs transition flex items-center space-x-1.5 shrink-0 cursor-pointer"
+                        onClick={() => cameraInputRef.current?.click()}
+                        className="bg-slate-900 hover:bg-black text-white font-bold py-2 px-3.5 rounded-xl text-xs transition flex items-center space-x-1.5 shrink-0 cursor-pointer disabled:opacity-50"
                         disabled={compressing}
                       >
                         <Camera className="h-4 w-4" />
-                        <span>{compressing ? 'Sıkıştırılıyor...' : 'Görsel Seç / Foto Çek'}</span>
+                        <span>{compressing ? 'Sıkıştırılıyor...' : 'Kameradan Çek'}</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => galleryInputRef.current?.click()}
+                        className="bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-700 font-bold py-2 px-3.5 rounded-xl text-xs transition flex items-center space-x-1.5 shrink-0 cursor-pointer disabled:opacity-50"
+                        disabled={compressing}
+                      >
+                        <ImageIcon className="h-4 w-4" />
+                        <span>Galeriden Seç</span>
                       </button>
                       
                       <input 
                         type="file" 
-                        ref={fileInputRef}
-                        accept="image/*" 
+                        ref={cameraInputRef}
+                        accept="image/*"
+                        capture="environment"
+                        onChange={handleImageUpload} 
+                        className="hidden"
+                      />
+                      <input 
+                        type="file" 
+                        ref={galleryInputRef}
+                        accept="image/*"
                         onChange={handleImageUpload} 
                         className="hidden"
                       />
@@ -1267,6 +1544,9 @@ export const LojistikScreen: React.FC<LojistikScreenProps> = ({
                         </div>
                       )}
                     </div>
+                    <p className="text-[9px] text-slate-400">
+                      Telefonda «Kameradan Çek» arka kamerayı açar; «Galeriden Seç» albümü açar.
+                    </p>
 
                     {faturaFotoBase64 && (
                       <div className="border border-slate-200 p-2.5 rounded-2xl bg-slate-50 flex items-center justify-center max-w-sm">
@@ -1289,12 +1569,82 @@ export const LojistikScreen: React.FC<LojistikScreenProps> = ({
                     </button>
                   </div>
                 </form>
+
+                <div className="border-t pt-4 space-y-3">
+                  <h3 className="text-xs font-bold text-slate-800">Şoför Masraf İade Raporu (A4)</h3>
+                  <p className="text-[10px] text-slate-500">
+                    Merkez geri ödemesi için fiş no, tutar ve görselleri tek A4 dökümde alın.
+                  </p>
+                  <div className="flex flex-wrap items-end gap-3">
+                    <div className="space-y-1">
+                      <label className="text-[9px] font-bold text-slate-500 uppercase">Başlangıç</label>
+                      <input
+                        type="date"
+                        value={iadeRaporStart}
+                        onChange={(e) => setIadeRaporStart(e.target.value)}
+                        className="rounded-xl border border-slate-300 px-3 py-2 text-xs"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[9px] font-bold text-slate-500 uppercase">Bitiş</label>
+                      <input
+                        type="date"
+                        value={iadeRaporEnd}
+                        onChange={(e) => setIadeRaporEnd(e.target.value)}
+                        className="rounded-xl border border-slate-300 px-3 py-2 text-xs"
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => void handleSoforIadeRaporu()}
+                      className="bg-amber-500 hover:bg-amber-400 text-slate-900 font-bold py-2 px-4 rounded-xl text-xs cursor-pointer"
+                    >
+                      A4 İade Raporu Yazdır
+                    </button>
+                  </div>
+                  {yolHarcamalari.length > 0 && (
+                    <div className="overflow-x-auto rounded-xl border border-slate-200">
+                      <table className="w-full text-[10px] text-left">
+                        <thead className="bg-slate-100">
+                          <tr>
+                            <th className="px-2 py-1.5">Tarih</th>
+                            <th className="px-2 py-1.5">Fiş No</th>
+                            <th className="px-2 py-1.5">Açıklama</th>
+                            <th className="px-2 py-1.5">Tip</th>
+                            <th className="px-2 py-1.5">Durum</th>
+                            <th className="px-2 py-1.5 text-right">Tutar</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {yolHarcamalari.slice(0, 20).map((exp) => (
+                            <tr key={exp.id} className="border-t border-slate-100">
+                              <td className="px-2 py-1.5 font-mono">{exp.tarih}</td>
+                              <td className="px-2 py-1.5 font-bold">{exp.fisNo || '—'}</td>
+                              <td className="px-2 py-1.5">{exp.aciklama}</td>
+                              <td className="px-2 py-1.5 font-bold text-[9px] uppercase">
+                                {exp.nihaiMasrafTipi === 'KASA' || exp.masrafTipi === 'KASA'
+                                  ? 'Kasa'
+                                  : exp.masrafTipi === 'KENDI' || exp.nihaiMasrafTipi === 'KENDI'
+                                    ? 'Kendi'
+                                    : '—'}
+                              </td>
+                              <td className="px-2 py-1.5">{exp.durum}</td>
+                              <td className="px-2 py-1.5 text-right font-mono font-bold">
+                                {Number(exp.tutar || 0).toLocaleString('tr-TR')} ₺
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
               </div>
             )}
 
             {/* TAB 6: PRINTABLE MINI REPORTS */}
             {activeTab === 'mini_raporlar' && (
-              <div className="bg-white border border-slate-200 rounded-3xl p-5 space-y-4 shadow-xs">
+              <div className="bg-white border border-slate-200 rounded-2xl sm:rounded-3xl p-3 sm:p-5 space-y-4 shadow-xs min-w-0 overflow-hidden">
                 
                 {/* Print Control Bar (Hidden on actual print) */}
                 <div className="flex items-center justify-between border-b pb-3 print:hidden">
@@ -1466,7 +1816,7 @@ export const LojistikScreen: React.FC<LojistikScreenProps> = ({
 
             {/* TAB: AYLIK SEFER RAPORU */}
             {activeTab === 'aylik_rapor' && (
-              <div className="bg-white border border-slate-200 rounded-3xl p-5 space-y-4 shadow-xs animate-in fade-in duration-150">
+              <div className="bg-white border border-slate-200 rounded-2xl sm:rounded-3xl p-3 sm:p-5 space-y-4 shadow-xs min-w-0 overflow-hidden animate-in fade-in duration-150">
                 <div className="border-b pb-3 flex justify-between items-center flex-wrap gap-2 print:hidden">
                   <div>
                     <h2 className="text-sm font-bold text-slate-800 flex items-center space-x-1.5">
@@ -1722,11 +2072,11 @@ export const LojistikScreen: React.FC<LojistikScreenProps> = ({
 
           </div>
 
-          {/* Right Reference Lists Column */}
-          <div className="space-y-5">
+          {/* Right Reference Lists Column — dar ekranda gizle (yatay taşma / gereksiz yük) */}
+          <div className="space-y-5 min-w-0 hidden lg:block">
             
             {/* 1. SEKTÖR ARAÇ VERİ TABANI */}
-            <div className="bg-white border border-slate-200 rounded-3xl p-5 space-y-3.5 shadow-xs">
+            <div className="bg-white border border-slate-200 rounded-3xl p-4 sm:p-5 space-y-3.5 shadow-xs min-w-0 overflow-hidden">
               <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block">🛞 Şirket Araç Filosu ({araclar.length})</span>
               
               {araclar.length === 0 ? (
@@ -1736,13 +2086,13 @@ export const LojistikScreen: React.FC<LojistikScreenProps> = ({
                   {araclar.map(a => {
                     const maintAlerts = getMaintenanceAlerts(a);
                     return (
-                      <div key={a.id} className="bg-slate-50 hover:bg-slate-100 transition p-3 rounded-2xl border border-slate-100 flex flex-col space-y-2">
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <span className="font-mono text-[10px] font-bold text-slate-700 bg-white border px-1.5 py-0.5 rounded shadow-3xs">{a.plaka}</span>
-                            <span className="text-xs font-bold text-slate-800 ml-2">{a.markaModel}</span>
+                      <div key={a.id} className="bg-slate-50 hover:bg-slate-100 transition p-3 rounded-2xl border border-slate-100 flex flex-col space-y-2 min-w-0">
+                        <div className="flex items-center justify-between gap-2 min-w-0">
+                          <div className="min-w-0 flex items-center gap-2">
+                            <span className="font-mono text-[10px] font-bold text-slate-700 bg-white border px-1.5 py-0.5 rounded shadow-3xs shrink-0">{a.plaka}</span>
+                            <span className="text-xs font-bold text-slate-800 truncate">{a.markaModel}</span>
                           </div>
-                          <div className="text-right text-[10px] font-mono font-bold text-slate-800">
+                          <div className="text-right text-[10px] font-mono font-bold text-slate-800 shrink-0">
                             {a.mevcutKm} KM
                           </div>
                         </div>

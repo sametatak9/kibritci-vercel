@@ -1,5 +1,10 @@
 # Render Blueprint — tek servis: kibritci-erp
 # Not: Aynı repo için ikinci bir Web Service bağlamayın; çift deploy olur.
+#
+# Akvizyon grup nöbeti (21:00 İstanbul) otomatik kapanış:
+# - Uygulama açıkken istemci her dakika kontrol eder
+# - Sunucu: POST /api/cron/akvizyon-nobet-kapat (X-Cron-Secret: CRON_SECRET)
+# - İsteğe bağlı harici cron: npm run cron:akvizyon-nobet
 services:
   - type: web
     name: kibritci-erp
@@ -32,4 +37,7 @@ services:
         sync: false
       # Firebase Admin — Authentication şifre sıfırlama ve kurucu bootstrap için zorunlu
       - key: FIREBASE_SERVICE_ACCOUNT_JSON
+        sync: false
+      # Akvizyon grup nöbeti cron API (X-Cron-Secret)
+      - key: CRON_SECRET
         sync: false

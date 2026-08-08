@@ -1,4 +1,4 @@
-import { CariKart, KampKaydi, KampOdasi, OperatorFaaliyet, Personel, TaseronEnerjiKaydi, TaseronSayacOlcum, TaseronYemekKaydi } from '../types/erp';
+import { CariKart, CariKartIslem, KampKaydi, KampOdasi, OperatorFaaliyet, Personel, TaseronEnerjiKaydi, TaseronKesintiRaporu, TaseronSayacOlcum, TaseronYemekKaydi } from '../types/erp';
 
 export function getTaseronCariKartlar(cariKartlar: CariKart[]): CariKart[] {
   return cariKartlar.filter(
@@ -165,8 +165,49 @@ export function sayacTutari(o: TaseronSayacOlcum): number {
   return Math.round(sayacFarki(o) * (o.birimFiyat || 0) * 100) / 100;
 }
 
-export function enerjiToplamTutar(kayit: Pick<TaseronEnerjiKaydi, 'elektrik' | 'su' | 'dogalgaz'>): number {
-  return sayacTutari(kayit.elektrik) + sayacTutari(kayit.su) + sayacTutari(kayit.dogalgaz);
+export type EnerjiKalem = 'ELEKTRIK' | 'SU' | 'DOGALGAZ';
+
+/** Dahil edilen kalemlerin tutar toplamı (aktifKalemler yoksa fark>0 olanlar) */
+export function enerjiAktifKalemler(
+  kayit: Pick<TaseronEnerjiKaydi, 'elektrik' | 'su' | 'dogalgaz' | 'aktifKalemler'>
+): EnerjiKalem[] {
+  if (kayit.aktifKalemler && kayit.aktifKalemler.length > 0) {
+    return kayit.aktifKalemler;
+  }
+  const out: EnerjiKalem[] = [];
+  if (sayacFarki(kayit.elektrik) > 0) out.push('ELEKTRIK');
+  if (sayacFarki(kayit.su) > 0) out.push('SU');
+  if (sayacFarki(kayit.dogalgaz) > 0) out.push('DOGALGAZ');
+  return out;
+}
+
+export function enerjiToplamTutar(
+  kayit: Pick<TaseronEnerjiKaydi, 'elektrik' | 'su' | 'dogalgaz' | 'aktifKalemler'>
+): number {
+  const aktif = new Set(enerjiAktifKalemler(kayit));
+  // Eski kayıtlar: aktif boşsa tüm kalemleri topla (geriye uyum)
+  if (aktif.size === 0 && !kayit.aktifKalemler) {
+    return sayacTutari(kayit.elektrik) + sayacTutari(kayit.su) + sayacTutari(kayit.dogalgaz);
+  }
+  let t = 0;
+  if (aktif.has('ELEKTRIK')) t += sayacTutari(kayit.elektrik);
+  if (aktif.has('SU')) t += sayacTutari(kayit.su);
+  if (aktif.has('DOGALGAZ')) t += sayacTutari(kayit.dogalgaz);
+  return t;
+}
+
+export function enerjiKalemOzet(
+  kayit: Pick<TaseronEnerjiKaydi, 'elektrik' | 'su' | 'dogalgaz' | 'aktifKalemler'>
+): string {
+  const aktif = enerjiAktifKalemler(kayit);
+  if (aktif.length === 0) return 'Kesinti kalemi yok';
+  return aktif
+    .map((k) => {
+      if (k === 'ELEKTRIK') return `Elektrik ${sayacFarki(kayit.elektrik)} kWh`;
+      if (k === 'SU') return `Su ${sayacFarki(kayit.su)} m³`;
+      return `Doğalgaz ${sayacFarki(kayit.dogalgaz)} m³`;
+    })
+    .join(' · ');
 }
 
 export function oncekiDonem(ay: number, yil: number): { ay: number; yil: number } {
@@ -229,10 +270,146 @@ export function yemekAylikOzet(
   };
 }
 
+export function makineKaynakLabel(kaynak?: OperatorFaaliyet['makineKaynak'] | null): string {
+  if (kaynak === 'KIRALIK') return 'Kiralık';
+  if (kaynak === 'MANUEL') return 'Elle';
+  return 'Demirbaş';
+}
+
+/** İcmal / kesinti ayrımı: Ana Firma makinesi vs Kiralık (karışmaz) */
+export type MakineKaynakGrup = 'ANA_FIRMA' | 'KIRALIK';
+
+export function resolveMakineKaynakGrup(
+  f: Pick<OperatorFaaliyet, 'makineKaynak' | 'operatorTipi'> | null | undefined
+): MakineKaynakGrup {
+  if (!f) return 'ANA_FIRMA';
+  if (f.makineKaynak === 'KIRALIK') return 'KIRALIK';
+  if (f.makineKaynak === 'DEMIRBAS' || f.makineKaynak === 'MANUEL') return 'ANA_FIRMA';
+  const tip = String(f.operatorTipi || '').toLocaleUpperCase('tr-TR');
+  if (tip === 'KİRALIK' || tip === 'KIRALIK') return 'KIRALIK';
+  return 'ANA_FIRMA';
+}
+
+export function makineKaynakGrupLabel(g: MakineKaynakGrup): string {
+  return g === 'KIRALIK' ? 'Kiralık Makine' : 'Ana Firma Makinesi';
+}
+
+/** Demirbaş envanterindeki iş makinelerini operatör seçim listesine almak için */
+export function isIsMakinesiArac(a: {
+  aracTipi?: string | null;
+  tur?: string | null;
+  markaModel?: string | null;
+  plaka?: string | null;
+  durum?: string | null;
+}): boolean {
+  if (String(a.durum || '').toLocaleUpperCase('tr-TR') === 'PASIF') return false;
+
+  // IdariScreen kaydı: aracTipi = 'IS_MAKINESI' (eski filtre yanlışlıkla tur === 'İŞ MAKİNESİ' arıyordu)
+  const tip = String(a.aracTipi || a.tur || '')
+    .trim()
+    .toLocaleUpperCase('tr-TR')
+    .replace(/İ/g, 'I')
+    .replace(/Ş/g, 'S')
+    .replace(/Ğ/g, 'G')
+    .replace(/Ü/g, 'U')
+    .replace(/Ö/g, 'O')
+    .replace(/Ç/g, 'C')
+    .replace(/[\s-]+/g, '_');
+  if (tip === 'IS_MAKINESI' || tip.includes('IS_MAKINE')) return true;
+
+  const blob = `${a.markaModel || ''} ${a.plaka || ''}`.toLocaleLowerCase('tr-TR');
+  return (
+    blob.includes('jcb') ||
+    blob.includes('kato') ||
+    blob.includes('excavator') ||
+    blob.includes('ekskavat') ||
+    blob.includes('iş makinesi') ||
+    blob.includes('is makinesi') ||
+    blob.includes('dozer') ||
+    blob.includes('loder') ||
+    blob.includes('loader') ||
+    blob.includes('exc') ||
+    blob.includes('eks')
+  );
+}
+
+/**
+ * İş kaydı etiketi — örn. "Demirbaş JCB makinesi iş kaydı"
+ * Makine kaynağı (Demirbaş/Kiralık/Elle) + makine tipi etiketi (JCB/KATO/…) birleşir.
+ */
+export function buildOperatorIsKaydiEtiketi(opts: {
+  makineKaynak?: OperatorFaaliyet['makineKaynak'] | null;
+  operatorTipi?: OperatorFaaliyet['operatorTipi'] | string | null;
+  makineManuelAd?: string | null;
+  aracPlaka?: string | null;
+}): string {
+  const kaynak = makineKaynakLabel(opts.makineKaynak);
+  const tipRaw = String(opts.operatorTipi || 'DİĞER').trim().toLocaleUpperCase('tr-TR') || 'DİĞER';
+  // Kaynak zaten kiralıkken tip "KİRALIK" tekrarını kısalt
+  const tip =
+    opts.makineKaynak === 'KIRALIK' && tipRaw === 'KİRALIK' ? 'makine' : tipRaw === 'KİRALIK' ? 'Kiralık' : tipRaw;
+
+  const plaka = String(opts.aracPlaka || opts.makineManuelAd || '').trim();
+  const base =
+    tip === 'makine'
+      ? `${kaynak} makinesi iş kaydı`
+      : `${kaynak} ${tip} makinesi iş kaydı`;
+  return plaka ? `${base} · ${plaka}` : base;
+}
+
 export function makineEtiketi(f: OperatorFaaliyet): string {
-  if (f.makineKaynak === 'MANUEL' && f.makineManuelAd) return f.makineManuelAd;
-  if (f.makineKaynak === 'KIRALIK' || f.operatorTipi === 'KİRALIK') return `Kiralık · ${f.aracPlaka || '—'}`;
-  return f.aracPlaka || f.aracId || 'Demirbaş Makine';
+  return buildOperatorIsKaydiEtiketi({
+    makineKaynak: f.makineKaynak,
+    operatorTipi: f.operatorTipi,
+    makineManuelAd: f.makineManuelAd,
+    aracPlaka: f.aracPlaka,
+  });
+}
+
+export function cariIslemIdForOperatorFaaliyet(faaliyetId: string): string {
+  return `cari_islem_of_${faaliyetId}`;
+}
+
+/** Onaylanmış iş makinesi kesintisini cari geçmiş kaydına çevirir */
+export function buildCariIslemFromOperatorFaaliyet(f: OperatorFaaliyet): CariKartIslem | null {
+  if (!f.firmaId) return null;
+  return {
+    id: cariIslemIdForOperatorFaaliyet(f.id),
+    cariKartId: f.firmaId,
+    islemTipi: 'OPERATOR_KESINTI',
+    islemId: f.id,
+    islemBaslik: `İş Makinesi Kesinti · ${f.firmaAdi}`,
+    islemDetay: `${f.tarih} · ${f.operatorIsim} · ${makineEtiketi(f)} · ${f.baslangicSaat}–${f.bitisSaat} (${f.calismaSuresi.toFixed(1)} sa) · ${f.yapilanIs}`,
+    tarih: f.tarih,
+    belgeNo: f.id,
+    fotoUrl: f.fotoUrl,
+  };
+}
+
+export function cariIslemIdForMakineKesintiRaporu(raporId: string): string {
+  return `cari_islem_tkr_${raporId}`;
+}
+
+/** Dönemlik iş makinesi kesinti raporunu taşeron cari geçmişine çevirir */
+export function buildCariIslemFromMakineKesintiRaporu(
+  rapor: TaseronKesintiRaporu
+): CariKartIslem | null {
+  const cariId = rapor.taseronFirmaId;
+  if (!cariId) return null;
+  const ay = Number(rapor.donemAy);
+  const yil = Number(rapor.donemYil);
+  const tarih = `${rapor.donemYil}-${String(rapor.donemAy).padStart(2, '0')}-01`;
+  return {
+    id: cariIslemIdForMakineKesintiRaporu(rapor.id),
+    cariKartId: cariId,
+    islemTipi: 'OPERATOR_KESINTI',
+    islemId: rapor.id,
+    islemBaslik: `İş Makinesi Kesinti · ${rapor.taseronFirmaAdi}`,
+    islemDetay: `${ayAdi(ay)} ${yil} · ${rapor.toplamSaat.toFixed(1)} sa × ${Number(rapor.saatlikUcret || 0).toLocaleString('tr-TR')} TL/sa = ${Number(rapor.kesintiTutari || 0).toLocaleString('tr-TR')} TL · ${rapor.faaliyetler?.length || 0} faaliyet`,
+    tutar: rapor.kesintiTutari,
+    tarih,
+    belgeNo: rapor.id,
+  };
 }
 
 export function hesaplaKesintiTutari(toplamSaat: number, saatlikUcret: number): number {

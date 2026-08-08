@@ -25,11 +25,15 @@ service cloud.firestore {
         && request.auth.token.email in ['sametatak9@gmail.com', 'santiye@kibritci.com'];
     }
 
-    // Custom Claims: role + durum=AKTİF + e-posta oturumu (anonim değil)
+    // Custom Claims: role + durum=AKTİF (veya ASCII AKTIF) + e-posta oturumu (anonim değil)
+    function hasAktifDurum() {
+      return durum() == 'AKTİF' || durum() == 'AKTIF';
+    }
+
     function hasPortalAccess() {
       return isSignedIn()
         && !isAnonymous()
-        && durum() == 'AKTİF'
+        && hasAktifDurum()
         && role() != ''
         && role() != 'MİSAFİR';
     }
@@ -45,7 +49,21 @@ service cloud.firestore {
 
     function isMobileRole() {
       return hasPortalAccess()
-        && role() in ['FORMEN', 'GÜVENLİK', 'KAMPCI', 'LOJİSTİK', 'DEPOCU', 'ANAHTARCI'];
+        && role() in [
+          'FORMEN',
+          'GÜVENLİK',
+          'KAMPCI',
+          'KAMPÇI',
+          'TESİSATÇI',
+          'TESISATCI',
+          'MERMERCİ',
+          'MERMERCI',
+          'LOJİSTİK',
+          'OPERATÖR',
+          'OPERATOR',
+          'DEPOCU',
+          'ANAHTARCI'
+        ];
     }
 
     // Geçiş: e-posta ile giriş yapmış ama henüz claim atanmamış (ilk sync öncesi)

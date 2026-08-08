@@ -84,6 +84,12 @@ async function completeEmailLogin(
   await syncAuthClaimsFromServer(emailLower).catch((err) => {
     console.warn('Claim sync atlandı (giriş devam ediyor):', err);
   });
+  // Claim sonrası token'ı zorla yenile (syncAuthClaimsFromServer zaten getIdToken(true) çağırır)
+  try {
+    await auth.currentUser?.getIdToken(true);
+  } catch {
+    /* ignore */
+  }
   finishPortalLogin(emailLower, cred.user.uid, onLoginSuccess);
 }
 
@@ -345,7 +351,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
     const passTrim = password.trim();
 
     if (isSignUp) {
-      await ensureFirestoreAuth();
+      await ensureFirestoreAuth({ allowAnonymous: true });
     }
 
     try {
@@ -585,12 +591,14 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
         }
       }
     } catch (err: any) {
-      // Offline fallback / Anon login
+      // Offline fallback — anonim ERP yazamaz; kullanıcıyı uyar
+      setErrorMsg(
+        'Demo girişi başarısız. E-posta/şifre ile giriş yapın. Anonim oturum kayıt yapamaz.'
+      );
       try {
         const res = await signInAnonymously(auth);
         onLoginSuccess(res.user);
       } catch (nestedErr) {
-        // Fallback simulated success
         onLoginSuccess({ email: 'demo@kibritci.com', displayName: 'Demo Kullanıcı', uid: 'test-user-id' });
       }
     } finally {
@@ -953,13 +961,14 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
                   type="submit"
                   disabled={loading}
                   onClick={() => {
+                    // Tam ERP sekmeleri (Yoklama / Faaliyet / Saha / Formen) — istatistik kabuğu yutmasın
                     localStorage.setItem('kibritci_mobile_mode', 'true');
-                    localStorage.setItem('kibritci_mobile_direct', 'false');
+                    localStorage.setItem('kibritci_mobile_direct', 'true');
                   }}
                   className="bg-slate-800 hover:bg-slate-750 active:scale-[0.98] text-slate-200 font-bold py-2.5 px-2 rounded-xl border border-slate-700/60 transition flex items-center justify-center space-x-1 cursor-pointer text-[10px]"
                 >
                   <Smartphone size={12} className="text-amber-550 shrink-0" />
-                  <span className="truncate">MOBİL SÜRÜM (İSTATİSTİK)</span>
+                  <span className="truncate">MOBİL SÜRÜM (TAM ERP)</span>
                 </button>
 
                 <button

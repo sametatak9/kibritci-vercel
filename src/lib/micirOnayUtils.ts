@@ -1,16 +1,19 @@
-import { CariKart, CariKartIslem, Irsaliye, MicirStabilizeFis } from '../types/erp';
+import { CariKart, CariKartIslem, Irsaliye, MicirStabilizeFis, SatinAlmaItem, SatinAlmaTalebi } from '../types/erp';
 import { saveDocument } from './firebase';
 import {
   ENTO_MADEN_UNVAN,
   findEntoMadenCari,
   formatMicirMiktarLabel,
   isEntoMadenFirma,
+  isOpenMicirSatinAlma,
   kgToTon,
   malzemeTipiLabel,
   MicirMalzemeTipi,
   resolveMicirKiloKg,
+  satinAlmaKalemMatchesMicir,
   tonToKg,
 } from './micirUtils';
+import { kalanMiktarForSaKalem } from './satinAlmaIrsaliyeUtils';
 
 export type MicirFisOnayDurum = 'YONETICI_ONAYINDA' | 'ONAYLANDI' | 'REDDEDILDI';
 
@@ -24,7 +27,94 @@ export type MicirFisCorrection = {
   fisGorselUrl?: string;
   firmaUnvan: string;
   cariKartId?: string;
+  /** Manuel seçim / kapıda önceden bağlanmış SA */
+  saId?: string;
+  saKalemId?: string;
 };
+
+export type MicirSaMatch = {
+  sa: SatinAlmaTalebi;
+  kalem: SatinAlmaItem;
+  kalan: number;
+};
+
+/**
+ * Açık Ento Maden (veya mıcır/stabilize kalemli) satın alma adayları.
+ * Sıra: kalan>0 önce · Ento önce · tarih yeni → eski.
+ */
+export function listMatchingMicirSatinAlma(
+  satinAlmaTalepleri: SatinAlmaTalebi[] | null | undefined,
+  irsaliyeler: Irsaliye[] | null | undefined,
+  malzemeTipi: MicirMalzemeTipi,
+  opts?: { preferredSaId?: string | null; preferredSaKalemId?: string | null }
+): MicirSaMatch[] {
+  const list = satinAlmaTalepleri || [];
+  const irs = irsaliyeler || [];
+
+  const scoreMatch = (sa: SatinAlmaTalebi, kalem: SatinAlmaItem): MicirSaMatch => ({
+    sa,
+    kalem,
+    kalan: kalanMiktarForSaKalem(sa, kalem, irs),
+  });
+
+  const candidates: MicirSaMatch[] = [];
+  for (const sa of list) {
+    if (!isOpenMicirSatinAlma(sa)) continue;
+    const ento = isEntoMadenFirma(sa.cariFirma);
+    for (const kalem of sa.kalemler || []) {
+      if (!satinAlmaKalemMatchesMicir(kalem.urunAdi, malzemeTipi)) continue;
+      if (!ento && !satinAlmaKalemMatchesMicir(kalem.urunAdi, malzemeTipi)) continue;
+      candidates.push(scoreMatch(sa, kalem));
+    }
+  }
+
+  candidates.sort((a, b) => {
+    const aEnto = isEntoMadenFirma(a.sa.cariFirma) ? 0 : 1;
+    const bEnto = isEntoMadenFirma(b.sa.cariFirma) ? 0 : 1;
+    if (aEnto !== bEnto) return aEnto - bEnto;
+    const aOpen = a.kalan > 0 ? 0 : 1;
+    const bOpen = b.kalan > 0 ? 0 : 1;
+    if (aOpen !== bOpen) return aOpen - bOpen;
+    // Yeni sipariş önce (eski SA-20241212… artık yanlışlıkla kazanmasın)
+    return String(b.sa.tarih || '').localeCompare(String(a.sa.tarih || ''), 'tr');
+  });
+
+  if (opts?.preferredSaId) {
+    const preferred = candidates.find(
+      (c) =>
+        c.sa.saId === opts.preferredSaId ||
+        c.sa.id === opts.preferredSaId
+    );
+    if (preferred) {
+      if (opts.preferredSaKalemId) {
+        const kalem = preferred.sa.kalemler.find((k) => k.id === opts.preferredSaKalemId);
+        if (kalem && satinAlmaKalemMatchesMicir(kalem.urunAdi, malzemeTipi)) {
+          return [
+            scoreMatch(preferred.sa, kalem),
+            ...candidates.filter((c) => c.sa.saId !== preferred.sa.saId || c.kalem.id !== kalem.id),
+          ];
+        }
+      }
+      return [preferred, ...candidates.filter((c) => c !== preferred)];
+    }
+  }
+
+  return candidates;
+}
+
+/**
+ * Açık Ento Maden (veya mıcır/stabilize kalemli) satın alma ile kapı fişini eşleştir.
+ * Önce kalan miktarı olan SA, yoksa aynı malzeme kalemli açık SA (en yeni tarih).
+ */
+export function findMatchingMicirSatinAlma(
+  satinAlmaTalepleri: SatinAlmaTalebi[] | null | undefined,
+  irsaliyeler: Irsaliye[] | null | undefined,
+  malzemeTipi: MicirMalzemeTipi,
+  opts?: { preferredSaId?: string | null; preferredSaKalemId?: string | null }
+): MicirSaMatch | null {
+  const all = listMatchingMicirSatinAlma(satinAlmaTalepleri, irsaliyeler, malzemeTipi, opts);
+  return all[0] || null;
+}
 
 /** Büyük data URL’leri tekrar yazma — Firestore timeout / rollback kök nedeni */
 const MAX_INLINE_IMAGE_CHARS = 120_000;
@@ -105,7 +195,15 @@ export async function approveMicirFis(options: {
   setCariIslemGecmisi?: (
     updater: CariKartIslem[] | ((prev: CariKartIslem[]) => CariKartIslem[])
   ) => void;
-}): Promise<{ irsaliye: Irsaliye; fis: MicirStabilizeFis; cariIslem: CariKartIslem }> {
+  /** Kapı mıcır ↔ satın alma senkronu */
+  satinAlmaTalepleri?: SatinAlmaTalebi[];
+  irsaliyeler?: Irsaliye[];
+}): Promise<{
+  irsaliye: Irsaliye;
+  fis: MicirStabilizeFis;
+  cariIslem: CariKartIslem;
+  saMatch: MicirSaMatch | null;
+}> {
   const { fis, correction, onaylayan } = options;
   const now = new Date().toISOString();
 
@@ -137,14 +235,28 @@ export async function approveMicirFis(options: {
     throw new Error('Kilo / tonaj zorunludur.');
   }
 
+  const saMatch = findMatchingMicirSatinAlma(
+    options.satinAlmaTalepleri,
+    options.irsaliyeler,
+    correction.malzemeTipi,
+    {
+      preferredSaId: correction.saId || fis.saId,
+      preferredSaKalemId: correction.saKalemId || fis.saKalemId,
+    }
+  );
+  const linkedSaId = saMatch?.sa.saId || correction.saId || fis.saId;
+  const linkedSaKalemId = saMatch?.kalem.id || correction.saKalemId || fis.saKalemId;
+
   const irsaliyeId = fis.irsaliyeId || `IR-MIC-${fis.id}`;
   const guvenlikEvrakId = fis.guvenlikEvrakId || `EVR-MIC-${fis.id}`;
-  const kalemler = buildMicirKalemler(fis.id, tonaj, correction.malzemeTipi, kiloKg);
+  const kalemler = buildMicirKalemler(fis.id, tonaj, correction.malzemeTipi, kiloKg).map((k) => ({
+    ...k,
+    saKalemId: linkedSaKalemId || undefined,
+  }));
   const malzemeAdi = malzemeTipiLabel(correction.malzemeTipi);
   const miktarLabel = formatMicirMiktarLabel(tonaj, kiloKg);
   const existingImage = String(fis.fisGorselUrl || '').trim();
   const correctionImage = leanImageUrl(correction.fisGorselUrl);
-  // Mevcut büyük görseli tekrar setDoc etme — merge ile alan güncelle
   const imageForIrsaliye = correctionImage || leanImageUrl(existingImage);
 
   const fisPatch: MicirStabilizeFis = {
@@ -157,6 +269,8 @@ export async function approveMicirFis(options: {
     malzemeTipi: correction.malzemeTipi,
     firmaUnvan,
     cariKartId,
+    saId: linkedSaId || undefined,
+    saKalemId: linkedSaKalemId || undefined,
     irsaliyeId,
     guvenlikEvrakId,
     kapıLogId: fis.kapıLogId,
@@ -167,7 +281,6 @@ export async function approveMicirFis(options: {
     olusturulma: fis.olusturulma || now,
     guncellenme: now,
   };
-  // Sadece küçük / yeni görsel varsa yaz; aksi halde eski data URL Firestore’da kalsın
   if (correctionImage) {
     fisPatch.fisGorselUrl = correctionImage;
   }
@@ -176,6 +289,7 @@ export async function approveMicirFis(options: {
     id: irsaliyeId,
     irsaliyeId,
     irsaliyeNo: fisPatch.irsaliyeNo,
+    saId: linkedSaId || undefined,
     firma: firmaUnvan,
     cariKartId,
     tarih: fisPatch.tarih,
@@ -200,12 +314,13 @@ export async function approveMicirFis(options: {
     islemTipi: 'IRSALIYE',
     islemId: irsaliyeId,
     islemBaslik: `${malzemeAdi} İrsaliyesi · ${firmaUnvan}`,
-    islemDetay: `${fisPatch.irsaliyeNo} · ${fisPatch.plaka} · ${miktarLabel} · ${malzemeAdi}`,
+    islemDetay: `${fisPatch.irsaliyeNo} · ${fisPatch.plaka} · ${miktarLabel} · ${malzemeAdi}${
+      linkedSaId ? ` · SA ${linkedSaId}` : ''
+    }`,
     tarih: fisPatch.tarih,
     belgeNo: fisPatch.irsaliyeNo,
   };
 
-  // Sıralı yalın yazımlar — büyük foto yok, timeout / rollback riski düşük
   await saveDocument('micirStabilizeFisleri', fisPatch);
   await saveDocument('irsaliyeler', irsaliye);
   await saveDocument('cariIslemGecmisi', cariIslem);
@@ -215,14 +330,16 @@ export async function approveMicirFis(options: {
     evrakTuru: 'İRSALİYE',
     firma: firmaUnvan,
     tarih: fisPatch.tarih,
-    // fotoUrl yeniden yazılmaz (kapıda zaten var)
     fileName: `micir_${fisPatch.irsaliyeNo}.jpg`,
     fileType: 'image/jpeg',
     durum: 'ONAYLANDI',
-    aciklama: `Kapı ${malzemeAdi} irsaliyesi onaylandı · Plaka ${fisPatch.plaka} · ${miktarLabel}`,
+    aciklama: `Kapı ${malzemeAdi} irsaliyesi onaylandı · Plaka ${fisPatch.plaka} · ${miktarLabel}${
+      linkedSaId ? ` · SA ${linkedSaId}` : ''
+    }`,
     kaynak: 'MICIR_STABILIZE_FIS',
     micirFisId: fis.id,
     irsaliyeId,
+    saId: linkedSaId || null,
     cariKartId,
     plaka: fisPatch.plaka,
     tonaj: fisPatch.tonaj,
@@ -241,6 +358,7 @@ export async function approveMicirFis(options: {
       onayDurumu: 'ONAYLANDI',
       irsaliyeId,
       micirFisId: fis.id,
+      saId: linkedSaId || null,
       guncellenme: now,
     });
   }
@@ -251,14 +369,19 @@ export async function approveMicirFis(options: {
     fisGorselUrl: correctionImage || existingImage,
   };
 
-  // irsaliyeler: onSnapshot zaten günceller — WithSync büyük listede rollback yapmasın
-  // cariIslemGecmisi: snapshot yok, yerel ekle (yalın kayıt)
+  options.setIrsaliyeler?.((prev) => {
+    const others = (prev || []).filter(
+      (x) => x.id !== irsaliye.id && x.irsaliyeId !== irsaliye.irsaliyeId
+    );
+    return [irsaliye, ...others];
+  });
+
   options.setCariIslemGecmisi?.((prev) => {
     const others = prev.filter((x) => x.id !== cariIslem.id);
     return [cariIslem, ...others];
   });
 
-  return { irsaliye, fis: updatedFis, cariIslem };
+  return { irsaliye, fis: updatedFis, cariIslem, saMatch };
 }
 
 function plakaOk(plaka?: string): boolean {

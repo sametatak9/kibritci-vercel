@@ -104,7 +104,8 @@ export function listFaturasizIrsaliyeler(
 ): FaturasizIrsaliyeOzet[] {
   return (irsaliyeler || [])
     .filter((ir) => {
-      if (ir.kaynak === 'VIDANJOR_FIS' || ir.kaynak === 'MICIR_STABILIZE_FIS') return false;
+      // Mıcır ay sonu mutabakatı ayrı; vidanjör/yıldırım güvenlik gibi SA→İrsaliye→Fatura döngüsüne dahil
+      if (ir.kaynak === 'MICIR_STABILIZE_FIS') return false;
       const durum = String(ir.onayDurumu || '');
       if (durum.includes('RED')) return false;
       if (ir.faturaNo) return false;

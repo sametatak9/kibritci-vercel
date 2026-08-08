@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Pencil, X } from 'lucide-react';
+import { normalizeMicirMalzemeTipi } from '../lib/micirUtils';
 
 export type GuvenlikDuzenleKind = 'personel' | 'arac' | 'tanker' | 'ziyaretci';
 
@@ -89,7 +90,7 @@ export const GuvenlikKayitDuzenleModal: React.FC<Props> = ({
         miktar: record.miktar || '',
         irsaliyeNo: record.irsaliyeNo || '',
         kiloKg: kiloFromRecord,
-        malzemeTipi: record.malzemeTipi === 'STABILIZE' ? 'STABILIZE' : 'MICIR',
+        malzemeTipi: normalizeMicirMalzemeTipi(record.malzemeTipi),
         aciklama: record.aciklama || '',
         durum: record.durum || 'İÇERİDE',
         girisZamani: toDatetimeLocalValue(record.girisZamani),
@@ -166,7 +167,7 @@ export const GuvenlikKayitDuzenleModal: React.FC<Props> = ({
           patch.irsaliyeNo = form.irsaliyeNo.trim().toUpperCase();
           patch.kiloKg = kiloKg;
           patch.tonaj = tonaj;
-          patch.malzemeTipi = form.malzemeTipi === 'STABILIZE' ? 'STABILIZE' : 'MICIR';
+          patch.malzemeTipi = normalizeMicirMalzemeTipi(form.malzemeTipi);
           patch.miktar = `${kiloKg.toLocaleString('tr-TR')} kg (${tonaj.toLocaleString('tr-TR')} ton)`;
         } else {
           patch.miktar = form.miktar.trim() || 'Belirtilmedi';
@@ -324,6 +325,7 @@ export const GuvenlikKayitDuzenleModal: React.FC<Props> = ({
                       >
                         <option value="MICIR">Mıcır</option>
                         <option value="STABILIZE">Stabilize</option>
+                        <option value="TAS_TOZU">Taş Tozu</option>
                       </select>
                     </Field>
                   </div>

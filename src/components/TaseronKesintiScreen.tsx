@@ -1,10 +1,11 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   Building2, HardHat, Zap, UtensilsCrossed, Archive, Mail, Printer,
-  Download, CheckCircle2, Plus, Users, LogIn, MessageCircle,
+  Download, CheckCircle2, Plus, Users, LogIn, MessageCircle, Trash2, Table2,
 } from 'lucide-react';
 import {
   CariKart,
+  CariKartIslem,
   KampKaydi,
   KampOdasi,
   OperatorFaaliyet,
@@ -19,6 +20,9 @@ import {
   faaliyetlerForTaseron,
   ilkOkumaFromOncekiAy,
   enerjiToplamTutar,
+  enerjiKalemOzet,
+  sayacFarki,
+  sayacTutari,
   yemekAylikOzet,
   hesaplaKesintiTutari,
   ayAdi,
@@ -27,6 +31,11 @@ import {
   firmaEslesir,
   buildTaseronFirmaEnvanteri,
   taseronEnvanterOzet,
+  buildCariIslemFromMakineKesintiRaporu,
+  makineEtiketi,
+  type EnerjiKalem,
+  resolveMakineKaynakGrup,
+  makineKaynakGrupLabel,
 } from '../lib/taseronUtils';
 import {
   buildEnerjiKesintiReportHtml,
@@ -36,6 +45,7 @@ import {
   yazdirIsMakinesiRaporu,
 } from '../lib/taseronReportUtils';
 import { downloadKibritciReportHtml } from '../lib/kibritciReportTemplate';
+import { appendCariIslemOnce } from '../lib/evrakCariStokSync';
 import { db } from '../lib/firebase';
 import { collection, onSnapshot } from 'firebase/firestore';
 import {
@@ -49,8 +59,22 @@ import {
   exportTaseronPersonelExcel,
   exportTumFirmalarPersonelExcel,
 } from '../lib/taseronPersonelExcelExport';
+import {
+  buildIsMakinesiIcmal,
+  indirIsMakinesiIcmal,
+  yazdirIsMakinesiIcmal,
+  IS_MAKINESI_ICMAL_TIPLER,
+} from '../lib/isMakinesiIcmalUtils';
 
-type SubPage = 'envanter' | 'makine' | 'enerji' | 'yemek' | 'personel' | 'personel_loglari' | 'arsiv';
+type SubPage =
+  | 'envanter'
+  | 'makine'
+  | 'makine_icmal'
+  | 'enerji'
+  | 'yemek'
+  | 'personel'
+  | 'personel_loglari'
+  | 'arsiv';
 
 interface TaseronKesintiScreenProps {
   cariKartlar: CariKart[];
@@ -66,6 +90,7 @@ interface TaseronKesintiScreenProps {
   setTaseronEnerjiKayitlari: React.Dispatch<React.SetStateAction<TaseronEnerjiKaydi[]>>;
   taseronYemekKayitlari: TaseronYemekKaydi[];
   setTaseronYemekKayitlari: React.Dispatch<React.SetStateAction<TaseronYemekKaydi[]>>;
+  setCariIslemGecmisi?: React.Dispatch<React.SetStateAction<CariKartIslem[]>>;
   addNotification?: (mesaj: string) => void;
   currentUser?: { email?: string };
 }
@@ -84,6 +109,7 @@ export const TaseronKesintiScreen: React.FC<TaseronKesintiScreenProps> = ({
   setTaseronEnerjiKayitlari,
   taseronYemekKayitlari,
   setTaseronYemekKayitlari,
+  setCariIslemGecmisi,
   addNotification,
   currentUser,
 }) => {
@@ -124,6 +150,8 @@ export const TaseronKesintiScreen: React.FC<TaseronKesintiScreenProps> = ({
     () => new Date().toISOString().split('T')[0]
   );
   const [selectedLogIds, setSelectedLogIds] = useState<string[]>([]);
+  /** İcmal: varsayılan yalnızca onaylı faaliyetler */
+  const [icmalOnlyOnayli, setIcmalOnlyOnayli] = useState(false);
 
   useEffect(() => {
     const unsubKapi = onSnapshot(collection(db, 'guvenlikGirisCikisLoglari'), (snap) => {
@@ -176,6 +204,38 @@ export const TaseronKesintiScreen: React.FC<TaseronKesintiScreenProps> = ({
     return faaliyetlerForTaseron(operatorFaaliyetleri, selectedTaseron, selectedAy, selectedYil);
   }, [operatorFaaliyetleri, selectedTaseron, selectedAy, selectedYil]);
 
+  const makineDonemRaporlari = useMemo(() => {
+    if (!selectedTaseron) return [];
+    return taseronKesintiRaporlari.filter(
+      (r) =>
+        (r.kesintiTipi === 'IS_MAKINESI' || !r.kesintiTipi) &&
+        (r.taseronFirmaId === selectedTaseron.id ||
+          firmaEslesir(r.taseronFirmaAdi, selectedTaseron.unvan)) &&
+        r.donemAy === donemAyStr &&
+        r.donemYil === donemYilStr
+    );
+  }, [taseronKesintiRaporlari, selectedTaseron, donemAyStr, donemYilStr]);
+
+  const makineIcmal = useMemo(
+    () =>
+      buildIsMakinesiIcmal({
+        faaliyetler: operatorFaaliyetleri,
+        cariKartlar,
+        ay: selectedAy,
+        yil: selectedYil,
+        onlyOnayli: icmalOnlyOnayli,
+        kesintiRaporlari: taseronKesintiRaporlari,
+      }),
+    [
+      operatorFaaliyetleri,
+      cariKartlar,
+      selectedAy,
+      selectedYil,
+      icmalOnlyOnayli,
+      taseronKesintiRaporlari,
+    ]
+  );
+
   const mevcutEnerji = useMemo(
     () =>
       taseronEnerjiKayitlari.find(
@@ -190,18 +250,53 @@ export const TaseronKesintiScreen: React.FC<TaseronKesintiScreenProps> = ({
   const [elek, setElek] = useState({ ilk: 0, son: 0, birim: 3.5 });
   const [su, setSu] = useState({ ilk: 0, son: 0, birim: 12 });
   const [gaz, setGaz] = useState({ ilk: 0, son: 0, birim: 8.5 });
+  const [aktifEnerji, setAktifEnerji] = useState<Record<EnerjiKalem, boolean>>({
+    ELEKTRIK: true,
+    SU: false,
+    DOGALGAZ: false,
+  });
+  const [enerjiAciklama, setEnerjiAciklama] = useState('');
 
   useEffect(() => {
     if (!selectedTaseronId) return;
     if (mevcutEnerji) {
-      setElek({ ilk: mevcutEnerji.elektrik.ilkOkuma, son: mevcutEnerji.elektrik.sonOkuma, birim: mevcutEnerji.elektrik.birimFiyat });
-      setSu({ ilk: mevcutEnerji.su.ilkOkuma, son: mevcutEnerji.su.sonOkuma, birim: mevcutEnerji.su.birimFiyat });
-      setGaz({ ilk: mevcutEnerji.dogalgaz.ilkOkuma, son: mevcutEnerji.dogalgaz.sonOkuma, birim: mevcutEnerji.dogalgaz.birimFiyat });
+      setElek({
+        ilk: mevcutEnerji.elektrik.ilkOkuma,
+        son: mevcutEnerji.elektrik.sonOkuma,
+        birim: mevcutEnerji.elektrik.birimFiyat,
+      });
+      setSu({
+        ilk: mevcutEnerji.su.ilkOkuma,
+        son: mevcutEnerji.su.sonOkuma,
+        birim: mevcutEnerji.su.birimFiyat,
+      });
+      setGaz({
+        ilk: mevcutEnerji.dogalgaz.ilkOkuma,
+        son: mevcutEnerji.dogalgaz.sonOkuma,
+        birim: mevcutEnerji.dogalgaz.birimFiyat,
+      });
+      const aktif = mevcutEnerji.aktifKalemler;
+      if (aktif && aktif.length > 0) {
+        setAktifEnerji({
+          ELEKTRIK: aktif.includes('ELEKTRIK'),
+          SU: aktif.includes('SU'),
+          DOGALGAZ: aktif.includes('DOGALGAZ'),
+        });
+      } else {
+        setAktifEnerji({
+          ELEKTRIK: true,
+          SU: sayacFarki(mevcutEnerji.su) > 0,
+          DOGALGAZ: sayacFarki(mevcutEnerji.dogalgaz) > 0,
+        });
+      }
+      setEnerjiAciklama(mevcutEnerji.aciklama || '');
     } else {
       const prev = ilkOkumaFromOncekiAy(taseronEnerjiKayitlari, selectedTaseronId, selectedAy, selectedYil);
       setElek({ ilk: prev.elektrik, son: prev.elektrik, birim: 3.5 });
       setSu({ ilk: prev.su, son: prev.su, birim: 12 });
       setGaz({ ilk: prev.dogalgaz, son: prev.dogalgaz, birim: 8.5 });
+      setAktifEnerji({ ELEKTRIK: true, SU: false, DOGALGAZ: false });
+      setEnerjiAciklama('');
     }
   }, [selectedTaseronId, selectedAy, selectedYil, mevcutEnerji, taseronEnerjiKayitlari]);
 
@@ -215,75 +310,173 @@ export const TaseronKesintiScreen: React.FC<TaseronKesintiScreenProps> = ({
       alert('Geçerli bir saatlik ücret girin.');
       return;
     }
-    setTaseronKesintiRaporlari((prev) =>
-      prev.map((r) => {
-        if (r.id !== raporId) return r;
-        const tutar = hesaplaKesintiTutari(r.toplamSaat, saatlikUcret);
-        return {
-          ...r,
-          saatlikUcret,
-          kesintiTutari: tutar,
-          ucretOnayBekliyor: false,
-          onayDurumu: 'ONAYLANDI' as const,
-        };
-      })
+    const mevcut = taseronKesintiRaporlari.find((r) => r.id === raporId);
+    if (!mevcut) return;
+    const tutar = hesaplaKesintiTutari(mevcut.toplamSaat, saatlikUcret);
+    const onayli: TaseronKesintiRaporu = {
+      ...mevcut,
+      taseronFirmaId: mevcut.taseronFirmaId || selectedTaseron?.id,
+      taseronFirmaAdi: mevcut.taseronFirmaAdi || selectedTaseron?.unvan || mevcut.taseronFirmaAdi,
+      saatlikUcret,
+      kesintiTutari: tutar,
+      ucretOnayBekliyor: false,
+      onayDurumu: 'ONAYLANDI',
+    };
+    setTaseronKesintiRaporlari((prev) => prev.map((r) => (r.id !== raporId ? r : onayli)));
+    appendCariIslemOnce(setCariIslemGecmisi, buildCariIslemFromMakineKesintiRaporu(onayli));
+    addNotification?.(
+      `İş makinesi kesinti onaylandı ve ${onayli.taseronFirmaAdi} cari geçmişine işlendi (${saatlikUcret} TL/sa → ${tutar.toLocaleString('tr-TR')} TL).`
     );
-    addNotification?.(`İş makinesi kesinti raporu onaylandı (${saatlikUcret} TL/sa).`);
+  };
+
+  const handleMakineCariyeIsle = (rapor: TaseronKesintiRaporu) => {
+    if (rapor.onayDurumu !== 'ONAYLANDI' && rapor.ucretOnayBekliyor) {
+      alert('Önce saat ücretini onaylayın.');
+      return;
+    }
+    const row = buildCariIslemFromMakineKesintiRaporu({
+      ...rapor,
+      taseronFirmaId: rapor.taseronFirmaId || selectedTaseron?.id,
+      taseronFirmaAdi: rapor.taseronFirmaAdi || selectedTaseron?.unvan || rapor.taseronFirmaAdi,
+    });
+    if (!row) {
+      alert('Taşeron cari kartı seçili değil — kayıt cariye işlenemedi.');
+      return;
+    }
+    appendCariIslemOnce(setCariIslemGecmisi, row);
+    addNotification?.(`Kesinti ${row.cariKartId ? rapor.taseronFirmaAdi : ''} cari geçmişine eklendi.`);
   };
 
   const handleElleMakineRaporu = () => {
-    if (!selectedTaseron) return;
-    const faaliyetler = aylikFaaliyetler.filter((f) => !f.kesintiYansitildi);
+    if (!selectedTaseron) {
+      alert('Önce taşeron seçin.');
+      return;
+    }
+    const faaliyetler = aylikFaaliyetler
+      .filter((f) => !f.kesintiYansitildi)
+      .map((f) => ({
+        ...f,
+        firmaId: f.firmaId || selectedTaseron.id,
+        firmaAdi: f.firmaAdi || selectedTaseron.unvan,
+      }));
     if (faaliyetler.length === 0) {
       alert('Bu dönem için yansıtılmamış faaliyet yok.');
       return;
     }
-    const toplamSaat = faaliyetler.reduce((s, f) => s + f.calismaSuresi, 0);
-    const rapor: TaseronKesintiRaporu = {
-      id: `tkr_${Date.now()}`,
-      kesintiTipi: 'IS_MAKINESI',
-      taseronFirmaAdi: selectedTaseron.unvan,
-      taseronFirmaId: selectedTaseron.id,
-      donemAy: donemAyStr,
-      donemYil: donemYilStr,
-      toplamSaat,
-      saatlikUcret: 0,
-      kesintiTutari: 0,
-      ucretOnayBekliyor: true,
-      faaliyetler,
-      onayDurumu: 'TASLAK',
-      olusturanKullanici: currentUser?.email || 'yönetici',
-      olusturmaTarihi: new Date().toISOString(),
+    const ana = faaliyetler.filter((f) => resolveMakineKaynakGrup(f) === 'ANA_FIRMA');
+    const kiralik = faaliyetler.filter((f) => resolveMakineKaynakGrup(f) === 'KIRALIK');
+    const stamp = Date.now();
+    const yeniRaporlar: TaseronKesintiRaporu[] = [];
+    const pushRapor = (
+      list: typeof faaliyetler,
+      makineKaynakGrup: 'ANA_FIRMA' | 'KIRALIK',
+      idx: number
+    ) => {
+      if (!list.length) return;
+      const toplamSaat = list.reduce((s, f) => s + f.calismaSuresi, 0);
+      yeniRaporlar.push({
+        id: `tkr_${stamp}_${idx}`,
+        kesintiTipi: 'IS_MAKINESI',
+        taseronFirmaAdi: selectedTaseron.unvan,
+        taseronFirmaId: selectedTaseron.id,
+        donemAy: donemAyStr,
+        donemYil: donemYilStr,
+        toplamSaat,
+        saatlikUcret: 0,
+        kesintiTutari: 0,
+        ucretOnayBekliyor: true,
+        faaliyetler: list,
+        makineKaynakGrup,
+        onayDurumu: 'TASLAK',
+        olusturanKullanici: currentUser?.email || 'yönetici',
+        olusturmaTarihi: new Date().toISOString(),
+      });
     };
-    setTaseronKesintiRaporlari((prev) => [rapor, ...prev]);
+    pushRapor(ana, 'ANA_FIRMA', 1);
+    pushRapor(kiralik, 'KIRALIK', 2);
+    setTaseronKesintiRaporlari((prev) => [...yeniRaporlar, ...prev]);
     if (setOperatorFaaliyetleri) {
       const ids = new Set(faaliyetler.map((f) => f.id));
       setOperatorFaaliyetleri((prev) =>
-        prev.map((f) => (ids.has(f.id) ? { ...f, kesintiYansitildi: true } : f))
+        prev.map((f) =>
+          ids.has(f.id)
+            ? {
+                ...f,
+                kesintiYansitildi: true,
+                firmaId: f.firmaId || selectedTaseron.id,
+                firmaAdi: f.firmaAdi || selectedTaseron.unvan,
+              }
+            : f
+        )
       );
     }
-    alert('Taslak rapor oluşturuldu — saat ücretini girip onaylayın.');
+    addNotification?.(
+      `${yeniRaporlar.length} taslak (Ana Firma: ${ana.length}, Kiralık: ${kiralik.length} kayıt) — saat ücretini ayrı onaylayın.`
+    );
   };
 
   const handleEnerjiKaydet = () => {
-    if (!selectedTaseron) return;
+    if (!selectedTaseron) {
+      alert('Önce taşeron seçin.');
+      return;
+    }
+    const aktifKalemler = (Object.keys(aktifEnerji) as EnerjiKalem[]).filter((k) => aktifEnerji[k]);
+    if (aktifKalemler.length === 0) {
+      alert('En az bir sayaç kalemi seçin (ör. yalnızca Elektrik).');
+      return;
+    }
+    const buildOlcum = (
+      state: { ilk: number; son: number; birim: number },
+      aktif: boolean
+    ) => {
+      // Pasif kalemde fark oluşmasın: son = ilk
+      const son = aktif ? state.son : state.ilk;
+      return { ilkOkuma: state.ilk, sonOkuma: son, birimFiyat: state.birim };
+    };
+    const elektrik = buildOlcum(elek, aktifEnerji.ELEKTRIK);
+    const suO = buildOlcum(su, aktifEnerji.SU);
+    const dogalgaz = buildOlcum(gaz, aktifEnerji.DOGALGAZ);
+    const draft = { elektrik, su: suO, dogalgaz, aktifKalemler };
+    const hasFark = aktifKalemler.some((k) => {
+      if (k === 'ELEKTRIK') return sayacFarki(elektrik) > 0;
+      if (k === 'SU') return sayacFarki(suO) > 0;
+      return sayacFarki(dogalgaz) > 0;
+    });
+    if (!hasFark) {
+      alert('Seçili kalemde son okuma ilk okumadan büyük olmalı (kesinti farkı).');
+      return;
+    }
     const kayit: TaseronEnerjiKaydi = {
       id: mevcutEnerji?.id || `ten_${Date.now()}`,
       taseronCariId: selectedTaseron.id,
       taseronFirmaAdi: selectedTaseron.unvan,
       donemAy: donemAyStr,
       donemYil: donemYilStr,
-      elektrik: { ilkOkuma: elek.ilk, sonOkuma: elek.son, birimFiyat: elek.birim },
-      su: { ilkOkuma: su.ilk, sonOkuma: su.son, birimFiyat: su.birim },
-      dogalgaz: { ilkOkuma: gaz.ilk, sonOkuma: gaz.son, birimFiyat: gaz.birim },
-      olusturmaTarihi: new Date().toISOString(),
+      elektrik,
+      su: suO,
+      dogalgaz,
+      aktifKalemler,
+      aciklama: enerjiAciklama.trim() || undefined,
+      olusturmaTarihi: mevcutEnerji?.olusturmaTarihi || new Date().toISOString(),
       olusturanKullanici: currentUser?.email,
     };
     setTaseronEnerjiKayitlari((prev) => {
       const rest = prev.filter((k) => k.id !== kayit.id);
-      return [kayit, ...rest.filter((k) => !(k.taseronCariId === kayit.taseronCariId && k.donemAy === kayit.donemAy && k.donemYil === kayit.donemYil))];
+      return [
+        kayit,
+        ...rest.filter(
+          (k) =>
+            !(
+              k.taseronCariId === kayit.taseronCariId &&
+              k.donemAy === kayit.donemAy &&
+              k.donemYil === kayit.donemYil
+            )
+        ),
+      ];
     });
-    alert('Sayaç kaydı kaydedildi. Son okuma bir sonraki ayın ilk okuması olacaktır.');
+    alert(
+      `Sayaç kesintisi kaydedildi.\nTaşeron: ${selectedTaseron.unvan}\n${enerjiKalemOzet(draft)}\nToplam: ${enerjiToplamTutar(draft).toLocaleString('tr-TR')} TL`
+    );
   };
 
   const handleEnerjiRapor = () => {
@@ -311,6 +504,19 @@ export const TaseronKesintiScreen: React.FC<TaseronKesintiScreenProps> = ({
     setTaseronKesintiRaporlari((prev) => [rapor, ...prev]);
     const html = buildEnerjiKesintiReportHtml(selectedTaseron.unvan, selectedAy, selectedYil, mevcutEnerji);
     downloadKibritciReportHtml(html, `Kibritci_Enerji_${selectedTaseron.unvan}_${donemAyStr}_${donemYilStr}.html`);
+  };
+
+  const enerjiKesintiListesi = useMemo(() => {
+    return [...taseronEnerjiKayitlari].sort((a, b) => {
+      const ka = `${a.donemYil}-${a.donemAy}`;
+      const kb = `${b.donemYil}-${b.donemAy}`;
+      return kb.localeCompare(ka);
+    });
+  }, [taseronEnerjiKayitlari]);
+
+  const handleEnerjiSil = (id: string) => {
+    if (!window.confirm('Bu sayaç kesinti kaydı silinsin mi?')) return;
+    setTaseronEnerjiKayitlari((prev) => prev.filter((k) => k.id !== id));
   };
 
   const handleYemekKaydet = () => {
@@ -561,26 +767,70 @@ export const TaseronKesintiScreen: React.FC<TaseronKesintiScreenProps> = ({
     state,
     setState,
     unit,
+    aktif,
+    onAktifChange,
   }: {
     label: string;
     icon: string;
     state: { ilk: number; son: number; birim: number };
     setState: React.Dispatch<React.SetStateAction<{ ilk: number; son: number; birim: number }>>;
     unit: string;
+    aktif: boolean;
+    onAktifChange: (v: boolean) => void;
   }) => (
-    <div className="bg-slate-50 border rounded-2xl p-3 space-y-2">
-      <div className="flex justify-between text-[10px] font-bold">
-        <span>{icon} {label}</span>
-        <span>Fark: {Math.max(0, state.son - state.ilk)} {unit}</span>
+    <div
+      className={`border rounded-2xl p-3 space-y-2 transition ${
+        aktif ? 'bg-slate-50 border-slate-200' : 'bg-slate-100/60 border-slate-100 opacity-70'
+      }`}
+    >
+      <div className="flex justify-between items-center gap-2 text-[10px] font-bold">
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={aktif}
+            onChange={(e) => onAktifChange(e.target.checked)}
+            className="rounded border-slate-300"
+          />
+          <span>
+            {icon} {label}
+          </span>
+        </label>
+        <span className={aktif ? 'text-slate-700' : 'text-slate-400'}>
+          {aktif ? `Fark: ${Math.max(0, state.son - state.ilk)} ${unit}` : 'Kesintiye dahil değil'}
+        </span>
       </div>
       <div className="grid grid-cols-3 gap-2">
-        <input type="number" placeholder="İlk" value={state.ilk || ''} onChange={(e) => setState((s) => ({ ...s, ilk: Number(e.target.value) }))} className="p-2 border rounded-lg text-center text-xs" />
-        <input type="number" placeholder="Son" value={state.son || ''} onChange={(e) => setState((s) => ({ ...s, son: Number(e.target.value) }))} className="p-2 border rounded-lg text-center text-xs" />
-        <input type="number" step="0.01" placeholder="Birim ₺" value={state.birim || ''} onChange={(e) => setState((s) => ({ ...s, birim: Number(e.target.value) }))} className="p-2 border rounded-lg text-center text-xs" />
+        <input
+          type="number"
+          placeholder="İlk"
+          disabled={!aktif}
+          value={state.ilk || ''}
+          onChange={(e) => setState((s) => ({ ...s, ilk: Number(e.target.value) }))}
+          className="p-2 border rounded-lg text-center text-xs disabled:bg-slate-100 disabled:text-slate-400"
+        />
+        <input
+          type="number"
+          placeholder="Son"
+          disabled={!aktif}
+          value={state.son || ''}
+          onChange={(e) => setState((s) => ({ ...s, son: Number(e.target.value) }))}
+          className="p-2 border rounded-lg text-center text-xs disabled:bg-slate-100 disabled:text-slate-400"
+        />
+        <input
+          type="number"
+          step="0.01"
+          placeholder="Birim ₺"
+          disabled={!aktif}
+          value={state.birim || ''}
+          onChange={(e) => setState((s) => ({ ...s, birim: Number(e.target.value) }))}
+          className="p-2 border rounded-lg text-center text-xs disabled:bg-slate-100 disabled:text-slate-400"
+        />
       </div>
-      <p className="text-[9px] text-right font-bold text-slate-600">
-        Tutar: {(Math.max(0, state.son - state.ilk) * state.birim).toLocaleString('tr-TR')} TL
-      </p>
+      {aktif && (
+        <p className="text-[9px] text-right font-bold text-slate-600">
+          Tutar: {(Math.max(0, state.son - state.ilk) * state.birim).toLocaleString('tr-TR')} TL
+        </p>
+      )}
     </div>
   );
 
@@ -616,7 +866,7 @@ export const TaseronKesintiScreen: React.FC<TaseronKesintiScreenProps> = ({
             ))}
           </select>
           <select value={selectedYil} onChange={(e) => setSelectedYil(Number(e.target.value))} className="text-xs p-2.5 bg-slate-800 border border-slate-700 rounded-xl">
-            {[2025, 2026, 2027].map((y) => <option key={y} value={y}>{y}</option>)}
+            {[2024, 2025, 2026, 2027].map((y) => <option key={y} value={y}>{y}</option>)}
           </select>
         </div>
       </div>
@@ -625,7 +875,8 @@ export const TaseronKesintiScreen: React.FC<TaseronKesintiScreenProps> = ({
         {(
           [
             ['envanter', 'Firma Envanteri', Building2],
-            ['makine', 'İş Makinesi', HardHat],
+            ['makine_icmal', 'İş Makinesi İcmali', Table2],
+            ['makine', 'İş Makinesi Kesinti', HardHat],
             ['enerji', 'Elektrik / Su / Gaz', Zap],
             ['yemek', 'Yemek Sayımı', UtensilsCrossed],
             ['personel', 'Seçili Taşeron Personel', Users],
@@ -644,7 +895,11 @@ export const TaseronKesintiScreen: React.FC<TaseronKesintiScreenProps> = ({
         ))}
       </div>
 
-      {!selectedTaseron && subPage !== 'envanter' ? (
+      {!selectedTaseron &&
+      subPage !== 'envanter' &&
+      subPage !== 'enerji' &&
+      subPage !== 'makine' &&
+      subPage !== 'makine_icmal' ? (
         <div className="bg-white border rounded-2xl p-12 text-center text-slate-500 text-sm">
           Taşeron seçmek için önce cari kartlara <strong>kartTipi: TASERON</strong> ile firma ekleyin.
           Firma listesi için <strong>Firma Envanteri</strong> sekmesine bakın.
@@ -735,64 +990,720 @@ export const TaseronKesintiScreen: React.FC<TaseronKesintiScreenProps> = ({
             </div>
           )}
 
-          {subPage === 'makine' && selectedTaseron && (
-            <div className="grid lg:grid-cols-2 gap-6">
-              <div className="bg-white border rounded-2xl p-5 space-y-4">
-                <h3 className="text-xs font-black uppercase text-slate-800">Yönetici — Saat Ücreti Onayı</h3>
-                <div className="flex gap-2 items-end">
-                  <div>
-                    <label className="text-[9px] font-bold text-slate-400 uppercase">Saatlik Ücret (TL)</label>
-                    <input type="number" value={saatlikUcret} onChange={(e) => setSaatlikUcret(Number(e.target.value))} className="w-full mt-1 p-2 border rounded-xl text-xs font-mono" />
+          {subPage === 'makine_icmal' && (
+            <div className="space-y-4">
+              <div className="bg-white border border-amber-200 rounded-2xl p-5 space-y-3">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <h3 className="text-xs font-black uppercase text-slate-800 flex items-center gap-2">
+                      <Table2 size={14} className="text-amber-600" />
+                      İş Makinesi İcmali · {ayAdi(selectedAy)} {selectedYil}
+                    </h3>
+                    <p className="text-[10px] text-slate-500 mt-1 max-w-2xl">
+                      Ana firma makinesi ile kiralık makine kayıtları ayrı tutulur. Operatörde «Kiralık»
+                      seçerek girdiğiniz saatler kiralık icmaline düşer; kesinti raporları da ayrı üretilir.
+                    </p>
+                    <div className="mt-3 flex flex-wrap gap-2 items-end">
+                      <label className="block space-y-1">
+                        <span className="text-[9px] font-black uppercase text-amber-800">Dönem ay</span>
+                        <select
+                          value={selectedAy}
+                          onChange={(e) => setSelectedAy(Number(e.target.value))}
+                          className="block text-xs font-bold p-2.5 border-2 border-amber-300 bg-amber-50 rounded-xl min-w-[140px]"
+                        >
+                          {Array.from({ length: 12 }, (_, i) => (
+                            <option key={i + 1} value={i + 1}>
+                              {ayAdi(i + 1)}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="block space-y-1">
+                        <span className="text-[9px] font-black uppercase text-amber-800">Yıl</span>
+                        <select
+                          value={selectedYil}
+                          onChange={(e) => setSelectedYil(Number(e.target.value))}
+                          className="block text-xs font-bold p-2.5 border-2 border-amber-300 bg-amber-50 rounded-xl"
+                        >
+                          {[2024, 2025, 2026, 2027].map((y) => (
+                            <option key={y} value={y}>
+                              {y}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <div className="flex flex-wrap gap-1 pb-0.5">
+                        {[5, 6, 7, 8].map((ay) => (
+                          <button
+                            key={ay}
+                            type="button"
+                            onClick={() => setSelectedAy(ay)}
+                            className={`px-2.5 py-2 rounded-lg text-[10px] font-black cursor-pointer ${
+                              selectedAy === ay
+                                ? 'bg-amber-500 text-slate-950'
+                                : 'bg-white border border-amber-200 text-amber-900'
+                            }`}
+                          >
+                            {ayAdi(ay)}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-2 items-center">
+                    <label className="flex items-center gap-1.5 text-[10px] font-bold text-slate-600 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={icmalOnlyOnayli}
+                        onChange={(e) => setIcmalOnlyOnayli(e.target.checked)}
+                        className="rounded border-slate-300"
+                      />
+                      Yalnızca onaylı
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => indirIsMakinesiIcmal(makineIcmal, icmalOnlyOnayli)}
+                      className="flex items-center gap-1 px-3 py-2 rounded-xl text-[10px] font-bold bg-slate-900 text-white cursor-pointer"
+                    >
+                      <Download size={12} /> HTML İndir
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => yazdirIsMakinesiIcmal(makineIcmal, icmalOnlyOnayli)}
+                      className="flex items-center gap-1 px-3 py-2 rounded-xl text-[10px] font-bold border border-slate-300 bg-white text-slate-800 cursor-pointer"
+                    >
+                      <Printer size={12} /> Yazdır
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSubPage('makine')}
+                      className="flex items-center gap-1 px-3 py-2 rounded-xl text-[10px] font-bold border border-amber-300 bg-amber-50 text-amber-900 cursor-pointer"
+                    >
+                      <HardHat size={12} /> Kesinti / Ücret
+                    </button>
                   </div>
                 </div>
-                <p className="text-[10px] text-slate-500">
-                  Formül: <strong>Kesinti = Toplam Saat × Saatlik Ücret</strong>. Operatör sekmesinden gelen raporlar ücret girilene kadar bekler.
-                </p>
-                {bekleyenMakineRaporlari.length === 0 ? (
-                  <p className="text-xs text-slate-400 italic">Onay bekleyen iş makinesi raporu yok.</p>
-                ) : (
-                  bekleyenMakineRaporlari.map((r) => (
-                    <div key={r.id} className="border rounded-xl p-3 bg-amber-50/50 space-y-2">
-                      <p className="text-xs font-bold">{r.taseronFirmaAdi} · {r.donemAy}/{r.donemYil}</p>
-                      <p className="text-[10px]">Toplam: {r.toplamSaat.toFixed(1)} sa · {r.faaliyetler.length} faaliyet</p>
-                      <button type="button" onClick={() => handleUcretOnayla(r.id)} className="w-full py-2 bg-emerald-600 text-white text-xs font-bold rounded-xl cursor-pointer flex items-center justify-center gap-1">
-                        <CheckCircle2 size={14} /> Ücreti Onayla ({saatlikUcret} TL/sa → {hesaplaKesintiTutari(r.toplamSaat, saatlikUcret).toLocaleString('tr-TR')} TL)
-                      </button>
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  {[
+                    [
+                      'Ana Firma sa',
+                      `${makineIcmal.anaFirma.genelToplamSaat.toLocaleString('tr-TR', { maximumFractionDigits: 1 })}`,
+                    ],
+                    [
+                      'Kiralık sa',
+                      `${makineIcmal.kiralik.genelToplamSaat.toLocaleString('tr-TR', { maximumFractionDigits: 1 })}`,
+                    ],
+                    ['Toplam saat', `${makineIcmal.genelToplamSaat.toLocaleString('tr-TR', { maximumFractionDigits: 1 })} sa`],
+                    ['Kayıt', String(makineIcmal.genelKayitSayisi)],
+                  ].map(([label, val]) => (
+                    <div key={String(label)} className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                      <span className="text-[9px] font-black uppercase text-slate-500 block">{label}</span>
+                      <span className="text-sm font-black text-slate-900 font-mono">{val}</span>
                     </div>
-                  ))
-                )}
-                <button type="button" onClick={handleElleMakineRaporu} className="w-full py-2.5 border-2 border-dashed border-slate-300 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-50 cursor-pointer flex items-center justify-center gap-1">
-                  <Plus size={14} /> Dönem Faaliyetlerinden Taslak Oluştur
-                </button>
+                  ))}
+                </div>
               </div>
-              <div className="bg-white border rounded-2xl p-5 space-y-2 max-h-[480px] overflow-y-auto">
-                <h3 className="text-xs font-black uppercase text-slate-800 mb-2">{ayAdi(selectedAy)} {selectedYil} Faaliyetleri</h3>
-                {aylikFaaliyetler.length === 0 ? (
-                  <p className="text-xs text-slate-400">Kayıt yok.</p>
-                ) : (
-                  aylikFaaliyetler.map((f) => (
-                    <div key={f.id} className="text-[10px] border-b py-2 flex justify-between gap-2">
-                      <span>{f.tarih} · {f.yapilanIs}</span>
-                      <span className="font-mono font-bold shrink-0">{f.calismaSuresi.toFixed(1)} sa</span>
+
+              {([makineIcmal.anaFirma, makineIcmal.kiralik] as const).map((blok) => (
+                <div
+                  key={blok.kaynakGrup}
+                  className={`bg-white border rounded-2xl overflow-hidden ${
+                    blok.kaynakGrup === 'KIRALIK' ? 'border-teal-200' : 'border-amber-200'
+                  }`}
+                >
+                  <div
+                    className={`px-4 py-3 border-b flex flex-wrap items-center justify-between gap-2 ${
+                      blok.kaynakGrup === 'KIRALIK' ? 'bg-teal-50 border-teal-100' : 'bg-amber-50 border-amber-100'
+                    }`}
+                  >
+                    <div>
+                      <h4
+                        className={`text-xs font-black uppercase ${
+                          blok.kaynakGrup === 'KIRALIK' ? 'text-teal-900' : 'text-amber-950'
+                        }`}
+                      >
+                        {blok.etiket}
+                      </h4>
+                      <p className="text-[10px] text-slate-500 mt-0.5">
+                        {blok.firmaSayisi} firma ·{' '}
+                        {blok.genelToplamSaat.toLocaleString('tr-TR', { maximumFractionDigits: 1 })} sa ·{' '}
+                        {blok.genelKayitSayisi} kayıt — kesinti raporları bu grupla ayrı üretilir
+                      </p>
                     </div>
-                  ))
-                )}
-                {cezaToplam > 0 && (
-                  <p className="text-[10px] text-rose-600 font-bold pt-2">Ceza tutanakları (ayrı rapor): {cezaToplam.toLocaleString('tr-TR')} TL</p>
-                )}
-              </div>
+                  </div>
+                  <div className="overflow-x-auto max-h-[420px] overflow-y-auto">
+                    <table className="w-full text-left text-xs min-w-[640px]">
+                      <thead
+                        className={`sticky top-0 z-10 text-white ${
+                          blok.kaynakGrup === 'KIRALIK' ? 'bg-teal-800' : 'bg-slate-900'
+                        }`}
+                      >
+                        <tr className="text-[9px] uppercase tracking-wide">
+                          <th className="px-3 py-2.5 text-left">Açıklama (Firma)</th>
+                          {IS_MAKINESI_ICMAL_TIPLER.map((t) => (
+                            <th key={t} className="px-3 py-2.5 text-right">
+                              {t}
+                            </th>
+                          ))}
+                          <th className="px-3 py-2.5 text-right">Toplam</th>
+                          <th className="px-3 py-2.5 text-center">Kayıt</th>
+                          <th className="px-3 py-2.5 text-right"></th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {blok.satirlar.length === 0 ? (
+                          <tr>
+                            <td colSpan={6} className="px-3 py-8 text-center text-slate-400 italic">
+                              Bu grupta henüz kayıt yok.
+                              {blok.kaynakGrup === 'KIRALIK'
+                                ? ' Operatörde makine kaynağını «Kiralık» seçerek girin.'
+                                : ''}
+                            </td>
+                          </tr>
+                        ) : (
+                          blok.satirlar.map((row) => (
+                            <tr key={`${blok.kaynakGrup}_${row.key}`} className="border-t border-slate-100 hover:bg-slate-50/80">
+                              <td className="px-3 py-2.5 font-bold text-slate-800 uppercase">{row.firmaAdi}</td>
+                              {IS_MAKINESI_ICMAL_TIPLER.map((t) => (
+                                <td key={t} className="px-3 py-2.5 text-right font-mono text-slate-700">
+                                  {row.saatler[t] > 0
+                                    ? row.saatler[t].toLocaleString('tr-TR', { maximumFractionDigits: 1 })
+                                    : '—'}
+                                </td>
+                              ))}
+                              <td className="px-3 py-2.5 text-right font-mono font-black text-slate-900">
+                                {row.toplamSaat.toLocaleString('tr-TR', { maximumFractionDigits: 1 })}
+                              </td>
+                              <td className="px-3 py-2.5 text-center font-mono text-slate-500">{row.kayitSayisi}</td>
+                              <td className="px-3 py-2.5 text-right">
+                                {row.firmaId && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setSelectedTaseronId(row.firmaId!);
+                                      setSubPage('makine');
+                                    }}
+                                    className="text-[10px] font-bold text-amber-700 hover:underline cursor-pointer"
+                                  >
+                                    Kesinti →
+                                  </button>
+                                )}
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                      {blok.satirlar.length > 0 && (
+                        <tfoot>
+                          <tr
+                            className={`font-black text-white ${
+                              blok.kaynakGrup === 'KIRALIK' ? 'bg-teal-900' : 'bg-slate-900'
+                            }`}
+                          >
+                            <td className="px-3 py-3">TOPLAM · {blok.etiket}</td>
+                            {IS_MAKINESI_ICMAL_TIPLER.map((t) => (
+                              <td key={t} className="px-3 py-3 text-right font-mono">
+                                {blok.tipToplamlari[t] > 0
+                                  ? blok.tipToplamlari[t].toLocaleString('tr-TR', { maximumFractionDigits: 1 })
+                                  : '—'}
+                              </td>
+                            ))}
+                            <td className="px-3 py-3 text-right font-mono text-amber-200">
+                              {blok.genelToplamSaat.toLocaleString('tr-TR', { maximumFractionDigits: 1 })} sa
+                            </td>
+                            <td className="px-3 py-3 text-center font-mono">{blok.genelKayitSayisi}</td>
+                            <td />
+                          </tr>
+                        </tfoot>
+                      )}
+                    </table>
+                  </div>
+                </div>
+              ))}
             </div>
           )}
 
-          {subPage === 'enerji' && selectedTaseron && (
-            <div className="bg-white border rounded-2xl p-5 space-y-4 max-w-2xl">
-              <p className="text-[10px] text-slate-500">Aylık tek kayıt. Son okuma, sonraki ayın ilk okuması olur.</p>
-              <SayacBlock label="Elektrik (kWh)" icon="⚡" state={elek} setState={setElek} unit="kWh" />
-              <SayacBlock label="Su (m³)" icon="💧" state={su} setState={setSu} unit="m³" />
-              <SayacBlock label="Doğalgaz (m³)" icon="🔥" state={gaz} setState={setGaz} unit="m³" />
-              <div className="flex gap-2">
-                <button type="button" onClick={handleEnerjiKaydet} className="flex-1 py-2.5 bg-slate-900 text-white text-xs font-bold rounded-xl cursor-pointer">Kaydet</button>
-                <button type="button" onClick={handleEnerjiRapor} className="flex-1 py-2.5 bg-indigo-600 text-white text-xs font-bold rounded-xl cursor-pointer">Ay Sonu Rapor + Arşiv</button>
+          {subPage === 'makine' && (
+            <div className="space-y-4">
+              <div className="bg-amber-50 border border-amber-200 rounded-2xl px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="text-[10px] font-black uppercase text-amber-900 tracking-wide">
+                    Dönem İcmali · {ayAdi(selectedAy)} {selectedYil}
+                  </p>
+                  <p className="text-xs text-amber-950 font-bold mt-0.5">
+                    {makineIcmal.firmaSayisi} firma ·{' '}
+                    {makineIcmal.genelToplamSaat.toLocaleString('tr-TR', { maximumFractionDigits: 1 })} sa
+                    {icmalOnlyOnayli ? ' (onaylı)' : ' (tümü)'}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSubPage('makine_icmal')}
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-[10px] font-bold bg-white border border-amber-300 text-amber-950 cursor-pointer"
+                >
+                  <Table2 size={12} /> Firma bazlı icmali aç
+                </button>
+              </div>
+
+              <div className="grid lg:grid-cols-2 gap-4">
+                <div className="bg-white border rounded-2xl p-5 space-y-4">
+                  <div>
+                    <h3 className="text-xs font-black uppercase text-slate-800 flex items-center gap-2">
+                      <HardHat size={14} className="text-amber-600" /> İş Makinesi Kesintisi
+                    </h3>
+                    <p className="text-[10px] text-slate-500 mt-1">
+                      Taşeron seçin → dönem faaliyetlerinden taslak açın → saat ücretini onaylayın.
+                      Onayda kesinti ilgili taşeronun <strong>cari geçmiş işlemlerine</strong> eklenir;
+                      istenirse taşeron bazlı kesinti raporu indirilir / yazdırılır.
+                    </p>
+                  </div>
+
+                  <label className="block space-y-1">
+                    <span className="text-[9px] font-black uppercase text-slate-500">Taşeron (kime kesilecek) *</span>
+                    <select
+                      value={selectedTaseronId}
+                      onChange={(e) => setSelectedTaseronId(e.target.value)}
+                      className="w-full text-xs font-bold p-2.5 bg-amber-50 border border-amber-200 rounded-xl"
+                    >
+                      {taseronlar.length === 0 ? (
+                        <option value="">Taşeron cari kartı yok</option>
+                      ) : (
+                        taseronlar.map((t) => (
+                          <option key={t.id} value={t.id}>
+                            {t.unvan} ({t.kod})
+                          </option>
+                        ))
+                      )}
+                    </select>
+                  </label>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <label className="block space-y-1">
+                      <span className="text-[9px] font-black uppercase text-slate-500">Dönem ay</span>
+                      <select
+                        value={selectedAy}
+                        onChange={(e) => setSelectedAy(Number(e.target.value))}
+                        className="w-full text-xs p-2.5 border rounded-xl"
+                      >
+                        {Array.from({ length: 12 }, (_, i) => (
+                          <option key={i + 1} value={i + 1}>
+                            {ayAdi(i + 1)}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="block space-y-1">
+                      <span className="text-[9px] font-black uppercase text-slate-500">Yıl</span>
+                      <select
+                        value={selectedYil}
+                        onChange={(e) => setSelectedYil(Number(e.target.value))}
+                        className="w-full text-xs p-2.5 border rounded-xl"
+                      >
+                        {[2024, 2025, 2026, 2027].map((y) => (
+                          <option key={y} value={y}>
+                            {y}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+
+                  <div>
+                    <label className="text-[9px] font-bold text-slate-400 uppercase">Saatlik Ücret (TL)</label>
+                    <input
+                      type="number"
+                      value={saatlikUcret}
+                      onChange={(e) => setSaatlikUcret(Number(e.target.value))}
+                      className="w-full mt-1 p-2.5 border rounded-xl text-xs font-mono"
+                    />
+                    <p className="text-[10px] text-slate-500 mt-1">
+                      Formül: <strong>Kesinti = Toplam Saat × Saatlik Ücret</strong>
+                    </p>
+                  </div>
+
+                  {bekleyenMakineRaporlari.length === 0 ? (
+                    <p className="text-xs text-slate-400 italic">Onay bekleyen iş makinesi raporu yok.</p>
+                  ) : (
+                    bekleyenMakineRaporlari.map((r) => (
+                      <div key={r.id} className="border rounded-xl p-3 bg-amber-50/50 space-y-2">
+                        <p className="text-xs font-bold">
+                          {r.taseronFirmaAdi} · {r.donemAy}/{r.donemYil}
+                        </p>
+                        <p className="text-[10px]">
+                          Toplam: {r.toplamSaat.toFixed(1)} sa · {r.faaliyetler?.length || 0} faaliyet
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => handleUcretOnayla(r.id)}
+                          className="w-full py-2 bg-emerald-600 text-white text-xs font-bold rounded-xl cursor-pointer flex items-center justify-center gap-1"
+                        >
+                          <CheckCircle2 size={14} /> Ücreti Onayla &amp; Cariye İşle (
+                          {saatlikUcret} TL/sa →{' '}
+                          {hesaplaKesintiTutari(r.toplamSaat, saatlikUcret).toLocaleString('tr-TR')} TL)
+                        </button>
+                      </div>
+                    ))
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={handleElleMakineRaporu}
+                    disabled={!selectedTaseron}
+                    className="w-full py-2.5 border-2 border-dashed border-slate-300 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-50 cursor-pointer flex items-center justify-center gap-1 disabled:opacity-40"
+                  >
+                    <Plus size={14} /> Dönem Faaliyetlerinden Taslak Oluştur
+                  </button>
+                </div>
+
+                <div className="bg-white border rounded-2xl p-5 space-y-2 max-h-[560px] overflow-y-auto">
+                  <div className="flex items-center justify-between gap-2 mb-1">
+                    <h3 className="text-xs font-black uppercase text-slate-800">
+                      {selectedTaseron
+                        ? `${selectedTaseron.unvan} · ${ayAdi(selectedAy)} ${selectedYil}`
+                        : 'Faaliyetler'}
+                    </h3>
+                    <span className="text-[9px] font-mono text-slate-500">
+                      {aylikFaaliyetler.reduce((s, f) => s + (f.calismaSuresi || 0), 0).toFixed(1)} sa
+                    </span>
+                  </div>
+                  {!selectedTaseron ? (
+                    <p className="text-xs text-slate-400">Taşeron seçin.</p>
+                  ) : aylikFaaliyetler.length === 0 ? (
+                    <p className="text-xs text-slate-400">
+                      Bu taşeron / dönem için operatör faaliyet kaydı yok. Ay-yıl filtresini kontrol edin.
+                    </p>
+                  ) : (
+                    aylikFaaliyetler.map((f) => (
+                      <div key={f.id} className="text-[10px] border-b border-slate-100 py-2.5 space-y-0.5">
+                        <div className="flex justify-between gap-2">
+                          <span className="font-bold text-slate-800">
+                            {f.tarih} · {f.operatorIsim}
+                          </span>
+                          <span className="font-mono font-bold shrink-0">{f.calismaSuresi.toFixed(1)} sa</span>
+                        </div>
+                        <p className="text-slate-600">{makineEtiketi(f)} · {f.yapilanIs}</p>
+                        <p className="text-[9px]">
+                          {f.kesintiYansitildi ? (
+                            <span className="text-emerald-700 font-bold">Kesintiye alındı</span>
+                          ) : (
+                            <span className="text-amber-700 font-bold">Bekliyor</span>
+                          )}
+                        </p>
+                      </div>
+                    ))
+                  )}
+                  {cezaToplam > 0 && (
+                    <p className="text-[10px] text-rose-600 font-bold pt-2">
+                      Ceza tutanakları (ayrı rapor): {cezaToplam.toLocaleString('tr-TR')} TL
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              {selectedTaseron && (
+                <div className="bg-white border rounded-2xl p-5 space-y-3">
+                  <h3 className="text-xs font-black uppercase text-slate-800">
+                    Taşeron Bazlı Kesinti Raporları · {ayAdi(selectedAy)} {selectedYil}
+                  </h3>
+                  <p className="text-[10px] text-slate-500">
+                    Bu liste ücret onayı / cari kesinti belgeleridir. Tüm firmaların güncel saat toplamı için{' '}
+                    <button
+                      type="button"
+                      onClick={() => setSubPage('makine_icmal')}
+                      className="font-bold text-amber-700 hover:underline cursor-pointer"
+                    >
+                      İş Makinesi İcmali
+                    </button>{' '}
+                    sekmesine bakın.
+                  </p>
+                  {makineDonemRaporlari.length === 0 ? (
+                    <p className="text-xs text-slate-400 italic">
+                      Bu dönem için henüz iş makinesi kesinti raporu yok. Üstteki taslak butonu ile oluşturun
+                      veya dönem icmalinden saatleri kontrol edin.
+                    </p>
+                  ) : (
+                    makineDonemRaporlari.map((r) => (
+                      <div
+                        key={r.id}
+                        className="border border-slate-200 rounded-xl p-3 flex flex-wrap gap-3 items-center justify-between"
+                      >
+                        <div className="min-w-0">
+                          <p className="text-xs font-bold text-slate-800">
+                            {r.taseronFirmaAdi} · {makineKaynakGrupLabel(r.makineKaynakGrup || resolveMakineKaynakGrup(r.faaliyetler?.[0]))} ·{' '}
+                            {r.faaliyetler?.length || 0} faaliyet · {r.toplamSaat.toFixed(1)} sa
+                          </p>
+                          <p className="text-[10px] text-slate-500">
+                            {r.ucretOnayBekliyor || r.onayDurumu === 'TASLAK'
+                              ? 'Ücret onayı bekliyor'
+                              : `Onaylı · ${Number(r.saatlikUcret || 0).toLocaleString('tr-TR')} TL/sa → ${Number(r.kesintiTutari || 0).toLocaleString('tr-TR')} TL`}
+                          </p>
+                        </div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {!r.ucretOnayBekliyor && r.onayDurumu === 'ONAYLANDI' && (
+                            <button
+                              type="button"
+                              onClick={() => handleMakineCariyeIsle(r)}
+                              className="px-2.5 py-1.5 text-[10px] font-bold rounded-lg bg-slate-900 text-white cursor-pointer"
+                            >
+                              Cariye İşle
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => indirIsMakinesiRaporu(r)}
+                            className="px-2.5 py-1.5 text-[10px] font-bold rounded-lg border border-slate-200 hover:bg-slate-50 cursor-pointer flex items-center gap-1"
+                          >
+                            <Download size={12} /> Rapor İndir
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => yazdirIsMakinesiRaporu(r)}
+                            className="px-2.5 py-1.5 text-[10px] font-bold rounded-lg border border-slate-200 hover:bg-slate-50 cursor-pointer flex items-center gap-1"
+                          >
+                            <Printer size={12} /> Yazdır
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              mailtoForRapor(
+                                `Kibritçi — ${r.taseronFirmaAdi} İş Makinesi Kesinti`,
+                                '',
+                                r
+                              )
+                            }
+                            className="px-2.5 py-1.5 text-[10px] font-bold rounded-lg border border-slate-200 hover:bg-slate-50 cursor-pointer flex items-center gap-1"
+                          >
+                            <Mail size={12} /> E-posta
+                          </button>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {subPage === 'enerji' && (
+            <div className="grid lg:grid-cols-2 gap-4">
+              <div className="bg-white border rounded-2xl p-5 space-y-4">
+                <div>
+                  <h3 className="text-xs font-black uppercase text-slate-800 flex items-center gap-2">
+                    <Zap size={14} className="text-amber-600" /> Sayaç Kesintisi Girişi
+                  </h3>
+                  <p className="text-[10px] text-slate-500 mt-1">
+                    Yalnızca işaretlediğiniz kalemler kesilir. Su / doğalgaz zorunlu değildir — sadece elektrik
+                    kesebilirsiniz. Son okuma, sonraki ayın ilk okuması olur.
+                  </p>
+                </div>
+
+                <label className="block space-y-1">
+                  <span className="text-[9px] font-black uppercase text-slate-500">Taşeron (kime kesilecek) *</span>
+                  <select
+                    value={selectedTaseronId}
+                    onChange={(e) => setSelectedTaseronId(e.target.value)}
+                    className="w-full text-xs font-bold p-2.5 bg-amber-50 border border-amber-200 rounded-xl"
+                  >
+                    {taseronlar.length === 0 ? (
+                      <option value="">Taşeron cari kartı yok</option>
+                    ) : (
+                      taseronlar.map((t) => (
+                        <option key={t.id} value={t.id}>
+                          {t.unvan} ({t.kod})
+                        </option>
+                      ))
+                    )}
+                  </select>
+                </label>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <label className="block space-y-1">
+                    <span className="text-[9px] font-black uppercase text-slate-500">Dönem ay</span>
+                    <select
+                      value={selectedAy}
+                      onChange={(e) => setSelectedAy(Number(e.target.value))}
+                      className="w-full text-xs p-2.5 border rounded-xl"
+                    >
+                      {Array.from({ length: 12 }, (_, i) => (
+                        <option key={i + 1} value={i + 1}>
+                          {ayAdi(i + 1)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="block space-y-1">
+                    <span className="text-[9px] font-black uppercase text-slate-500">Yıl</span>
+                    <select
+                      value={selectedYil}
+                      onChange={(e) => setSelectedYil(Number(e.target.value))}
+                      className="w-full text-xs p-2.5 border rounded-xl"
+                    >
+                      {[2024, 2025, 2026, 2027].map((y) => (
+                        <option key={y} value={y}>
+                          {y}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+
+                {!selectedTaseron ? (
+                  <p className="text-xs text-rose-600 font-semibold">Kesinti için taşeron seçin.</p>
+                ) : (
+                  <>
+                    <p className="text-[10px] font-bold text-amber-900 bg-amber-50 border border-amber-100 rounded-xl px-3 py-2">
+                      Seçili: {selectedTaseron.unvan} · {ayAdi(selectedAy)} {selectedYil}
+                    </p>
+                    <SayacBlock
+                      label="Elektrik (kWh)"
+                      icon="⚡"
+                      state={elek}
+                      setState={setElek}
+                      unit="kWh"
+                      aktif={aktifEnerji.ELEKTRIK}
+                      onAktifChange={(v) => setAktifEnerji((s) => ({ ...s, ELEKTRIK: v }))}
+                    />
+                    <SayacBlock
+                      label="Su (m³)"
+                      icon="💧"
+                      state={su}
+                      setState={setSu}
+                      unit="m³"
+                      aktif={aktifEnerji.SU}
+                      onAktifChange={(v) => setAktifEnerji((s) => ({ ...s, SU: v }))}
+                    />
+                    <SayacBlock
+                      label="Doğalgaz (m³)"
+                      icon="🔥"
+                      state={gaz}
+                      setState={setGaz}
+                      unit="m³"
+                      aktif={aktifEnerji.DOGALGAZ}
+                      onAktifChange={(v) => setAktifEnerji((s) => ({ ...s, DOGALGAZ: v }))}
+                    />
+                    <label className="block space-y-1">
+                      <span className="text-[9px] font-black uppercase text-slate-500">
+                        Açıklama / neden (isteğe bağlı)
+                      </span>
+                      <textarea
+                        value={enerjiAciklama}
+                        onChange={(e) => setEnerjiAciklama(e.target.value)}
+                        rows={2}
+                        placeholder="Örn. Ağustos elektrik tüketimi — şantiye barakası"
+                        className="w-full text-xs p-2.5 border rounded-xl"
+                      />
+                    </label>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={handleEnerjiKaydet}
+                        className="flex-1 py-2.5 bg-slate-900 text-white text-xs font-bold rounded-xl cursor-pointer"
+                      >
+                        Kaydet
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleEnerjiRapor}
+                        className="flex-1 py-2.5 bg-indigo-600 text-white text-xs font-bold rounded-xl cursor-pointer"
+                      >
+                        Ay Sonu Rapor + Arşiv
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+
+              <div className="bg-white border rounded-2xl p-5 space-y-3">
+                <div>
+                  <h3 className="text-xs font-black uppercase text-slate-800">Kesinti Listesi</h3>
+                  <p className="text-[10px] text-slate-500 mt-0.5">
+                    Kime, hangi dönem, hangi kalem, tutar — yapılan sayaç kesintileri
+                  </p>
+                </div>
+                <div className="space-y-2 max-h-[560px] overflow-y-auto pr-1">
+                  {enerjiKesintiListesi.length === 0 ? (
+                    <p className="text-xs text-slate-400 italic py-8 text-center">Henüz sayaç kesintisi yok.</p>
+                  ) : (
+                    enerjiKesintiListesi.map((k) => {
+                      const tutar = enerjiToplamTutar(k);
+                      const ozet = enerjiKalemOzet(k);
+                      const isSelected =
+                        k.taseronCariId === selectedTaseronId &&
+                        k.donemAy === donemAyStr &&
+                        k.donemYil === donemYilStr;
+                      return (
+                        <div
+                          key={k.id}
+                          className={`border rounded-xl p-3 space-y-1.5 ${
+                            isSelected ? 'border-amber-300 bg-amber-50/50' : 'border-slate-100 bg-slate-50/50'
+                          }`}
+                        >
+                          <div className="flex justify-between gap-2 items-start">
+                            <div>
+                              <p className="text-xs font-black text-slate-800">{k.taseronFirmaAdi}</p>
+                              <p className="text-[10px] text-slate-500 font-semibold">
+                                {ayAdi(Number(k.donemAy))} {k.donemYil} · Sayaç kesintisi
+                              </p>
+                            </div>
+                            <span className="text-xs font-black text-rose-700 whitespace-nowrap">
+                              {tutar.toLocaleString('tr-TR')} TL
+                            </span>
+                          </div>
+                          <p className="text-[10px] text-slate-700 font-medium">{ozet}</p>
+                          {k.aciklama && (
+                            <p className="text-[10px] text-slate-500 italic">Neden: {k.aciklama}</p>
+                          )}
+                          <p className="text-[9px] text-slate-400">
+                            {k.olusturanKullanici || '—'} ·{' '}
+                            {k.olusturmaTarihi
+                              ? new Date(k.olusturmaTarihi).toLocaleString('tr-TR')
+                              : ''}
+                          </p>
+                          <div className="flex gap-1.5 pt-1">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelectedTaseronId(k.taseronCariId);
+                                setSelectedAy(Number(k.donemAy));
+                                setSelectedYil(Number(k.donemYil));
+                              }}
+                              className="flex-1 py-1.5 text-[10px] font-bold rounded-lg bg-white border cursor-pointer"
+                            >
+                              Düzenle
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                downloadKibritciReportHtml(
+                                  buildEnerjiKesintiReportHtml(
+                                    k.taseronFirmaAdi,
+                                    Number(k.donemAy),
+                                    Number(k.donemYil),
+                                    k
+                                  ),
+                                  `enerji_${k.id}.html`
+                                )
+                              }
+                              className="p-1.5 border rounded-lg cursor-pointer"
+                              title="Rapor"
+                            >
+                              <Download size={12} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleEnerjiSil(k.id)}
+                              className="p-1.5 border border-rose-200 text-rose-600 rounded-lg cursor-pointer"
+                              title="Sil"
+                            >
+                              <Trash2 size={12} />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
               </div>
             </div>
           )}

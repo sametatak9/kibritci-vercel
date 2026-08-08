@@ -23,6 +23,7 @@ const DashboardScreen = lazy(() => import('./components/DashboardScreen').then(m
 const PersonelScreen = lazy(() => import('./components/PersonelScreen').then(m => ({ default: m.PersonelScreen })));
 const YoklamaScreen = lazy(() => import('./components/YoklamaScreen').then(m => ({ default: m.YoklamaScreen })));
 const FaaliyetPersonelScreen = lazy(() => import('./components/FaaliyetPersonelScreen').then(m => ({ default: m.FaaliyetPersonelScreen })));
+const SahaIsPlanKontrolScreen = lazy(() => import('./components/SahaIsPlanKontrolScreen').then(m => ({ default: m.SahaIsPlanKontrolScreen })));
 const MaasMerkeziScreen = lazy(() => import('./components/MaasMerkeziScreen').then(m => ({ default: m.MaasMerkeziScreen })));
 const PersonelIzinScreen = lazy(() => import('./components/PersonelIzinScreen').then(m => ({ default: m.PersonelIzinScreen })));
 const SatinAlmaScreen = lazy(() => import('./components/SatinAlmaScreen').then(m => ({ default: m.SatinAlmaScreen })));
@@ -54,7 +55,7 @@ import {
   KasaHareketi, AracBakim, Demisbas, KampOdasi, KampKaydi, KampYerleske, KampKat,
   HazirTutanak, CariKart, StokKart, EpostaGonderim, SahaFaaliyeti as SahaFaaliyetiType,
   OperatorFaaliyet, TaseronKesintiRaporu, TaseronEnerjiKaydi, TaseronYemekKaydi, MaaşOdeme, PersonelIslemGecmisi, CariKartIslem, StokKartIslem,
-  EvrakBaglantiGrubu, OnayliAnalizRaporu, ProgramliFaaliyet
+  EvrakBaglantiGrubu, OnayliAnalizRaporu, ProgramliFaaliyet, KiralikKamyonPuantajKaydi
 } from './types/erp';
 
 // Initial Mock Data
@@ -89,6 +90,8 @@ import { loadKampStateSnapshot, ensureYapıFromOdalari } from './lib/kampYapisi'
 import {
   evictActiveKampResidentsForPersonel,
   isPersonelAktifDurum,
+  reactivateEvictedKampStays,
+  detectMassKampEvictionDate,
 } from './lib/kampPlacementUtils';
 import { probeGeminiApi } from './lib/apiClient';
 import {
@@ -99,6 +102,7 @@ import {
 } from './lib/productionDataGuard';
 import {
   normalizeYetki,
+  isSoforYetki,
   getRoleHomeTab,
   isMobileRole,
   isStandaloneMobileRole,
@@ -119,6 +123,17 @@ import {
 import { collection, onSnapshot, doc, getDoc, query, orderBy, limit } from 'firebase/firestore';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { syncAuthClaimsFromServer } from './lib/authClaimsClient';
+import { assertErpWriteAuth, formatFirestoreWriteError } from './lib/authWriteGuard';
+import {
+  countYoklamaFilledDays,
+} from './lib/yoklamaGuard';
+import {
+  enqueueSahaFaaliyetSave,
+  fetchSahaFaaliyetById,
+  removeSahaFaaliyetSafe,
+  type SahaFaaliyetSaveSource,
+} from './lib/sahaFaaliyetPersistence';
+import { fetchYoklamaMapPreferFast, scheduleYoklamaMonthShardSync } from './lib/yoklamaPersistence';
 import { LoginScreen } from './components/LoginScreen';
 const YetkiVermeScreen = lazy(() => import('./components/YetkiVermeScreen').then(m => ({ default: m.YetkiVermeScreen })));
 const OperatorScreen = lazy(() => import('./components/OperatorScreen').then(m => ({ default: m.OperatorScreen })));
@@ -127,6 +142,7 @@ const PublicSatinAlmaShareScreen = lazy(() => import('./components/PublicSatinAl
 import { fetchSatinAlmaPublicShare } from './lib/satinAlmaPublicShare';
 import { installReportEmailGlobalBridge } from './lib/reportEmail';
 import { CANONICAL_ANA_FIRMA_ADI, isKibritciCompany, normalizeTurkishName } from './lib/yoklamaUtils';
+import { isActivePortalDurum } from './lib/roleClaims';
 import {
   buildSaIrsaliyeFormPrefill,
   type SaIrsaliyeFormPrefill,
@@ -240,17 +256,26 @@ export default function App() {
   const [loadingMsg, setLoadingMsg] = useState('Google Cloud Veritabanı bağlantısı kuruluyor...');
   const [startupError, setStartupError] = useState<{ message: string; step: string; technical?: string } | null>(null);
   const [geminiApiAlert, setGeminiApiAlert] = useState<string | null>(null);
+  const [authWriteWarning, setAuthWriteWarning] = useState<string | null>(null);
+  const [claimsTick, setClaimsTick] = useState(0);
   const [dashboardDataReady, setDashboardDataReady] = useState(false);
 
   // Global State Engine
   
-  // --- Toast Override ---
+  // --- Toast Override (FIRESTORE_TIMEOUT ham metin göstermesin) ---
   useEffect(() => {
     const originalAlert = window.alert;
     window.alert = (message) => {
-      window.dispatchEvent(new CustomEvent('app-toast', { detail: { message } }));
+      const raw = String(message ?? '');
+      const friendly =
+        /FIRESTORE_TIMEOUT/i.test(raw)
+          ? 'Bağlantı zaman aşımı. Yoklama büyük belge olduğu için PC’de yavaş gelebilir — «Sunucudan Yenile» ile tekrar deneyin veya sayfayı yenileyin (önbellekten açılabilir).'
+          : raw;
+      window.dispatchEvent(new CustomEvent('app-toast', { detail: { message: friendly } }));
     };
-    return () => { window.alert = originalAlert; };
+    return () => {
+      window.alert = originalAlert;
+    };
   }, []);
 
   const [personeller, setPersoneller] = useState<Personel[]>([]);
@@ -270,6 +295,7 @@ export default function App() {
   
   const [araclar, setAraclar] = useState<AracBakim[]>([]);
   const [demirbaslar, setDemirbaslar] = useState<Demisbas[]>([]);
+  const [kiralikKamyonPuantaj, setKiralikKamyonPuantaj] = useState<KiralikKamyonPuantajKaydi[]>([]);
   const [kampOdalari, setKampOdalari] = useState<KampOdasi[]>([]);
   const [kampKayitlari, setKampKayitlari] = useState<KampKaydi[]>([]);
   const [kampYerleskeleri, setKampYerleskeleri] = useState<KampYerleske[]>([]);
@@ -285,6 +311,25 @@ export default function App() {
   // Realtime user accounts & vehicle logs
   const [kullanicilar, setKullanicilar] = useState<Kullanici[]>([]);
   const [aracKmLoglari, setAracKmLoglari] = useState<any[]>([]);
+
+  // Eski "mobil istatistik" oturumu: yönetici/Formen için tam ERP sekmelerini geri aç
+  // NOT: kullanicilar declare edildikten sonra — aksi halde TDZ ("Cannot access before initialization")
+  useEffect(() => {
+    if (!currentUser || !isMobileMode || isMobileDirect) return;
+    const matched = findKullaniciByEmail(kullanicilar, currentUser?.email);
+    const yetki = normalizeYetki(matched?.yetki);
+    const email = currentUser?.email?.toLowerCase() || '';
+    const yonetici =
+      yetki === 'YÖNETİCİ' ||
+      yetki === 'KURUCU' ||
+      yetki === 'PROJE_MÜDÜRÜ' ||
+      email === 'sametatak9@gmail.com' ||
+      email === SECONDARY_ADMIN_EMAIL ||
+      email === 'santiye@kibritci.com';
+    if (!(yonetici || isIdariIslerRole(yetki) || yetki === 'FORMEN')) return;
+    setIsMobileDirect(true);
+    localStorage.setItem('kibritci_mobile_direct', 'true');
+  }, [currentUser, isMobileMode, isMobileDirect, kullanicilar]);
 
   // Operator & Heavy Equipment Activity Logs
   const [operatorFaaliyetleri, setOperatorFaaliyetleri] = useState<OperatorFaaliyet[]>([]);
@@ -323,10 +368,16 @@ export default function App() {
   const yeditepePersonelSeedRef = useRef(false);
   const yeditepeCariSeedRef = useRef(false);
   const kampRepairInFlightRef = useRef(false);
+  const yoklamaJsonSeenRef = useRef<string | null>(null);
+  const yoklamaSyncPendingRef = useRef<{
+    prev: AylikYoklamaMap;
+    next: AylikYoklamaMap;
+  } | null>(null);
   const personelAutoCreateBlocklistRef = useRef(new Set<string>());
   const personelDeletedIdBlocklistRef = useRef(new Set<string>());
   const kampKayitlariRef = useRef(kampKayitlari);
   const kampOdalariRef = useRef(kampOdalari);
+  const kampAutoRestoreTriedRef = useRef(false);
   kampKayitlariRef.current = kampKayitlari;
   kampOdalariRef.current = kampOdalari;
   const persistenceFailureRef = useRef<(collection: string, message: string) => void>((c, m) => {
@@ -416,7 +467,7 @@ export default function App() {
     if (viewGirisId) {
       setPublicLoading(true);
       void (async () => {
-        await ensureFirestoreAuth();
+        await ensureFirestoreAuth({ allowAnonymous: true });
         try {
           const snap = await getDoc(doc(db, 'personelGirisTalepleri', viewGirisId));
           if (snap.exists()) {
@@ -480,7 +531,7 @@ export default function App() {
                 localStorage.removeItem('kibritci_portal_session');
                 setCurrentUser(null);
                 setAuthLoading(false);
-              }, 12000);
+              }, 8000);
             }
             return;
           }
@@ -518,11 +569,36 @@ export default function App() {
     if (!firebaseUser || firebaseUser.isAnonymous) return;
 
     claimsSyncedRef.current = true;
-    void syncAuthClaimsFromServer(currentUser.email.toLowerCase()).catch((err) => {
-      console.warn('Claim senkronizasyonu atlandı:', err);
-      claimsSyncedRef.current = false;
-    });
+    void syncAuthClaimsFromServer(currentUser.email.toLowerCase())
+      .then(async () => {
+        try {
+          await auth.currentUser?.getIdToken(true);
+        } catch {
+          /* ignore */
+        }
+        setClaimsTick((t) => t + 1);
+      })
+      .catch((err) => {
+        console.warn('Claim senkronizasyonu atlandı:', err);
+        claimsSyncedRef.current = false;
+        setClaimsTick((t) => t + 1);
+      });
   }, [authLoading, currentUser?.email, currentUser?.uid]);
+
+  // ERP yazma oturumu uyarısı (anonim / durum claim)
+  useEffect(() => {
+    if (authLoading || !currentUser) {
+      setAuthWriteWarning(null);
+      return;
+    }
+    let cancelled = false;
+    void assertErpWriteAuth().then((msg) => {
+      if (!cancelled) setAuthWriteWarning(msg);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [authLoading, currentUser?.uid, currentUser?.email, claimsTick]);
 
   // Son görülme tarihini güncelle (Her 5 dakikada bir en fazla)
   useEffect(() => {
@@ -564,9 +640,9 @@ export default function App() {
         if (!authed) {
           setStartupError({
             message:
-              'Veritabanı güvenlik oturumu açılamadı. Firebase Console > Authentication > Sign-in method bölümünde Anonymous ve Email/Password etkin olmalı.',
+              'Veritabanına yazmak için e-posta oturumu gerekli. Anonim oturum kaydedemez — çıkış yapıp e-posta ve şifre ile yeniden giriş yapın.',
             step: 'Güvenli veritabanı oturumu kontrol ediliyor',
-            technical: 'ensureFirestoreAuth returned false',
+            technical: 'ensureFirestoreAuth returned false (anonymous or missing email session)',
           });
           setDbStatus('error');
           return;
@@ -584,19 +660,52 @@ export default function App() {
         // ciddi biçimde yavaşlatıyordu. Sadece canlı dinleyicisi olmayan küçük
         // yardımcı koleksiyonları arka planda yükle.
         if (!allowDemoSeed) {
-          void Promise.allSettled([
-            fetchCollection<Demisbas>('demirbaslar').then(setDemirbaslar),
-            fetchCollection<EpostaGonderim>('epostaGonderimleri').then(setEpostaGonderimleri),
-            fetchCollection<PersonelIslemGecmisi>('personelIslemGecmisi').then(setPersonelIslemGecmisi),
-            fetchCollection<CariKartIslem>('cariIslemGecmisi').then(setCariIslemGecmisi),
-            fetchCollection<StokKartIslem>('stokIslemGecmisi').then(setStokIslemGecmisi),
-          ]).then((results) => {
-            results.forEach((result, index) => {
-              if (result.status === 'rejected') {
-                console.warn(`Yardımcı koleksiyon ${index} arka planda yüklenemedi:`, result.reason);
-              }
+          const loadAuxiliaryCollections = () => {
+            void Promise.allSettled([
+              fetchCollection<Demisbas>('demirbaslar').then(setDemirbaslar),
+              fetchCollection<EpostaGonderim>('epostaGonderimleri').then(setEpostaGonderimleri),
+              fetchCollection<PersonelIslemGecmisi>('personelIslemGecmisi').then(setPersonelIslemGecmisi),
+              fetchCollection<CariKartIslem>('cariIslemGecmisi').then(setCariIslemGecmisi),
+              fetchCollection<StokKartIslem>('stokIslemGecmisi').then(setStokIslemGecmisi),
+            ]).then((results) => {
+              results.forEach((result, index) => {
+                if (result.status === 'rejected') {
+                  console.warn(`Yardımcı koleksiyon ${index} arka planda yüklenemedi:`, result.reason);
+                }
+              });
             });
-          });
+
+            // Demo kasa seed temizliği bir kez (her girişte yazma yükü olmasın)
+            const kasaCleanKey = 'kibritci_kasa_demo_cleaned_v1';
+            try {
+              if (typeof localStorage !== 'undefined' && !localStorage.getItem(kasaCleanKey)) {
+                void Promise.allSettled(
+                  INITIAL_KASA.map((seed) =>
+                    removeDocument('kasaHareketleri', seed.id).catch((err) =>
+                      console.warn('[kasa] demo seed silinemedi:', seed.id, err)
+                    )
+                  )
+                ).then(() => {
+                  try {
+                    localStorage.setItem(kasaCleanKey, '1');
+                  } catch {
+                    /* ignore */
+                  }
+                });
+              }
+            } catch {
+              /* ignore */
+            }
+          };
+
+          if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+            (window as Window & { requestIdleCallback: (cb: () => void, opts?: { timeout: number }) => number }).requestIdleCallback(
+              loadAuxiliaryCollections,
+              { timeout: 2500 }
+            );
+          } else {
+            setTimeout(loadAuxiliaryCollections, 600);
+          }
           return;
         }
 
@@ -656,7 +765,7 @@ export default function App() {
           safeLoad(seedCollectionIfEmpty('faturalar', INITIAL_FATURA), [], 'faturalar'),
           safeLoad(seedCollectionIfEmpty('evrakBaglantiGruplari', []), [], 'evrakBaglantiGruplari'),
           safeLoad(seedCollectionIfEmpty('onayliAnalizRaporlari', []), [], 'onayliAnalizRaporlari'),
-          safeLoad(seedCollectionIfEmpty('kasaHareketleri', INITIAL_KASA), [], 'kasaHareketleri'),
+          safeLoad(seedCollectionIfEmpty('kasaHareketleri', allowDemoSeed ? INITIAL_KASA : []), [], 'kasaHareketleri'),
           safeLoad(seedCollectionIfEmpty('araclar', INITIAL_ARAC), [], 'araclar'),
           safeLoad(seedCollectionIfEmpty('demirbaslar', []), [], 'demirbaslar'),
           safeLoad((async () => { await seedCollectionIfEmpty('kampOdalari', []); return await fetchCollection<KampOdasi>('kampOdalari'); })(), [], 'kampOdalari'),
@@ -836,7 +945,6 @@ export default function App() {
             const mergedSaha = reportData;
             void (async () => {
               try {
-                const { enqueueSahaFaaliyetSave } = await import('./lib/sahaFaaliyetPersistence');
                 for (const sf of mergedSaha) {
                   if (sf.id?.startsWith('SF-MAY26-') || sf.id?.startsWith('SF-HAZ26-')) {
                     await enqueueSahaFaaliyetSave(sf, 'legacy_bootstrap');
@@ -995,22 +1103,6 @@ export default function App() {
       markDashboardSnapshot('faturalar');
     }, markDashboardSnapshotError('faturalar'));
 
-    const unsubEvrakBaglanti = onSnapshot(collection(db, 'evrakBaglantiGruplari'), (snapshot) => {
-      const list: EvrakBaglantiGrubu[] = [];
-      snapshot.forEach((doc) => {
-        list.push({ id: doc.id, ...doc.data() } as any);
-      });
-      setEvrakBaglantiGruplari(list);
-    });
-
-    const unsubAnalizRapor = onSnapshot(collection(db, 'onayliAnalizRaporlari'), (snapshot) => {
-      const list: OnayliAnalizRaporu[] = [];
-      snapshot.forEach((doc) => {
-        list.push({ id: doc.id, ...doc.data() } as any);
-      });
-      setOnayliAnalizRaporlari(list);
-    });
-
     const unsubSatinAlma = onSnapshot(collection(db, 'satinAlmaTalepleri'), (snapshot) => {
       const list: SatinAlmaTalebi[] = [];
       snapshot.forEach((doc) => {
@@ -1019,6 +1111,210 @@ export default function App() {
       setSatinAlmaTalepleri(list);
       markDashboardSnapshot('satinAlmaTalepleri');
     }, markDashboardSnapshotError('satinAlmaTalepleri'));
+
+    // İkincil koleksiyonlar: ilk boyamayı hızlandırmak için kısa gecikmeyle bağlanır (salt okuma)
+    const deferredUnsubs: Array<() => void> = [];
+    let deferredStarted = false;
+    let deferredTimer: ReturnType<typeof setTimeout> | null = null;
+    let deferredIdleId: number | null = null;
+
+    const attachDeferredListeners = () => {
+      if (deferredStarted) return;
+      deferredStarted = true;
+
+      deferredUnsubs.push(
+        onSnapshot(collection(db, 'evrakBaglantiGruplari'), (snapshot) => {
+          const list: EvrakBaglantiGrubu[] = [];
+          snapshot.forEach((doc) => {
+            list.push({ id: doc.id, ...doc.data() } as any);
+          });
+          setEvrakBaglantiGruplari(list);
+        })
+      );
+
+      deferredUnsubs.push(
+        onSnapshot(collection(db, 'onayliAnalizRaporlari'), (snapshot) => {
+          const list: OnayliAnalizRaporu[] = [];
+          snapshot.forEach((doc) => {
+            list.push({ id: doc.id, ...doc.data() } as any);
+          });
+          setOnayliAnalizRaporlari(list);
+        })
+      );
+
+      deferredUnsubs.push(
+        onSnapshot(collection(db, 'sahaFaaliyetleri'), (snapshot) => {
+          const list: SahaFaaliyetiType[] = [];
+          snapshot.forEach((doc) => {
+            list.push({ id: doc.id, ...doc.data() } as any);
+          });
+          setSahaFaaliyetleri(list);
+        })
+      );
+
+      deferredUnsubs.push(
+        onSnapshot(collection(db, 'programliFaaliyetler'), (snapshot) => {
+          const list: ProgramliFaaliyet[] = [];
+          snapshot.forEach((doc) => {
+            list.push({ id: doc.id, ...doc.data() } as ProgramliFaaliyet);
+          });
+          setProgramliFaaliyetler(list);
+        })
+      );
+
+      deferredUnsubs.push(
+        onSnapshot(collection(db, 'kasaHareketleri'), (snapshot) => {
+          const list: KasaHareketi[] = [];
+          snapshot.forEach((docSnap) => {
+            list.push({ ...docSnap.data(), id: docSnap.id } as KasaHareketi);
+          });
+          setKasaHareketleri(list);
+        })
+      );
+
+      deferredUnsubs.push(
+        onSnapshot(collection(db, 'kampOdalari'), (snapshot) => {
+          const list: KampOdasi[] = [];
+          snapshot.forEach((doc) => {
+            list.push({ id: doc.id, ...doc.data() } as any);
+          });
+          setKampOdalari(list);
+          if (list.length > 0) markProductionLive();
+        })
+      );
+
+      deferredUnsubs.push(
+        onSnapshot(collection(db, 'kampKayitlari'), (snapshot) => {
+          const list: KampKaydi[] = [];
+          snapshot.forEach((doc) => {
+            list.push({ id: doc.id, ...doc.data() } as any);
+          });
+          setKampKayitlari(list);
+        })
+      );
+
+      deferredUnsubs.push(
+        onSnapshot(collection(db, 'kampYerleskeleri'), (snapshot) => {
+          const list: KampYerleske[] = [];
+          snapshot.forEach((doc) => {
+            list.push({ id: doc.id, ...doc.data() } as any);
+          });
+          setKampYerleskeleri(list);
+        })
+      );
+
+      deferredUnsubs.push(
+        onSnapshot(collection(db, 'kampKatlari'), (snapshot) => {
+          const list: KampKat[] = [];
+          snapshot.forEach((doc) => {
+            list.push({ id: doc.id, ...doc.data() } as any);
+          });
+          setKampKatlari(list);
+        })
+      );
+
+      deferredUnsubs.push(
+        onSnapshot(collection(db, 'araclar'), (snapshot) => {
+          const list: AracBakim[] = [];
+          snapshot.forEach((doc) => {
+            list.push({ id: doc.id, ...doc.data() } as any);
+          });
+          setAraclar(list);
+        })
+      );
+
+      deferredUnsubs.push(
+        onSnapshot(collection(db, 'aracKmLoglari'), (snapshot) => {
+          const list: any[] = [];
+          snapshot.forEach((doc) => {
+            list.push({ id: doc.id, ...doc.data() });
+          });
+          list.sort((a, b) => new Date(b.tarih || 0).getTime() - new Date(a.tarih || 0).getTime());
+          setAracKmLoglari(list);
+        })
+      );
+
+      deferredUnsubs.push(
+        onSnapshot(collection(db, 'kiralikKamyonPuantaj'), (snapshot) => {
+          const list: KiralikKamyonPuantajKaydi[] = [];
+          snapshot.forEach((docSnap) => {
+            list.push({ id: docSnap.id, ...docSnap.data() } as KiralikKamyonPuantajKaydi);
+          });
+          list.sort((a, b) => String(b.tarih || '').localeCompare(String(a.tarih || '')));
+          setKiralikKamyonPuantaj(list);
+        })
+      );
+
+      deferredUnsubs.push(
+        onSnapshot(collection(db, 'operatorFaaliyetleri'), (snapshot) => {
+          const list: OperatorFaaliyet[] = [];
+          snapshot.forEach((doc) => {
+            list.push({ id: doc.id, ...doc.data() } as any);
+          });
+          setOperatorFaaliyetleri(list);
+        })
+      );
+
+      deferredUnsubs.push(
+        onSnapshot(collection(db, 'taseronKesintiRaporlari'), (snapshot) => {
+          const list: TaseronKesintiRaporu[] = [];
+          snapshot.forEach((doc) => {
+            const data = doc.data() as TaseronKesintiRaporu;
+            list.push({ ...data, id: doc.id, kesintiTipi: data.kesintiTipi || 'IS_MAKINESI' });
+          });
+          setTaseronKesintiRaporlari(list);
+        })
+      );
+
+      deferredUnsubs.push(
+        onSnapshot(collection(db, 'taseronEnerjiKayitlari'), (snapshot) => {
+          const list: TaseronEnerjiKaydi[] = [];
+          snapshot.forEach((doc) => {
+            list.push({ id: doc.id, ...doc.data() } as TaseronEnerjiKaydi);
+          });
+          setTaseronEnerjiKayitlari(list);
+        })
+      );
+
+      deferredUnsubs.push(
+        onSnapshot(collection(db, 'taseronYemekKayitlari'), (snapshot) => {
+          const list: TaseronYemekKaydi[] = [];
+          snapshot.forEach((doc) => {
+            list.push({ id: doc.id, ...doc.data() } as TaseronYemekKaydi);
+          });
+          setTaseronYemekKayitlari(list);
+        })
+      );
+
+      deferredUnsubs.push(
+        onSnapshot(collection(db, 'maasOdemeleri'), (snapshot) => {
+          const list: MaaşOdeme[] = [];
+          snapshot.forEach((doc) => {
+            list.push({ id: doc.id, ...doc.data() } as any);
+          });
+          setMaasOdemeleri(list);
+        })
+      );
+
+      deferredUnsubs.push(
+        onSnapshot(collection(db, 'hazirTutanaklar'), (snapshot) => {
+          const list: HazirTutanak[] = [];
+          snapshot.forEach((docItem) => {
+            list.push({ id: docItem.id, ...docItem.data() } as any);
+          });
+          setHazirTutanaklar(list);
+        })
+      );
+    };
+
+    deferredTimer = setTimeout(attachDeferredListeners, 280);
+    if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+      deferredIdleId = (
+        window as Window & {
+          requestIdleCallback: (cb: () => void, opts?: { timeout: number }) => number;
+        }
+      ).requestIdleCallback(attachDeferredListeners, { timeout: 900 });
+    }
 
     const unsubPersonel = onSnapshot(collection(db, 'personeller'), (snapshot) => {
       const list: Personel[] = [];
@@ -1107,23 +1403,89 @@ export default function App() {
       }
     }, markDashboardSnapshotError('personeller'));
 
-    const unsubYoklamalar = onSnapshot(doc(db, 'yoklamalar', 'global_yoklama_map'), (snap) => {
-      if (!snap.exists()) return;
-      const data = parseYoklamaSnapshotData(snap.data() as Record<string, unknown>) as AylikYoklamaMap;
-      const personCount = Object.keys(data).length;
-      let totalDayKeys = 0;
-      let nonDateKeyCount = 0;
-      Object.values(data).forEach((personMap) => {
-        if (!personMap || typeof personMap !== 'object') return;
-        const keys = Object.keys(personMap as Record<string, unknown>);
-        totalDayKeys += keys.length;
-        keys.forEach((k) => {
-          if (!/^\d{4}-\d{2}-\d{2}$/.test(k)) nonDateKeyCount++;
+    const unsubYoklamalar = onSnapshot(
+      doc(db, 'yoklamalar', 'global_yoklama_map'),
+      (snap) => {
+        if (!snap.exists()) return;
+        const raw = snap.data() as Record<string, unknown>;
+        const rawJson = typeof raw.dataJson === 'string' ? raw.dataJson : null;
+        // Aynı payload tekrar parse/render edilmesin (kasma)
+        if (rawJson && rawJson === yoklamaJsonSeenRef.current) return;
+
+        const data = parseYoklamaSnapshotData(raw) as AylikYoklamaMap;
+        const nextFilled = countYoklamaFilledDays(data);
+        const fromCache = Boolean(snap.metadata?.fromCache);
+
+        setYoklamalar((prev) => {
+          const prevFilled = countYoklamaFilledDays(prev);
+          // Masaüstü IndexedDB bazen eski/zayıf paket döndürür — dolu haritayı ezme
+          if (
+            fromCache &&
+            prevFilled >= 80 &&
+            nextFilled < Math.max(30, prevFilled * 0.25)
+          ) {
+            console.warn('[yoklama] Cache snapshot küçülmesi yok sayıldı', {
+              prevFilled,
+              nextFilled,
+            });
+            return prev;
+          }
+          return data;
         });
-      });
-      setYoklamalar(data);
-      if (hasSubstantialYoklamaData(data)) markProductionLive();
-    });
+        // Ref'i yalnızca kabul edilen (veya ilk) paket için güncelle — zayıf cache ezmesin
+        if (
+          !(
+            fromCache &&
+            countYoklamaFilledDays(data) < 30 &&
+            (yoklamaJsonSeenRef.current?.length || 0) > 50_000
+          )
+        ) {
+          if (rawJson) yoklamaJsonSeenRef.current = rawJson;
+        }
+        if (hasSubstantialYoklamaData(data)) markProductionLive();
+      },
+      (err) => {
+        console.warn('Yoklama canlı dinleme hatası:', err);
+      }
+    );
+
+    // Açılış: PC'de getDocFromServer mega-belgeyi timeout'a düşürüyordu.
+    // Cache + ay shard öncelikli; sunucu sadece zayıfsa (PreferFast içinde).
+    void (async () => {
+      try {
+        await new Promise((r) => setTimeout(r, 600));
+        const now = new Date();
+        const ym = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+        const prev = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+        const prevYm = `${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, '0')}`;
+        const { map, dataJson, source } = await fetchYoklamaMapPreferFast({
+          yearMonths: [prevYm, ym],
+          allowServerForce: true,
+        });
+        const serverFilled = countYoklamaFilledDays(map);
+        setYoklamalar((prevMap) => {
+          const prevFilled = countYoklamaFilledDays(prevMap);
+          if (serverFilled >= prevFilled || prevFilled < 30) {
+            return map;
+          }
+          console.warn('[yoklama] Yüklenen paket zayıf, mevcut daha dolu korunuyor', {
+            prevFilled,
+            serverFilled,
+            source,
+          });
+          return prevMap;
+        });
+        if (dataJson && (serverFilled >= 30 || !yoklamaJsonSeenRef.current)) {
+          yoklamaJsonSeenRef.current = dataJson;
+        }
+        if (hasSubstantialYoklamaData(map)) {
+          markProductionLive();
+          scheduleYoklamaMonthShardSync(map);
+        }
+      } catch (err) {
+        console.warn('Yoklama hızlı yükleme atlandı (canlı dinleyici devam eder):', err);
+      }
+    })();
 
     const unsubKullanicilar = onSnapshot(collection(db, 'kullanicilar'), (snapshot) => {
       const raw = parseKullanicilarSnapshot(snapshot.docs) as Kullanici[];
@@ -1141,86 +1503,12 @@ export default function App() {
       }
     });
 
-    const unsubSahaFaaliyetleri = onSnapshot(collection(db, 'sahaFaaliyetleri'), (snapshot) => {
-      const list: SahaFaaliyetiType[] = [];
-      snapshot.forEach((doc) => {
-        list.push({ id: doc.id, ...doc.data() } as any);
-      });
-      setSahaFaaliyetleri(list);
-    });
-
-    const unsubProgramliFaaliyetler = onSnapshot(collection(db, 'programliFaaliyetler'), (snapshot) => {
-      const list: ProgramliFaaliyet[] = [];
-      snapshot.forEach((doc) => {
-        list.push({ id: doc.id, ...doc.data() } as ProgramliFaaliyet);
-      });
-      setProgramliFaaliyetler(list);
-    });
-
-    const unsubKasaHareketleri = onSnapshot(collection(db, 'kasaHareketleri'), (snapshot) => {
-      const list: KasaHareketi[] = [];
-      snapshot.forEach((doc) => {
-        list.push({ id: doc.id, ...doc.data() } as any);
-      });
-      setKasaHareketleri(list);
-    });
-
-    const unsubKampOdalari = onSnapshot(collection(db, 'kampOdalari'), (snapshot) => {
-      const list: KampOdasi[] = [];
-      snapshot.forEach((doc) => {
-        list.push({ id: doc.id, ...doc.data() } as any);
-      });
-      setKampOdalari(list);
-      if (list.length > 0) markProductionLive();
-    });
-
-    const unsubKampKayitlari = onSnapshot(collection(db, 'kampKayitlari'), (snapshot) => {
-      const list: KampKaydi[] = [];
-      snapshot.forEach((doc) => {
-        list.push({ id: doc.id, ...doc.data() } as any);
-      });
-      setKampKayitlari(list);
-    });
-
-    const unsubKampYerleskeleri = onSnapshot(collection(db, 'kampYerleskeleri'), (snapshot) => {
-      const list: KampYerleske[] = [];
-      snapshot.forEach((doc) => {
-        list.push({ id: doc.id, ...doc.data() } as any);
-      });
-      setKampYerleskeleri(list);
-    });
-
-    const unsubKampKatlari = onSnapshot(collection(db, 'kampKatlari'), (snapshot) => {
-      const list: KampKat[] = [];
-      snapshot.forEach((doc) => {
-        list.push({ id: doc.id, ...doc.data() } as any);
-      });
-      setKampKatlari(list);
-    });
-
     const unsubStoklar = onSnapshot(collection(db, 'stokKartlar'), (snapshot) => {
       const list: StokKart[] = [];
       snapshot.forEach((docSnap) => {
         list.push({ ...docSnap.data(), id: docSnap.id } as StokKart);
       });
       setStokKartlar(list);
-    });
-
-    const unsubAraclar = onSnapshot(collection(db, 'araclar'), (snapshot) => {
-      const list: AracBakim[] = [];
-      snapshot.forEach((doc) => {
-        list.push({ id: doc.id, ...doc.data() } as any);
-      });
-      setAraclar(list);
-    });
-
-    const unsubAracKm = onSnapshot(collection(db, 'aracKmLoglari'), (snapshot) => {
-      const list: any[] = [];
-      snapshot.forEach((doc) => {
-        list.push({ id: doc.id, ...doc.data() });
-      });
-      list.sort((a, b) => new Date(b.tarih || 0).getTime() - new Date(a.tarih || 0).getTime());
-      setAracKmLoglari(list);
     });
 
     const unsubCari = onSnapshot(collection(db, 'cariKartlar'), (snapshot) => {
@@ -1265,55 +1553,6 @@ export default function App() {
       }
     });
 
-    const unsubOperator = onSnapshot(collection(db, 'operatorFaaliyetleri'), (snapshot) => {
-      const list: OperatorFaaliyet[] = [];
-      snapshot.forEach((doc) => {
-        list.push({ id: doc.id, ...doc.data() } as any);
-      });
-      setOperatorFaaliyetleri(list);
-    });
-
-    const unsubTaseronKesinti = onSnapshot(collection(db, 'taseronKesintiRaporlari'), (snapshot) => {
-      const list: TaseronKesintiRaporu[] = [];
-      snapshot.forEach((doc) => {
-        const data = doc.data() as TaseronKesintiRaporu;
-        list.push({ ...data, id: doc.id, kesintiTipi: data.kesintiTipi || 'IS_MAKINESI' });
-      });
-      setTaseronKesintiRaporlari(list);
-    });
-
-    const unsubTaseronEnerji = onSnapshot(collection(db, 'taseronEnerjiKayitlari'), (snapshot) => {
-      const list: TaseronEnerjiKaydi[] = [];
-      snapshot.forEach((doc) => {
-        list.push({ id: doc.id, ...doc.data() } as TaseronEnerjiKaydi);
-      });
-      setTaseronEnerjiKayitlari(list);
-    });
-
-    const unsubTaseronYemek = onSnapshot(collection(db, 'taseronYemekKayitlari'), (snapshot) => {
-      const list: TaseronYemekKaydi[] = [];
-      snapshot.forEach((doc) => {
-        list.push({ id: doc.id, ...doc.data() } as TaseronYemekKaydi);
-      });
-      setTaseronYemekKayitlari(list);
-    });
-
-    const unsubMaasOde = onSnapshot(collection(db, 'maasOdemeleri'), (snapshot) => {
-      const list: MaaşOdeme[] = [];
-      snapshot.forEach((doc) => {
-        list.push({ id: doc.id, ...doc.data() } as any);
-      });
-      setMaasOdemeleri(list);
-    });
-
-    const unsubTutanaklar = onSnapshot(collection(db, 'hazirTutanaklar'), (snapshot) => {
-      const list: HazirTutanak[] = [];
-      snapshot.forEach((docItem) => {
-        list.push({ id: docItem.id, ...docItem.data() } as any);
-      });
-      setHazirTutanaklar(list);
-    });
-
     const qNotif = query(collection(db, 'bildirimler'), orderBy('tarih', 'desc'), limit(30));
     const unsubNotif = onSnapshot(qNotif, (snapshot) => {
       const list: any[] = [];
@@ -1324,32 +1563,26 @@ export default function App() {
     });
 
     return () => {
+      if (deferredTimer) clearTimeout(deferredTimer);
+      if (
+        deferredIdleId != null &&
+        typeof window !== 'undefined' &&
+        'cancelIdleCallback' in window
+      ) {
+        (
+          window as Window & { cancelIdleCallback: (id: number) => void }
+        ).cancelIdleCallback(deferredIdleId);
+      }
+      deferredUnsubs.forEach((u) => u());
       unsubIrsaliyeler();
       unsubFaturalar();
-      unsubEvrakBaglanti();
-      unsubAnalizRapor();
       unsubSatinAlma();
       unsubPersonel();
       unsubYoklamalar();
       unsubKullanicilar();
-      unsubSahaFaaliyetleri();
-      unsubProgramliFaaliyetler();
-      unsubKasaHareketleri();
-      unsubKampOdalari();
-      unsubKampKayitlari();
-      unsubKampYerleskeleri();
-      unsubKampKatlari();
       unsubNotif();
       unsubStoklar();
-      unsubAraclar();
-      unsubAracKm();
       unsubCari();
-      unsubOperator();
-      unsubTaseronKesinti();
-      unsubTaseronEnerji();
-      unsubTaseronYemek();
-      unsubMaasOde();
-      unsubTutanaklar();
     };
   }, [dbStatus, currentUser]);
 
@@ -1793,19 +2026,34 @@ export default function App() {
         setKampKayitlari(nextKayitlar);
       }
 
-      // 3. Aktif kamp sakinleri: silinen personeli yeniden oluşturma —
-      //    yetim oda kaydını tahliye et; yalnızca bilinçli misafir yerleşimleri için kart aç.
+      // 3. Aktif kamp sakinleri:
+      //    - personelId kaymışsa İSİMLE eşleştirip yeniden bağla (asla otomatik tahliye etme)
+      //    - yalnızca bilerek silinen / engelli listede olanları tahliye et
+      //    - kartı hiç yoksa (isimle de yok) misafir kartı oluştur — odadan düşürme
       const activeResidents = kampKayitlari.filter((k) => k.durum === 'AKTIF');
       const toCreate: Personel[] = [];
       const orphanKayitIds = new Set<string>();
+      const relinkPatches = new Map<string, string>(); // kayitId → personelId
 
       activeResidents.forEach((k) => {
-        const nameClean = k.personelIsim.trim();
+        const nameClean = (k.personelIsim || '').trim();
         if (!nameClean) return;
 
         const nameKeyLower = nameClean.toLocaleLowerCase('tr-TR');
         const nameKeyNorm = normalizeTurkishName(nameClean);
 
+        const existsById = Boolean(
+          k.personelId && personeller.some((p) => p.id === k.personelId)
+        );
+        const matchedByName = personeller.find((p) => {
+          const fullName = `${p.ad} ${p.soyad}`.trim();
+          return (
+            fullName.toLocaleLowerCase('tr-TR') === nameKeyLower ||
+            normalizeTurkishName(fullName) === nameKeyNorm
+          );
+        });
+
+        // Bilinçli silme engeli — yalnızca bunlar tahliye edilir
         if (personelAutoCreateBlocklistRef.current.has(nameKeyLower)) {
           orphanKayitIds.add(k.id);
           return;
@@ -1820,24 +2068,15 @@ export default function App() {
         }
         if (isPlaceholderPersonelName(nameClean)) return;
 
-        const existsById = Boolean(
-          k.personelId && personeller.some((p) => p.id === k.personelId)
-        );
-        const existsByName = personeller.some((p) => {
-          const fullName = `${p.ad} ${p.soyad}`.trim();
-          return (
-            fullName.toLocaleLowerCase('tr-TR') === nameKeyLower ||
-            normalizeTurkishName(fullName) === nameKeyNorm
-          );
-        });
-
-        // personelId vardı ama kart silinmiş → yeniden oluşturma, kamptan düşür
-        if (k.personelId && !existsById) {
-          orphanKayitIds.add(k.id);
+        // ID yok / kaymış ama isim mevcut → yeniden bağla (tahliye YOK)
+        if (!existsById && matchedByName) {
+          if (k.personelId !== matchedByName.id) {
+            relinkPatches.set(k.id, matchedByName.id);
+          }
           return;
         }
 
-        if (existsById || existsByName) return;
+        if (existsById || matchedByName) return;
 
         const alreadyQueued = toCreate.some((p) => {
           const fullName = `${p.ad} ${p.soyad}`.trim();
@@ -1894,9 +2133,24 @@ export default function App() {
 
       let workingKayitlar = kampKayitlari;
 
+      // ID yeniden bağlama — odada kalır
+      if (relinkPatches.size > 0) {
+        workingKayitlar = workingKayitlar.map((k) => {
+          const newPid = relinkPatches.get(k.id);
+          if (!newPid) return k;
+          const updated = { ...k, personelId: newPid };
+          void saveDocument('kampKayitlari', updated);
+          return updated;
+        });
+        setKampKayitlari(workingKayitlar);
+        console.log(
+          `[kamp] ${relinkPatches.size} yerleşim personelId yeniden bağlandı (tahliye yok)`
+        );
+      }
+
       if (orphanKayitIds.size > 0) {
         const cikisTarihi = new Date().toISOString().slice(0, 10);
-        workingKayitlar = kampKayitlari.map((k) =>
+        workingKayitlar = workingKayitlar.map((k) =>
           orphanKayitIds.has(k.id) && k.durum === 'AKTIF'
             ? { ...k, durum: 'PASIF' as const, cikisTarihi }
             : k
@@ -1955,6 +2209,59 @@ export default function App() {
     }
   }, [personeller, kampKayitlari]);
 
+  // Toplu yanlış tahliye (PASIF) tespit edilirse bir kez otomatik geri yükle
+  useEffect(() => {
+    if (kampAutoRestoreTriedRef.current) return;
+    if (!currentUser) return;
+    if (kampKayitlari.length === 0 || kampOdalari.length === 0) return;
+
+    const aktifCount = kampKayitlari.filter((k) => k.durum === 'AKTIF').length;
+    const mass = detectMassKampEvictionDate(kampKayitlari, 5);
+    if (!mass) return;
+
+    // Aktif yerleşim hâlâ doluysa dokunma
+    if (aktifCount >= mass.count) return;
+
+    const storageKey = `kibritci_kamp_auto_restore_${mass.date}`;
+    try {
+      if (localStorage.getItem(storageKey) === '1') {
+        kampAutoRestoreTriedRef.current = true;
+        return;
+      }
+    } catch {
+      /* ignore */
+    }
+
+    kampAutoRestoreTriedRef.current = true;
+
+    void (async () => {
+      try {
+        const result = await reactivateEvictedKampStays({
+          kampKayitlari: kampKayitlariRef.current,
+          kampOdalari: kampOdalariRef.current,
+          onlyCikisTarihi: mass.date,
+          blockedPersonelIds: personelDeletedIdBlocklistRef.current,
+          blockedNameKeys: personelAutoCreateBlocklistRef.current,
+        });
+        if (result.reactivatedCount > 0) {
+          setKampKayitlari(result.kampKayitlari);
+          setKampOdalari(result.kampOdalari);
+          console.info(
+            `[kamp] Toplu tahliye geri alındı: ${result.reactivatedCount} yerleşim (${mass.date}, atlanan ${result.skippedCount})`
+          );
+        }
+        try {
+          localStorage.setItem(storageKey, '1');
+        } catch {
+          /* ignore */
+        }
+      } catch (err) {
+        console.warn('[kamp] Otomatik yerleşim geri yükleme başarısız:', err);
+        kampAutoRestoreTriedRef.current = false;
+      }
+    })();
+  }, [currentUser, kampKayitlari, kampOdalari]);
+
 
   const setSatinAlmaTalepleriWithSync = (updater: SatinAlmaTalebi[] | ((s: SatinAlmaTalebi[]) => SatinAlmaTalebi[])) => {
     setSatinAlmaTalepleri(prev => {
@@ -2002,6 +2309,11 @@ export default function App() {
       syncListState('kasaHareketleri', prev, next, setKasaHareketleri);
       return next;
     });
+  };
+
+  const deleteKasaHareketi = async (id: string) => {
+    await removeDocument('kasaHareketleri', id);
+    setKasaHareketleri((prev) => prev.filter((k) => k.id !== id));
   };
 
   const setAraclarWithSync = (updater: AracBakim[] | ((a: AracBakim[]) => AracBakim[])) => {
@@ -2092,6 +2404,16 @@ export default function App() {
     setAracKmLoglari(prev => {
       const next = typeof updater === 'function' ? updater(prev) : updater;
       syncListState('aracKmLoglari', prev, next, setAracKmLoglari);
+      return next;
+    });
+  };
+
+  const setKiralikKamyonPuantajWithSync = (
+    updater: KiralikKamyonPuantajKaydi[] | ((k: KiralikKamyonPuantajKaydi[]) => KiralikKamyonPuantajKaydi[])
+  ) => {
+    setKiralikKamyonPuantaj((prev) => {
+      const next = typeof updater === 'function' ? updater(prev) : updater;
+      syncListState('kiralikKamyonPuantaj', prev, next, setKiralikKamyonPuantaj);
       return next;
     });
   };
@@ -2250,38 +2572,100 @@ export default function App() {
   };
 
   const notifyYoklamaSaveFailure = (message: string) => {
-    console.error('[yoklama]', message);
-    void addNotification(`⚠️ Yoklama kaydı korundu: ${message}`);
+    const friendly = formatFirestoreWriteError(message, message);
+    console.error('[yoklama]', friendly);
+    void addNotification(`⚠️ Yoklama kaydı korundu: ${friendly}`);
   };
 
   persistenceFailureRef.current = (collection, message) => {
-    console.error(`[persist:${collection}]`, message);
-    void addNotification(`⚠️ ${collection} kaydı korundu: ${message}`);
+    const friendly = formatFirestoreWriteError(message, message);
+    console.error(`[persist:${collection}]`, friendly);
+    void addNotification(`⚠️ ${collection} kaydı korundu: ${friendly}`);
   };
 
   const saveYoklamalarNow = async (
     next: AylikYoklamaMap,
     kaynak: import('./lib/yoklamaPersistence').YoklamaSaveSource = 'formen_mobil'
   ) => {
+    const authBlock = await assertErpWriteAuth();
+    if (authBlock) {
+      notifyYoklamaSaveFailure(authBlock);
+      throw new Error(authBlock);
+    }
     const result = await saveYoklamaDocument(next, kaynak);
     if (!result.ok) {
       notifyYoklamaSaveFailure(result.error || 'Bilinmeyen hata');
       throw new Error(result.error || 'Yoklama kaydedilemedi');
     }
-    setYoklamalar(next);
+    setYoklamalar(result.map || next);
+    if (result.map) {
+      try {
+        yoklamaJsonSeenRef.current = JSON.stringify(result.map);
+      } catch {
+        /* ignore */
+      }
+    }
     return result;
+  };
+
+  /** Masaüstü: cache + ay shard öncelikli; mega-belge sunucu yalnızca gerekirse. */
+  const reloadYoklamalarFromServer = async () => {
+    const now = new Date();
+    const months: string[] = [];
+    for (let i = -3; i <= 1; i++) {
+      const d = new Date(now.getFullYear(), now.getMonth() + i, 1);
+      months.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+    }
+    const { map, dataJson, source } = await fetchYoklamaMapPreferFast({
+      yearMonths: months,
+      allowServerForce: true,
+    });
+    if (dataJson) yoklamaJsonSeenRef.current = dataJson;
+    setYoklamalar(map);
+    if (hasSubstantialYoklamaData(map)) {
+      markProductionLive();
+      scheduleYoklamaMonthShardSync(map);
+    }
+    console.info('[yoklama] yenileme kaynağı:', source);
+    return {
+      personCount: Object.keys(map || {}).length,
+      filledDayCount: countYoklamaFilledDays(map),
+      map,
+    };
   };
 
   const setYoklamalarWithSync = (updater: AylikYoklamaMap | ((y: AylikYoklamaMap) => AylikYoklamaMap)) => {
     setYoklamalar((prev) => {
       const next = typeof updater === 'function' ? updater(prev) : updater;
-      void saveYoklamaDocument(next, 'sync').then((result) => {
+      if (next === prev) return prev;
+      yoklamaSyncPendingRef.current = { prev, next };
+      return next;
+    });
+    // Yan etki state updater dışında (StrictMode çift çağrıda çift yazma riski yok)
+    queueMicrotask(() => {
+      const pending = yoklamaSyncPendingRef.current;
+      if (!pending) return;
+      yoklamaSyncPendingRef.current = null;
+      const { prev, next } = pending;
+      void (async () => {
+        const authBlock = await assertErpWriteAuth();
+        if (authBlock) {
+          setYoklamalar(prev);
+          notifyYoklamaSaveFailure(authBlock);
+          return;
+        }
+        const result = await saveYoklamaDocument(next, 'sync');
         if (!result.ok) {
           setYoklamalar(prev);
           notifyYoklamaSaveFailure(result.error || 'Yoklama kaydı sunucuya yazılamadı');
+          return;
         }
-      });
-      return next;
+        if (result.map) {
+          const rawJson = JSON.stringify(result.map);
+          yoklamaJsonSeenRef.current = rawJson;
+          setYoklamalar(result.map);
+        }
+      })();
     });
   };
 
@@ -2292,11 +2676,13 @@ export default function App() {
 
   const saveSahaFaaliyetNow = async (
     record: SahaFaaliyetiType,
-    kaynak: import('./lib/sahaFaaliyetPersistence').SahaFaaliyetSaveSource = 'formen_mobil'
+    kaynak: SahaFaaliyetSaveSource = 'formen_mobil'
   ) => {
-    const { enqueueSahaFaaliyetSave, fetchSahaFaaliyetById } = await import(
-      './lib/sahaFaaliyetPersistence'
-    );
+    const authBlock = await assertErpWriteAuth();
+    if (authBlock) {
+      notifySahaFaaliyetFailure(authBlock);
+      throw new Error(authBlock);
+    }
     const result = await enqueueSahaFaaliyetSave(record, kaynak);
     if (!result.ok) {
       notifySahaFaaliyetFailure(result.error || 'Bilinmeyen hata');
@@ -2318,7 +2704,6 @@ export default function App() {
   };
 
   const removeSahaFaaliyetNow = async (record: SahaFaaliyetiType) => {
-    const { removeSahaFaaliyetSafe } = await import('./lib/sahaFaaliyetPersistence');
     const result = await removeSahaFaaliyetSafe(record.id, 'delete', record);
     if (!result.ok) {
       notifySahaFaaliyetFailure(result.error || 'Silme işlemi engellendi');
@@ -2556,6 +2941,19 @@ export default function App() {
   }
 
   const matchedU = findKullaniciByEmail(kullanicilar, currentUser?.email);
+  const soforPortalUser = matchedU
+    ? {
+        ...currentUser,
+        ...matchedU,
+        email: currentUser?.email || matchedU.email,
+        displayName: currentUser?.displayName,
+        matchedPersonelId:
+          matchedU.matchedPersonelId ||
+          (matchedU.tcNo
+            ? personeller.find((p) => String(p.tcNo || '').trim() === String(matchedU.tcNo).trim())?.id
+            : undefined),
+      }
+    : currentUser;
   const userYetki = normalizeYetki(matchedU?.yetki);
   const emailLower = currentUser?.email?.toLowerCase();
   const isFounderAccount = emailLower === 'sametatak9@gmail.com';
@@ -2579,7 +2977,8 @@ export default function App() {
   const isAllowedKampci = userYetki === 'KAMPÇI' || isYonetici;
   const isAllowedTesisatci = userYetki === 'TESİSATÇI' || isYonetici;
   const isAllowedMermerci = userYetki === 'MERMERCİ' || isYonetici;
-  const isAllowedLojistik = userYetki === 'LOJİSTİK' || isYonetici;
+  /** Şöför Mobil: yalnızca ŞÖFÖR/LOJİSTİK yetkisi (yönetici önizleme) */
+  const isAllowedLojistik = isSoforYetki(userYetki) || isYonetici;
   const isAllowedDepocu = userYetki === 'DEPOCU' || isYonetici;
   const isTabRestricted = isPrivilegedAdmin
     ? false
@@ -2627,6 +3026,8 @@ export default function App() {
           userYetki={matchedU?.yetki}
           isStandalone={true}
           addNotification={addNotification}
+          satinAlmaTalepleri={satinAlmaTalepleri}
+          irsaliyeler={irsaliyeler}
         />
       );
     }
@@ -2649,6 +3050,10 @@ export default function App() {
           saveYoklamalarNow={saveYoklamalarNow}
           stokKartlar={stokKartlar}
           faturalar={faturalar}
+          setFaturalar={setFaturalarWithSync}
+          irsaliyeler={irsaliyeler}
+          setIrsaliyeler={setIrsaliyelerWithSync}
+          setCariIslemGecmisi={setCariIslemGecmisiWithSync}
           currentUser={currentUser}
           onSignOut={handleSignOut}
           isStandalone={true}
@@ -2665,6 +3070,9 @@ export default function App() {
           saveYoklamalarNow={saveYoklamalarNow}
           cariKartlar={cariKartlar}
           faturalar={faturalar}
+          setFaturalar={setFaturalarWithSync}
+          irsaliyeler={irsaliyeler}
+          setIrsaliyeler={setIrsaliyelerWithSync}
           kampYerleskeleri={kampYerleskeleri}
           setCariKartlar={setCariKartlarWithSync}
           setCariIslemGecmisi={setCariIslemGecmisiWithSync}
@@ -2689,7 +3097,7 @@ export default function App() {
         />
       );
     }
-    if (userYetki === 'LOJİSTİK') {
+    if (isSoforYetki(userYetki)) {
       return (
         <LojistikScreen
           irsaliyeler={irsaliyeler}
@@ -2699,7 +3107,33 @@ export default function App() {
           setAraclar={setAraclarWithSync}
           aracKmLoglari={aracKmLoglari}
           setAracKmLoglari={setAracKmLoglariWithSync}
+          currentUser={soforPortalUser}
+          personeller={personeller}
+          yoklamalar={yoklamalar}
+          setYoklamalar={setYoklamalarWithSync}
+          saveYoklamalarNow={saveYoklamalarNow}
+          addNotification={addNotification}
+          onSignOut={handleSignOut}
+          isStandalone={true}
+        />
+      );
+    }
+    if (userYetki === 'OPERATÖR') {
+      return (
+        <OperatorScreen
+          araclar={araclar}
+          personeller={personeller}
+          cariKartlar={cariKartlar}
+          operatorFaaliyetleri={operatorFaaliyetleri}
+          setOperatorFaaliyetleri={setOperatorFaaliyetleriWithSync}
+          taseronKesintiRaporlari={taseronKesintiRaporlari}
+          setTaseronKesintiRaporlari={setTaseronKesintiRaporlariWithSync}
+          setCariIslemGecmisi={setCariIslemGecmisiWithSync}
           currentUser={currentUser}
+          addNotification={addNotification}
+          yoklamalar={yoklamalar}
+          setYoklamalar={setYoklamalarWithSync}
+          saveYoklamalarNow={saveYoklamalarNow}
           onSignOut={handleSignOut}
           isStandalone={true}
         />
@@ -2739,24 +3173,8 @@ export default function App() {
 
   if (isMobileMode && currentUser) {
     const role = userYetki;
-    if (role === 'FORMEN') {
-      return (
-        <FormenScreen
-          personeller={personeller}
-          yoklamalar={yoklamalar}
-          setYoklamalar={setYoklamalarWithSync}
-          saveYoklamalarNow={saveYoklamalarNow}
-          sahaFaaliyetleri={sahaFaaliyetleri}
-          setSahaFaaliyetleri={setSahaFaaliyetleriWithSync}
-          saveSahaFaaliyetNow={saveSahaFaaliyetNow}
-          removeSahaFaaliyetNow={removeSahaFaaliyetNow}
-          currentUser={currentUser}
-          onSignOut={handleSignOut}
-          isStandalone={true}
-          kullanicilar={kullanicilar}
-        />
-      );
-    }
+    // FORMEN çok sekmeli (Mobil + Faaliyeti Olan Personeller + …) — tam ekran kilitlenmez;
+    // normal kabuk + sidebar ile faaliyet_personel vb. görünür.
     if (role === 'GÜVENLİK') {
       return (
         <GuvenlikScreen
@@ -2766,6 +3184,8 @@ export default function App() {
           userYetki={matchedU?.yetki}
           isStandalone={true}
           addNotification={addNotification}
+          satinAlmaTalepleri={satinAlmaTalepleri}
+          irsaliyeler={irsaliyeler}
         />
       );
     }
@@ -2788,6 +3208,10 @@ export default function App() {
           saveYoklamalarNow={saveYoklamalarNow}
           stokKartlar={stokKartlar}
           faturalar={faturalar}
+          setFaturalar={setFaturalarWithSync}
+          irsaliyeler={irsaliyeler}
+          setIrsaliyeler={setIrsaliyelerWithSync}
+          setCariIslemGecmisi={setCariIslemGecmisiWithSync}
           currentUser={currentUser}
           onSignOut={handleSignOut}
           isStandalone={true}
@@ -2804,6 +3228,9 @@ export default function App() {
           saveYoklamalarNow={saveYoklamalarNow}
           cariKartlar={cariKartlar}
           faturalar={faturalar}
+          setFaturalar={setFaturalarWithSync}
+          irsaliyeler={irsaliyeler}
+          setIrsaliyeler={setIrsaliyelerWithSync}
           kampYerleskeleri={kampYerleskeleri}
           setCariKartlar={setCariKartlarWithSync}
           setCariIslemGecmisi={setCariIslemGecmisiWithSync}
@@ -2828,7 +3255,7 @@ export default function App() {
         />
       );
     }
-    if (role === 'LOJİSTİK') {
+    if (isSoforYetki(role)) {
       return (
         <LojistikScreen
           irsaliyeler={irsaliyeler}
@@ -2838,7 +3265,33 @@ export default function App() {
           setAraclar={setAraclarWithSync}
           aracKmLoglari={aracKmLoglari}
           setAracKmLoglari={setAracKmLoglariWithSync}
+          currentUser={soforPortalUser}
+          personeller={personeller}
+          yoklamalar={yoklamalar}
+          setYoklamalar={setYoklamalarWithSync}
+          saveYoklamalarNow={saveYoklamalarNow}
+          addNotification={addNotification}
+          onSignOut={handleSignOut}
+          isStandalone={true}
+        />
+      );
+    }
+    if (role === 'OPERATÖR') {
+      return (
+        <OperatorScreen
+          araclar={araclar}
+          personeller={personeller}
+          cariKartlar={cariKartlar}
+          operatorFaaliyetleri={operatorFaaliyetleri}
+          setOperatorFaaliyetleri={setOperatorFaaliyetleriWithSync}
+          taseronKesintiRaporlari={taseronKesintiRaporlari}
+          setTaseronKesintiRaporlari={setTaseronKesintiRaporlariWithSync}
+          setCariIslemGecmisi={setCariIslemGecmisiWithSync}
           currentUser={currentUser}
+          addNotification={addNotification}
+          yoklamalar={yoklamalar}
+          setYoklamalar={setYoklamalarWithSync}
+          saveYoklamalarNow={saveYoklamalarNow}
           onSignOut={handleSignOut}
           isStandalone={true}
         />
@@ -2875,9 +3328,16 @@ export default function App() {
       );
     }
 
-    if (isMobileDirect) {
-      // Fall through to normal responsive layout
-    } else {
+    // FORMEN / yönetici / idari: mobilde de tam kabuk (Yoklama, Faaliyet, Saha sekmeleri).
+    // Eski "MOBİL SÜRÜM (İSTATİSTİK)" MobileManagerScreen bu sekmeleri tamamen yutuyordu.
+    const keepFullErpShell =
+      isMobileDirect ||
+      role === 'FORMEN' ||
+      isYonetici ||
+      isIdariIsler ||
+      !isMobileRole(role);
+
+    if (!keepFullErpShell) {
       return (
         <MobileManagerScreen
           currentUser={currentUser}
@@ -2932,10 +3392,11 @@ export default function App() {
           onClose={() => setIsSidebarOpen(false)}
           kisitliSayfalar={sanitizeKisitliSayfalar(userYetki, matchedU?.kisitliSayfalar)}
           onToggleMobileMode={() => {
+            // Tam ERP kabuğu (sidebar + Yoklama/Faaliyet/Saha); istatistik kabuğu sekmeleri yutmasın
             setIsMobileMode(true);
-            setIsMobileDirect(false);
+            setIsMobileDirect(true);
             localStorage.setItem('kibritci_mobile_mode', 'true');
-            localStorage.setItem('kibritci_mobile_direct', 'false');
+            localStorage.setItem('kibritci_mobile_direct', 'true');
           }}
         />
       )}
@@ -2978,9 +3439,9 @@ export default function App() {
             onNotificationClick={handleNotificationClick}
             onToggleMobileMode={() => {
               setIsMobileMode(true);
-              setIsMobileDirect(false);
+              setIsMobileDirect(true);
               localStorage.setItem('kibritci_mobile_mode', 'true');
-              localStorage.setItem('kibritci_mobile_direct', 'false');
+              localStorage.setItem('kibritci_mobile_direct', 'true');
             }}
             onProfileClick={() => setIsProfileModalOpen(true)}
             pendingOnayCount={countChromePendingOnay({
@@ -3003,6 +3464,22 @@ export default function App() {
           />
         )}
 
+        {authWriteWarning && (
+          <div className="shrink-0 border-b border-rose-500/50 bg-rose-950/95 px-4 py-2.5 text-[11px] leading-relaxed text-rose-50 flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <span className="font-bold text-rose-200">Kayıt engeli:</span>{' '}
+              {authWriteWarning}
+            </div>
+            <button
+              type="button"
+              onClick={() => void handleSignOut()}
+              className="shrink-0 rounded-lg bg-rose-600 hover:bg-rose-500 px-3 py-1.5 text-[10px] font-black uppercase tracking-wide text-white cursor-pointer"
+            >
+              Çıkış / Yeniden Giriş
+            </button>
+          </div>
+        )}
+
         {geminiApiAlert && !hideSidebarAndTopbar && isFounderAccount && (
           <div className="shrink-0 border-b border-amber-500/40 bg-amber-950/90 px-4 py-2 text-[11px] leading-relaxed text-amber-100">
             <span className="font-bold text-amber-300">Yapay zeka API uyarısı:</span>{' '}
@@ -3018,7 +3495,7 @@ export default function App() {
             const matchedYetki = normalizeYetki(matchedUser?.yetki);
             const currentEmail = currentUser?.email?.toLowerCase();
             const privileged = currentEmail === 'sametatak9@gmail.com' || currentEmail === SECONDARY_ADMIN_EMAIL;
-            const hasActiveMobileRole = isMobileRole(matchedYetki) && matchedUser?.durum === 'AKTİF';
+            const hasActiveMobileRole = isMobileRole(matchedYetki) && isActivePortalDurum(matchedUser?.durum);
             const isBlocked =
               !privileged &&
               !hasActiveMobileRole &&
@@ -3120,6 +3597,7 @@ export default function App() {
                   yoklamalar={yoklamalar}
                   setYoklamalar={setYoklamalarWithSync}
                   saveYoklamalarNow={saveYoklamalarNow}
+                  reloadYoklamalarFromServer={reloadYoklamalarFromServer}
                   addNotification={addNotification}
                   sahaFaaliyetleri={sahaFaaliyetleri}
                   onOpenFaaliyetPersonel={() => handleTabNavigation('faaliyet_personel')}
@@ -3132,8 +3610,18 @@ export default function App() {
                   yoklamalar={yoklamalar}
                   sahaFaaliyetleri={sahaFaaliyetleri}
                   setSahaFaaliyetleri={setSahaFaaliyetleriWithSync}
+                  saveSahaFaaliyetNow={saveSahaFaaliyetNow}
+                  removeSahaFaaliyetNow={removeSahaFaaliyetNow}
                   currentUser={currentUser}
                   canAssignProgram={isAllowedFormen}
+                />
+              )}
+
+              {activeTab === "saha_is_plan" && (
+                <SahaIsPlanKontrolScreen
+                  personeller={personeller}
+                  yoklamalar={yoklamalar}
+                  currentUser={currentUser}
                 />
               )}
 
@@ -3242,6 +3730,7 @@ export default function App() {
                   setTaseronEnerjiKayitlari={setTaseronEnerjiKayitlariWithSync}
                   taseronYemekKayitlari={taseronYemekKayitlari}
                   setTaseronYemekKayitlari={setTaseronYemekKayitlariWithSync}
+                  setCariIslemGecmisi={setCariIslemGecmisiWithSync}
                   addNotification={addNotification}
                   currentUser={currentUser}
                 />
@@ -3264,6 +3753,8 @@ export default function App() {
                 <KasaScreen 
                   kasaHareketleri={kasaHareketleri}
                   setKasaHareketleri={setKasaHareketleriWithSync}
+                  deleteKasaHareketi={deleteKasaHareketi}
+                  personeller={personeller}
                 />
               )}
 
@@ -3277,6 +3768,9 @@ export default function App() {
                   setStokIslemGecmisi={setStokIslemGecmisiWithSync}
                   faturalar={faturalar}
                   setFaturalar={setFaturalarWithSync}
+                  irsaliyeler={irsaliyeler}
+                  setIrsaliyeler={setIrsaliyelerWithSync}
+                  satinAlmaTalepleri={satinAlmaTalepleri}
                   cariIslemGecmisi={cariIslemGecmisi}
                   setCariIslemGecmisi={setCariIslemGecmisiWithSync}
                   personeller={personeller}
@@ -3320,12 +3814,16 @@ export default function App() {
                   yoklamalar={yoklamalar}
                   setYoklamalar={setYoklamalarWithSync}
                   saveYoklamalarNow={saveYoklamalarNow}
+                  kiralikKamyonPuantaj={kiralikKamyonPuantaj}
+                  setKiralikKamyonPuantaj={setKiralikKamyonPuantajWithSync}
+                  addNotification={addNotification}
+                  currentUser={currentUser}
                 />
               )}
 
 
               {activeTab === "onay_islemleri" && (
-                  <OnayIslemleriScreen 
+                  <OnayIslemleriScreen
                   satinAlmaTalepleri={satinAlmaTalepleri}
                   setSatinAlmaTalepleri={setSatinAlmaTalepleriWithSync}
                   irsaliyeler={irsaliyeler}
@@ -3343,6 +3841,12 @@ export default function App() {
                   stokKartlar={stokKartlar}
                   setStokKartlar={setStokKartlarWithSync}
                   setStokIslemGecmisi={setStokIslemGecmisiWithSync}
+                  personeller={personeller}
+                  setPersoneller={setPersonellerWithSync}
+                  kampKayitlari={kampKayitlari}
+                  setKampKayitlari={setKampKayitlari}
+                  kampOdalari={kampOdalari}
+                  setKampOdalari={setKampOdalari}
                 />
               )}
 
@@ -3374,6 +3878,8 @@ export default function App() {
                     onSignOut={handleSignOut}
                     userYetki={matchedU?.yetki}
                     addNotification={addNotification}
+                    satinAlmaTalepleri={satinAlmaTalepleri}
+                    irsaliyeler={irsaliyeler}
                   />
                 ) : renderAccessDenied()
               )}
@@ -3397,6 +3903,10 @@ export default function App() {
                     saveYoklamalarNow={saveYoklamalarNow}
                     stokKartlar={stokKartlar}
                     faturalar={faturalar}
+                    setFaturalar={setFaturalarWithSync}
+                    irsaliyeler={irsaliyeler}
+                    setIrsaliyeler={setIrsaliyelerWithSync}
+                    setCariIslemGecmisi={setCariIslemGecmisiWithSync}
                     currentUser={currentUser}
                     onSignOut={handleSignOut}
                     addNotification={addNotification}
@@ -3413,6 +3923,9 @@ export default function App() {
                     saveYoklamalarNow={saveYoklamalarNow}
                     cariKartlar={cariKartlar}
                     faturalar={faturalar}
+                    setFaturalar={setFaturalarWithSync}
+                    irsaliyeler={irsaliyeler}
+                    setIrsaliyeler={setIrsaliyelerWithSync}
                     kampYerleskeleri={kampYerleskeleri}
                     setCariKartlar={setCariKartlarWithSync}
                     setCariIslemGecmisi={setCariIslemGecmisiWithSync}
@@ -3447,7 +3960,12 @@ export default function App() {
                     setAraclar={setAraclarWithSync}
                     aracKmLoglari={aracKmLoglari}
                     setAracKmLoglari={setAracKmLoglariWithSync}
-                    currentUser={currentUser}
+                    currentUser={soforPortalUser}
+                    personeller={personeller}
+                    yoklamalar={yoklamalar}
+                    setYoklamalar={setYoklamalarWithSync}
+                    saveYoklamalarNow={saveYoklamalarNow}
+                    addNotification={addNotification}
                     onSignOut={handleSignOut}
                     isStandalone={hideSidebarAndTopbar}
                   />
@@ -3495,7 +4013,6 @@ export default function App() {
               )}
 
               {activeTab === "kibar_hakedis" && (
-                isPrivilegedAdmin || emailLower === 'santiye@kibritci.com' ? (
                   <KibarHakedisScreen
                     personeller={personeller}
                     yoklamalar={yoklamalar}
@@ -3503,11 +4020,10 @@ export default function App() {
                     programliFaaliyetler={programliFaaliyetler}
                     currentUser={currentUser}
                   />
-                ) : renderAccessDenied()
               )}
 
               {activeTab === "operator" && (
-                isYonetici ? (
+                isYonetici || userYetki === 'OPERATÖR' ? (
                   <OperatorScreen
                     araclar={araclar}
                     personeller={personeller}
@@ -3516,8 +4032,14 @@ export default function App() {
                     setOperatorFaaliyetleri={setOperatorFaaliyetleriWithSync}
                     taseronKesintiRaporlari={taseronKesintiRaporlari}
                     setTaseronKesintiRaporlari={setTaseronKesintiRaporlariWithSync}
+                    setCariIslemGecmisi={setCariIslemGecmisiWithSync}
                     currentUser={currentUser}
                     addNotification={addNotification}
+                    yoklamalar={yoklamalar}
+                    setYoklamalar={setYoklamalarWithSync}
+                    saveYoklamalarNow={saveYoklamalarNow}
+                    onSignOut={handleSignOut}
+                    isStandalone={hideSidebarAndTopbar}
                   />
                 ) : renderAccessDenied()
               )}

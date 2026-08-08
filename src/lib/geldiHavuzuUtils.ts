@@ -1,14 +1,15 @@
-import { AylikYoklamaMap, Personel, SahaFaaliyeti, YoklamaDurum } from '../types/erp';
+import { AylikYoklamaMap, KampFaaliyet, Personel, SahaFaaliyeti, YoklamaDurum } from '../types/erp';
 import { normalizeDateKey } from './dateKeyUtils';
 import { getFaaliyetFotolar } from './sahaFaaliyetUtils';
 import {
   findPersonelByName,
   getYoklamaDay,
   isIdariPersonel,
+  isKampciGorev,
   isTaseronPersonel,
   normalizeTurkishName,
 } from './yoklamaUtils';
-import { personMatchesFaaliyet } from './faaliyetPersonelUtils';
+import { isKampFaaliyetOnayli, personMatchesFaaliyet } from './faaliyetPersonelUtils';
 
 export interface GunlukProgramCetvelSatir {
   personelId: string;
@@ -39,7 +40,7 @@ function parseDateParts(dateKey: string): { y: number; m: number; d: number } | 
   return { y, m, d };
 }
 
-/** O gün yoklamada Geldi olan saha personeli (taşeron / idari hariç) */
+/** O gün yoklamada Geldi olan aktif saha personeli (taşeron / idari / işten çıkmış hariç) */
 export function buildGeldiHavuzu(
   personeller: Personel[],
   yoklamalar: AylikYoklamaMap,
@@ -51,6 +52,9 @@ export function buildGeldiHavuzu(
   return personeller
     .filter((p) => {
       if (isTaseronPersonel(p) || isIdariPersonel(p)) return false;
+      const aktif = p.durum === true || String(p.durum).toLowerCase() === 'true';
+      if (!aktif) return false;
+      if (String(p.istenCikisTarihi || '').trim()) return false;
       const dayData = getYoklamaDay(yoklamalar[p.id], y, m, d);
       return dayData?.durum === 'Geldi';
     })
@@ -59,41 +63,68 @@ export function buildGeldiHavuzu(
     );
 }
 
-/** O güne ait saha faaliyetlerinde aktifPersonelListesi'ne yazılmış id'ler */
+/** O güne ait saha (+ opsiyonel onaylı kamp) faaliyetlerinde bağlanan id'ler */
 export function buildAssignedIdsForDate(
   sahaFaaliyetleri: SahaFaaliyeti[],
   dateKey: string,
-  excludeFaaliyetId?: string
+  excludeFaaliyetId?: string,
+  kampFaaliyetleri: KampFaaliyet[] = []
 ): Set<string> {
   const ids = new Set<string>();
   const target = normalizeDateKey(dateKey);
+  const absorb = (list: string[] | undefined) => {
+    for (const entry of list || []) {
+      const raw = String(entry || '').trim();
+      if (raw) ids.add(raw);
+    }
+  };
   for (const sf of sahaFaaliyetleri || []) {
     if (normalizeDateKey(sf.tarih) !== target) continue;
     if (excludeFaaliyetId && sf.id === excludeFaaliyetId) continue;
-    for (const entry of sf.aktifPersonelListesi || []) {
-      const raw = String(entry || '').trim();
-      if (!raw) continue;
-      ids.add(raw);
-    }
+    absorb(sf.aktifPersonelListesi);
+    if (sf.personelId) ids.add(String(sf.personelId));
+  }
+  for (const kf of kampFaaliyetleri || []) {
+    if (normalizeDateKey(kf.tarih) !== target) continue;
+    if (!isKampFaaliyetOnayli(kf)) continue;
+    absorb(kf.aktifPersonelListesi);
+    if (kf.personelId) ids.add(String(kf.personelId));
   }
   return ids;
 }
 
-/** Geldi havuzundan henüz hiçbir göreve atanmamışlar */
+/** Geldi havuzundan henüz hiçbir göreve (saha veya onaylı kamp) atanmamışlar */
 export function buildAtanmamisGeldiHavuzu(
   personeller: Personel[],
   yoklamalar: AylikYoklamaMap,
   sahaFaaliyetleri: SahaFaaliyeti[],
   dateKey: string,
-  excludeFaaliyetId?: string
+  excludeFaaliyetId?: string,
+  kampFaaliyetleri: KampFaaliyet[] = []
 ): Personel[] {
   const geldi = buildGeldiHavuzu(personeller, yoklamalar, dateKey);
-  const assigned = buildAssignedIdsForDate(sahaFaaliyetleri, dateKey, excludeFaaliyetId);
+  const assigned = buildAssignedIdsForDate(
+    sahaFaaliyetleri,
+    dateKey,
+    excludeFaaliyetId,
+    kampFaaliyetleri
+  );
+  const dayKampOnayli = (kampFaaliyetleri || []).filter(
+    (kf) => normalizeDateKey(kf.tarih) === normalizeDateKey(dateKey) && isKampFaaliyetOnayli(kf)
+  );
+  // 1 onaylı kamp faaliyeti varsa o gün tüm Geldi kampçılar faaliyetli sayılır
+  // (liste kısmi dolu olsa bile — KAMPÇI / Kampçı yazım farkı önemli değil)
+  const hasOnayliKamp = dayKampOnayli.length > 0;
   return geldi.filter((p) => {
     if (assigned.has(p.id)) return false;
     const fullName = normalizeTurkishName(`${p.ad} ${p.soyad}`);
     for (const id of assigned) {
       if (normalizeTurkishName(id) === fullName) return false;
+    }
+    // Kamp faaliyetinde kaydeden / eşleşme
+    if (dayKampOnayli.some((kf) => personMatchesFaaliyet(p, kf))) return false;
+    if (hasOnayliKamp && isKampciGorev(p.gorev)) {
+      return false;
     }
     return true;
   });

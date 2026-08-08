@@ -4,6 +4,7 @@ import {
   CariKartIslem,
   Irsaliye,
   IrsaliyeItem,
+  SatinAlmaTalebi,
   StokKart,
   StokKartIslem,
 } from '../types/erp';
@@ -16,6 +17,7 @@ import {
   linkIrsaliyeKalemler,
   resolveCariKartId,
 } from './evrakCariStokSync';
+import { kalanMiktarForSaKalem } from './satinAlmaIrsaliyeUtils';
 
 export const KAPI_EVRAK_KAYNAK = 'KAPI_EVRAK';
 
@@ -24,6 +26,7 @@ export type KapiKalemInput = {
   miktar?: number | string;
   birim?: string;
   stokKartId?: string;
+  saKalemId?: string;
   id?: string;
 };
 
@@ -34,7 +37,167 @@ export type KapiMatchSummary = {
   stokLinked: number;
   stokTotal: number;
   unmatchedKalemler: string[];
+  /** Kapı ↔ SA eşleşmesi (opsiyonel) */
+  saId?: string;
+  saMatched?: boolean;
 };
+
+function withSaMatchSummary(summary: KapiMatchSummary, saId: string): KapiMatchSummary {
+  return {
+    ...summary,
+    saId: saId || '',
+    saMatched: Boolean(saId),
+  };
+}
+
+function normTr(s: string): string {
+  return String(s || '')
+    .trim()
+    .toLocaleLowerCase('tr-TR')
+    .replace(/[ıİ]/g, 'i')
+    .replace(/[şŞ]/g, 's')
+    .replace(/[çÇ]/g, 'c')
+    .replace(/[ğĞ]/g, 'g')
+    .replace(/[üÜ]/g, 'u')
+    .replace(/[öÖ]/g, 'o');
+}
+
+function isOpenSatinAlmaForKapi(sa: SatinAlmaTalebi): boolean {
+  if (sa.arsivde) return false;
+  const d = String(sa.onayDurumu || '');
+  if (d === 'REDDEDİLDİ' || d === 'KAPATILDI') return false;
+  return true;
+}
+
+export type KapiSaKalemEslesme = {
+  kapiUrunAdi: string;
+  saKalemId: string;
+  saUrunAdi: string;
+  kalan: number;
+};
+
+export type KapiSaOneri = {
+  saId: string;
+  saDocId: string;
+  cariFirma: string;
+  tarih: string;
+  score: number;
+  reason: string;
+  matchedKalemler: KapiSaKalemEslesme[];
+};
+
+/**
+ * Kapı irsaliyesi için açık satın alma önerileri (otomatik bağlama yok).
+ * Cari + ürün/stok örtüşmesi + kalan miktar skorlanır.
+ */
+export function suggestSatinAlmaForKapiEvrak(opts: {
+  firma?: string;
+  cariKartId?: string;
+  kalemler?: KapiKalemInput[];
+  satinAlmaTalepleri: SatinAlmaTalebi[];
+  irsaliyeler?: Irsaliye[];
+  limit?: number;
+}): KapiSaOneri[] {
+  const firma = String(opts.firma || '').trim();
+  const cariId = String(opts.cariKartId || '').trim();
+  const kalemler = (opts.kalemler || []).filter((k) => String(k.urunAdi || '').trim());
+  if (!firma && !cariId && kalemler.length === 0) return [];
+
+  const irs = opts.irsaliyeler || [];
+  const firmaN = normTr(firma);
+  const scored: KapiSaOneri[] = [];
+
+  for (const sa of opts.satinAlmaTalepleri || []) {
+    if (!isOpenSatinAlmaForKapi(sa)) continue;
+    const saId = String(sa.saId || '').trim();
+    if (!saId) continue;
+
+    let score = 0;
+    const reasons: string[] = [];
+
+    if (cariId && sa.cariKartId && cariId === sa.cariKartId) {
+      score += 50;
+      reasons.push('cari');
+    } else {
+      const saFirma = normTr(sa.cariFirma || '');
+      if (firmaN && saFirma) {
+        if (firmaN === saFirma) {
+          score += 40;
+          reasons.push('firma tam');
+        } else if (firmaN.includes(saFirma) || saFirma.includes(firmaN)) {
+          score += 25;
+          reasons.push('firma benzer');
+        }
+      }
+    }
+
+    const matchedKalemler: KapiSaKalemEslesme[] = [];
+    for (const kk of kalemler) {
+      const ku = normTr(String(kk.urunAdi || ''));
+      const kStok = String(kk.stokKartId || '').trim();
+      for (const sk of sa.kalemler || []) {
+        const su = normTr(sk.urunAdi || '');
+        const sStok = String(sk.stokKartId || '').trim();
+        let hit = false;
+        if (kStok && sStok && kStok === sStok) hit = true;
+        else if (ku && su && (ku === su || ku.includes(su) || su.includes(ku))) hit = true;
+        if (!hit) continue;
+        const kalan = kalanMiktarForSaKalem(sa, sk, irs);
+        matchedKalemler.push({
+          kapiUrunAdi: String(kk.urunAdi || '').trim(),
+          saKalemId: sk.id,
+          saUrunAdi: sk.urunAdi,
+          kalan,
+        });
+        score += 22;
+        if (kalan > 0) score += 8;
+      }
+    }
+    if (matchedKalemler.length) reasons.push(`${matchedKalemler.length} kalem`);
+
+    // Eşik: en az cari/firma veya kalem örtüşmesi
+    if (score < 25) continue;
+
+    scored.push({
+      saId,
+      saDocId: sa.id,
+      cariFirma: sa.cariFirma,
+      tarih: sa.tarih,
+      score,
+      reason: reasons.join(' · ') || 'yakın',
+      matchedKalemler,
+    });
+  }
+
+  scored.sort((a, b) => b.score - a.score || String(b.tarih).localeCompare(String(a.tarih)));
+  return scored.slice(0, opts.limit ?? 5);
+}
+
+/** Kapı kalemlerine SA kalem id yazar (isim/stok örtüşmesi). */
+export function linkKapiKalemlerToSa(
+  kalemler: IrsaliyeItem[],
+  sa: SatinAlmaTalebi | null | undefined,
+  irsaliyeler: Irsaliye[] = []
+): IrsaliyeItem[] {
+  if (!sa) return kalemler;
+  return kalemler.map((k) => {
+    if (k.saKalemId) return k;
+    const ku = normTr(k.urunAdi || '');
+    const kStok = String(k.stokKartId || '').trim();
+    let best: { id: string; kalan: number } | null = null;
+    for (const sk of sa.kalemler || []) {
+      const su = normTr(sk.urunAdi || '');
+      const sStok = String(sk.stokKartId || '').trim();
+      const hit =
+        (kStok && sStok && kStok === sStok) ||
+        (ku && su && (ku === su || ku.includes(su) || su.includes(ku)));
+      if (!hit) continue;
+      const kalan = kalanMiktarForSaKalem(sa, sk, irsaliyeler);
+      if (!best || kalan > best.kalan) best = { id: sk.id, kalan };
+    }
+    return best ? { ...k, saKalemId: best.id } : k;
+  });
+}
 
 export function normalizeKapiKalemler(raw: KapiKalemInput[], prefix = 'kapi'): IrsaliyeItem[] {
   return (raw || [])
@@ -48,6 +211,7 @@ export function normalizeKapiKalemler(raw: KapiKalemInput[], prefix = 'kapi'): I
         miktar: Number.isFinite(miktar) ? miktar : 0,
         birim: String(k.birim || 'Adet').trim() || 'Adet',
         stokKartId: k.stokKartId || undefined,
+        saKalemId: k.saKalemId || undefined,
       } as IrsaliyeItem;
     })
     .filter(Boolean) as IrsaliyeItem[];
@@ -115,15 +279,17 @@ export function buildKapiDraftIrsaliye(opts: {
   kalemler: IrsaliyeItem[];
   cariKartId?: string;
   kaydeden?: string;
+  saId?: string;
 }): Irsaliye {
   const id = opts.guvenlikEvrakId;
+  const saId = String(opts.saId || '').trim();
   return {
     id,
     irsaliyeId: id,
     irsaliyeNo: String(opts.irsaliyeNo || id).trim() || id,
     firma: String(opts.firma || '').trim() || 'Bilinmeyen Firma',
     cariKartId: opts.cariKartId || undefined,
-    saId: '',
+    saId: saId || '',
     tarih: opts.tarih || new Date().toISOString().split('T')[0],
     onayDurumu: 'ONAY BEKLİYOR',
     fisEvrakUrl: opts.fotoUrl || '',
@@ -131,6 +297,7 @@ export function buildKapiDraftIrsaliye(opts: {
     guvenlikEvrakId: opts.guvenlikEvrakId,
     kalemler: opts.kalemler,
     kaydeden: opts.kaydeden,
+    donusumKaynagi: saId ? 'KAPI_SA_ESLESME' : 'KAPI_EVRAK',
   } as Irsaliye & { kaydeden?: string };
 }
 
@@ -148,6 +315,10 @@ export async function upsertKapiDraftIrsaliye(opts: {
   cariKartlar: CariKart[];
   stokKartlar: StokKart[];
   kaydeden?: string;
+  /** Kullanıcı onaylı SA bağı (otomatik yazılmaz) */
+  saId?: string;
+  satinAlmaTalepleri?: SatinAlmaTalebi[];
+  irsaliyeler?: Irsaliye[];
 }): Promise<{ irsaliye: Irsaliye; summary: KapiMatchSummary }> {
   const { summary, kalemler } = doubleCheckKapiMatch(
     opts.firma,
@@ -156,19 +327,29 @@ export async function upsertKapiDraftIrsaliye(opts: {
     opts.stokKartlar
   );
 
+  const saId = String(opts.saId || '').trim();
+  const sa = saId
+    ? (opts.satinAlmaTalepleri || []).find((s) => s.saId === saId || s.id === saId)
+    : undefined;
+  const linkedKalemler = linkKapiKalemlerToSa(kalemler, sa, opts.irsaliyeler || []);
+
   const irsaliye = buildKapiDraftIrsaliye({
     guvenlikEvrakId: opts.guvenlikEvrakId,
     irsaliyeNo: opts.irsaliyeNo || opts.guvenlikEvrakId,
     firma: summary.cariUnvan || opts.firma,
     tarih: opts.tarih,
     fotoUrl: opts.fotoUrl,
-    kalemler,
+    kalemler: linkedKalemler,
     cariKartId: summary.cariKartId || undefined,
     kaydeden: opts.kaydeden,
+    saId,
   });
 
   await saveDocument('irsaliyeler', irsaliye);
-  return { irsaliye, summary };
+  return {
+    irsaliye,
+    summary: withSaMatchSummary(summary, saId),
+  };
 }
 
 /**
@@ -189,6 +370,9 @@ export async function finalizeKapiIrsaliyeApproval(opts: {
   setCariIslemGecmisi?: Dispatch<SetStateAction<CariKartIslem[]>>;
   setStokKartlar?: Dispatch<SetStateAction<StokKart[]>>;
   setStokIslemGecmisi?: Dispatch<SetStateAction<StokKartIslem[]>>;
+  saId?: string;
+  satinAlmaTalepleri?: SatinAlmaTalebi[];
+  irsaliyeler?: Irsaliye[];
 }): Promise<{ irsaliye: Irsaliye; summary: KapiMatchSummary }> {
   const now = new Date().toISOString();
   const { summary, kalemler } = doubleCheckKapiMatch(
@@ -198,6 +382,12 @@ export async function finalizeKapiIrsaliyeApproval(opts: {
     opts.stokKartlar
   );
 
+  const saId = String(opts.saId || '').trim();
+  const sa = saId
+    ? (opts.satinAlmaTalepleri || []).find((s) => s.saId === saId || s.id === saId)
+    : undefined;
+  const linkedKalemler = linkKapiKalemlerToSa(kalemler, sa, opts.irsaliyeler || []);
+
   const firmaUnvan = summary.cariUnvan || String(opts.firma || '').trim();
   const irsaliye: Irsaliye = {
     id: opts.guvenlikEvrakId,
@@ -205,15 +395,16 @@ export async function finalizeKapiIrsaliyeApproval(opts: {
     irsaliyeNo: String(opts.irsaliyeNo || opts.guvenlikEvrakId).trim(),
     firma: firmaUnvan,
     cariKartId: summary.cariKartId || undefined,
-    saId: '',
+    saId: saId || '',
     tarih: opts.tarih,
     onayDurumu: 'ONAYLANDI',
     fisEvrakUrl: opts.fotoUrl || '',
     kaynak: KAPI_EVRAK_KAYNAK,
     guvenlikEvrakId: opts.guvenlikEvrakId,
-    kalemler,
+    kalemler: linkedKalemler,
     onaylayanYonetici: opts.onaylayan,
     onayTarihi: now,
+    donusumKaynagi: saId ? 'KAPI_SA_ESLESME' : 'KAPI_EVRAK',
   };
 
   await saveDocument('irsaliyeler', irsaliye);
@@ -231,7 +422,9 @@ export async function finalizeKapiIrsaliyeApproval(opts: {
       islemTipi: 'IRSALIYE',
       islemId: irsaliye.id,
       islemBaslik: `Kapı İrsaliyesi · ${firmaUnvan}`,
-      islemDetay: `${irsaliye.irsaliyeNo} · ${kalemler.length} kalem · güvenlik kapısı`,
+      islemDetay: `${irsaliye.irsaliyeNo} · ${linkedKalemler.length} kalem · güvenlik kapısı${
+        saId ? ` · SA ${saId}` : ''
+      }`,
       tarih: opts.tarih,
       belgeNo: irsaliye.irsaliyeNo,
     });
@@ -239,8 +432,9 @@ export async function finalizeKapiIrsaliyeApproval(opts: {
     appendCariIslemOnce(opts.setCariIslemGecmisi, cariRow);
   }
 
+  const stokBagliKalemler = linkedKalemler.filter((k) => Boolean(k.stokKartId));
   applyStokGirisFromKalemler({
-    kalemler,
+    kalemler: stokBagliKalemler,
     belgeNo: irsaliye.irsaliyeNo,
     tarih: opts.tarih,
     supplier: firmaUnvan,
@@ -253,7 +447,10 @@ export async function finalizeKapiIrsaliyeApproval(opts: {
     aciklamaTag: 'Kapı İrsaliye',
   });
 
-  return { irsaliye, summary };
+  return {
+    irsaliye,
+    summary: withSaMatchSummary(summary, saId),
+  };
 }
 
 export function formatKapiMatchLabel(summary?: Partial<KapiMatchSummary> | null): string {
@@ -263,7 +460,8 @@ export function formatKapiMatchLabel(summary?: Partial<KapiMatchSummary> | null)
     typeof summary.stokTotal === 'number' && summary.stokTotal > 0
       ? `Stok ${summary.stokLinked || 0}/${summary.stokTotal}`
       : 'Kalem yok';
-  return `${cari} · ${stok}`;
+  const sa = summary.saMatched && summary.saId ? ` · SA ${summary.saId}` : '';
+  return `${cari} · ${stok}${sa}`;
 }
 
 export type CariOneri = {

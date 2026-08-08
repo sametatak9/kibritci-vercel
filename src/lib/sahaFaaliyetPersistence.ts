@@ -67,6 +67,13 @@ export function mergeSahaFaaliyetRecords(
     ...local,
     fotoUrls: fotoUrls.length ? fotoUrls : undefined,
     fotoUrl: fotoUrl || undefined,
+    // İlerleme kayıtları: local doluysa local, yoksa remote korunur
+    ilerlemeKayitlari:
+      Array.isArray(local.ilerlemeKayitlari) && local.ilerlemeKayitlari.length > 0
+        ? local.ilerlemeKayitlari
+        : remote.ilerlemeKayitlari,
+    isEtiketi: local.isEtiketi !== undefined ? local.isEtiketi : remote.isEtiketi,
+    ilerlemeDurumu: local.ilerlemeDurumu || remote.ilerlemeDurumu,
   };
 }
 

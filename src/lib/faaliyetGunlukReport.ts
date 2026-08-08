@@ -9,6 +9,74 @@ import {
   isMesaiSahaFaaliyet,
 } from './sahaFaaliyetUtils';
 
+/** Excel'e gömmek için görseli JPEG base64'e çevirir (webp/data/http). */
+async function loadImageAsJpegBase64(url: string): Promise<string | null> {
+  const raw = String(url || '').trim();
+  if (!raw) return null;
+
+  const fromCanvas = (src: string): Promise<string | null> =>
+    new Promise((resolve) => {
+      const img = new Image();
+      if (!src.startsWith('data:')) img.crossOrigin = 'anonymous';
+      const finish = () => {
+        try {
+          const maxW = 520;
+          const scale = Math.min(1, maxW / Math.max(1, img.naturalWidth || img.width));
+          const w = Math.max(1, Math.round((img.naturalWidth || img.width) * scale));
+          const h = Math.max(1, Math.round((img.naturalHeight || img.height) * scale));
+          const canvas = document.createElement('canvas');
+          canvas.width = w;
+          canvas.height = h;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) {
+            resolve(null);
+            return;
+          }
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(0, 0, w, h);
+          ctx.drawImage(img, 0, 0, w, h);
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.75);
+          const b64 = dataUrl.replace(/^data:image\/jpeg;base64,/i, '');
+          resolve(b64 || null);
+        } catch {
+          resolve(null);
+        }
+      };
+      img.onload = finish;
+      img.onerror = () => resolve(null);
+      img.src = src;
+    });
+
+  if (raw.startsWith('data:image/')) {
+    const m = raw.match(/^data:image\/(png|jpe?g|webp);base64,(.+)$/i);
+    if (m && !/webp/i.test(m[1])) {
+      // png/jpeg doğrudan kullanılabilir; exceljs jpeg tercih
+      if (/jpe?g/i.test(m[1])) return m[2];
+    }
+    return fromCanvas(raw);
+  }
+
+  if (/^https?:\/\//i.test(raw) || raw.startsWith('blob:')) {
+    const viaImg = await fromCanvas(raw);
+    if (viaImg) return viaImg;
+    try {
+      const resp = await fetch(raw, { mode: 'cors' });
+      if (!resp.ok) return null;
+      const blob = await resp.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      try {
+        return await fromCanvas(objectUrl);
+      } finally {
+        URL.revokeObjectURL(objectUrl);
+      }
+    } catch {
+      return null;
+    }
+  }
+
+  return null;
+}
+
 function escapeHtml(value: string): string {
   return value
     .replace(/&/g, '&amp;')
@@ -47,11 +115,17 @@ function renderFotoBlock(fotolar: string[]): string {
   }
   const imgs = fotolar
     .map(
-      (url) =>
-        `<img src="${escapeHtml(url)}" alt="Faaliyet fotoğrafı" style="max-width:100%;max-height:240px;border-radius:8px;border:1px solid #e2e8f0;object-fit:contain;background:#f8fafc;" />`
+      (url, idx) =>
+        `<button type="button" class="foto-thumb" data-foto-url="${escapeHtml(url)}" title="Büyütmek için tıklayın" style="display:block;width:100%;padding:0;border:2px solid #64748b;border-radius:10px;overflow:hidden;background:#0f172a;cursor:zoom-in;box-shadow:0 2px 8px rgba(15,23,42,.12)">
+          <img src="${escapeHtml(url)}" alt="Faaliyet fotoğrafı ${idx + 1}" style="display:block;width:100%;height:200px;object-fit:cover;pointer-events:none" />
+          <span style="display:block;padding:4px;font-size:9px;font-weight:800;color:#e2e8f0;background:#1e293b;text-align:center">🔍 Büyüt</span>
+        </button>`
     )
     .join('');
-  return `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px;margin-top:10px;">${imgs}</div>`;
+  return `<div style="margin-top:12px;">
+    <div style="font-size:10px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:#64748b;margin-bottom:8px;">Saha / Kamp fotoğrafları (${fotolar.length}) — tıklayınca büyür</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;">${imgs}</div>
+  </div>`;
 }
 
 function renderSahaCard(
@@ -271,23 +345,52 @@ export function buildFaaliyetGunlukReportHtml(options: {
     .page { max-width: 900px; margin: 0 auto; }
     .meta { margin: 16px 0 20px; padding: 12px 16px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; font-size: 11px; color: #475569; }
     .meta p { margin: 2px 0; }
+    .toolbar { position: sticky; top: 0; z-index: 40; display:flex; gap:8px; justify-content:flex-end; padding:0 0 12px; background:linear-gradient(#fff,#fff 80%,transparent); }
+    .toolbar button { border:0; border-radius:10px; padding:8px 14px; font-size:12px; font-weight:800; cursor:pointer; background:#1e3a5f; color:#fff; }
+    #foto-lightbox { display:none; position:fixed; inset:0; z-index:9999; background:rgba(15,23,42,.92); align-items:center; justify-content:center; padding:24px; cursor:zoom-out; }
+    #foto-lightbox.open { display:flex; }
+    #foto-lightbox img { max-width:min(96vw,1100px); max-height:90vh; object-fit:contain; border-radius:12px; background:#111; cursor:default; }
+    #foto-lightbox .lb-close { position:absolute; top:16px; right:16px; border:0; background:#fff; color:#0f172a; font-weight:900; font-size:14px; border-radius:999px; padding:8px 14px; cursor:pointer; }
     @media print {
       body { padding: 12px; }
       article { break-inside: avoid; }
       .personel-page { page-break-before: always; }
+      .toolbar, #foto-lightbox, .foto-thumb span { display: none !important; }
     }
   </style>
 </head>
 <body>
   <div class="page">
+    <div class="toolbar"><button type="button" onclick="window.print()">🖨 Yazdır / PDF</button></div>
     ${kibritciReportHeaderHtml(title, subtitle)}
-    <div class="meta">${meta.map((m) => `<p>${escapeHtml(m)}</p>`).join('')}</div>
+    <div class="meta">${meta.map((m) => `<p>${escapeHtml(m)}</p>`).join('')}<p style="margin-top:6px;font-weight:700;color:#1e3a5f">Fotoğrafa tıklayınca büyür.</p></div>
     ${bodyParts.join('')}
     ${personelPage}
     <footer style="margin-top:24px;padding-top:12px;border-top:1px solid #e2e8f0;font-size:10px;color:#94a3b8;text-align:center;">
       Kibritçi İnşaat ERP · Faaliyeti Olan Personeller
     </footer>
   </div>
+  <div id="foto-lightbox" role="dialog" aria-modal="true">
+    <button type="button" class="lb-close" id="foto-lightbox-close">Kapat ✕</button>
+    <img id="foto-lightbox-img" alt="Büyük fotoğraf" />
+  </div>
+  <script>
+    (function () {
+      var lb = document.getElementById('foto-lightbox');
+      var img = document.getElementById('foto-lightbox-img');
+      var closeBtn = document.getElementById('foto-lightbox-close');
+      function openLb(url) { if (!url||!lb||!img) return; img.src=url; lb.classList.add('open'); }
+      function closeLb() { if (!lb||!img) return; lb.classList.remove('open'); img.removeAttribute('src'); }
+      document.addEventListener('click', function (e) {
+        var t = e.target; if (!t) return;
+        var btn = t.closest ? t.closest('.foto-thumb') : null;
+        if (btn) { e.preventDefault(); openLb(btn.getAttribute('data-foto-url')); return; }
+        if (t === lb || t === closeBtn) closeLb();
+      });
+      document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeLb(); });
+      if (img) img.addEventListener('click', function (e) { e.stopPropagation(); });
+    })();
+  </script>
 </body>
 </html>`;
 }
@@ -302,7 +405,6 @@ export function openFaaliyetGunlukReportPdf(html: string, title: string): void {
   w.document.write(html);
   w.document.close();
   w.document.title = title;
-  setTimeout(() => w.print(), 500);
 }
 
 export async function exportFaaliyetGunlukExcel(options: {
@@ -330,7 +432,7 @@ export async function exportFaaliyetGunlukExcel(options: {
     },
   });
 
-  sheet.mergeCells('A1:H1');
+  sheet.mergeCells('A1:J1');
   const titleCell = sheet.getCell('A1');
   titleCell.value = 'Günlük Faaliyet Raporu';
   titleCell.font = { name: 'Arial', size: 14, bold: true, color: { argb: 'FFFFFFFF' } };
@@ -342,9 +444,9 @@ export async function exportFaaliyetGunlukExcel(options: {
   titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
   sheet.getRow(1).height = 28;
 
-  sheet.mergeCells('A2:H2');
+  sheet.mergeCells('A2:J2');
   const dateCell = sheet.getCell('A2');
-  dateCell.value = `Tarih: ${label} · Saha ${ozet.sahaSayisi} · Kamp ${ozet.kampSayisi} · Faaliyetli ${ozet.personelSayisi} · Yok ${ozet.yokSayisi}`;
+  dateCell.value = `Tarih: ${label} · Saha ${ozet.sahaSayisi} · Kamp ${ozet.kampSayisi} · Faaliyetli ${ozet.personelSayisi} · Yok ${ozet.yokSayisi} · Fotoğraflar gömülü (J sütunu + Fotoğraflar sekmesi)`;
   dateCell.font = { name: 'Arial', size: 11, italic: true };
   dateCell.alignment = { horizontal: 'center', vertical: 'middle' };
 
@@ -357,6 +459,8 @@ export async function exportFaaliyetGunlukExcel(options: {
     'Açıklama',
     'Kaydeden',
     'Foto adedi',
+    'Foto URL',
+    'Foto',
   ];
   const headerRow = sheet.addRow(headers);
   headerRow.eachCell((cell) => {
@@ -380,10 +484,12 @@ export async function exportFaaliyetGunlukExcel(options: {
     { width: 28 },
     { width: 22 },
     { width: 16 },
+    { width: 32 },
     { width: 36 },
-    { width: 40 },
     { width: 18 },
     { width: 10 },
+    { width: 28 },
+    { width: 22 },
   ];
 
   const thinBorder = {
@@ -393,39 +499,43 @@ export async function exportFaaliyetGunlukExcel(options: {
     right: { style: 'thin' as const },
   };
 
-  for (const f of options.sahaFaaliyetleri) {
-    const row = sheet.addRow([
-      'Saha',
-      f.isNiteligi || '—',
-      kaynakEtiket(f.kaynakEkran) + (isMesaiSahaFaaliyet(f) ? ' · Mesai' : ''),
-      [f.parsel && `P:${f.parsel}`, f.blok && `B:${f.blok}`].filter(Boolean).join(' ') || '—',
-      ekipLabel(f, options.personeller) || '—',
-      f.aciklama || '—',
-      f.kaydedenFormen || f.kaydeden || '—',
-      getFaaliyetFotolar(f).length,
-    ]);
-    row.eachCell((cell) => {
-      cell.border = thinBorder;
-      cell.alignment = { vertical: 'top', wrapText: true };
-    });
-  }
+  type FotoSatir = {
+    kaynak: string;
+    baslik: string;
+    aciklama: string;
+    urls: string[];
+    mainRowNumber?: number;
+  };
+  const fotoSatirlari: FotoSatir[] = [];
 
-  for (const f of options.kampFaaliyetleri) {
-    const tip = [f.faaliyetTipi, f.faaliyetGrubu].filter(Boolean).join(' · ');
+  const addMainRow = async (opts: {
+    kaynak: string;
+    baslik: string;
+    tip: string;
+    konum: string;
+    personel: string;
+    aciklama: string;
+    kaydeden: string;
+    fotolar: string[];
+    highlightKamp?: boolean;
+  }) => {
     const row = sheet.addRow([
-      'Kamp',
-      f.yerleskeAdi || '—',
-      tip || '—',
-      '—',
-      ekipLabel(f, options.personeller) || '—',
-      f.aciklama || '—',
-      f.kaydedenKampci || '—',
-      getFaaliyetFotolar(f).length,
+      opts.kaynak,
+      opts.baslik,
+      opts.tip,
+      opts.konum,
+      opts.personel,
+      opts.aciklama,
+      opts.kaydeden,
+      opts.fotolar.length,
+      opts.fotolar[0] || '—',
+      opts.fotolar.length ? '' : '—',
     ]);
+    row.height = opts.fotolar.length > 0 ? 88 : 22;
     row.eachCell((cell, colNumber) => {
       cell.border = thinBorder;
       cell.alignment = { vertical: 'top', wrapText: true };
-      if (colNumber === 1) {
+      if (opts.highlightKamp && colNumber === 1) {
         cell.fill = {
           type: 'pattern',
           pattern: 'solid',
@@ -433,10 +543,151 @@ export async function exportFaaliyetGunlukExcel(options: {
         };
       }
     });
+
+    fotoSatirlari.push({
+      kaynak: opts.kaynak,
+      baslik: opts.baslik,
+      aciklama: opts.aciklama,
+      urls: opts.fotolar,
+      mainRowNumber: row.number,
+    });
+
+    // İlk fotoğrafı satıra göm (J sütunu = col 9, 0-based)
+    if (opts.fotolar[0]) {
+      const b64 = await loadImageAsJpegBase64(opts.fotolar[0]);
+      if (b64) {
+        const imageId = workbook.addImage({ base64: b64, extension: 'jpeg' });
+        sheet.addImage(imageId, {
+          tl: { col: 9, row: row.number - 1 },
+          ext: { width: 118, height: 78 },
+          editAs: 'oneCell',
+        });
+      }
+    }
+  };
+
+  for (const f of options.sahaFaaliyetleri) {
+    const fotolar = getFaaliyetFotolar(f);
+    await addMainRow({
+      kaynak: kaynakEtiket(f.kaynakEkran),
+      baslik: f.isNiteligi || '—',
+      tip: kaynakEtiket(f.kaynakEkran) + (isMesaiSahaFaaliyet(f) ? ' · Mesai' : ''),
+      konum:
+        [f.parsel && `P:${f.parsel}`, f.blok && `B:${f.blok}`].filter(Boolean).join(' ') || '—',
+      personel: ekipLabel(f, options.personeller) || '—',
+      aciklama: f.aciklama || '—',
+      kaydeden: f.kaydedenFormen || f.kaydeden || '—',
+      fotolar,
+    });
+  }
+
+  for (const f of options.kampFaaliyetleri) {
+    const tip = [f.faaliyetTipi, f.faaliyetGrubu].filter(Boolean).join(' · ');
+    const fotolar = getFaaliyetFotolar(f);
+    await addMainRow({
+      kaynak: 'Kampçı',
+      baslik: f.yerleskeAdi || '—',
+      tip: tip || '—',
+      konum: '—',
+      personel: ekipLabel(f, options.personeller) || '—',
+      aciklama: f.aciklama || '—',
+      kaydeden: f.kaydedenKampci || '—',
+      fotolar,
+      highlightKamp: true,
+    });
   }
 
   if (options.sahaFaaliyetleri.length === 0 && options.kampFaaliyetleri.length === 0) {
-    sheet.addRow(['—', 'Bu gün için kayıt yok', '', '', '', '', '', 0]);
+    sheet.addRow(['—', 'Bu gün için kayıt yok', '', '', '', '', '', 0, '', '']);
+  }
+
+  // Fotoğraflar albüm sayfası — her kayıt için büyük görseller
+  const fotoSheet = workbook.addWorksheet('Fotoğraflar', {
+    pageSetup: { paperSize: 9, orientation: 'portrait', fitToPage: true, fitToWidth: 1 },
+  });
+  fotoSheet.mergeCells('A1:E1');
+  const fTitle = fotoSheet.getCell('A1');
+  fTitle.value = `Faaliyet Fotoğrafları — ${label}`;
+  fTitle.font = { name: 'Arial', size: 13, bold: true, color: { argb: 'FFFFFFFF' } };
+  fTitle.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF312E81' } };
+  fTitle.alignment = { horizontal: 'center', vertical: 'middle' };
+  fotoSheet.getRow(1).height = 26;
+
+  fotoSheet.mergeCells('A2:E2');
+  const fHint = fotoSheet.getCell('A2');
+  fHint.value =
+    'Her kaydın fotoğrafları aşağıda gömülüdür. Ana sayfada da J sütununda ilk fotoğraf görünür.';
+  fHint.font = { name: 'Arial', size: 10, italic: true, color: { argb: 'FF475569' } };
+
+  fotoSheet.columns = [
+    { width: 6 },
+    { width: 16 },
+    { width: 28 },
+    { width: 36 },
+    { width: 28 },
+  ];
+
+  let albumNo = 0;
+  for (const sat of fotoSatirlari) {
+    albumNo += 1;
+    const head = fotoSheet.addRow([
+      albumNo,
+      sat.kaynak,
+      sat.baslik,
+      sat.aciklama || '',
+      sat.urls.length ? `${sat.urls.length} foto` : 'Foto yok',
+    ]);
+    head.eachCell((cell) => {
+      cell.border = thinBorder;
+      cell.font = { bold: true, size: 10 };
+      cell.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FFF1F5F9' },
+      };
+      cell.alignment = { vertical: 'middle', wrapText: true };
+    });
+    head.height = 28;
+
+    if (sat.urls.length === 0) continue;
+
+    // Her foto için ayrı satır + gömülü görsel (yan yana max 2)
+    for (let i = 0; i < sat.urls.length; i += 2) {
+      const chunk = sat.urls.slice(i, i + 2);
+      const imgRow = fotoSheet.addRow(['', '', '', '', '']);
+      imgRow.height = 150;
+      imgRow.eachCell((cell) => {
+        cell.border = thinBorder;
+      });
+
+      for (let j = 0; j < chunk.length; j++) {
+        const b64 = await loadImageAsJpegBase64(chunk[j]);
+        if (!b64) {
+          fotoSheet.getCell(imgRow.number, 3 + j).value = 'Görsel yüklenemedi';
+          continue;
+        }
+        const imageId = workbook.addImage({ base64: b64, extension: 'jpeg' });
+        fotoSheet.addImage(imageId, {
+          tl: { col: 1 + j * 2, row: imgRow.number - 1 },
+          ext: { width: 260, height: 140 },
+          editAs: 'oneCell',
+        });
+      }
+    }
+  }
+
+  if (fotoSatirlari.length === 0) {
+    fotoSheet.addRow(['—', '—', 'Bu gün faaliyet kaydı yok', '', '']);
+  } else {
+    const withFoto = fotoSatirlari.filter((s) => s.urls.length > 0).length;
+    const note = fotoSheet.addRow([
+      '',
+      '',
+      `Toplam ${fotoSatirlari.length} kayıt · ${withFoto} kayıtta fotoğraf var`,
+      '',
+      '',
+    ]);
+    note.getCell(3).font = { italic: true, color: { argb: 'FF64748B' }, size: 9 };
   }
 
   // Faaliyeti olan personeller sayfası

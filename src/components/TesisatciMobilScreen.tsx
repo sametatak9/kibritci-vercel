@@ -1,19 +1,29 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Wrench, ClipboardList, Truck, Camera, CheckCircle, RefreshCw, X, AlertTriangle,
-  LogOut, Pencil, Trash2, Calendar, Gauge
+  LogOut, Pencil, Trash2, Calendar, Gauge, Printer
 } from 'lucide-react';
 import { collection, deleteDoc, doc, onSnapshot, setDoc } from 'firebase/firestore';
 import {
-  AylikYoklamaMap, CariKart, CariKartIslem, Fatura, KampYerleske, Personel, SahaFaaliyeti, TesisatciFaaliyet
+  AylikYoklamaMap, CariKart, CariKartIslem, Fatura, Irsaliye, KampYerleske, Personel, SahaFaaliyeti, TesisatciFaaliyet
 } from '../types/erp';
 import { db, cleanUndefined } from '../lib/firebase';
 import { compressImage } from '../lib/imageCompress';
 import { todayDateKey, formatDateLabelTr, normalizeDateKey } from '../lib/dateKeyUtils';
-import { applySahaMesaiToYoklama, normalizeMesaiHours } from '../lib/sahaFaaliyetUtils';
+import {
+  applySahaMesaiToYoklama,
+  mesaiInputDisplayValue,
+  normalizeMesaiHours,
+  setMesaiHoursInMap,
+} from '../lib/sahaFaaliyetUtils';
 import { ensureSahaFaaliyetFotolarPersisted } from '../lib/sahaFaaliyetFotoStorage';
 import { isTesisatciGorev } from '../lib/yoklamaUtils';
+import { resolveGeldiRolPersonelIds } from '../lib/mobilRolEtiketUtils';
 import { vibrateYildirimAlert } from '../lib/yildirimTankerUtils';
+import {
+  buildMobilGunlukFaaliyetReportHtml,
+  openMobilGunlukFaaliyetReport,
+} from '../lib/mobilGunlukFaaliyetReport';
 import { KampGunlukYoklamaTab } from './KampGunlukYoklamaTab';
 import { TesisatciYildirimTab } from './TesisatciYildirimTab';
 import { TesisatciSayacKesintiTab } from './TesisatciSayacKesintiTab';
@@ -25,6 +35,9 @@ interface TesisatciMobilScreenProps {
   saveYoklamalarNow?: (next: AylikYoklamaMap) => Promise<void>;
   cariKartlar?: CariKart[];
   faturalar?: Fatura[];
+  setFaturalar?: React.Dispatch<React.SetStateAction<Fatura[]>>;
+  irsaliyeler?: Irsaliye[];
+  setIrsaliyeler?: React.Dispatch<React.SetStateAction<Irsaliye[]>>;
   kampYerleskeleri?: KampYerleske[];
   setCariKartlar?: (updater: CariKart[] | ((prev: CariKart[]) => CariKart[])) => void;
   setCariIslemGecmisi?: React.Dispatch<React.SetStateAction<CariKartIslem[]>>;
@@ -51,6 +64,9 @@ export const TesisatciMobilScreen: React.FC<TesisatciMobilScreenProps> = ({
   saveYoklamalarNow,
   cariKartlar = [],
   faturalar = [],
+  setFaturalar,
+  irsaliyeler = [],
+  setIrsaliyeler,
   kampYerleskeleri = [],
   setCariKartlar,
   setCariIslemGecmisi,
@@ -78,6 +94,9 @@ export const TesisatciMobilScreen: React.FC<TesisatciMobilScreenProps> = ({
   useEffect(() => {
     const unsub = onSnapshot(collection(db, 'bildirimler'), (snap) => {
       const now = Date.now();
+      const myEmail = String(currentUser?.email || '')
+        .trim()
+        .toLowerCase();
       snap.docChanges().forEach((change) => {
         if (change.type !== 'added') return;
         const id = change.doc.id;
@@ -85,14 +104,47 @@ export const TesisatciMobilScreen: React.FC<TesisatciMobilScreenProps> = ({
         const data = change.doc.data() as Record<string, unknown>;
         const tip = String(data.tip || '');
         const hedef = String(data.hedefRol || '').toLocaleUpperCase('tr-TR');
+        const hedefEmail = String(data.hedefEmail || '')
+          .trim()
+          .toLowerCase();
         const mesaj = String(data.mesaj || '');
         const ts = new Date(String(data.tarih || 0)).getTime();
-        if (Number.isFinite(ts) && now - ts > 120_000) return;
+        if (Number.isFinite(ts) && now - ts > 600_000) return;
+
+        const isOnaySonucu =
+          tip === 'YILDIRIM_TANKER_FIS_ONAYLANDI' || tip === 'YILDIRIM_TANKER_FIS_REDDEDILDI';
+        if (isOnaySonucu) {
+          if (hedef && !hedef.includes('TESISAT')) return;
+          if (hedefEmail && myEmail && hedefEmail !== myEmail) return;
+          seenNotifIds.current.add(id);
+          vibrateYildirimAlert();
+          setYildirimAlert(mesaj);
+          setActiveSubTab('yildirim');
+          showStatus(
+            tip === 'YILDIRIM_TANKER_FIS_ONAYLANDI' ? 'success' : 'error',
+            mesaj || (tip.includes('ONAYLANDI') ? 'İrsaliye onaylandı.' : 'İrsaliye reddedildi.')
+          );
+          try {
+            window.dispatchEvent(
+              new CustomEvent('app-toast', {
+                detail: {
+                  type: tip.includes('ONAYLANDI') ? 'success' : 'error',
+                  message: mesaj,
+                },
+              })
+            );
+          } catch {
+            /* ignore */
+          }
+          return;
+        }
+
         const isYildirim =
           tip === 'YILDIRIM_TANKER_GIRIS' ||
           tip === 'SU_TANKERI_GIRIS' ||
           (hedef.includes('TESISAT') && mesaj.toLocaleLowerCase('tr-TR').includes('tanker'));
         if (!isYildirim) return;
+        if (Number.isFinite(ts) && now - ts > 120_000) return;
         seenNotifIds.current.add(id);
         vibrateYildirimAlert();
         setYildirimAlert(mesaj || 'Yıldırım Tanker sahaya girdi — fiş yükleyin.');
@@ -109,7 +161,7 @@ export const TesisatciMobilScreen: React.FC<TesisatciMobilScreenProps> = ({
       });
     });
     return () => unsub();
-  }, []);
+  }, [currentUser?.email]);
 
   // ─── Faaliyet state ───────────────────────────────────────────
   const [faaliyetGrubu, setFaaliyetGrubu] = useState<'NORMAL' | 'MESAI'>('NORMAL');
@@ -143,6 +195,23 @@ export const TesisatciMobilScreen: React.FC<TesisatciMobilScreenProps> = ({
     () => faaliyetler.filter((f) => normalizeDateKey(f.tarih) === normalizeDateKey(faaliyetTarih)),
     [faaliyetler, faaliyetTarih]
   );
+
+  const handleTopluRaporla = () => {
+    if (gunlukFaaliyetler.length === 0) {
+      showStatus('error', 'Bu tarihte birleştirilecek faaliyet kaydı yok.');
+      return;
+    }
+    const html = buildMobilGunlukFaaliyetReportHtml({
+      rol: 'TESİSATÇI',
+      anchorDate: faaliyetTarih,
+      records: gunlukFaaliyetler,
+      olusturan: currentUser?.email || 'Tesisatçı',
+    });
+    openMobilGunlukFaaliyetReport(
+      html,
+      `Tesisatçı Günlük Rapor — ${formatDateLabelTr(faaliyetTarih)}`
+    );
+  };
 
   const handleFaaliyetFoto = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -228,14 +297,16 @@ export const TesisatciMobilScreen: React.FC<TesisatciMobilScreenProps> = ({
       if (mesaiMap && Object.keys(mesaiMap).length > 0) {
         aktifPersonelListesi = Object.keys(mesaiMap);
       } else {
-        const self = tesisatciPersoneller.find(
-          (p) => String(p.eposta || '').trim().toLowerCase() === kaydedenEmail
+        // NORMAL: o gün Geldi olan tüm tesisatçılar (+ kaydeden self)
+        aktifPersonelListesi = resolveGeldiRolPersonelIds(
+          personeller,
+          yoklamalar,
+          normalizeDateKey(faaliyetTarih),
+          'TESISATCI',
+          { ensureEmail: kaydedenEmail }
         );
-        if (self?.id) aktifPersonelListesi = [self.id];
-        else if (existing?.aktifPersonelListesi?.length) {
+        if (aktifPersonelListesi.length === 0 && existing?.aktifPersonelListesi?.length) {
           aktifPersonelListesi = [...existing.aktifPersonelListesi];
-        } else if (tesisatciPersoneller.length === 1) {
-          aktifPersonelListesi = [tesisatciPersoneller[0].id];
         }
       }
 
@@ -590,12 +661,13 @@ export const TesisatciMobilScreen: React.FC<TesisatciMobilScreenProps> = ({
                   ) : (
                     <div className="max-h-44 overflow-y-auto space-y-1">
                       {tesisatciPersoneller.map((p) => {
-                        const hrs = personelMesaiSaatleri[p.id] || 0;
+                        const hrs = personelMesaiSaatleri[p.id];
+                        const hasHrs = Number(hrs) > 0;
                         return (
                           <div
                             key={p.id}
                             className={`flex items-center justify-between gap-2 border rounded-lg px-2 py-1.5 ${
-                              hrs > 0 ? 'bg-amber-100 border-amber-300' : 'bg-white border-slate-200'
+                              hasHrs ? 'bg-amber-100 border-amber-300' : 'bg-white border-slate-200'
                             }`}
                           >
                             <span className="text-[9px] font-bold text-slate-800 truncate">
@@ -606,12 +678,12 @@ export const TesisatciMobilScreen: React.FC<TesisatciMobilScreenProps> = ({
                               min={0}
                               max={14}
                               step={0.5}
-                              value={hrs}
+                              placeholder="—"
+                              value={mesaiInputDisplayValue(hrs)}
                               onChange={(e) =>
-                                setPersonelMesaiSaatleri((prev) => ({
-                                  ...prev,
-                                  [p.id]: Number(e.target.value) || 0,
-                                }))
+                                setPersonelMesaiSaatleri((prev) =>
+                                  setMesaiHoursInMap(prev, p.id, e.target.value)
+                                )
                               }
                               className="w-16 text-center text-[10px] font-bold border rounded-lg py-1"
                             />
@@ -645,9 +717,20 @@ export const TesisatciMobilScreen: React.FC<TesisatciMobilScreenProps> = ({
           </div>
 
           <div className="bg-white border border-slate-200 rounded-2xl p-4 space-y-3 shadow-sm">
-            <h4 className="text-[10px] font-black uppercase tracking-wider text-slate-700">
-              {formatDateLabelTr(faaliyetTarih)} — Kayıtlar ({gunlukFaaliyetler.length})
-            </h4>
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <h4 className="text-[10px] font-black uppercase tracking-wider text-slate-700">
+                {formatDateLabelTr(faaliyetTarih)} — Kayıtlar ({gunlukFaaliyetler.length})
+              </h4>
+              <button
+                type="button"
+                onClick={handleTopluRaporla}
+                disabled={gunlukFaaliyetler.length === 0}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-cyan-700 text-white text-[9px] font-black uppercase tracking-wide disabled:opacity-40 cursor-pointer"
+              >
+                <Printer size={12} />
+                Toplu Raporla ({gunlukFaaliyetler.length})
+              </button>
+            </div>
             {gunlukFaaliyetler.length === 0 ? (
               <p className="text-[11px] text-slate-400 italic">Bu tarihte faaliyet yok.</p>
             ) : (
@@ -721,9 +804,11 @@ export const TesisatciMobilScreen: React.FC<TesisatciMobilScreenProps> = ({
       {activeSubTab === 'yildirim' && (
         <TesisatciYildirimTab
           cariKartlar={cariKartlar}
-          setCariKartlar={setCariKartlar}
-          setCariIslemGecmisi={setCariIslemGecmisi}
           faturalar={faturalar}
+          setFaturalar={setFaturalar}
+          irsaliyeler={irsaliyeler}
+          setIrsaliyeler={setIrsaliyeler}
+          setCariIslemGecmisi={setCariIslemGecmisi}
           currentUser={currentUser}
           addNotification={addNotification}
           showStatus={showStatus}

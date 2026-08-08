@@ -5,6 +5,7 @@ export const PORTAL_PAGES = [
   { key: "personel_kartlari", label: "Personel Detay Kartları", group: "PERSONEL" },
   { key: "yoklama", label: "Yoklama ve Puantaj", group: "PERSONEL" },
   { key: "faaliyet_personel", label: "Faaliyeti Olan Personeller", group: "PERSONEL" },
+  { key: "saha_is_plan", label: "Saha İş Planı & Kontrol", group: "PERSONEL" },
   { key: "maas", label: "Maaş Hesaplama & Ödeme", group: "PERSONEL" },
   { key: "personel_izin", label: "Personel İzin Formu", group: "PERSONEL" },
   { key: "kasa", label: "Haftalık Kasa", group: "FİNANS & ENVANTER" },
@@ -37,12 +38,14 @@ export type PortalPageKey = (typeof PORTAL_PAGES)[number]["key"];
 
 /** Mobil saha rolleri → erişilebilir panel sekmeleri */
 export const MOBILE_ROLE_ALLOWED_TABS: Record<string, PortalPageKey[]> = {
-  FORMEN: ['formen_ekrani', 'faaliyet_personel', 'rapor_programlama', 'personel'],
+  // Formen günlük planı yönetirken ana sayfadaki genel özeti de görebilir.
+  FORMEN: ['ana_sayfa', 'formen_ekrani', 'faaliyet_personel', 'saha_is_plan', 'rapor_programlama', 'personel'],
   GÜVENLİK: ['guvenlik_ekrani'],
   KAMPÇI: ['kampci_ekrani'],
   TESİSATÇI: ['tesisatci_ekrani'],
   MERMERCİ: ['mermerci_ekrani'],
   LOJİSTİK: ['lojistik_ekrani'],
+  OPERATÖR: ['operator'],
   DEPOCU: ['depocu_ekrani'],
   ANAHTARCI: ['imalat_terminali'],
 };
@@ -58,16 +61,27 @@ const YETKI_ALIASES: Record<string, string> = {
   GUVENLIK: 'GÜVENLİK',
   LOJISTIK: 'LOJİSTİK',
   DEPO: 'DEPOCU',
+  /** Personel/görev kataloğu ve üyelik formları “ŞÖFÖR” yazar; mobil rol LOJİSTİK */
+  ŞÖFÖR: 'LOJİSTİK',
   ŞOFÖR: 'LOJİSTİK',
+  SOFÖR: 'LOJİSTİK',
   SOFOR: 'LOJİSTİK',
+  DRIVER: 'LOJİSTİK',
   TESISATCI: 'TESİSATÇI',
   TESİSATCI: 'TESİSATÇI',
   MERMERCI: 'MERMERCİ',
+  OPERATOR: 'OPERATÖR',
+  OPERATÖR: 'OPERATÖR',
   'İDARİ İŞLER': 'İDARİ_İŞLER',
   'IDARI ISLER': 'İDARİ_İŞLER',
   IDARI_ISLER: 'İDARİ_İŞLER',
   IDARI: 'İDARİ_İŞLER',
 };
+
+/** Şöför Mobil Paneli — kayıtlı yetki ŞÖFÖR / LOJİSTİK */
+export function isSoforYetki(yetki?: string | null): boolean {
+  return normalizeYetki(yetki) === 'LOJİSTİK';
+}
 
 export function normalizeYetki(yetki?: string | null): string {
   if (!yetki) return "";
@@ -127,6 +141,7 @@ export function getMobileRoleDisplayName(yetki?: string | null): string {
     MERMERCİ: 'Mermerci Mobil',
     GÜVENLİK: 'Güvenlik Mobil',
     LOJİSTİK: 'Şöför Mobil',
+    OPERATÖR: 'Operatör Mobil',
     DEPOCU: 'Depocu Mobil',
     ANAHTARCI: 'İmalat Terminali Mobil',
   };
@@ -194,6 +209,7 @@ export const YETKI_ROLLER = [
   'MERMERCİ',
   'GÜVENLİK',
   'LOJİSTİK',
+  'OPERATÖR',
   'DEPOCU',
   'ANAHTARCI',
   'MİSAFİR',
@@ -263,6 +279,9 @@ export function guessRoleFromEmail(email: string): string {
   }
   if (norm.includes('sofor') || norm.includes('driver')) {
     return 'LOJİSTİK';
+  }
+  if (norm.includes('operator') || norm.includes('operatör') || norm.includes('is makine')) {
+    return 'OPERATÖR';
   }
   if (norm.includes('anahtar') || norm.includes('key')) {
     return 'ANAHTARCI';

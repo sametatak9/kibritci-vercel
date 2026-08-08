@@ -55,7 +55,7 @@ export async function createSatinAlmaPublicShare(options: {
   sa: SatinAlmaTalebi;
   createdBy?: string;
 }): Promise<{ token: string; url: string }> {
-  await ensureFirestoreAuth();
+  await ensureFirestoreAuth({ allowAnonymous: true });
   const payload = toSharePayload(options.sa, options.createdBy);
   const idToken = await auth.currentUser?.getIdToken().catch(() => null);
 
@@ -104,7 +104,7 @@ export async function fetchSatinAlmaPublicShare(
     console.warn('Satın alma paylaşım okuma API başarısız, Firestore deneniyor:', err);
   }
 
-  await ensureFirestoreAuth();
+  await ensureFirestoreAuth({ allowAnonymous: true });
   const snap = await getDoc(doc(db, PUBLIC_SA_SHARE_COLLECTION, token));
   if (!snap.exists()) return null;
   return { id: snap.id, ...(snap.data() as Omit<SatinAlmaPublicShareDoc, 'id'>) };

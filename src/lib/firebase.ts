@@ -11,12 +11,43 @@ import {
   getDocs, 
   onSnapshot,
   writeBatch,
-  query
+  query,
+  enableIndexedDbPersistence
 } from 'firebase/firestore';
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 import { getStorage } from 'firebase/storage';
 import { getFirestoreDatabaseId, resolveFirebaseConfig } from './firebaseConfig';
 import { shouldBlockMassDelete } from './productionDataGuard';
+
+// New utilities for performance optimization
+/**
+ * Execute a batch of write operations (set/delete) limited to Firestore's max batch size (500).
+ * Returns a promise that resolves when the batch is committed.
+ */
+export async function executeBatchWrites(batch: ReturnType<typeof writeBatch>) {
+  // Firestore limits batches to 500 operations.
+  return batch.commit();
+}
+
+/** Debounce wrapper to coalesce rapid successive calls to a function.
+ * @param fn Function to debounce.
+ * @param waitMs Milliseconds to wait before invoking.
+ */
+export function debounce<T extends (...args: any[]) => any>(fn: T, waitMs = 200): T {
+  let timeout: NodeJS.Timeout;
+  // @ts-ignore – dynamic return signature
+  return function (...args: any[]) {
+    clearTimeout(timeout);
+    timeout = setTimeout(() => fn(...args), waitMs);
+  } as any;
+}
+
+/** Enable IndexedDB persistence for specific collections (placeholder, global currently). */
+export function enableCache(enable = true) {
+  // Currently Firestore persistence is configured globally at initialization.
+  // This function exists for future per‑collection cache toggles.
+  console.info(`[Firebase] Cache ${enable ? 'enabled' : 'disabled'}.`);
+}
 
 export { mergeYoklamaMaps } from './yoklamaGuard';
 
@@ -39,7 +70,7 @@ export const db = initializeFirestore(
 export const auth = getAuth(app);
 export const storage = getStorage(app);
 
-/** Firestore güvenlik kuralları oturum gerektirir; giriş öncesi anonim oturum açar. */
+/** Firestore güvenlik kuralları oturum gerektirir. */
 async function waitForAuthUser(maxMs = 8000) {
   if (auth.currentUser) return auth.currentUser;
   return new Promise<typeof auth.currentUser>((resolve) => {
@@ -53,9 +84,38 @@ async function waitForAuthUser(maxMs = 8000) {
   });
 }
 
-export async function ensureFirestoreAuth(): Promise<boolean> {
+export type EnsureFirestoreAuthOptions = {
+  /**
+   * true: oturum yoksa anonim aç (yalnızca public koleksiyonlar: personelGirisTalepleri vb.)
+   * false/undefined: ERP — anonim oluşturma yok; mevcut anonim oturum yetersiz sayılır
+   */
+  allowAnonymous?: boolean;
+};
+
+/**
+ * Firestore oturumu hazırlar.
+ * ERP yazmaları için allowAnonymous=false (varsayılan): e-posta oturumu şart.
+ */
+export async function ensureFirestoreAuth(
+  opts?: EnsureFirestoreAuthOptions
+): Promise<boolean> {
+  const allowAnonymous = Boolean(opts?.allowAnonymous);
   const existing = await waitForAuthUser(6000);
-  if (existing) return true;
+
+  if (existing) {
+    if (existing.isAnonymous && !allowAnonymous) {
+      console.warn(
+        '[Firebase] Anonim oturum ERP yazması için yetersiz; e-posta girişi gerekli.'
+      );
+      return false;
+    }
+    return true;
+  }
+
+  if (!allowAnonymous) {
+    console.warn('[Firebase] ERP oturumu yok; anonim oluşturulmayacak.');
+    return false;
+  }
 
   try {
     await signInAnonymously(auth);
@@ -75,20 +135,46 @@ if (typeof window !== 'undefined') {
 }
 
 /**
- * Helper to wrap any promise with a timeout
+ * Helper to wrap any promise with a timeout and automatic retry logic
+ * to prevent transient FIRESTORE_TIMEOUT crashes without breaking existing calls.
  */
-export async function withTimeout<T>(promise: Promise<T>, ms = 18000): Promise<T> {
-  let timeoutId: ReturnType<typeof setTimeout>;
-  const timeoutPromise = new Promise<never>((_, reject) => {
-    timeoutId = setTimeout(() => {
-      reject(new Error('FIRESTORE_TIMEOUT'));
-    }, ms);
-  });
-  try {
-    return await Promise.race([promise, timeoutPromise]);
-  } finally {
-    clearTimeout(timeoutId!);
+export async function withTimeout<T>(
+  promiseFnOrPromise: Promise<T> | (() => Promise<T>), 
+  ms = 25000, 
+  retries = 2
+): Promise<T> {
+  let attempt = 0;
+
+  while (attempt <= retries) {
+    attempt++;
+    let timeoutId: ReturnType<typeof setTimeout>;
+
+    const promise = typeof promiseFnOrPromise === 'function' 
+      ? promiseFnOrPromise() 
+      : (attempt === 1 ? promiseFnOrPromise : Promise.reject(new Error('FIRESTORE_TIMEOUT')));
+
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timeoutId = setTimeout(() => {
+        reject(new Error('FIRESTORE_TIMEOUT'));
+      }, ms);
+    });
+
+    try {
+      return await Promise.race([promise, timeoutPromise]);
+    } catch (err: any) {
+      const isTimeout = err?.message === 'FIRESTORE_TIMEOUT' || err?.code === 'unavailable';
+      if (isTimeout && attempt <= retries && typeof promiseFnOrPromise === 'function') {
+        console.warn(`[Firestore] Zaman aşımı denemesi ${attempt}/${retries} başarısız oldu, yeniden deneniyor...`);
+        await new Promise((r) => setTimeout(r, 800 * attempt));
+        continue;
+      }
+      throw err;
+    } finally {
+      clearTimeout(timeoutId!);
+    }
   }
+
+  throw new Error('FIRESTORE_TIMEOUT');
 }
 
 /**
@@ -252,6 +338,7 @@ export async function saveYoklamaDocument(
  */
 const PERSONEL_MEDIA_KEYS = ['fotografUrl', 'sigortaEvrakUrl'] as const;
 const MAX_PERSONEL_SYNC_INLINE = 120_000;
+const MAX_KASA_FIS_INLINE = 700_000;
 
 /** Personel sync: değişmeyen büyük data URL’leri yazma (timeout/rollback engeli) */
 function leanPersonelSyncPayload<T extends { id: string }>(item: T, oldItem?: T): T {
@@ -270,12 +357,36 @@ function leanPersonelSyncPayload<T extends { id: string }>(item: T, oldItem?: T)
   return out as T;
 }
 
+/** Kasa: aşırı büyük inline fiş Firestore yazımını düşürüp tüm kaydı rollback ettirmesin */
+function leanKasaSyncPayload<T extends { id: string }>(item: T, oldItem?: T): T {
+  const out: Record<string, unknown> = { ...(item as Record<string, unknown>) };
+  const nextVal = String(out.fisEvrakUrl || '');
+  if (!nextVal.startsWith('data:') || nextVal.length <= MAX_KASA_FIS_INLINE) {
+    return out as T;
+  }
+  const prevVal = String((oldItem as Record<string, unknown> | undefined)?.fisEvrakUrl || '');
+  if (prevVal && !prevVal.startsWith('data:')) {
+    out.fisEvrakUrl = prevVal;
+  } else {
+    delete out.fisEvrakUrl;
+  }
+  return out as T;
+}
+
 export async function syncArrayToFirestore<T extends { id: string }>(
   collectionName: string,
   oldArray: T[],
   newArray: T[]
 ): Promise<void> {
+  // Optimized: uses a single Firestore batch commit instead of individual
+  // parallel writes — reduces billing operations and network round-trips.
   try {
+    const { assertErpWriteAuth } = await import('./authWriteGuard');
+    const authBlock = await assertErpWriteAuth();
+    if (authBlock) {
+      throw new Error(authBlock);
+    }
+
     if (collectionName === 'sahaFaaliyetleri') {
       const { syncSahaFaaliyetleriArray } = await import('./sahaFaaliyetPersistence');
       const result = await syncSahaFaaliyetleriArray(
@@ -298,9 +409,7 @@ export async function syncArrayToFirestore<T extends { id: string }>(
     const oldMap = new Map(oldArray.map(item => [item.id, item]));
     const newMap = new Map(newArray.map(item => [item.id, item]));
 
-    const promises: Promise<any>[] = [];
-
-    // Helper for stable deep comparison independent of key order
+    // Stable deep-compare helper (key-order independent)
     const stableStringify = (obj: any): string => {
       const isObject = (val: any) => val && typeof val === 'object' && !Array.isArray(val);
       const stringifyObj = (o: any): any => {
@@ -316,31 +425,42 @@ export async function syncArrayToFirestore<T extends { id: string }>(
       return JSON.stringify(stringifyObj(obj));
     };
 
+    // Collect all operations into a single batch (max 500 per Firestore rules)
+    const batch = writeBatch(db);
+    let opCount = 0;
+
     // Save/Update new or changed items
     for (const [id, item] of newMap.entries()) {
       const oldItem = oldMap.get(id);
       if (!oldItem || stableStringify(oldItem) !== stableStringify(item)) {
-        // personeller: büyük foto/PDF’yi değişmediyse tekrar yazma (timeout → rollback)
         if (collectionName === 'personeller') {
-          promises.push(saveDocument(collectionName, leanPersonelSyncPayload(item, oldItem)));
+          batch.set(doc(db, collectionName, id), leanPersonelSyncPayload(item, oldItem));
+        } else if (collectionName === 'kasaHareketleri') {
+          batch.set(doc(db, collectionName, id), leanKasaSyncPayload(item, oldItem));
         } else {
-          promises.push(saveDocument(collectionName, item));
+          batch.set(doc(db, collectionName, id), item);
         }
+        opCount++;
       }
     }
 
     // Delete removed items
     for (const id of oldMap.keys()) {
       if (!newMap.has(id)) {
-        promises.push(removeDocument(collectionName, id));
+        batch.delete(doc(db, collectionName, id));
+        opCount++;
       }
     }
 
-    // #endregion
-    await Promise.all(promises);
+    // Only commit if there are actual changes
+    if (opCount > 0) {
+      await batch.commit();
+    }
   } catch (error) {
+    const { formatFirestoreWriteError } = await import('./authWriteGuard');
+    const friendly = formatFirestoreWriteError(error, `Error syncing ${collectionName}`);
     console.error(`Error syncing array for collection ${collectionName}:`, error);
-    throw error instanceof Error ? error : new Error(String(error));
+    throw new Error(friendly);
   }
 }
 

@@ -2,14 +2,21 @@ import React, { useEffect, useState, useMemo } from 'react';
 import { Calendar, Trash2, ShieldAlert, CheckCircle, FileText, ChevronRight, RefreshCw, Database, Undo2, Redo2, Camera } from 'lucide-react';
 import { Personel, AylikYoklamaMap, YoklamaDurum, SahaFaaliyeti, KampFaaliyet } from '../types/erp';
 import { normalizeDateKey } from '../lib/dateKeyUtils';
-import { formatMesaiFaaliyetLabel, getFaaliyetFotolar, isMesaiSahaFaaliyet } from '../lib/sahaFaaliyetUtils';
+import {
+  formatMesaiFaaliyetLabel,
+  getFaaliyetFotolar,
+  isMesaiSahaFaaliyet,
+  mesaiInputDisplayValue,
+  parseMesaiInputValue,
+} from '../lib/sahaFaaliyetUtils';
 import {
   buildFaaliyetPersoneller,
   getPersonFaaliyetleriInPeriod,
 } from '../lib/faaliyetPersonelUtils';
 import { CorporateReportLayout } from './CorporateReportLayout';
 import { loadKibritciLogoDataUrl } from '../lib/kibritciBrand';
-import { buildPersonelListForMonth, findPersonelByName, getBoundaryDayInMonth, getYoklamaDay, isDayActiveForPersonel, isPersonelVisibleInMonth, normalizeTurkishName, setYoklamaDay } from '../lib/yoklamaUtils';
+import { buildPersonelListForMonth, findPersonelByName, getBoundaryDayInMonth, getYoklamaDay, isDayActiveForPersonel, isPersonelVisibleInMonth, normalizeTurkishName, parseFlexibleDateParts, setYoklamaDay } from '../lib/yoklamaUtils';
+import { exportModernPuantajExcel } from '../lib/modernPuantajExcel';
 import { importAllLegacyExcelMonths, importLegacyExcelMonth, aiMonthlyDataToLegacyMonth, resolveStubPersonelFromLegacyId } from '../lib/legacyYoklamaImport';
 import { LEGACY_EXCEL_MONTHS } from '../data/legacyExcelYoklama';
 import { fetchApiJson } from '../lib/apiClient';
@@ -19,8 +26,24 @@ import {
   YoklamaArchiveEntry,
 } from '../lib/yoklamaPersistence';
 import type { YoklamaSaveSource } from '../lib/yoklamaPersistence';
+import { countYoklamaFilledDays, countYoklamaPersons } from '../lib/yoklamaGuard';
 import { db } from '../lib/firebase';
 import { collection, onSnapshot } from 'firebase/firestore';
+
+/** Seçili ayda Girilmedi dışı dolu hücre sayısı */
+function countFilledDaysInMonth(map: AylikYoklamaMap, year: number, month: number): number {
+  const prefix = `${year}-${String(month).padStart(2, '0')}-`;
+  let n = 0;
+  for (const personMap of Object.values(map || {})) {
+    if (!personMap || typeof personMap !== 'object') continue;
+    for (const [key, data] of Object.entries(personMap)) {
+      if (!key.startsWith(prefix)) continue;
+      const durum = (data as { durum?: string })?.durum;
+      if (durum && durum !== 'Girilmedi') n++;
+    }
+  }
+  return n;
+}
 
 const maskName = (name?: string): string => {
   return name || '';
@@ -35,6 +58,12 @@ interface YoklamaScreenProps {
     next: AylikYoklamaMap,
     kaynak?: YoklamaSaveSource
   ) => Promise<unknown>;
+  /** IndexedDB atlayıp sunucudan oku (Firestore'a yazmaz) */
+  reloadYoklamalarFromServer?: () => Promise<{
+    personCount: number;
+    filledDayCount: number;
+    map: AylikYoklamaMap;
+  }>;
   addNotification?: (mesaj: string) => void;
   sahaFaaliyetleri?: SahaFaaliyeti[];
   onOpenFaaliyetPersonel?: () => void;
@@ -46,6 +75,7 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
   yoklamalar, 
   setYoklamalar,
   saveYoklamalarNow,
+  reloadYoklamalarFromServer,
   addNotification,
   sahaFaaliyetleri = [],
   onOpenFaaliyetPersonel,
@@ -80,6 +110,7 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
   const [hasPendingChanges, setHasPendingChanges] = useState(false);
   const [savingDraft, setSavingDraft] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
+  const [serverRefreshLoading, setServerRefreshLoading] = useState(false);
 
   // Report formatting state
   const [reportType, setReportType] = useState<'NORMAL' | 'E-IMZALI'>('NORMAL');
@@ -120,23 +151,64 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
       setDraftYoklamalar(yoklamalar);
       setUndoStack([]);
       setRedoStack([]);
+      return;
     }
-  }, [yoklamalar, hasPendingChanges]);
+    // Takılı boş/zayıf taslak, dolu sunucu haritasını gizlemesin (masaüstü sık)
+    const remoteFilled = countYoklamaFilledDays(yoklamalar);
+    const localFilled = countYoklamaFilledDays(draftYoklamalar);
+    if (remoteFilled > localFilled + 20) {
+      setDraftYoklamalar(yoklamalar);
+      setHasPendingChanges(false);
+      setUndoStack([]);
+      setRedoStack([]);
+      if (addNotification) {
+        addNotification(
+          `Yoklama taslağı sunucu ile senkronlandı (${remoteFilled} dolu gün). Kaydedilmemiş zayıf taslak atıldı.`
+        );
+      }
+    }
+  }, [yoklamalar, hasPendingChanges, draftYoklamalar, addNotification]);
 
-  const cloneYoklamaMap = (map: AylikYoklamaMap): AylikYoklamaMap =>
-    JSON.parse(JSON.stringify(map || {})) as AylikYoklamaMap;
-
-  const isSameYoklamaMap = (a: AylikYoklamaMap, b: AylikYoklamaMap): boolean =>
-    JSON.stringify(a || {}) === JSON.stringify(b || {});
+  const handleForceServerRefresh = async () => {
+    if (!reloadYoklamalarFromServer) {
+      alert('Sunucu yenileme bu oturumda kullanılamıyor. Sayfayı Ctrl+Shift+R ile yenileyin.');
+      return;
+    }
+    setServerRefreshLoading(true);
+    try {
+      const stats = await reloadYoklamalarFromServer();
+      setHasPendingChanges(false);
+      setUndoStack([]);
+      setRedoStack([]);
+      setDraftYoklamalar(stats.map);
+      if (addNotification) {
+        addNotification(
+          `Yoklama yenilendi: ${stats.personCount} personel · ${stats.filledDayCount} dolu gün.`
+        );
+      }
+      alert(
+        `Yoklama yüklendi.\nPersonel: ${stats.personCount}\nDolu gün: ${stats.filledDayCount}\n\nHâlâ boşsa «Yoklama Arşivi» ile yedek geri yükleyin. (PC önce önbellek/ay yedeği kullanır.)`
+      );
+    } catch (err: unknown) {
+      const raw = err instanceof Error ? err.message : 'Sunucu yenilemesi başarısız';
+      const msg = /FIRESTORE_TIMEOUT/i.test(raw)
+        ? 'Bağlantı zaman aşımı. PC önbelleği veya ay yedeklerinden yüklenmeye çalışıldı; hâlâ boşsa «Yoklama Arşivi»nden geri yükleyin.'
+        : raw;
+      alert(msg);
+    } finally {
+      setServerRefreshLoading(false);
+    }
+  };
 
   const updateDraftYoklama = (
     updater: AylikYoklamaMap | ((prev: AylikYoklamaMap) => AylikYoklamaMap)
   ) => {
     setDraftYoklamalar((prev) => {
       const next = typeof updater === 'function' ? updater(prev) : updater;
-      if (isSameYoklamaMap(prev, next)) return prev;
+      if (prev === next) return prev;
+      // Derin klon yok: prev zaten immutable anlık görüntü
       setUndoStack((stack) => {
-        const merged = [...stack, cloneYoklamaMap(prev)];
+        const merged = [...stack, prev];
         return merged.length > 80 ? merged.slice(merged.length - 80) : merged;
       });
       setRedoStack([]);
@@ -240,21 +312,21 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
   const handleUndoDraftChange = () => {
     if (undoStack.length === 0 || savingDraft) return;
     const previous = undoStack[undoStack.length - 1];
-    const current = cloneYoklamaMap(draftYoklamalar);
+    const current = draftYoklamalar;
     setUndoStack((stack) => stack.slice(0, -1));
     setRedoStack((stack) => [...stack, current]);
     setDraftYoklamalar(previous);
-    setHasPendingChanges(!isSameYoklamaMap(previous, yoklamalar));
+    setHasPendingChanges(previous !== yoklamalar);
   };
 
   const handleRedoDraftChange = () => {
     if (redoStack.length === 0 || savingDraft) return;
     const next = redoStack[redoStack.length - 1];
-    const current = cloneYoklamaMap(draftYoklamalar);
+    const current = draftYoklamalar;
     setRedoStack((stack) => stack.slice(0, -1));
     setUndoStack((stack) => [...stack, current]);
     setDraftYoklamalar(next);
-    setHasPendingChanges(!isSameYoklamaMap(next, yoklamalar));
+    setHasPendingChanges(next !== yoklamalar);
   };
 
   const handleAiFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -423,9 +495,54 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
   const daysInMonth = new Date(selectedYear, selectedMonth, 0).getDate();
   const daysArray = Array.from({ length: daysInMonth }, (_, i) => i + 1);
 
+  const yoklamaLoadStats = useMemo(() => {
+    const source = hasPendingChanges ? draftYoklamalar : yoklamalar;
+    const thisMonth = countFilledDaysInMonth(source, selectedYear, selectedMonth);
+    const prevMonth = selectedMonth === 1 ? 12 : selectedMonth - 1;
+    const prevYear = selectedMonth === 1 ? selectedYear - 1 : selectedYear;
+    const prevFilled = countFilledDaysInMonth(source, prevYear, prevMonth);
+
+    // Bu ay boş ama haritada başka ay doluysa (yanlış yıl/ay seçimi) en dolu dönemi bul
+    let bestYear = selectedYear;
+    let bestMonth = selectedMonth;
+    let bestFilled = thisMonth;
+    if (thisMonth === 0) {
+      const monthTotals = new Map<string, number>();
+      for (const personMap of Object.values(source || {})) {
+        if (!personMap || typeof personMap !== 'object') continue;
+        for (const [key, data] of Object.entries(personMap)) {
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(key)) continue;
+          const durum = (data as { durum?: string })?.durum;
+          if (!durum || durum === 'Girilmedi') continue;
+          const ym = key.slice(0, 7);
+          monthTotals.set(ym, (monthTotals.get(ym) || 0) + 1);
+        }
+      }
+      for (const [ym, n] of monthTotals) {
+        if (n > bestFilled) {
+          bestFilled = n;
+          bestYear = Number(ym.slice(0, 4));
+          bestMonth = Number(ym.slice(5, 7));
+        }
+      }
+    }
+
+    return {
+      persons: countYoklamaPersons(source),
+      filledTotal: countYoklamaFilledDays(source),
+      thisMonth,
+      prevMonth,
+      prevYear,
+      prevFilled,
+      bestYear,
+      bestMonth,
+      bestFilled,
+    };
+  }, [yoklamalar, draftYoklamalar, hasPendingChanges, selectedYear, selectedMonth]);
+
   // Yoklama codes list for cycling: G: Geldi, Y: Yok, İ: İzinli, R: Raporlu, P: Pazar, T: Tatil
   const statusCycle: YoklamaDurum[] = ['Geldi', 'Yok', 'İzinli', 'Raporlu', 'Pazar', 'Tatil', 'Girilmedi'];
-  
+   
   const getStatusColor = (status: YoklamaDurum) => {
     switch (status) {
       case 'Geldi': return 'bg-emerald-100 text-emerald-800 border-emerald-200';
@@ -485,9 +602,10 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
         personeller,
         selectedYear,
         selectedMonth,
-        kampFaaliyetleri
+        kampFaaliyetleri,
+        draftYoklamalar
       ).length,
-    [sahaFaaliyetleri, kampFaaliyetleri, personeller, selectedYear, selectedMonth]
+    [sahaFaaliyetleri, kampFaaliyetleri, personeller, selectedYear, selectedMonth, draftYoklamalar]
   );
 
   const sahaPreviewFaaliyetleri = useMemo(() => {
@@ -629,390 +747,33 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
   }, [monthPersoneller, searchTerm]);
 
   const handleExportExcelTables = async (emptyMode: boolean = false) => {
-    const { createExcelWorkbook } = await import('../lib/exceljsLoader');
-
-    const wb = await createExcelWorkbook();
-    const ws = wb.addWorksheet('Puantaj', {
-      views: [{ state: 'frozen', ySplit: 5, xSplit: 7 }],
-    });
-
-    const periodLabel = `${selectedYear}-${String(selectedMonth).padStart(2, '0')}`;
-    const reportNo = `KBR-DSK-${selectedYear}${String(selectedMonth).padStart(2, '0')}-${Date.now().toString().slice(-4)}`;
-    const basimTarihi = new Date().toLocaleString('tr-TR');
-    const daysInMonth = new Date(selectedYear, selectedMonth, 0).getDate();
-    const dayIndexes = Array.from({ length: daysInMonth }, (_, i) => i + 1);
-    const monthLabel = new Date(selectedYear, selectedMonth - 1, 1).toLocaleDateString('tr-TR', {
+    // onClick={fn} event nesnesini 1. argüman yapar; yalnızca true boş şablon demektir.
+    const isEmptyTemplate = emptyMode === true;
+    const filled = countFilledDaysInMonth(draftYoklamalar, selectedYear, selectedMonth);
+    const periodLabel = new Date(selectedYear, selectedMonth - 1, 1).toLocaleDateString('tr-TR', {
       month: 'long',
       year: 'numeric',
     });
-    const reportTitle = `KİBRİTÇİ İNŞAAT DURSUNKÖY PROJESİ ${monthLabel.toUpperCase()} RAPORUDUR`;
-    const titleRow = 1;
-    const metaRow = 2;
-    const periodRow = 3;
-    const headerTopRow = 4;
-    const headerSubRow = 5;
-    const dataStartRow = 6;
-    const baseCols = 7; // sıra, ad soyad, tc, iban, görev, maaş, satır tipi
-    const summaryStart = baseCols + daysInMonth + 1;
-    const summaryLabels = ['Top. Gün', 'Yok Gün', 'Top. Mesai', 'Aylık Maaş', 'Gün Hak.', 'Mesai Hak.', 'Toplam'];
-    const totalCols = summaryStart + summaryLabels.length - 1;
-
-    ws.getCell(titleRow, 1).value = reportTitle;
-    ws.mergeCells(titleRow, 1, titleRow, totalCols);
-    ws.getCell(titleRow, 1).font = { bold: true, size: 14, color: { argb: 'FFFFFFFF' } };
-    ws.getCell(titleRow, 1).alignment = { vertical: 'middle', horizontal: 'center' };
-    ws.getCell(titleRow, 1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0F172A' } };
-    ws.getRow(titleRow).height = 28;
-
-    ws.getCell(metaRow, 1).value = `Rapor No: ${reportNo}  |  Basım Tarihi: ${basimTarihi}`;
-    ws.mergeCells(metaRow, 1, metaRow, totalCols);
-    ws.getCell(metaRow, 1).font = { bold: true, size: 10, color: { argb: 'FF0F172A' } };
-    ws.getCell(metaRow, 1).alignment = { vertical: 'middle', horizontal: 'center' };
-    ws.getCell(metaRow, 1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2E8F0' } };
-
-    ws.getCell(periodRow, 1).value = `Dönem: ${monthLabel}`;
-    ws.mergeCells(periodRow, 1, periodRow, totalCols);
-    ws.getCell(periodRow, 1).font = { bold: true, size: 10, color: { argb: 'FF334155' } };
-    ws.getCell(periodRow, 1).alignment = { vertical: 'middle', horizontal: 'center' };
-    ws.getCell(periodRow, 1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } };
-
-    const logoDataUrl = await loadKibritciLogoDataUrl();
-    if (logoDataUrl) {
-      const base64 = logoDataUrl.replace(/^data:image\/png;base64,/, '');
-      const logoId = wb.addImage({ base64, extension: 'png' });
-      ws.addImage(logoId, { tl: { col: 0.1, row: 0.08 }, ext: { width: 200, height: 78 } });
+    if (
+      !window.confirm(
+        isEmptyTemplate
+          ? `${periodLabel} için BOŞ puantaj şablonu indirilsin mi?\n(Gün/mesai hücreleri boş kalır.)`
+          : `${periodLabel} dönemi Excel puantajı indirilsin mi?\n` +
+              `Personel: ${filteredPersonel.length} · Dolu gün kaydı: ${filled}\n` +
+              `Rapor seçili aya göredir (basım tarihi yalnızca yazdırma anıdır).`
+      )
+    ) {
+      return;
     }
-
-    const headerTop = ['Sıra', 'Ad Soyad', 'TC Kimlik', 'IBAN', 'Görevi', 'Aylık Maaş', 'Satır'];
-    headerTop.forEach((h, i) => {
-      const col = i + 1;
-      ws.getCell(headerTopRow, col).value = h;
-      ws.getCell(headerTopRow, col).font = { bold: true, color: { argb: 'FFFFFFFF' } };
-      ws.getCell(headerTopRow, col).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1F2937' } };
-      ws.getCell(headerTopRow, col).alignment = { horizontal: 'center', vertical: 'middle' };
-      ws.mergeCells(headerTopRow, col, headerSubRow, col);
+    await exportModernPuantajExcel({
+      personeller: filteredPersonel,
+      yoklamalar: draftYoklamalar,
+      year: selectedYear,
+      month: selectedMonth,
+      emptyMode: isEmptyTemplate,
+      filledDayCountInMonth: filled,
+      skipEmptyConfirm: true,
     });
-
-    dayIndexes.forEach((d, idx) => {
-      const col = baseCols + idx + 1;
-      ws.getCell(headerTopRow, col).value = d;
-      ws.getCell(headerSubRow, col).value = dayOfWeekAbbreviation(d);
-      [headerTopRow, headerSubRow].forEach((r) => {
-        ws.getCell(r, col).font = { bold: true, color: { argb: 'FFFFFFFF' } };
-        ws.getCell(r, col).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1D4ED8' } };
-        ws.getCell(r, col).alignment = { horizontal: 'center', vertical: 'middle' };
-      });
-    });
-
-    summaryLabels.forEach((label, i) => {
-      const col = summaryStart + i;
-      ws.getCell(headerTopRow, col).value = label;
-      ws.mergeCells(headerTopRow, col, headerSubRow, col);
-      ws.getCell(headerTopRow, col).font = { bold: true, color: { argb: 'FFFFFFFF' } };
-      ws.getCell(headerTopRow, col).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF111827' } };
-      ws.getCell(headerTopRow, col).alignment = { horizontal: 'center', vertical: 'middle' };
-    });
-
-    const toStatusSymbol = (durum: YoklamaDurum): string => {
-      if (durum === 'Geldi') return 'X';
-      if (durum === 'Yok') return 'Y';
-      if (durum === 'İzinli') return 'İ';
-      if (durum === 'Raporlu') return 'R';
-      if (durum === 'Pazar') return 'P';
-      if (durum === 'Tatil') return 'T';
-      return '-';
-    };
-
-    let row = dataStartRow;
-    filteredPersonel.forEach((p, index) => {
-      const cetvelRow = row;
-      ws.mergeCells(cetvelRow, 1, cetvelRow, baseCols);
-      ws.getCell(cetvelRow, 1).value = `TARİH CETVELİ · ${p.ad} ${p.soyad}`;
-      ws.getCell(cetvelRow, 1).font = { bold: true, size: 9, color: { argb: 'FF1E3A8A' } };
-      ws.getCell(cetvelRow, 1).alignment = { horizontal: 'left', vertical: 'middle' };
-      ws.getCell(cetvelRow, 1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEFF6FF' } };
-      dayIndexes.forEach((day, idx) => {
-        const col = baseCols + idx + 1;
-        const cetvelCell = ws.getCell(cetvelRow, col);
-        cetvelCell.value = `${String(day).padStart(2, '0')} ${dayOfWeekAbbreviation(day)}`;
-        cetvelCell.font = { bold: true, size: 8, color: { argb: 'FF1E3A8A' } };
-        cetvelCell.alignment = { horizontal: 'center', vertical: 'middle' };
-        cetvelCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE0E7FF' } };
-      });
-      summaryLabels.forEach((_, i) => {
-        const col = summaryStart + i;
-        const cell = ws.getCell(cetvelRow, col);
-        cell.value = '';
-        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF1F5F9' } };
-      });
-      ws.getRow(cetvelRow).height = 18;
-      row += 1;
-
-      const map = draftYoklamalar[p.id] || {};
-      let geldiGun = 0;
-      let yokGun = 0;
-      let mesaiToplam = 0;
-      let hakedisGun = 0;
-      const hireDay = getBoundaryDayInMonth(p.iseGirisTarihi, selectedYear, selectedMonth);
-      const exitDay = getBoundaryDayInMonth(p.istenCikisTarihi, selectedYear, selectedMonth);
-      const dailyWage = Number(p.maas || 0) / Math.max(daysInMonth, 1);
-
-      for (let c = 1; c <= 6; c++) {
-        ws.mergeCells(row, c, row + 2, c);
-      }
-      ws.getCell(row, 1).value = index + 1;
-      ws.getCell(row, 2).value = `${p.ad} ${p.soyad}`;
-      ws.getCell(row, 3).value = p.tcNo || '-';
-      ws.getCell(row, 4).value = p.ibanNo || '-';
-      ws.getCell(row, 4).alignment = { horizontal: 'left', vertical: 'middle', wrapText: false };
-      ws.getCell(row, 5).value = p.gorev || '-';
-      ws.getCell(row, 6).value = Number(p.maas || 0);
-      ws.getCell(row, 6).numFmt = '#,##0.00';
-
-      ws.getCell(row, 7).value = 'ÇALIŞMA GÜNÜ';
-      ws.getCell(row + 1, 7).value = 'MESAİ (SAAT)';
-      ws.getCell(row + 2, 7).value = '';
-
-      dayIndexes.forEach((day, idx) => {
-        const col = baseCols + idx + 1;
-        const active = isDayActiveForEmployee(p, day);
-        const d = getYoklamaDay(map, selectedYear, selectedMonth, day) || { durum: 'Girilmedi' as YoklamaDurum, mesaiSaati: 0 };
-        const mesai = Number(d.mesaiSaati || 0);
-        if (active) {
-          if (d.durum === 'Geldi') geldiGun++;
-          if (d.durum === 'Yok') yokGun++;
-          if (d.durum === 'Geldi' || d.durum === 'İzinli' || d.durum === 'Pazar' || d.durum === 'Tatil') hakedisGun++;
-          mesaiToplam += mesai;
-        }
-
-        const statusCell = ws.getCell(row, col);
-        const mesaiCell = ws.getCell(row + 1, col);
-        statusCell.value = active ? (emptyMode ? '' : toStatusSymbol(d.durum)) : '-';
-        mesaiCell.value = active && mesai > 0 && !emptyMode ? mesai : '';
-        if (active && mesai > 0 && !emptyMode) mesaiCell.numFmt = '0.0';
-        let hasSpecialDayStyle = false;
-
-        if (!active) {
-          statusCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF1F5F9' } };
-          mesaiCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } };
-        } else if (emptyMode) {
-          statusCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFFFF' } };
-        } else if (d.durum === 'Geldi') {
-          statusCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDCFCE7' } };
-        } else if (d.durum === 'Yok') {
-          statusCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFEE2E2' } };
-        } else if (d.durum === 'Pazar' || d.durum === 'Tatil') {
-          statusCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFEF3C7' } };
-        }
-        if (hireDay === day) {
-          hasSpecialDayStyle = true;
-          statusCell.border = {
-            top: { style: 'medium', color: { argb: 'FF22C55E' } },
-            left: { style: 'medium', color: { argb: 'FF22C55E' } },
-            right: { style: 'medium', color: { argb: 'FF22C55E' } },
-            bottom: { style: 'medium', color: { argb: 'FF22C55E' } },
-          };
-          mesaiCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: emptyMode ? 'FFFFFFFF' : 'FFDCFCE7' } };
-          mesaiCell.border = {
-            top: { style: 'medium', color: { argb: 'FF22C55E' } },
-            left: { style: 'medium', color: { argb: 'FF22C55E' } },
-            right: { style: 'medium', color: { argb: 'FF22C55E' } },
-            bottom: { style: 'medium', color: { argb: 'FF22C55E' } },
-          };
-        }
-        if (exitDay === day) {
-          hasSpecialDayStyle = true;
-          statusCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: emptyMode ? 'FFFFFFFF' : 'FFFEE2E2' } };
-          statusCell.border = {
-            top: { style: 'medium', color: { argb: 'FFDC2626' } },
-            left: { style: 'medium', color: { argb: 'FFDC2626' } },
-            right: { style: 'medium', color: { argb: 'FFDC2626' } },
-            bottom: { style: 'medium', color: { argb: 'FFDC2626' } },
-          };
-          mesaiCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: emptyMode ? 'FFFFFFFF' : 'FFFEE2E2' } };
-          mesaiCell.border = {
-            top: { style: 'medium', color: { argb: 'FFDC2626' } },
-            left: { style: 'medium', color: { argb: 'FFDC2626' } },
-            right: { style: 'medium', color: { argb: 'FFDC2626' } },
-            bottom: { style: 'medium', color: { argb: 'FFDC2626' } },
-          };
-        }
-        if (hasSpecialDayStyle) {
-          statusCell.font = { ...(statusCell.font || {}), bold: true };
-          mesaiCell.font = { ...(mesaiCell.font || {}), bold: true };
-        }
-      });
-
-      const tahminiMaas = dailyWage * hakedisGun;
-      const tahminiMesai = mesaiToplam * (dailyWage / 7.5) * 1.5;
-      const tahminiToplam = tahminiMaas + tahminiMesai;
-      const summaryValues = emptyMode ? ['', '', '', '', '', '', ''] : [geldiGun, yokGun, Number(mesaiToplam.toFixed(1)), Number(p.maas || 0), tahminiMaas, tahminiMesai, tahminiToplam];
-      summaryValues.forEach((v, i) => {
-        const cell = ws.getCell(row, summaryStart + i);
-        cell.value = v;
-        if (i >= 2 && !emptyMode) cell.numFmt = '#,##0.00';
-      });
-      ws.mergeCells(row + 1, summaryStart, row + 1, summaryStart + summaryLabels.length - 1);
-      ws.getCell(row + 1, summaryStart).value = '';
-      ws.mergeCells(row + 2, baseCols + 1, row + 2, baseCols + daysInMonth);
-      ws.getCell(row + 2, baseCols + 1).value = emptyMode ? '' :
-        `Gün Hak: ${tahminiMaas.toFixed(2)} TL | Mesai Hak: ${tahminiMesai.toFixed(2)} TL | Toplam: ${tahminiToplam.toFixed(2)} TL`;
-      ws.mergeCells(row + 2, summaryStart, row + 2, summaryStart + summaryLabels.length - 1);
-      ws.getCell(row + 2, summaryStart).value =
-        `İşe Giriş: ${p.iseGirisTarihi || '-'} | İşten Çıkış: ${p.istenCikisTarihi || '-'}`;
-
-      ws.getRow(row).height = 24;
-      ws.getRow(row + 1).height = 20;
-      ws.getRow(row + 2).height = 20;
-      ws.getCell(row + 2, baseCols + 1).font = { size: 9, color: { argb: 'FF166534' } };
-      ws.getCell(row + 2, summaryStart).font = { size: 9, color: { argb: 'FF166534' } };
-      ws.getCell(row + 2, baseCols + 1).alignment = { horizontal: 'left', vertical: 'middle', wrapText: false };
-      ws.getCell(row + 2, summaryStart).alignment = { horizontal: 'center', vertical: 'middle', wrapText: false };
-      ws.getCell(row + 1, summaryStart).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } };
-      ws.getCell(row + 2, baseCols + 1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF0FDF4' } };
-      ws.getCell(row + 2, summaryStart).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF0FDF4' } };
-      row += 3;
-    });
-
-    const signTitleRow = row + 1;
-    ws.mergeCells(signTitleRow, 1, signTitleRow, totalCols);
-    ws.getCell(signTitleRow, 1).value = 'ONAY / İMZA ALANLARI';
-    ws.getCell(signTitleRow, 1).font = { bold: true, size: 10, color: { argb: 'FF0F172A' } };
-    ws.getCell(signTitleRow, 1).alignment = { horizontal: 'center', vertical: 'middle' };
-    ws.getCell(signTitleRow, 1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2E8F0' } };
-
-    const signRoles = ['Muhasebe', 'İdari İşler', 'Şantiye Şefi', 'Proje Müdürü'];
-    const signStartRow = signTitleRow + 1;
-    signRoles.forEach((role, idx) => {
-      const startCol = 1 + Math.floor((idx * totalCols) / signRoles.length);
-      const endCol = Math.floor(((idx + 1) * totalCols) / signRoles.length);
-      ws.mergeCells(signStartRow, startCol, signStartRow + 2, endCol);
-      const cell = ws.getCell(signStartRow, startCol);
-      cell.value = `${role}\n\nİmza: __________________`;
-      cell.font = { bold: true, size: 10, color: { argb: 'FF334155' } };
-      cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
-      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } };
-    });
-    row = signStartRow + 3;
-
-    ws.eachRow((r) => {
-      r.eachCell((cell) => {
-        if (!cell.alignment) cell.alignment = {};
-        const keepWrap = Boolean(cell.alignment.wrapText);
-        cell.alignment = { ...cell.alignment, horizontal: 'center', vertical: 'middle', wrapText: keepWrap };
-        if (!cell.border) {
-          cell.border = {
-            top: { style: 'thin', color: { argb: 'FFCBD5E1' } },
-            left: { style: 'thin', color: { argb: 'FFCBD5E1' } },
-            right: { style: 'thin', color: { argb: 'FFCBD5E1' } },
-            bottom: { style: 'thin', color: { argb: 'FFCBD5E1' } },
-          };
-        }
-      });
-    });
-
-    ws.getColumn(1).width = 7;
-    ws.getColumn(2).width = 22;
-    ws.getColumn(3).width = 16;
-    ws.getColumn(4).width = 28;
-    ws.getColumn(5).width = 14;
-    ws.getColumn(6).width = 12;
-    ws.getColumn(7).width = 14;
-    dayIndexes.forEach((_, idx) => {
-      ws.getColumn(baseCols + idx + 1).width = 6.2;
-    });
-    summaryLabels.forEach((_, i) => {
-      ws.getColumn(summaryStart + i).width = 12;
-    });
-
-    const summaryWs = wb.addWorksheet('Özet');
-    summaryWs.addRow([reportTitle]);
-    summaryWs.mergeCells(1, 1, 1, 9);
-    summaryWs.getCell(1, 1).font = { bold: true, size: 14, color: { argb: 'FFFFFFFF' } };
-    summaryWs.getCell(1, 1).alignment = { horizontal: 'center', vertical: 'middle' };
-    summaryWs.getCell(1, 1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0F172A' } };
-    summaryWs.addRow([`Rapor No: ${reportNo}  |  Basım Tarihi: ${basimTarihi}`]);
-    summaryWs.mergeCells(2, 1, 2, 9);
-    summaryWs.getCell(2, 1).font = { bold: true, size: 10, color: { argb: 'FF0F172A' } };
-    summaryWs.getCell(2, 1).alignment = { horizontal: 'center', vertical: 'middle' };
-    summaryWs.getCell(2, 1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2E8F0' } };
-    summaryWs.addRow(['Sıra', 'Ad Soyad', 'TC Kimlik', 'IBAN', 'Görev', 'Toplam Gün', 'Yok Gün', 'Toplam Mesai', 'Toplam Kazanç']);
-    summaryWs.getRow(3).font = { bold: true, color: { argb: 'FFFFFFFF' } };
-    summaryWs.getRow(3).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1D4ED8' } };
-    if (logoDataUrl) {
-      const base64 = logoDataUrl.replace(/^data:image\/png;base64,/, '');
-      const summaryLogoId = wb.addImage({ base64, extension: 'png' });
-      summaryWs.addImage(summaryLogoId, { tl: { col: 0.1, row: 0.08 }, ext: { width: 200, height: 78 } });
-    }
-
-    let sRow = 4;
-    filteredPersonel.forEach((p, i) => {
-      const map = draftYoklamalar[p.id] || {};
-      let geldiGun = 0;
-      let yokGun = 0;
-      let mesaiToplam = 0;
-      let hakedisGun = 0;
-      dayIndexes.forEach((day) => {
-        if (!isDayActiveForEmployee(p, day)) return;
-        const d = getYoklamaDay(map, selectedYear, selectedMonth, day) || { durum: 'Girilmedi' as YoklamaDurum, mesaiSaati: 0 };
-        if (d.durum === 'Geldi') geldiGun++;
-        if (d.durum === 'Yok') yokGun++;
-        if (d.durum === 'Geldi' || d.durum === 'İzinli' || d.durum === 'Pazar' || d.durum === 'Tatil') hakedisGun++;
-        mesaiToplam += Number(d.mesaiSaati || 0);
-      });
-      const dailyWage = Number(p.maas || 0) / Math.max(daysInMonth, 1);
-      const toplam = dailyWage * hakedisGun + mesaiToplam * (dailyWage / 7.5) * 1.5;
-      summaryWs.addRow([
-        i + 1,
-        `${p.ad} ${p.soyad}`,
-        p.tcNo || '-',
-        p.ibanNo || '-',
-        p.gorev || '-',
-        geldiGun,
-        yokGun,
-        Number(mesaiToplam.toFixed(2)),
-        Number(toplam.toFixed(2)),
-      ]);
-      if (sRow % 2 === 0) {
-        summaryWs.getRow(sRow).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } };
-      }
-      sRow++;
-    });
-
-    [9].forEach((col) => {
-      summaryWs.getColumn(col).numFmt = '#,##0.00';
-    });
-    [1, 2, 3, 4, 5, 6, 7, 8, 9].forEach((c) => {
-      summaryWs.getColumn(c).width = [7, 24, 16, 28, 14, 11, 10, 12, 14][c - 1];
-    });
-    summaryWs.eachRow((r) => {
-      r.eachCell((cell) => {
-        const colNumber = Number(cell.col);
-        cell.alignment = {
-          horizontal: colNumber === 2 || colNumber === 4 || colNumber === 5 ? 'left' : 'center',
-          vertical: 'middle',
-          wrapText: false,
-        };
-        cell.border = {
-          top: { style: 'thin', color: { argb: 'FFCBD5E1' } },
-          left: { style: 'thin', color: { argb: 'FFCBD5E1' } },
-          right: { style: 'thin', color: { argb: 'FFCBD5E1' } },
-          bottom: { style: 'thin', color: { argb: 'FFCBD5E1' } },
-        };
-      });
-    });
-
-    const buffer = await wb.xlsx.writeBuffer();
-    const blob = new Blob([buffer], {
-      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `Yoklama_Modern_Rapor_${periodLabel}.xlsx`;
-    a.click();
-    URL.revokeObjectURL(url);
-    alert('Modern tasarımlı XLSX rapor indirildi: X/Y, renkler, 3 satır düzen, mesai ve maaş özeti.');
   };
 
   const handleBulkOvertime = (hours: number) => {
@@ -1119,15 +880,28 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
                   <option key={y} value={y}>{y}</option>
                 ))}
               </select>
+              <span className="text-[10px] font-bold text-slate-500 bg-slate-100 border border-slate-200 rounded-lg px-2 py-1">
+                {new Date(selectedYear, selectedMonth - 1, 1).toLocaleDateString('tr-TR', {
+                  month: 'long',
+                  year: 'numeric',
+                })}
+              </span>
             </div>
 
             <button
-              onClick={handleExportExcelTables}
+              type="button"
+              onClick={() => void handleExportExcelTables(false)}
               className="text-[11px] bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg px-3 py-1.5 font-bold cursor-pointer transition flex items-center space-x-1 shadow-sm border border-emerald-800"
-              title="Modern, renkli ve 3 satırlı puantaj raporunu Excel formatında indirir."
+              title={`Seçili dönem (${selectedMonth}/${selectedYear}) gün + mesai + hakediş Excel puantajı. Basım tarihi raporu etkilemez.`}
             >
               <FileText size={13} />
-              <span>Modern Excel Puantaj Raporu</span>
+              <span>
+                Modern Excel —{' '}
+                {new Date(selectedYear, selectedMonth - 1, 1).toLocaleDateString('tr-TR', {
+                  month: 'long',
+                  year: 'numeric',
+                })}
+              </span>
             </button>
 
             {/* Quick bulk actions */}
@@ -1194,6 +968,16 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
               <span>Taslağı Geri Al</span>
             </button>
             <button
+              type="button"
+              onClick={() => void handleForceServerRefresh()}
+              disabled={serverRefreshLoading || !reloadYoklamalarFromServer}
+              className="text-[11px] bg-sky-50 hover:bg-sky-100 text-sky-900 border border-sky-200 rounded-lg px-3 py-1.5 font-bold cursor-pointer transition flex items-center space-x-1 shadow-sm disabled:opacity-50"
+              title="Telefon dolu / PC boş ise IndexedDB önbelleğini atlayıp sunucudan zorla çeker. Veritabanına yazmaz."
+            >
+              <RefreshCw size={13} className={serverRefreshLoading ? 'animate-spin' : ''} />
+              <span>{serverRefreshLoading ? 'Sunucu…' : 'Sunucudan Yenile'}</span>
+            </button>
+            <button
               onClick={handleToggleArchivePanel}
               className="text-[11px] bg-indigo-50 hover:bg-indigo-100 text-indigo-800 border border-indigo-200 rounded-lg px-3 py-1.5 font-bold cursor-pointer transition flex items-center space-x-1 shadow-sm"
               title="Otomatik yoklama yedeklerini listeler ve geri yükler."
@@ -1213,7 +997,8 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
               <span>{isEditMode ? '🔓 Düzenleme Modu Açık' : '🔒 Yoklama Başlat'}</span>
             </button>
             <button
-              onClick={() => handleExportExcelTables(true)}
+              type="button"
+              onClick={() => void handleExportExcelTables(true)}
               className="text-[11px] bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg px-3 py-1.5 font-bold cursor-pointer transition flex items-center space-x-1 shadow-sm"
               title="Şantiyede günlük elle doldurmak için boş aylık puantaj cetvelini Excel olarak indirir."
             >
@@ -1483,10 +1268,15 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
                                 min={0}
                                 max={MAX_MESAI_SAATI}
                                 step={0.5}
-                                value={rec.mesaiSaati || 0}
+                                placeholder="—"
+                                value={mesaiInputDisplayValue(rec.mesaiSaati)}
                                 onChange={(e) => {
-                                  const val = normalizeMesaiHours(Number(e.target.value));
-                                  setParsedRecords(prev => prev.map((item, i) => i === idx ? { ...item, mesaiSaati: val } : item));
+                                  const parsed = parseMesaiInputValue(e.target.value);
+                                  setParsedRecords((prev) =>
+                                    prev.map((item, i) =>
+                                      i === idx ? { ...item, mesaiSaati: parsed ?? 0 } : item
+                                    )
+                                  );
                                 }}
                                 className="w-full text-xs p-0.5 border border-slate-300 rounded font-bold font-mono text-center"
                               />
@@ -1565,8 +1355,11 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
                 min={0}
                 max={MAX_MESAI_SAATI}
                 step={0.5}
-                value={overtimeHours}
-                onChange={(e) => setOvertimeHours(normalizeMesaiHours(parseFloat(e.target.value) || 0))}
+                placeholder="—"
+                value={mesaiInputDisplayValue(overtimeHours)}
+                onChange={(e) =>
+                  setOvertimeHours(parseMesaiInputValue(e.target.value) ?? 0)
+                }
                 className="w-12 text-center text-[11px] font-bold bg-white border border-slate-200 rounded p-1"
               />
               <span className="text-slate-400 font-medium text-[10px]">Saat</span>
@@ -1581,6 +1374,75 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
             </button>
           </div>
         </div>
+
+      {yoklamaLoadStats.thisMonth === 0 && (
+        <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 flex flex-wrap items-center justify-between gap-3 shrink-0">
+          <div className="space-y-1 min-w-0">
+            <p className="text-[11px] font-extrabold text-amber-950">
+              {new Date(selectedYear, selectedMonth - 1, 1).toLocaleDateString('tr-TR', {
+                month: 'long',
+                year: 'numeric',
+              })}{' '}
+              dönemi şu an boş görünüyor
+            </p>
+            <p className="text-[10px] text-amber-900/80 font-semibold leading-snug">
+              {yoklamaLoadStats.filledTotal > 0
+                ? `Veritabanından ${yoklamaLoadStats.persons} personel · ${yoklamaLoadStats.filledTotal} dolu gün yüklü; bu ayda yevmiye/mesai kaydı yok. Mor ■ ve koyu mesai kutuları “işe giriş öncesi / çıkış sonrası kapalı gün”dir — silinmiş yoklama değildir. Formen kaydı başka bir tarihe (ör. bugün) yazılmış olabilir. Üstten «Sunucudan Yenile» veya «Yoklama Arşivi» deneyin.`
+                : 'Henüz hiç yoklama günü yüklenmedi. Üstten «Sunucudan Yenile» ile PC önbelleğini atlayın; olmazsa «Yoklama Arşivi»nden geri yükleyin. Bu ekranda Kaydet’e basmayın.'}
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2 shrink-0">
+            {reloadYoklamalarFromServer && (
+              <button
+                type="button"
+                onClick={() => void handleForceServerRefresh()}
+                disabled={serverRefreshLoading}
+                className="text-[11px] font-extrabold px-3 py-2 rounded-xl bg-sky-700 hover:bg-sky-800 text-white cursor-pointer disabled:opacity-50"
+              >
+                {serverRefreshLoading ? 'Yenileniyor…' : 'Sunucudan Yenile'}
+              </button>
+            )}
+          {yoklamaLoadStats.bestFilled > 0 &&
+            (yoklamaLoadStats.bestYear !== selectedYear ||
+              yoklamaLoadStats.bestMonth !== selectedMonth) && (
+            <button
+              type="button"
+              onClick={() => {
+                setSelectedMonth(yoklamaLoadStats.bestMonth);
+                setSelectedYear(yoklamaLoadStats.bestYear);
+              }}
+              className="text-[11px] font-extrabold px-3 py-2 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white cursor-pointer"
+            >
+              {new Date(yoklamaLoadStats.bestYear, yoklamaLoadStats.bestMonth - 1, 1).toLocaleDateString(
+                'tr-TR',
+                { month: 'long', year: 'numeric' }
+              )}{' '}
+              aç ({yoklamaLoadStats.bestFilled} gün)
+            </button>
+          )}
+          {yoklamaLoadStats.prevFilled > 0 &&
+            !(
+              yoklamaLoadStats.prevYear === yoklamaLoadStats.bestYear &&
+              yoklamaLoadStats.prevMonth === yoklamaLoadStats.bestMonth
+            ) && (
+            <button
+              type="button"
+              onClick={() => {
+                setSelectedMonth(yoklamaLoadStats.prevMonth);
+                setSelectedYear(yoklamaLoadStats.prevYear);
+              }}
+              className="text-[11px] font-extrabold px-3 py-2 rounded-xl bg-amber-700 hover:bg-amber-800 text-white cursor-pointer"
+            >
+              {new Date(yoklamaLoadStats.prevYear, yoklamaLoadStats.prevMonth - 1, 1).toLocaleDateString(
+                'tr-TR',
+                { month: 'long', year: 'numeric' }
+              )}{' '}
+              aç ({yoklamaLoadStats.prevFilled} gün)
+            </button>
+          )}
+          </div>
+        </div>
+      )}
 
       {/* Main Grid Card View */}
       <div className="flex-1 bg-white border border-[#e2e8f0] rounded-2xl flex flex-col overflow-hidden shadow-sm">
@@ -2200,15 +2062,22 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
                                 min={0}
                                 max={MAX_MESAI_SAATI}
                                 step={0.5}
-                                value={dayData.mesaiSaati || 0}
+                                placeholder="—"
+                                value={mesaiInputDisplayValue(dayData.mesaiSaati)}
                                 onChange={(e) => {
-                                  const hours = normalizeMesaiHours(parseFloat(e.target.value) || 0);
-                                  updateDraftYoklama(prev => ({
+                                  const hours = parseMesaiInputValue(e.target.value) ?? 0;
+                                  updateDraftYoklama((prev) => ({
                                     ...prev,
-                                    [bireyselStaffId]: setYoklamaDay(prev[bireyselStaffId], bireyselYear, bireyselMonth, day, {
-                                      ...dayData,
-                                      mesaiSaati: hours
-                                    })
+                                    [bireyselStaffId]: setYoklamaDay(
+                                      prev[bireyselStaffId],
+                                      bireyselYear,
+                                      bireyselMonth,
+                                      day,
+                                      {
+                                        ...dayData,
+                                        mesaiSaati: hours,
+                                      }
+                                    ),
                                   }));
                                 }}
                                 className="w-12 text-center bg-slate-50 border rounded-lg p-1 text-[10px] font-mono font-bold"

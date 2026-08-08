@@ -13,7 +13,7 @@ export interface ReportEmailPayload {
   downloadUrl?: string;
 }
 
-const MAX_MAILTO_BODY = 1800;
+const MAX_MAILTO_BODY = 12000;
 
 export function htmlToPlainText(html: string): string {
   if (typeof document === 'undefined') {
@@ -37,9 +37,21 @@ export function buildReportMailBody(options: {
   html?: string;
   downloadUrl?: string;
 }): string {
-  const base =
-    (options.body || '').trim() ||
-    (options.html ? htmlToPlainText(options.html).slice(0, 4000) : '');
+  const stubRe = /ekte\s+HTML|indirilebilir|HTML olarak/i;
+  const bodyTrim = (options.body || '').trim();
+  const fromHtml = options.html ? htmlToPlainText(options.html) : '';
+
+  // Kısa «ek indirin» metni yerine HTML rapordan düz metin dökümü kullan
+  let base = bodyTrim;
+  if (fromHtml) {
+    if (!base || stubRe.test(base) || base.length < 280) {
+      const introLine = bodyTrim && !stubRe.test(bodyTrim) ? `${bodyTrim}\n\n` : '';
+      base = `${introLine}${fromHtml}`;
+    } else if (!base.includes(fromHtml.slice(0, 80))) {
+      base = `${base}\n\n—— Rapor dökümü ——\n${fromHtml}`;
+    }
+  }
+
   const intro = `Sayın Seçkin Yetkili,
 
 Kibritçi İnşaat ERP üzerinden hazırlanan rapor bilginize sunulmuştur.
@@ -52,25 +64,20 @@ Konu: ${options.subject}
 
 Evrakı görüntülemek / indirmek için bağlantı:
 ${options.downloadUrl}
-
-(Bağlantıyı tarayıcıda açıp «HTML İndir» veya «Yazdır / PDF» kullanabilirsiniz.)
 `
     : '';
-  const outro = options.downloadUrl
-    ? `
+  const outro = `
 
 ---
-Bu mesaj Kibritçi ERP rapor gönderimi ile açılmıştır.
-`
-    : `
-
----
-Bu mesaj Kibritçi ERP rapor gönderimi ile açılmıştır.
-HTML rapor dosyasını eke eklemek için «HTML İndir» ile bilgisayarınıza kaydedip mailinize ekleyebilirsiniz.
+Bu mesaj Kibritçi ERP rapor gönderimi ile açılmıştır.${
+    options.html && !options.downloadUrl
+      ? ' İsterseniz «HTML İndir» ile görsel ekli tam raporu da ekleyebilirsiniz.'
+      : ''
+  }
 `;
   const combined = `${intro}${base}${linkBlock}${outro}`;
   return combined.length > MAX_MAILTO_BODY
-    ? `${combined.slice(0, MAX_MAILTO_BODY)}\n\n… (rapor kısaltıldı; tam metin için indirme bağlantısını kullanın)`
+    ? `${combined.slice(0, MAX_MAILTO_BODY)}\n\n… (rapor uzun olduğu için kısaltıldı; tam metin için HTML İndir kullanın)`
     : combined;
 }
 
@@ -197,7 +204,7 @@ function ensureComposerStyles(): void {
     #kibritci-report-email-card .body{padding:16px 18px;display:flex;flex-direction:column;gap:10px}
     #kibritci-report-email-card label{font-size:10px;font-weight:800;color:#64748b;text-transform:uppercase;letter-spacing:.04em}
     #kibritci-report-email-card input,#kibritci-report-email-card textarea{width:100%;border:1px solid #e2e8f0;border-radius:10px;padding:10px;font-size:12px;font-weight:600;color:#0f172a;background:#f8fafc}
-    #kibritci-report-email-card textarea{min-height:110px;resize:vertical;font-weight:500;line-height:1.45}
+    #kibritci-report-email-card textarea{min-height:220px;resize:vertical;font-weight:500;line-height:1.45;font-family:ui-monospace,Consolas,monospace;font-size:11px}
     #kibritci-report-email-card .hint{font-size:10px;color:#64748b;line-height:1.4}
     #kibritci-report-email-card .actions{display:flex;flex-wrap:wrap;gap:8px;padding:0 18px 16px}
     #kibritci-report-email-card .actions button{border:0;border-radius:10px;padding:9px 12px;font-size:11px;font-weight:800;cursor:pointer}

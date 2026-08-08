@@ -65,7 +65,8 @@ export function shouldBlockYoklamaMassWrite(
 
   if (remoteFilled >= 20) {
     const filledDrop = remoteFilled - mergedFilled;
-    if (filledDrop > 40 || mergedFilled < remoteFilled * 0.88) {
+    // Kalıcı koruma: dolu günlerin %5'inden fazla veya 15+ gün kaybı engellenir
+    if (filledDrop > 15 || mergedFilled < remoteFilled * 0.95) {
       return {
         blocked: true,
         reason: `Şüpheli toplu yoklama silme engellendi (${remoteFilled} → ${mergedFilled} dolu gün). Arşivden geri yükleyebilirsiniz.`,
@@ -73,8 +74,8 @@ export function shouldBlockYoklamaMassWrite(
     }
   }
 
-  if (remoteDateKeys >= 80) {
-    if (mergedDateKeys < remoteDateKeys * 0.88) {
+  if (remoteDateKeys >= 50) {
+    if (mergedDateKeys < remoteDateKeys * 0.95) {
       return {
         blocked: true,
         reason: `Tarih anahtarı kaybı engellendi (${remoteDateKeys} → ${mergedDateKeys}). Bağlantı sorunu olabilir; tekrar deneyin.`,
@@ -92,15 +93,38 @@ export function shouldBlockYoklamaMassWrite(
   return { blocked: false };
 }
 
-/** Uzak kayıttaki personelleri korur; yerel güncellemeler üstüne yazılır */
+/** Uzak kayıttaki personelleri korur; yerel güncellemeler üstüne yazılır.
+ *  Tam harita yazımında (çok gün anahtarı) yerel Girilmedi, uzaktaki dolu günü ezmez.
+ *  Seyrek (sparse) yazımda bilinçli sıfırlama hâlâ uygulanır. */
 export function mergeYoklamaMaps(
   remote: Record<string, unknown>,
   local: Record<string, unknown>
 ): Record<string, unknown> {
   const result: Record<string, unknown> = { ...remote };
   for (const [personId, days] of Object.entries(local || {})) {
-    const remoteDays = (result[personId] as Record<string, unknown>) || {};
-    result[personId] = { ...remoteDays, ...(days as Record<string, unknown>) };
+    const remoteDays = ((result[personId] as Record<string, unknown>) || {}) as Record<
+      string,
+      { durum?: string }
+    >;
+    const localDays = (days as Record<string, { durum?: string }>) || {};
+    const localKeyCount = Object.keys(localDays).length;
+    const mergedDays: Record<string, unknown> = { ...remoteDays };
+
+    for (const [dayKey, localData] of Object.entries(localDays)) {
+      if (!localData || typeof localData !== 'object') {
+        mergedDays[dayKey] = localData;
+        continue;
+      }
+      const localEmpty = !localData.durum || localData.durum === 'Girilmedi';
+      const remoteFilled =
+        !!remoteDays[dayKey]?.durum && remoteDays[dayKey].durum !== 'Girilmedi';
+      // Tam harita gönderiminde (ör. eski Formen bug) Girilmedi ile dolu günü koru
+      if (localEmpty && remoteFilled && localKeyCount > 5) {
+        continue;
+      }
+      mergedDays[dayKey] = localData;
+    }
+    result[personId] = mergedDays;
   }
   return result;
 }

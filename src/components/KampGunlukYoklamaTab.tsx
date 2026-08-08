@@ -9,9 +9,11 @@ import {
   isDayActiveForPersonel, 
   isTaseronPersonel, 
   setYoklamaDay, 
-  isKampciGorev,
+  isKampciYoklamaKapsami,
   isTesisatciGorev,
   isMermerciGorev,
+  isSoforGorev,
+  isOperatorGorev,
 } from '../lib/yoklamaUtils';
 import { todayDateKey, normalizeDateKey, formatDateLabelTr } from '../lib/dateKeyUtils';
 import { downloadCsv } from '../lib/reportExport';
@@ -23,8 +25,8 @@ interface KampGunlukYoklamaTabProps {
   saveYoklamalarNow?: (next: AylikYoklamaMap) => Promise<void>;
   currentUser: any;
   addNotification?: (mesaj: string) => void;
-  /** Varsayılan: kampçı. Tesisatçı / mermerci kendi mobillerinde */
-  personelKapsami?: 'kamp' | 'tesisatci' | 'mermerci';
+  /** Varsayılan: kampçı + şenör. Tesisatçı / mermerci / şöför / operatör kendi mobillerinde */
+  personelKapsami?: 'kamp' | 'tesisatci' | 'mermerci' | 'sofor' | 'operator';
 }
 
 export const KampGunlukYoklamaTab: React.FC<KampGunlukYoklamaTabProps> = ({
@@ -45,6 +47,13 @@ export const KampGunlukYoklamaTab: React.FC<KampGunlukYoklamaTabProps> = ({
   
   const [savingAttendance, setSavingAttendance] = useState(false);
   const [hasLocalAttendanceDraft, setHasLocalAttendanceDraft] = useState(false);
+  const [lastSaveAt, setLastSaveAt] = useState<string | null>(() => {
+    try {
+      return localStorage.getItem('kamp_gunluk_yoklama_last');
+    } catch {
+      return null;
+    }
+  });
 
   const { year, month, day } = useMemo(() => {
     const parts = selectedDate.split('-');
@@ -67,8 +76,14 @@ export const KampGunlukYoklamaTab: React.FC<KampGunlukYoklamaTabProps> = ({
         if (!isTesisatciGorev(p.gorev)) return false;
       } else if (personelKapsami === 'mermerci') {
         if (!isMermerciGorev(p.gorev)) return false;
-      } else if (!isKampciGorev(p.gorev)) {
-        return false;
+      } else if (personelKapsami === 'sofor') {
+        if (!isSoforGorev(p.gorev)) return false;
+      } else if (personelKapsami === 'operator') {
+        if (!isOperatorGorev(p.gorev)) return false;
+      } else {
+        // Kampçı yoklama: kampçılar + şenör (şöför/operatör kendi ekranlarında)
+        if (isSoforGorev(p.gorev) || isOperatorGorev(p.gorev)) return false;
+        if (!isKampciYoklamaKapsami(p.gorev)) return false;
       }
       return isDayActiveForPersonel(p, year, month, day, yoklamalar[p.id] as any);
     });
@@ -152,7 +167,8 @@ export const KampGunlukYoklamaTab: React.FC<KampGunlukYoklamaTabProps> = ({
 
     setSavingAttendance(true);
     try {
-      let nextYoklamalar = { ...yoklamalar };
+      const sparse: AylikYoklamaMap = {};
+      const gonderen = currentUser?.email || 'kampci';
 
       activeStaff.forEach((p) => {
         let durumToSave: YoklamaDurum | null = null;
@@ -166,22 +182,29 @@ export const KampGunlukYoklamaTab: React.FC<KampGunlukYoklamaTabProps> = ({
         }
 
         if (durumToSave) {
-          const personelMap = nextYoklamalar[p.id] as any || {};
-          const currentMap = setYoklamaDay(personelMap, year, month, day, {
+          sparse[p.id] = setYoklamaDay(sparse[p.id], year, month, day, {
             durum: durumToSave,
             mesaiSaati: mesaiToSave,
-            gonderen: currentUser?.email || 'kampci'
+            gonderen,
           });
-          nextYoklamalar[p.id] = currentMap as any;
         }
       });
 
-      if (setYoklamalar) {
-        setYoklamalar(nextYoklamalar);
+      if (Object.keys(sparse).length === 0) {
+        if (addNotification) addNotification('Kaydedilecek işaretli personel yok.');
+        return;
       }
-      await saveYoklamalarNow(nextYoklamalar);
+
+      await saveYoklamalarNow(sparse);
 
       setHasLocalAttendanceDraft(false);
+      const stamp = new Date().toLocaleString('tr-TR');
+      setLastSaveAt(stamp);
+      try {
+        localStorage.setItem('kamp_gunluk_yoklama_last', stamp);
+      } catch {
+        /* ignore */
+      }
       if (addNotification) addNotification(`📅 ${selectedDate} Yoklaması başarıyla kaydedildi!`);
     } catch (err: any) {
       if (addNotification) addNotification(`Yoklama kaydedilemedi: ${err?.message || 'Bilinmeyen hata'}`);
@@ -388,21 +411,38 @@ export const KampGunlukYoklamaTab: React.FC<KampGunlukYoklamaTabProps> = ({
       )}
 
       {/* Submit Button */}
-      <div className="bg-white rounded-3xl p-4 border shadow-sm">
+      <div className="bg-white rounded-3xl p-4 border shadow-sm space-y-2">
+        <div className="rounded-xl bg-slate-50 border border-slate-100 px-3 py-2 flex items-center justify-between gap-2">
+          <div className="min-w-0">
+            <p className="text-[8px] font-black uppercase tracking-wider text-slate-400">Son kayıt</p>
+            <p className="text-[11px] font-bold text-slate-800 truncate">
+              {lastSaveAt || 'Henüz bu cihazdan kayıt yok'}
+            </p>
+          </div>
+          {hasLocalAttendanceDraft ? (
+            <span className="text-[9px] font-black text-amber-800 bg-amber-100 border border-amber-200 px-2 py-1 rounded-lg shrink-0">
+              Kaydedilmedi
+            </span>
+          ) : (
+            <span className="text-[9px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-100 px-2 py-1 rounded-lg shrink-0">
+              Güncel
+            </span>
+          )}
+        </div>
         <button
           onClick={handleSave}
           disabled={savingAttendance || !hasLocalAttendanceDraft}
-          className="w-full bg-slate-900 hover:bg-slate-900 text-white font-bold py-3.5 rounded-2xl flex items-center justify-center gap-2 transition shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
+          className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3.5 rounded-2xl flex items-center justify-center gap-2 transition shadow-md disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
         >
           {savingAttendance ? (
             <RefreshCw size={18} className="animate-spin" />
           ) : (
             <FileSignature size={18} />
           )}
-          {savingAttendance ? 'KAYDEDİLİYOR...' : 'YOKLAMAYI SİSTEME KAYDET'}
+          {savingAttendance ? 'KAYDEDİLİYOR...' : 'KAYDET'}
         </button>
-        <p className="text-center text-[9px] text-slate-400 mt-3 italic">
-          Yoklamayı kaydettiğinizde merkez ofise günlük olarak iletilir.
+        <p className="text-center text-[9px] text-slate-400 italic">
+          Güvenli kayıt: yalnızca işaretlediğiniz personeller yazılır; diğer günler silinmez.
         </p>
       </div>
 

@@ -48,7 +48,7 @@ export async function ensureYildirimTankerCari(
     adres: 'Yıldırım Tanker su teslimatı — tesisatçı fişlerinden otomatik oluşturuldu.',
     iban: '',
     durum: 'AKTIF',
-    notlar: 'Sistem tarafından Yıldırım Tanker fiş kaydında oluşturuldu. Fatura kontrolünde irsaliye toplamları bu cari altında toplanır.',
+    notlar: 'Sistem tarafından Yıldırım Tanker irsaliye onayında oluşturuldu. Fatura kontrolünde irsaliye toplamları bu cari altında toplanır.',
   };
   await saveDocument('cariKartlar', created);
   setCariKartlar?.((prev) => [created, ...prev.filter((c) => c.id !== created.id)]);
@@ -136,6 +136,68 @@ export function filterFaturalarByCariMonth(
   const target = normalizeFirmaUnvan(firmaUnvan);
   return (faturalar || []).filter((f) => {
     if (!String(f.tarih || '').startsWith(prefix)) return false;
-    return normalizeFirmaUnvan(f.cariUnvan).includes(target) || target.includes(normalizeFirmaUnvan(f.cariUnvan));
+    return (
+      normalizeFirmaUnvan(f.cariUnvan).includes(target) ||
+      target.includes(normalizeFirmaUnvan(f.cariUnvan)) ||
+      isYildirimTankerFirma(f.cariUnvan)
+    );
   });
+}
+
+/** Fatura kalemlerinden su/tanker/damaca adet toplamı */
+export function faturaYildirimAdedi(fatura: Fatura): number {
+  const kalemler = fatura.kalemler || [];
+  if (kalemler.length === 0) return 0;
+  const suLike = kalemler.filter((k) => {
+    const ad = String(k.urunAdi || '').toLocaleLowerCase('tr-TR');
+    return (
+      ad.includes('içme') ||
+      ad.includes('icme') ||
+      ad.includes('sanayi') ||
+      ad.includes('damaca') ||
+      ad.includes('tanker') ||
+      ad.includes('su') ||
+      ad.includes('adet')
+    );
+  });
+  const pool = suLike.length > 0 ? suLike : kalemler;
+  return pool.reduce((s, k) => s + (Number(k.miktar) || 0), 0);
+}
+
+export type YildirimEslesmeSonuc = {
+  fisToplam: number;
+  fisIcme: number;
+  fisSanayi: number;
+  fisDamaca: number;
+  faturaToplam: number;
+  fark: number;
+  uyumlu: boolean;
+  faturaSayisi: number;
+};
+
+/** Onaylı Yıldırım fişleri ↔ ayın faturaları (Şeker Vidanjör çekim eşleşmesi gibi) */
+export function compareYildirimFatura(
+  fisler: YildirimTankerFis[],
+  faturalar: Fatura[],
+  yil: number,
+  ay: number,
+  cariUnvan = YILDIRIM_TANKER_UNVAN
+): YildirimEslesmeSonuc {
+  const monthFis = filterYildirimFislerByMonth(fisler, yil, ay).filter(
+    (f) => !f.durum || f.durum === 'ONAYLANDI'
+  );
+  const monthFat = filterFaturalarByCariMonth(faturalar, yil, ay, cariUnvan);
+  const sums = sumYildirimSular(monthFis);
+  const faturaToplam = monthFat.reduce((s, f) => s + faturaYildirimAdedi(f), 0);
+  const fark = sums.toplam - faturaToplam;
+  return {
+    fisToplam: sums.toplam,
+    fisIcme: sums.icme,
+    fisSanayi: sums.sanayi,
+    fisDamaca: sums.damaca,
+    faturaToplam,
+    fark,
+    uyumlu: monthFat.length === 0 ? true : Math.abs(fark) < 0.001,
+    faturaSayisi: monthFat.length,
+  };
 }

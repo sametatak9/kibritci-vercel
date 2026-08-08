@@ -11,6 +11,7 @@ export type EvrakDuvariItem = {
   title: string;
   meta?: string;
   kategori?: string;
+  /** Gönderilme / kayıt zamanı (görüntüleme) */
   tarih?: string;
   /** BEKLEMEDE | YONETICI_ONAYINDA | ONAYLANDI | REDDEDİLDİ | … */
   durum?: string;
@@ -280,7 +281,13 @@ export const EvrakDuvariPanel: React.FC<Props> = ({
                     </span>
                   )}
                   <p className="text-[11px] font-bold text-slate-800 truncate">{item.title}</p>
-                  <p className="text-[10px] text-slate-500 truncate">{item.meta || item.tarih || '—'}</p>
+                  <p className="text-[10px] text-slate-500 truncate">{item.meta || '—'}</p>
+                  {item.tarih ? (
+                    <p className="text-[9px] font-mono text-slate-600">
+                      <span className="font-black uppercase tracking-wider text-slate-400">Gönderilme · </span>
+                      {item.tarih}
+                    </p>
+                  ) : null}
 
                   {showActions && (
                     <div className="flex gap-1.5 pt-1">

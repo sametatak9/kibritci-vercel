@@ -64,6 +64,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         { key: "personel_kartlari", label: "Personel Detay Kartları", icon: Users },
         { key: "yoklama", label: "Yoklama ve Puantaj", icon: CalendarCheck2 },
         { key: "faaliyet_personel", label: "Faaliyeti Olan Personeller", icon: Camera },
+        { key: "saha_is_plan", label: "Saha İş Planı & Kontrol", icon: HardHat },
         { key: "maas", label: "Maaş Hesaplama & Ödeme", icon: CreditCard },
         { key: "personel_izin", label: "Personel İzin Formu", icon: FileText },
       ]
@@ -136,11 +137,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
           if (!(isIdariIsler && (item.key === 'admin' || item.key === 'onay_islemleri'))) {
             return false;
           }
-        }
-
-        if (item.key === 'kibar_hakedis') {
-          const emailLower = currentUser?.email?.toLowerCase();
-          return emailLower === 'sametatak9@gmail.com' || emailLower === 'santiye@kibritci.com';
         }
 
         if (item.key === 'admin') {
