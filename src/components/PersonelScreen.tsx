@@ -922,7 +922,14 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
           rows,
           cols,
           `Kibritci_Personel_${exportFilterLabel}${activeSuffix}_${safeFileKey(key)}_${Date.now()}`,
-          exportFormat
+          exportFormat,
+          {
+            title: 'Kibritçi Personel Raporu',
+            subtitle: `${exportFilterLabel.replace(/_/g, ' ')} · ${key}`,
+            meta: [`Kayıt: ${rows.length} personel`, `Göreve göre ayrılmış rapor`, 'Firma bazlı gruplanmış görüntü'],
+            groupByFirma: true,
+            groupByRole: false,
+          }
         );
       }
 
@@ -946,7 +953,14 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
       rows,
       cols,
       `Kibritci_Personel_${exportFilterLabel}${activeSuffix}_GOREV_SIRALI_${Date.now()}`,
-      exportFormat
+      exportFormat,
+      {
+        title: 'Kibritçi Personel Raporu',
+        subtitle: `${exportFilterLabel.replace(/_/g, ' ')}${activeSuffix ? ' · Sadece Aktif' : ''}`,
+        meta: [`Kayıt: ${rows.length} personel`, `Göreve göre sıralandı`, 'Firma bazlı gruplanmış görüntü'],
+        groupByFirma: true,
+        groupByRole: true,
+      }
     );
   };
 
