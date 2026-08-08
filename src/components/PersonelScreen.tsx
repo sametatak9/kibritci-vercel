@@ -861,7 +861,8 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
     return `${firmaFilters.length}_Firma`;
   }, [firmaFilters]);
 
-  const exportFilteredPersonel = () => {
+  const exportFilteredPersonel = (formatOverride?: 'html' | 'csv') => {
+    const outputFormat = formatOverride ?? exportFormat;
     if (filteredPersonel.length === 0) {
       alert('Dışa aktarılacak personel bulunamadı. Filtreleri kontrol edin.');
       return;
@@ -922,7 +923,7 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
           rows,
           cols,
           `Kibritci_Personel_${exportFilterLabel}${activeSuffix}_${safeFileKey(key)}_${Date.now()}`,
-          exportFormat,
+          outputFormat,
           {
             title: 'Kibritçi Personel Raporu',
             subtitle: `${exportFilterLabel.replace(/_/g, ' ')} · ${key}`,
@@ -953,7 +954,7 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
       rows,
       cols,
       `Kibritci_Personel_${exportFilterLabel}${activeSuffix}_GOREV_SIRALI_${Date.now()}`,
-      exportFormat,
+      outputFormat,
       {
         title: 'Kibritçi Personel Raporu',
         subtitle: `${exportFilterLabel.replace(/_/g, ' ')}${activeSuffix ? ' · Sadece Aktif' : ''}`,
@@ -1819,18 +1820,10 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
               type="button"
               onClick={() => setShowOnlyActive((prev) => !prev)}
               className={`text-[10px] font-bold px-3 py-2 rounded-xl border cursor-pointer ${showOnlyActive ? 'bg-emerald-600 text-white border-emerald-700' : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'}`}
+              title="Sadece aktif personel göster"
             >
               {showOnlyActive ? 'Sadece Aktifler: AÇIK' : 'Sadece Aktifleri Göster'}
             </button>
-            <select
-              value={exportFormat}
-              onChange={(e) => setExportFormat(e.target.value as 'html' | 'csv')}
-              className="text-[10px] font-bold px-2 py-2 rounded-xl border border-slate-200 bg-white text-slate-700 cursor-pointer"
-              title="Dışa aktarma formatı"
-            >
-              <option value="csv">Excel (CSV)</option>
-              <option value="html">HTML</option>
-            </select>
             <select
               value={gorevReportMode}
               onChange={(e) => setGorevReportMode(e.target.value as 'SIRALA' | 'AYRI_RAPOR')}
@@ -1842,57 +1835,34 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
             </select>
             <button
               type="button"
-              onClick={exportFilteredPersonel}
-              className="flex items-center gap-1.5 text-[10px] font-bold px-3 py-2 bg-slate-900 text-white rounded-xl hover:bg-black cursor-pointer"
-              title={`Listedeki ${filteredPersonel.length} personeli CSV/HTML olarak dışa aktar`}
-            >
-              <Download size={12} /> Dışa Aktar ({filteredPersonel.length})
-            </button>
-            <button
-              type="button"
-              onClick={() => void handleExportSeciliExcel()}
+              onClick={() => exportFilteredPersonel('html')}
               disabled={filteredPersonel.length === 0}
               className="flex items-center gap-1.5 text-[10px] font-bold px-3 py-2 bg-emerald-700 text-white rounded-xl hover:bg-emerald-800 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
-              title="Ekrandaki seçili firma filtresindeki personeli Excel (.xlsx) olarak indir"
+              title="Göreve ve firma bazlı HTML raporu filtrelere göre oluştur"
             >
-              <Download size={12} /> Seçili Excel ({filteredPersonel.length})
+              <Download size={12} /> HTML Rapor ({filteredPersonel.length})
             </button>
             <button
               type="button"
-              onClick={() => void handleExportAnaFirmaExcel()}
-              className="flex items-center gap-1.5 text-[10px] font-bold px-3 py-2 bg-indigo-700 text-white rounded-xl hover:bg-indigo-800 cursor-pointer"
-              title="Yalnızca ana firma (Kibritçi İnşaat) personelini Excel (.xlsx) olarak indir"
+              onClick={() => exportFilteredPersonel('csv')}
+              disabled={filteredPersonel.length === 0}
+              className="flex items-center gap-1.5 text-[10px] font-bold px-3 py-2 bg-slate-900 text-white rounded-xl hover:bg-black disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+              title="Göreve ve firma bazlı Excel raporu filtrelere göre oluştur"
             >
-              <Download size={12} /> Ana Firma Excel
-            </button>
-            <button
-              type="button"
-              onClick={() => void handleExportTumFirmalarExcel()}
-              className="flex items-center gap-1.5 text-[10px] font-bold px-3 py-2 bg-sky-700 text-white rounded-xl hover:bg-sky-800 cursor-pointer"
-              title="Ana firma dahil tüm firmaların personelini Excel (.xlsx) olarak indir"
-            >
-              <Download size={12} /> Tüm Firmalar Excel
-            </button>
-            <button
-              type="button"
-              onClick={() => void handleExportAllTaseronExcel()}
-              className="flex items-center gap-1.5 text-[10px] font-bold px-3 py-2 bg-amber-600 text-white rounded-xl hover:bg-amber-700 cursor-pointer"
-              title="Tüm taşeron firma personelini Excel (.xlsx) olarak indir"
-            >
-              <Download size={12} /> Taşeron Excel
+              <Download size={12} /> Excel Rapor ({filteredPersonel.length})
             </button>
             <div className="relative w-64">
-            <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-400">
-              <span className="text-xs">🔍</span>
-            </span>
-            <input
-              type="text"
-              placeholder="İsim veya soyisim ile filtrele..."
-              className="w-full bg-slate-50 text-xs border border-slate-200 rounded-xl py-2 pl-9 pr-4 text-slate-700 focus:outline-none  transition duration-150"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-            />
-          </div>
+              <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-400">
+                <span className="text-xs">🔍</span>
+              </span>
+              <input
+                type="text"
+                placeholder="İsim veya soyisim ile filtrele..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full text-[10px] font-bold pl-9 pr-3 py-2 rounded-xl border border-slate-200 bg-white text-slate-700 outline-none focus:border-slate-400"
+              />
+            </div>
           </div>
         </div>
 
