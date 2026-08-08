@@ -636,6 +636,38 @@ export const PersonelKartlariScreen: React.FC<PersonelKartlariScreenProps> = ({
               </div>
             </div>
 
+            <div className="bg-white border border-[#e2e8f0] rounded-2xl p-5 shadow-sm space-y-4">
+              <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-1.5">
+                <Activity size={14} className="text-emerald-600" />
+                Saha Faaliyetleri ({personelSahaFaaliyetleri.length})
+              </h4>
+              <div className="space-y-2.5">
+                {personelSahaFaaliyetleri.length === 0 ? (
+                  <div className="h-16 border border-dashed border-slate-100 rounded-xl flex items-center justify-center text-[10px] text-slate-400 font-medium italic">
+                    Bu personel için saha faaliyet kaydı yok.
+                  </div>
+                ) : (
+                  personelSahaFaaliyetleri.slice(0, 8).map((f) => (
+                    <div key={f.id} className="border border-slate-150 rounded-xl p-3 bg-slate-50/70 text-xs">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="text-slate-900 font-semibold truncate">{f.isNiteligi || 'Saha Faaliyeti'}</p>
+                          <p className="text-[10px] text-slate-500 mt-1">{f.tarih || '-'}</p>
+                          <p className="text-slate-600 text-[11px] mt-2 truncate">{f.aciklama || f.parsel || f.blok || 'Detay yok'}</p>
+                        </div>
+                        {f.personelMesaiSaatleri?.[selectedPersonnel.id] ? (
+                          <span className="text-[10px] font-black text-amber-600">{f.personelMesaiSaatleri[selectedPersonnel.id]}h</span>
+                        ) : null}
+                      </div>
+                      {f.kaynakEkran && (
+                        <p className="text-[9px] text-slate-400 mt-2">Kaynak: {f.kaynakEkran}</p>
+                      )}
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+
           </div>
 
         </div>
