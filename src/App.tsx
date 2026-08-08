@@ -3107,6 +3107,9 @@ export default function App() {
                   cariKartlar={cariKartlar}
                   setCariKartlar={setCariKartlarWithSync}
                   setCariIslemGecmisi={setCariIslemGecmisiWithSync}
+                  kampKayitlari={kampKayitlari}
+                  kampOdalari={kampOdalari}
+                  sahaFaaliyetleri={sahaFaaliyetleri}
                 />
               )}
 
