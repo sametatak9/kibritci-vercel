@@ -12,6 +12,7 @@ import { KibritciLogo } from './KibritciLogo';
 import { KIBRITCI_COMPANY } from '../lib/kibritciBrand';
 import { DashboardPeriodSummary } from './DashboardPeriodSummary';
 import { DashboardFavoriteTabsStrip } from './DashboardFavoriteTabsStrip';
+import { DashboardGunlukYoklamaGorev } from './DashboardGunlukYoklamaGorev';
 import { DashboardSonIslemlerFeed } from './DashboardSonIslemlerFeed';
 import { DashboardKampOdaPanel } from './DashboardKampOdaPanel';
 import { isPersonelActiveOnDate } from '../lib/guvenlikHelpers';
@@ -350,6 +351,12 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
             );
           })}
         </div>
+
+        <DashboardGunlukYoklamaGorev
+          personeller={personeller}
+          yoklamalar={yoklamalar}
+          onNavigate={onNavigate}
+        />
 
         {/* Ana grid: işler + akış */}
         <div className="grid grid-cols-1 xl:grid-cols-12 gap-5">

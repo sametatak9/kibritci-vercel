@@ -39,6 +39,14 @@ import {
   PERSONEL_SORUN_LABEL,
   type PersonelKayitSorunu,
 } from '../lib/personelKayitKaliteUtils';
+import {
+  countPersonelByGorevGrup,
+  PERSONEL_GOREV_GRUP_ORDER,
+  personelGorevGrupChipClass,
+  personelGorevGrupLabel,
+  resolvePersonelGorevGrubu,
+  type PersonelGorevGrup,
+} from '../lib/personelGorevGrupUtils';
 import { SmartCatalogField } from './SmartCatalogField';
 
 const MAX_PERSONEL_INLINE_MEDIA = 120_000;
@@ -159,6 +167,7 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
   const [historyPersonel, setHistoryPersonel] = useState<Personel | null>(null);
   const [showOnlyActive, setShowOnlyActive] = useState(true);
   const [showOnlyProblematic, setShowOnlyProblematic] = useState(false);
+  const [gorevGrupFilters, setGorevGrupFilters] = useState<PersonelGorevGrup[]>([]);
   const [sortMode, setSortMode] = useState<'NAME_ASC' | 'NAME_DESC' | 'DATE_NEWEST' | 'DATE_OLDEST'>('NAME_ASC');
   const [repairingKampTaseron, setRepairingKampTaseron] = useState(false);
   const [exportingListe, setExportingListe] = useState<'excel' | 'html' | null>(null);
@@ -1229,6 +1238,39 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
     [kadroPool, personelKalite.duplicateNameIds]
   );
 
+  const gorevGrupPool = useMemo(() => {
+    let pool = kadroPool;
+    if (showOnlyProblematic) {
+      pool = pool.filter((p) => personelKalite.problematicIds.has(p.id));
+    } else if (showOnlyActive) {
+      pool = pool.filter((p) => is_aktif_status(p.durum));
+    }
+    if (kadroMode === 'ana_firma') {
+      pool = pool.filter((p) => matchesFirmaFilter(p, firmaFilters.length ? firmaFilters : ['ANA_FIRMA']));
+    } else if (firmaFilters.length > 0) {
+      pool = pool.filter((p) => matchesFirmaFilter(p, firmaFilters));
+    }
+    return pool;
+  }, [
+    kadroPool,
+    showOnlyProblematic,
+    showOnlyActive,
+    personelKalite.problematicIds,
+    kadroMode,
+    firmaFilters,
+  ]);
+
+  const gorevGrupCounts = useMemo(
+    () => countPersonelByGorevGrup(gorevGrupPool),
+    [gorevGrupPool]
+  );
+
+  const toggleGorevGrupFilter = (grup: PersonelGorevGrup) => {
+    setGorevGrupFilters((prev) =>
+      prev.includes(grup) ? prev.filter((g) => g !== grup) : [...prev, grup]
+    );
+  };
+
   const filteredPersonel = useMemo(
     () =>
       personeller.filter((p) => {
@@ -1248,6 +1290,10 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
           return false;
         }
 
+        if (gorevGrupFilters.length > 0 && !gorevGrupFilters.includes(resolvePersonelGorevGrubu(p))) {
+          return false;
+        }
+
         const term = searchTerm.toLowerCase();
         const fullName = `${p.ad} ${p.soyad}`.toLowerCase();
         return (
@@ -1263,6 +1309,7 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
       showOnlyActive,
       showOnlyProblematic,
       personelKalite.problematicIds,
+      gorevGrupFilters,
       searchTerm,
     ]
   );
@@ -1313,6 +1360,9 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
     ];
     if (showOnlyActive) parts.push('Yalnız aktif');
     if (showOnlyProblematic) parts.push('Sorunlu kayıtlar');
+    if (gorevGrupFilters.length > 0) {
+      parts.push(`Görev: ${gorevGrupFilters.map(personelGorevGrupLabel).join(', ')}`);
+    }
     if (searchTerm.trim()) parts.push(`Arama: ${searchTerm.trim()}`);
     return parts.join(' · ');
   };
@@ -2301,6 +2351,38 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
                   <option value="DATE_NEWEST">İşe giriş: Yeni → Eski</option>
                   <option value="DATE_OLDEST">İşe giriş: Eski → Yeni</option>
                 </select>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-1.5 w-full">
+                <span className="text-[9px] font-black uppercase tracking-widest text-slate-400 shrink-0">
+                  Görev:
+                </span>
+                {gorevGrupFilters.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setGorevGrupFilters([])}
+                    className="text-[9px] font-bold px-2 py-1 rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 cursor-pointer"
+                  >
+                    Tümü
+                  </button>
+                )}
+                {PERSONEL_GOREV_GRUP_ORDER.map((grup) => {
+                  const count = gorevGrupCounts.get(grup) || 0;
+                  if (count === 0 && !gorevGrupFilters.includes(grup)) return null;
+                  const active = gorevGrupFilters.includes(grup);
+                  return (
+                    <button
+                      key={grup}
+                      type="button"
+                      onClick={() => toggleGorevGrupFilter(grup)}
+                      className={`text-[9px] font-bold px-2.5 py-1.5 rounded-xl border cursor-pointer transition ${personelGorevGrupChipClass(grup, active)}`}
+                      title={`${personelGorevGrupLabel(grup)} grubunu filtrele (${count} kişi)`}
+                    >
+                      {personelGorevGrupLabel(grup)}
+                      <span className="ml-1 opacity-80 tabular-nums">({count})</span>
+                    </button>
+                  );
+                })}
               </div>
 
               <div className="relative w-full max-w-xs">
