@@ -148,6 +148,7 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
   const [gunSonuNot, setGunSonuNot] = useState('');
   const [gunSonuBusy, setGunSonuBusy] = useState(false);
   const [patchBusyId, setPatchBusyId] = useState<string | null>(null);
+  const [gorevMerkeziPatchBusyId, setGorevMerkeziPatchBusyId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState<SahaFaaliyeti | null>(null);
   const [editSaving, setEditSaving] = useState(false);
   const [deleteBusyId, setDeleteBusyId] = useState<string | null>(null);
@@ -997,7 +998,7 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
                   }`}
                 >
                   <HardHat size={12} />
-                  Görev Ata
+                  Görev Merkezi
                 </button>
               )}
             </div>
@@ -1096,7 +1097,7 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
               </div>
             ) : (
               <p className="text-[10px] font-bold text-amber-200 text-right px-2">
-                Formen / Yönetici görev programı
+                Günlük Görev Merkezi — sabah gönder, gün içi ilerleme
               </p>
             )}
           </div>
@@ -1180,8 +1181,20 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
           personeller={personeller}
           yoklamalar={yoklamalar}
           sahaFaaliyetleri={sahaFaaliyetleri}
+          tumSahaFaaliyetleri={tumSahaFaaliyetleri}
+          kampFaaliyetleri={kampFaaliyetleri}
           setSahaFaaliyetleri={setSahaFaaliyetleri}
           saveSahaFaaliyetNow={saveSahaFaaliyetNow}
+          editableSahaIds={editableSahaIds}
+          onPatchSahaFaaliyet={async (base, patch) => {
+            setGorevMerkeziPatchBusyId(base.id);
+            try {
+              await patchSahaFaaliyet(base, patch);
+            } finally {
+              setGorevMerkeziPatchBusyId(null);
+            }
+          }}
+          patchBusyId={gorevMerkeziPatchBusyId}
           currentUser={currentUser}
           initialDate={selectedDate}
           focusPersonId={programFocusPersonId}
@@ -1222,7 +1235,7 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
                   className="inline-flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 text-white text-[10px] font-black px-3 py-2 rounded-xl cursor-pointer"
                 >
                   <HardHat size={13} />
-                  Görev Ata Ekranı
+                  Görev Merkezi
                 </button>
               )}
             </div>
@@ -1244,7 +1257,7 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
                 {filteredFaaliyetsiz.length} kişi · {faaliyetsizByGorev.length} görev grubu
                 {!canAssignProgram
                   ? ' · Faaliyet atamak için Formen/Yönetici yetkisi gerekir'
-                  : ' · Satırdan “Görev Ata” ile günlük programa geçebilirsiniz'}
+                  : ' · Satırdan “Göreve Gönder” ile günlük görev merkezine geçebilirsiniz'}
               </p>
               {faaliyetsizByGorev.map(([gorev, list]) => (
                 <div
@@ -1298,7 +1311,7 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
                             className="inline-flex items-center gap-1.5 text-[10px] font-black px-3 py-1.5 rounded-xl bg-amber-500 text-slate-900 hover:bg-amber-400 cursor-pointer"
                           >
                             <HardHat size={12} />
-                            Görev Ata
+                            Göreve Gönder
                           </button>
                         ) : (
                           <span className="text-[9px] font-black uppercase tracking-wide text-rose-700 bg-rose-50 border border-rose-100 px-2 py-1 rounded-lg">

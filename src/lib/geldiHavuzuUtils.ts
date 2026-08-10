@@ -40,6 +40,15 @@ function parseDateParts(dateKey: string): { y: number; m: number; d: number } | 
   return { y, m, d };
 }
 
+/** Yoklamada "geldi" sayılan durumlar (Formen/mobil ile uyumlu) */
+export function isYoklamaGeldiDurumu(durum?: string | null): boolean {
+  const d = String(durum || '')
+    .trim()
+    .toLocaleLowerCase('tr-TR');
+  if (!d) return false;
+  return d.includes('geldi') || d === 'var' || d.includes('çalış') || d === 'calisti';
+}
+
 /** O gün yoklamada Geldi olan aktif saha personeli (taşeron / idari / işten çıkmış hariç) */
 export function buildGeldiHavuzu(
   personeller: Personel[],
@@ -56,7 +65,7 @@ export function buildGeldiHavuzu(
       if (!aktif) return false;
       if (String(p.istenCikisTarihi || '').trim()) return false;
       const dayData = getYoklamaDay(yoklamalar[p.id], y, m, d);
-      return dayData?.durum === 'Geldi';
+      return isYoklamaGeldiDurumu(dayData?.durum);
     })
     .sort((a, b) =>
       `${a.ad} ${a.soyad}`.localeCompare(`${b.ad} ${b.soyad}`, 'tr')
@@ -168,10 +177,14 @@ export function buildGunlukProgramCetveli(
   personeller: Personel[],
   yoklamalar: AylikYoklamaMap,
   sahaFaaliyetleri: SahaFaaliyeti[],
-  dateKey: string
+  dateKey: string,
+  kampFaaliyetleri: KampFaaliyet[] = []
 ): GunlukProgramCetvelSatir[] {
   const geldi = buildGeldiHavuzu(personeller, yoklamalar, dateKey);
   const dayFaaliyetler = filterSahaFaaliyetleriByDate(sahaFaaliyetleri, dateKey);
+  const dayKamp = (kampFaaliyetleri || []).filter(
+    (kf) => normalizeDateKey(kf.tarih) === normalizeDateKey(dateKey)
+  );
   const parts = parseDateParts(dateKey);
 
   return geldi.map((p) => {
@@ -179,7 +192,9 @@ export function buildGunlukProgramCetveli(
       parts != null
         ? getYoklamaDay(yoklamalar[p.id], parts.y, parts.m, parts.d)
         : undefined;
-    const matched = dayFaaliyetler.filter((sf) => personMatchesFaaliyet(p, sf));
+    const matchedSaha = dayFaaliyetler.filter((sf) => personMatchesFaaliyet(p, sf));
+    const matchedKamp = dayKamp.filter((kf) => personMatchesFaaliyet(p, kf));
+    const matched = [...matchedSaha, ...matchedKamp];
     return {
       personelId: p.id,
       adSoyad: `${p.ad} ${p.soyad}`.trim(),
@@ -188,8 +203,8 @@ export function buildGunlukProgramCetveli(
       mesaiSaati: Number(cell?.mesaiSaati || 0),
       faaliyetVar: matched.length > 0,
       faaliyetSayisi: matched.length,
-      fotoSayisi: matched.reduce((n, f) => n + getFaaliyetFotolar(f).length, 0),
-      faaliyetIds: matched.map((f) => f.id),
+      fotoSayisi: matchedSaha.reduce((n, f) => n + getFaaliyetFotolar(f).length, 0),
+      faaliyetIds: matchedSaha.map((f) => f.id),
       atandi: matched.length > 0,
     };
   });
@@ -199,19 +214,25 @@ export function buildGunlukProgramOzeti(
   personeller: Personel[],
   yoklamalar: AylikYoklamaMap,
   sahaFaaliyetleri: SahaFaaliyeti[],
-  dateKey: string
+  dateKey: string,
+  kampFaaliyetleri: KampFaaliyet[] = []
 ): GunlukProgramOzeti {
   const geldi = buildGeldiHavuzu(personeller, yoklamalar, dateKey);
   const dayFaaliyetler = filterSahaFaaliyetleriByDate(sahaFaaliyetleri, dateKey);
-  const atananSayisi = geldi.filter((p) =>
-    dayFaaliyetler.some((sf) => personMatchesFaaliyet(p, sf))
-  ).length;
+  const dayKamp = (kampFaaliyetleri || []).filter(
+    (kf) => normalizeDateKey(kf.tarih) === normalizeDateKey(dateKey)
+  );
+  const atananSayisi = geldi.filter((p) => {
+    if (dayFaaliyetler.some((sf) => personMatchesFaaliyet(p, sf))) return true;
+    if (dayKamp.some((kf) => personMatchesFaaliyet(p, kf))) return true;
+    return false;
+  }).length;
   const atanmamisSayisi = Math.max(0, geldi.length - atananSayisi);
   return {
     geldiSayisi: geldi.length,
     atananSayisi,
     atanmamisSayisi,
-    gorevSayisi: dayFaaliyetler.length,
+    gorevSayisi: dayFaaliyetler.length + dayKamp.length,
     programTamam: geldi.length > 0 && atanmamisSayisi === 0,
   };
 }

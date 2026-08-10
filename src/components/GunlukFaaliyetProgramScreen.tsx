@@ -23,7 +23,7 @@ import {
   Loader2,
   Clock,
 } from 'lucide-react';
-import { AylikYoklamaMap, Personel, SahaFaaliyeti } from '../types/erp';
+import { AylikYoklamaMap, KampFaaliyet, Personel, SahaFaaliyeti } from '../types/erp';
 import { formatDateLabelTr, todayDateKey } from '../lib/dateKeyUtils';
 import { PARSEL_LIST, blokListForParsel, defaultBlokForParsel } from '../data/parselBlokMap';
 import { getFaaliyetFotolar, getFaaliyetTumFotolar, MAX_SAHA_FOTO_COUNT } from '../lib/sahaFaaliyetUtils';
@@ -36,11 +36,21 @@ import {
 } from '../lib/geldiHavuzuUtils';
 import { personMatchesFaaliyet } from '../lib/faaliyetPersonelUtils';
 import { FAALIYET_ETIKET_ONSETLERI, normalizeFaaliyetEtiketi } from '../lib/faaliyetEtiketUtils';
+import { FaaliyetEtiketIlerlemePanel } from './FaaliyetEtiketIlerlemePanel';
+import {
+  buildBirlesikGunlukFaaliyetler,
+  gorevMerkeziKaynakLabel,
+  GOREV_MERKEZI_KAYNAK_STYLE,
+  resolveGorevMerkeziKaynak,
+} from '../lib/gunlukGorevMerkeziUtils';
 
 interface GunlukFaaliyetProgramScreenProps {
   personeller: Personel[];
   yoklamalar: AylikYoklamaMap;
   sahaFaaliyetleri: SahaFaaliyeti[];
+  /** Saha + tesisat + mermer + şoför + operatör (havuz/atama için) */
+  tumSahaFaaliyetleri?: SahaFaaliyeti[];
+  kampFaaliyetleri?: KampFaaliyet[];
   setSahaFaaliyetleri: (
     updater: SahaFaaliyeti[] | ((prev: SahaFaaliyeti[]) => SahaFaaliyeti[])
   ) => void;
@@ -48,6 +58,12 @@ interface GunlukFaaliyetProgramScreenProps {
     record: SahaFaaliyeti,
     kaynak?: import('../lib/sahaFaaliyetPersistence').SahaFaaliyetSaveSource
   ) => Promise<unknown>;
+  onPatchSahaFaaliyet?: (
+    base: SahaFaaliyeti,
+    patch: Partial<SahaFaaliyeti>
+  ) => Promise<void> | void;
+  editableSahaIds?: Set<string>;
+  patchBusyId?: string | null;
   currentUser?: { email?: string; uid?: string } | null;
   /** Dışarıdan tarih (faaliyetsiz listeden geçiş) */
   initialDate?: string;
@@ -68,12 +84,18 @@ export const GunlukFaaliyetProgramScreen: React.FC<GunlukFaaliyetProgramScreenPr
   personeller,
   yoklamalar,
   sahaFaaliyetleri,
+  tumSahaFaaliyetleri,
+  kampFaaliyetleri = [],
   setSahaFaaliyetleri,
   saveSahaFaaliyetNow,
+  onPatchSahaFaaliyet,
+  editableSahaIds,
+  patchBusyId = null,
   currentUser,
   initialDate,
   focusPersonId = null,
 }) => {
+  const havuzFaaliyetleri = tumSahaFaaliyetleri ?? sahaFaaliyetleri;
   const [selectedDate, setSelectedDate] = useState(initialDate || todayDateKey());
   const [havuzSearch, setHavuzSearch] = useState('');
   const [selectedHavuzIds, setSelectedHavuzIds] = useState<string[]>([]);
@@ -114,8 +136,15 @@ export const GunlukFaaliyetProgramScreen: React.FC<GunlukFaaliyetProgramScreenPr
   const dayLabel = useMemo(() => formatDateLabelTr(selectedDate), [selectedDate]);
 
   const ozet = useMemo(
-    () => buildGunlukProgramOzeti(personeller, yoklamalar, sahaFaaliyetleri, selectedDate),
-    [personeller, yoklamalar, sahaFaaliyetleri, selectedDate]
+    () =>
+      buildGunlukProgramOzeti(
+        personeller,
+        yoklamalar,
+        havuzFaaliyetleri,
+        selectedDate,
+        kampFaaliyetleri
+      ),
+    [personeller, yoklamalar, havuzFaaliyetleri, kampFaaliyetleri, selectedDate]
   );
 
   const atanmamisHavuz = useMemo(
@@ -123,11 +152,12 @@ export const GunlukFaaliyetProgramScreen: React.FC<GunlukFaaliyetProgramScreenPr
       buildAtanmamisGeldiHavuzu(
         personeller,
         yoklamalar,
-        sahaFaaliyetleri,
+        havuzFaaliyetleri,
         selectedDate,
-        editingGorevId || undefined
+        editingGorevId || undefined,
+        kampFaaliyetleri
       ),
-    [personeller, yoklamalar, sahaFaaliyetleri, selectedDate, editingGorevId]
+    [personeller, yoklamalar, havuzFaaliyetleri, kampFaaliyetleri, selectedDate, editingGorevId]
   );
 
   const filteredHavuz = useMemo(() => {
@@ -141,13 +171,20 @@ export const GunlukFaaliyetProgramScreen: React.FC<GunlukFaaliyetProgramScreenPr
   }, [atanmamisHavuz, havuzSearch]);
 
   const dayGorevler = useMemo(
-    () => filterSahaFaaliyetleriByDate(sahaFaaliyetleri, selectedDate),
-    [sahaFaaliyetleri, selectedDate]
+    () => buildBirlesikGunlukFaaliyetler(havuzFaaliyetleri, kampFaaliyetleri, selectedDate),
+    [havuzFaaliyetleri, kampFaaliyetleri, selectedDate]
   );
 
   const cetvel = useMemo(
-    () => buildGunlukProgramCetveli(personeller, yoklamalar, sahaFaaliyetleri, selectedDate),
-    [personeller, yoklamalar, sahaFaaliyetleri, selectedDate]
+    () =>
+      buildGunlukProgramCetveli(
+        personeller,
+        yoklamalar,
+        havuzFaaliyetleri,
+        selectedDate,
+        kampFaaliyetleri
+      ),
+    [personeller, yoklamalar, havuzFaaliyetleri, kampFaaliyetleri, selectedDate]
   );
 
   const detailPerson = useMemo(
@@ -207,14 +244,15 @@ export const GunlukFaaliyetProgramScreen: React.FC<GunlukFaaliyetProgramScreenPr
   };
 
   const startEditGorev = (sf: SahaFaaliyeti) => {
-    setEditingGorevId(sf.id);
-    setIsNiteligi(sf.isNiteligi || '');
-    setParsel(sf.parsel || PARSEL_LIST[0] || 'GENEL SAHA');
-    setBlok(sf.blok || defaultBlokForParsel(sf.parsel || ''));
-    setAciklama(sf.aciklama || '');
-    setIsEtiketi(sf.isEtiketi || '');
-    setDraftStaff(Array.isArray(sf.aktifPersonelListesi) ? [...sf.aktifPersonelListesi] : []);
-    setDraftFotos(getFaaliyetFotolar(sf));
+    const existing = sahaFaaliyetleri.find((x) => x.id === sf.id) || sf;
+    setEditingGorevId(existing.id);
+    setIsNiteligi(existing.isNiteligi || '');
+    setParsel(existing.parsel || PARSEL_LIST[0] || 'GENEL SAHA');
+    setBlok(existing.blok || defaultBlokForParsel(existing.parsel || ''));
+    setAciklama(existing.aciklama || '');
+    setIsEtiketi(existing.isEtiketi || '');
+    setDraftStaff(Array.isArray(existing.aktifPersonelListesi) ? [...existing.aktifPersonelListesi] : []);
+    setDraftFotos(getFaaliyetFotolar(existing));
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -332,6 +370,10 @@ export const GunlukFaaliyetProgramScreen: React.FC<GunlukFaaliyetProgramScreenPr
   };
 
   const handleDeleteGorev = (id: string) => {
+    if (!sahaFaaliyetleri.some((sf) => sf.id === id)) {
+      alert('Bu kayıt mobil/kamp kaynağından geldi; buradan silinemez.');
+      return;
+    }
     if (!window.confirm('Bu görev kaydını silmek istediğinize emin misiniz?')) return;
     setSahaFaaliyetleri((prev) => prev.filter((sf) => sf.id !== id));
     if (editingGorevId === id) resetGorevForm();
@@ -372,9 +414,9 @@ export const GunlukFaaliyetProgramScreen: React.FC<GunlukFaaliyetProgramScreenPr
           kampFaaliyetleri: [],
           personeller,
           yoklamalar,
-          olusturan: currentUser?.email || 'Günlük Faaliyet Programı',
+          olusturan: currentUser?.email || 'Günlük Görev Merkezi',
         });
-        openFaaliyetGunlukReportPdf(html, `Günlük Faaliyet Programı — ${dayLabel}`);
+        openFaaliyetGunlukReportPdf(html, `Günlük Görev Merkezi — ${dayLabel}`);
       }
     );
   };
@@ -418,14 +460,14 @@ export const GunlukFaaliyetProgramScreen: React.FC<GunlukFaaliyetProgramScreenPr
         <div className="relative flex flex-wrap items-start justify-between gap-4">
           <div>
             <p className="text-[10px] font-black uppercase tracking-[0.2em] text-amber-200/90">
-              Geldi Havuzu · Günlük Program
+              Sabah görev dağıtımı · Günlük ilerleme
             </p>
             <h1 className="text-xl sm:text-2xl font-black mt-1 tracking-tight">
-              Günlük Faaliyet Programı
+              Günlük Görev Merkezi
             </h1>
             <p className="text-[11px] text-slate-300 mt-1.5 max-w-xl font-medium">
-              Yoklamada Geldi işaretlenen her personel o gün bir göreve atanmalıdır. Atamalar saha
-              faaliyetleriyle aynı parsel / blok kayıtlarına yazılır.
+              Geldi personeli parsel/blok ve iş açıklamasıyla göreve gönderin. Saha, Kamp, Tesisat,
+              Operatör ve Şoför kayıtları burada birleşir; gün içinde ilerleme notu ekleyin.
             </p>
           </div>
           <div className="flex items-center gap-2 bg-white/10 border border-white/15 rounded-2xl p-1.5">
@@ -609,7 +651,7 @@ export const GunlukFaaliyetProgramScreen: React.FC<GunlukFaaliyetProgramScreenPr
             <div className="flex items-center justify-between gap-2">
               <h2 className="text-xs font-black uppercase tracking-wider text-slate-800 flex items-center gap-2">
                 <HardHat size={14} className="text-amber-600" />
-                {editingGorevId ? 'Görevi Düzenle' : 'Yeni Görev Oluştur'}
+                {editingGorevId ? 'Görevi Düzenle' : 'Sabah — Göreve Gönder'}
               </h2>
               {editingGorevId && (
                 <button
@@ -792,27 +834,26 @@ export const GunlukFaaliyetProgramScreen: React.FC<GunlukFaaliyetProgramScreenPr
               className="w-full inline-flex items-center justify-center gap-1.5 bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white text-xs font-black py-3 rounded-xl cursor-pointer"
             >
               <Plus size={14} />
-              {editingGorevId ? 'Görevi Güncelle' : 'Görevi Kaydet (Saha Faaliyeti)'}
+              {editingGorevId ? 'Görevi Güncelle' : 'Göreve Gönder'}
             </button>
           </div>
 
           <div className="space-y-2">
             <h3 className="text-xs font-black uppercase tracking-wider text-slate-700 px-1">
-              Günün görevleri ({dayGorevler.length})
+              Günün görevleri — tüm kaynaklar ({dayGorevler.length})
             </h3>
             {dayGorevler.length === 0 ? (
               <div className="bg-white border border-dashed border-slate-200 rounded-2xl p-8 text-center text-slate-400 text-xs">
-                Bu gün henüz program görevi yok.
+                Bu gün henüz görev kaydı yok. Soldan personel seçip göreve gönderin.
               </div>
             ) : (
               dayGorevler.map((sf) => {
                 const fotolar = getFaaliyetTumFotolar(sf);
-                const ekip = (sf.aktifPersonelListesi || [])
-                  .map((id) => {
-                    const p = personeller.find((x) => x.id === id);
-                    return p ? `${p.ad} ${p.soyad}` : id;
-                  })
-                  .join(', ');
+                const kaynak = resolveGorevMerkeziKaynak(sf.kaynakEkran);
+                const kaynakLabel = gorevMerkeziKaynakLabel(kaynak);
+                const canEditProgress = editableSahaIds?.has(sf.id) ?? false;
+                const isProgramKayit =
+                  sf.kaynakEkran === 'GUNLUK_PROGRAM' || kaynak === 'PROGRAM';
                 return (
                   <article
                     key={sf.id}
@@ -820,34 +861,48 @@ export const GunlukFaaliyetProgramScreen: React.FC<GunlukFaaliyetProgramScreenPr
                   >
                     <div className="flex justify-between gap-2 items-start">
                       <div className="min-w-0">
-                        <p className="text-[9px] font-black uppercase text-slate-400">
-                          {sf.kaynakEkran || 'SAHA'} · {fotolar.length} foto
-                        </p>
+                        <div className="flex flex-wrap items-center gap-1.5 mb-1">
+                          <span
+                            className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-full border ${GOREV_MERKEZI_KAYNAK_STYLE[kaynak]}`}
+                          >
+                            {kaynakLabel}
+                          </span>
+                          {sf.durum && String(sf.durum).includes('BEK') && (
+                            <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded-full bg-amber-100 text-amber-900 border border-amber-200">
+                              Onay bekliyor
+                            </span>
+                          )}
+                        </div>
                         <h4 className="text-sm font-black text-slate-900 truncate">
                           {sf.isNiteligi || '—'}
                         </h4>
                         <p className="text-[11px] text-slate-500 font-semibold flex items-center gap-1 mt-0.5">
                           <MapPin size={11} className="text-amber-600" />
                           {sf.parsel} · {sf.blok}
+                          {fotolar.length > 0 && (
+                            <span className="text-slate-400"> · {fotolar.length} foto</span>
+                          )}
                         </p>
                       </div>
-                      <div className="flex gap-1 shrink-0">
-                        <button
-                          type="button"
-                          onClick={() => startEditGorev(sf)}
-                          className="text-[9px] font-black uppercase px-2 py-1 rounded-lg bg-amber-50 text-amber-900 border border-amber-200 cursor-pointer"
-                        >
-                          Düzenle
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteGorev(sf.id)}
-                          className="p-1.5 rounded-lg bg-rose-50 text-rose-700 border border-rose-100 cursor-pointer"
-                          title="Sil"
-                        >
-                          <Trash2 size={12} />
-                        </button>
-                      </div>
+                      {isProgramKayit && (
+                        <div className="flex gap-1 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => startEditGorev(sf)}
+                            className="text-[9px] font-black uppercase px-2 py-1 rounded-lg bg-amber-50 text-amber-900 border border-amber-200 cursor-pointer"
+                          >
+                            Düzenle
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteGorev(sf.id)}
+                            className="p-1.5 rounded-lg bg-rose-50 text-rose-700 border border-rose-100 cursor-pointer"
+                            title="Sil"
+                          >
+                            <Trash2 size={12} />
+                          </button>
+                        </div>
+                      )}
                     </div>
                     {sf.aciklama && (
                       <p className="text-[11px] text-slate-600 leading-relaxed">{sf.aciklama}</p>
@@ -862,20 +917,29 @@ export const GunlukFaaliyetProgramScreen: React.FC<GunlukFaaliyetProgramScreenPr
                             className="inline-flex items-center gap-1 text-[9px] font-bold bg-slate-50 border border-slate-200 rounded-lg px-1.5 py-0.5"
                           >
                             {label}
-                            <button
-                              type="button"
-                              onClick={() => removePersonFromGorev(sf.id, pid)}
-                              className="text-rose-400 hover:text-rose-600 cursor-pointer"
-                              title="Görevden çıkar"
-                            >
-                              <X size={10} />
-                            </button>
+                            {isProgramKayit && (
+                              <button
+                                type="button"
+                                onClick={() => removePersonFromGorev(sf.id, pid)}
+                                className="text-rose-400 hover:text-rose-600 cursor-pointer"
+                                title="Görevden çıkar"
+                              >
+                                <X size={10} />
+                              </button>
+                            )}
                           </span>
                         );
                       })}
                     </div>
-                    {!ekip && (
-                      <p className="text-[10px] text-rose-500 italic">Personel atanmamış</p>
+                    {canEditProgress && onPatchSahaFaaliyet && (
+                      <FaaliyetEtiketIlerlemePanel
+                        faaliyet={sf}
+                        currentUserEmail={currentUser?.email}
+                        busy={patchBusyId === sf.id}
+                        compact
+                        onPatch={(patch) => onPatchSahaFaaliyet(sf, patch)}
+                        onOpenFoto={(urls, index) => setLightbox({ urls, index })}
+                      />
                     )}
                   </article>
                 );
