@@ -41,7 +41,6 @@ import {
   PERSONEL_SORUN_LABEL,
   type PersonelKayitSorunu,
 } from '../lib/personelKayitKaliteUtils';
-import { applyLegacyPersonelNormalize, planLegacyPersonelNormalize } from '../lib/personelLegacyNormalize';
 import {
   countPersonelByGorevGrup,
   PERSONEL_GOREV_GRUP_ORDER,
@@ -175,7 +174,6 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
   const [gorevGrupFilters, setGorevGrupFilters] = useState<PersonelGorevGrup[]>([]);
   const [sortMode, setSortMode] = useState<'NAME_ASC' | 'NAME_DESC' | 'DATE_NEWEST' | 'DATE_OLDEST'>('NAME_ASC');
   const [repairingKampTaseron, setRepairingKampTaseron] = useState(false);
-  const [repairingLegacyImport, setRepairingLegacyImport] = useState(false);
   const [exportingListe, setExportingListe] = useState<'excel' | 'html' | null>(null);
   const [screenView, setScreenView] = useState<PersonelScreenView>('liste');
 
@@ -1278,36 +1276,6 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
     setGorevGrupFilters((prev) =>
       prev.includes(grup) ? prev.filter((g) => g !== grup) : [...prev, grup]
     );
-  };
-
-  const importKaynakInKadro = useMemo(
-    () => kadroPool.filter((p) => personelKalite.importKaynakIds.has(p.id)).length,
-    [kadroPool, personelKalite.importKaynakIds]
-  );
-
-  const handleNormalizeLegacyImport = async () => {
-    const plan = planLegacyPersonelNormalize(personeller, yoklamalar);
-    if (plan.patches.length === 0) {
-      alert('Normalize edilecek import kadro kaydı bulunamadı.');
-      return;
-    }
-    if (
-      !window.confirm(
-        `${plan.patches.length} Excel/AI import personel kaydı onaylanacak ve placeholder alanlar temizlenecek.\n\nKimlik (ID) ve yoklama geçmişi korunur — silme yapılmaz.\n\nDevam?`
-      )
-    ) {
-      return;
-    }
-    setRepairingLegacyImport(true);
-    try {
-      const result = await applyLegacyPersonelNormalize(personeller, yoklamalar);
-      setPersoneller(result.personeller);
-      alert(`${result.updatedCount} import kadro kaydı normalize edildi. Yoklama bağlantıları aynen duruyor.`);
-    } catch (err) {
-      alert(err instanceof Error ? err.message : 'Import kadro normalize edilemedi.');
-    } finally {
-      setRepairingLegacyImport(false);
-    }
   };
 
   const filteredPersonel = useMemo(
@@ -2449,8 +2417,7 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
           </div>
 
         {(personelKalite.problematicIds.size > 0 ||
-          personelKalite.duplicateNameGroups.length > 0 ||
-          importKaynakInKadro > 0) && (
+          personelKalite.duplicateNameGroups.length > 0) && (
           <div className="mx-4 mt-0 mb-0 rounded-xl border border-rose-200 bg-rose-50/80 px-4 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
             <div className="flex items-start gap-2 text-rose-900">
               <AlertCircle size={16} className="shrink-0 mt-0.5" />
@@ -2459,13 +2426,6 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
                   {formatPersonelKaliteOzet(personelKalite)} / Firestore
                 </p>
                 <p className="text-[10px] text-rose-700/90 mt-0.5">
-                  {importKaynakInKadro > 0 && (
-                    <>
-                      <span className="text-sky-800 font-semibold">
-                        {importKaynakInKadro} Excel/AI import kadro kaydı yoklama ile bağlı — silinmemeli.
-                      </span>{' '}
-                    </>
-                  )}
                   Bu sekme ({kadroMode === 'ana_firma' ? 'Ana Firma' : 'Taşeron'}): {problematicInKadro} gerçek sorunlu
                   {problematicInKadro === 0 && personelKalite.problematicIds.size > 0
                     ? ' — diğer sekmede veya pasif olabilir.'
@@ -2496,30 +2456,17 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
                 </p>
               </div>
             </div>
-            <div className="flex flex-wrap gap-2 shrink-0">
-              {importKaynakInKadro > 0 && (
-                <button
-                  type="button"
-                  disabled={repairingLegacyImport}
-                  onClick={() => void handleNormalizeLegacyImport()}
-                  className="text-[10px] font-bold px-3 py-2 rounded-xl border cursor-pointer bg-sky-600 text-white border-sky-700 hover:bg-sky-500 disabled:opacity-60"
-                  title="Import kadroları onayla — ID ve yoklama korunur"
-                >
-                  {repairingLegacyImport ? 'Onaylanıyor…' : `Import Kadroyu Onayla (${importKaynakInKadro})`}
-                </button>
-              )}
-              <button
-                type="button"
-                onClick={toggleProblematicFilter}
-                className={`text-[10px] font-bold px-3 py-2 rounded-xl border cursor-pointer ${
-                  showOnlyProblematic
-                    ? 'bg-rose-700 text-white border-rose-800'
-                    : 'bg-white text-rose-800 border-rose-300 hover:bg-rose-100'
-                }`}
-              >
-                {showOnlyProblematic ? 'Normal listeye dön' : 'Gerçek sorunluları göster'}
-              </button>
-            </div>
+            <button
+              type="button"
+              onClick={toggleProblematicFilter}
+              className={`shrink-0 text-[10px] font-bold px-3 py-2 rounded-xl border cursor-pointer ${
+                showOnlyProblematic
+                  ? 'bg-rose-700 text-white border-rose-800'
+                  : 'bg-white text-rose-800 border-rose-300 hover:bg-rose-100'
+              }`}
+            >
+              {showOnlyProblematic ? 'Normal listeye dön' : 'Gerçek sorunluları göster'}
+            </button>
           </div>
         )}
 
@@ -2597,14 +2544,6 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
                         )}
                       </h4>
                       <div className="mt-1 flex flex-wrap gap-2">
-                        {personelKalite.importKaynakIds.has(p.id) && (
-                          <span
-                            className="text-[10px] border px-2 py-0.5 rounded-full font-bold bg-sky-50 text-sky-900 border-sky-200"
-                            title="Excel/AI yoklama importu — TC veya yoklama ile doğrulanmış gerçek kadro"
-                          >
-                            Import Kadro
-                          </span>
-                        )}
                         {(personelKalite.issuesById.get(p.id) || [])
                           .filter(isKritikPersonelSorunu)
                           .map((sorun) => (
