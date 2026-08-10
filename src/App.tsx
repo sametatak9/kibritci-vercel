@@ -3629,6 +3629,7 @@ export default function App() {
                   personeller={personeller} 
                   setPersoneller={setPersonellerWithSync}
                   onPersonelDeleted={handlePersonelDeleted}
+                  yoklamalar={yoklamalar}
                   cariKartlar={cariKartlar}
                   setCariKartlar={setCariKartlarWithSync}
                   setCariIslemGecmisi={setCariIslemGecmisiWithSync}

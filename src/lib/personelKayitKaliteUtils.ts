@@ -1,22 +1,54 @@
-import { Personel } from '../types/erp';
+import type { AylikYoklamaMap, Personel } from '../types/erp';
+import { levenshteinDistance, normalizeStockCompareName } from './duplicateNameUtils';
+import { validateTC } from './personelOdemeUtils';
+import { asYoklamaGunMap, isTaseronPersonel, normalizeTurkishName } from './yoklamaUtils';
 
 export type PersonelKayitSorunu =
   | 'CIFT_ISIM'
+  | 'YAKIN_ISIM'
   | 'CIFT_TC'
   | 'ISIMDE_RAKAM'
   | 'GECERSIZ_ISIM'
+  | 'TEK_KELIME_ISIM'
+  | 'GECERSIZ_TC'
+  | 'LEGACY_KAYIT'
+  | 'YAPAY_IMPORT'
+  | 'YOKLAMA_YETIM'
   | 'EKSIK_BILGI';
 
 export const PERSONEL_SORUN_LABEL: Record<PersonelKayitSorunu, string> = {
   CIFT_ISIM: 'Çift İsim',
+  YAKIN_ISIM: 'Yakın İsim',
   CIFT_TC: 'Çift TC',
   ISIMDE_RAKAM: 'İsimde Rakam',
   GECERSIZ_ISIM: 'Geçersiz İsim',
+  TEK_KELIME_ISIM: 'Tek Kelime İsim',
+  GECERSIZ_TC: 'Geçersiz TC',
+  LEGACY_KAYIT: 'Legacy Import',
+  YAPAY_IMPORT: 'Yapay/Import Kayıt',
+  YOKLAMA_YETIM: 'Yoklama Yetim',
   EKSIK_BILGI: 'Eksik Bilgi',
 };
 
+export type PersonelKaliteOptions = {
+  yoklamalar?: AylikYoklamaMap;
+  /** Yakın isim Levenshtein eşiği (varsayılan 2) */
+  nearDuplicateMaxDistance?: number;
+};
+
 export function personelAdSoyadKey(p: Pick<Personel, 'ad' | 'soyad'>): string {
-  return `${String(p.ad || '').trim()} ${String(p.soyad || '').trim()}`.trim().toLowerCase();
+  return normalizeTurkishName(`${String(p.ad || '').trim()} ${String(p.soyad || '').trim()}`);
+}
+
+export function personelCompareNameKey(p: Pick<Personel, 'ad' | 'soyad'>): string {
+  return normalizeStockCompareName(`${String(p.ad || '').trim()} ${String(p.soyad || '').trim()}`);
+}
+
+function personelFirmaScopeKey(p: Personel): string {
+  if (isTaseronPersonel(p)) {
+    return `T:${String(p.firmaAdi || 'TASERON').trim().toLocaleUpperCase('tr-TR')}`;
+  }
+  return 'ANA_FIRMA';
 }
 
 export function isimdeRakamVar(p: Pick<Personel, 'ad' | 'soyad'>): boolean {
@@ -24,7 +56,7 @@ export function isimdeRakamVar(p: Pick<Personel, 'ad' | 'soyad'>): boolean {
 }
 
 const PLACEHOLDER_NAME_RE =
-  /^(test|deneme|xxx+|yok|bilinmiyor|personel|ad\s*soyad|isimsiz|dummy|null|undefined)$/i;
+  /^(test|deneme|xxx+|yok|bilinmiyor|personel|ad\s*soyad|isimsiz|dummy|null|undefined|bilinmeyen|unknown)$/i;
 
 /** Tek harf, boş, placeholder vb. */
 export function gecersizIsimKaydi(p: Pick<Personel, 'ad' | 'soyad'>): boolean {
@@ -37,24 +69,128 @@ export function gecersizIsimKaydi(p: Pick<Personel, 'ad' | 'soyad'>): boolean {
   return false;
 }
 
+/** AI / Excel import — ad-soyad tek alana yazılmış */
+export function tekKelimeIsimKaydi(p: Pick<Personel, 'ad' | 'soyad'>): boolean {
+  const ad = String(p.ad || '').trim();
+  const soyad = String(p.soyad || '').trim();
+  if (!soyad && ad.split(/\s+/).length >= 2) return true;
+  if (soyad.length === 1 && ad.length >= 2) return true;
+  return false;
+}
+
+export function gecersizTcKaydi(p: Pick<Personel, 'tcNo'>): boolean {
+  const tc = String(p.tcNo || '').trim();
+  if (!tc) return false;
+  return !validateTC(tc);
+}
+
+/** PRS-LEGACY-* — eski Excel / otomatik yoklama import kimliği */
+export function legacyImportKaydi(p: Pick<Personel, 'id'>): boolean {
+  return /^PRS-LEGACY/i.test(String(p.id || ''));
+}
+
+/** createMinimalPersonel / AI yoklama import parmak izi */
+export function yapayImportKaydi(p: Personel): boolean {
+  if (legacyImportKaydi(p)) return true;
+  const noTc = !String(p.tcNo || '').trim();
+  const noTel = !String(p.telefonNo || '').trim();
+  const defaultDogum = String(p.dogumTarihi || '').startsWith('1990-01-01');
+  const defaultAdres = String(p.adres || '').includes('Yüksekova Konut');
+  const sigortasiz = String(p.sgkDurumu || '').trim() === 'Sigortasız';
+  return noTc && noTel && sigortasiz && (defaultDogum || defaultAdres);
+}
+
 export function eksikTemelBilgi(p: Personel): boolean {
   return !String(p.ad || '').trim() || !String(p.soyad || '').trim() || !String(p.iseGirisTarihi || '').trim();
+}
+
+function personHasYoklamaData(yoklamalar: AylikYoklamaMap | undefined, personelId: string): boolean {
+  if (!yoklamalar) return false;
+  const map = asYoklamaGunMap(yoklamalar[personelId]);
+  if (!map) return false;
+  return Object.values(map).some((d) => d?.durum && d.durum !== 'Girilmedi');
 }
 
 export type PersonelKaliteIndex = {
   issuesById: Map<string, PersonelKayitSorunu[]>;
   problematicIds: Set<string>;
   duplicateNameGroups: Array<[string, Personel[]]>;
+  nearDuplicateNameGroups: Array<{ label: string; members: Personel[]; distance: number }>;
   duplicateNameIds: Set<string>;
+  nearDuplicateNameIds: Set<string>;
   duplicateTcIds: Set<string>;
   digitNameIds: Set<string>;
   invalidNameIds: Set<string>;
+  tekKelimeIsimIds: Set<string>;
+  invalidTcIds: Set<string>;
+  legacyImportIds: Set<string>;
+  yapayImportIds: Set<string>;
+  yoklamaYetimIds: Set<string>;
+  orphanYoklamaIds: string[];
 };
 
-export function buildPersonelKaliteIndex(personeller: Personel[]): PersonelKaliteIndex {
+function pushIssue(
+  issuesById: Map<string, PersonelKayitSorunu[]>,
+  personelId: string,
+  sorun: PersonelKayitSorunu
+) {
+  const list = issuesById.get(personelId) || [];
+  if (!list.includes(sorun)) list.push(sorun);
+  issuesById.set(personelId, list);
+}
+
+function findNearDuplicateGroups(
+  personeller: Personel[],
+  maxDistance: number
+): Array<{ label: string; members: Personel[]; distance: number }> {
+  const byScope = new Map<string, Personel[]>();
+  for (const p of personeller) {
+    const scope = personelFirmaScopeKey(p);
+    const list = byScope.get(scope) || [];
+    list.push(p);
+    byScope.set(scope, list);
+  }
+
+  const groups: Array<{ label: string; members: Personel[]; distance: number }> = [];
+  const seenPair = new Set<string>();
+
+  for (const pool of byScope.values()) {
+    for (let i = 0; i < pool.length; i += 1) {
+      for (let j = i + 1; j < pool.length; j += 1) {
+        const a = pool[i];
+        const b = pool[j];
+        const keyA = personelCompareNameKey(a);
+        const keyB = personelCompareNameKey(b);
+        if (!keyA || !keyB || keyA.length < 5 || keyB.length < 5) continue;
+        if (keyA === keyB) continue;
+        const dist = levenshteinDistance(keyA, keyB);
+        if (dist < 1 || dist > maxDistance) continue;
+        const pairKey = [a.id, b.id].sort().join('|');
+        if (seenPair.has(pairKey)) continue;
+        seenPair.add(pairKey);
+        groups.push({
+          label: `${a.ad} ${a.soyad} ~ ${b.ad} ${b.soyad}`,
+          members: [a, b],
+          distance: dist,
+        });
+      }
+    }
+  }
+
+  return groups.sort((a, b) => a.distance - b.distance || a.label.localeCompare(b.label, 'tr'));
+}
+
+export function buildPersonelKaliteIndex(
+  personeller: Personel[],
+  options?: PersonelKaliteOptions
+): PersonelKaliteIndex {
+  const yoklamalar = options?.yoklamalar;
+  const nearDuplicateMaxDistance = options?.nearDuplicateMaxDistance ?? 2;
+
   const nameCount = new Map<string, number>();
   const tcCount = new Map<string, number>();
   const byName = new Map<string, Personel[]>();
+  const personelIdSet = new Set(personeller.map((p) => p.id));
 
   for (const p of personeller) {
     const name = personelAdSoyadKey(p);
@@ -73,45 +209,97 @@ export function buildPersonelKaliteIndex(personeller: Personel[]): PersonelKalit
   const duplicateTcIds = new Set<string>();
   const digitNameIds = new Set<string>();
   const invalidNameIds = new Set<string>();
+  const tekKelimeIsimIds = new Set<string>();
+  const invalidTcIds = new Set<string>();
+  const legacyImportIds = new Set<string>();
+  const yapayImportIds = new Set<string>();
+  const yoklamaYetimIds = new Set<string>();
 
   for (const p of personeller) {
-    const issues: PersonelKayitSorunu[] = [];
     const name = personelAdSoyadKey(p);
     if (name.length >= 3 && (nameCount.get(name) || 0) > 1) {
-      issues.push('CIFT_ISIM');
+      pushIssue(issuesById, p.id, 'CIFT_ISIM');
       duplicateNameIds.add(p.id);
     }
     const tc = String(p.tcNo || '').trim();
     if (tc && (tcCount.get(tc) || 0) > 1) {
-      issues.push('CIFT_TC');
+      pushIssue(issuesById, p.id, 'CIFT_TC');
       duplicateTcIds.add(p.id);
     }
     if (isimdeRakamVar(p)) {
-      issues.push('ISIMDE_RAKAM');
+      pushIssue(issuesById, p.id, 'ISIMDE_RAKAM');
       digitNameIds.add(p.id);
     }
     if (gecersizIsimKaydi(p)) {
-      issues.push('GECERSIZ_ISIM');
+      pushIssue(issuesById, p.id, 'GECERSIZ_ISIM');
       invalidNameIds.add(p.id);
     }
-    if (eksikTemelBilgi(p)) {
-      issues.push('EKSIK_BILGI');
+    if (tekKelimeIsimKaydi(p)) {
+      pushIssue(issuesById, p.id, 'TEK_KELIME_ISIM');
+      tekKelimeIsimIds.add(p.id);
     }
-    if (issues.length > 0) issuesById.set(p.id, issues);
+    if (gecersizTcKaydi(p)) {
+      pushIssue(issuesById, p.id, 'GECERSIZ_TC');
+      invalidTcIds.add(p.id);
+    }
+    if (legacyImportKaydi(p)) {
+      pushIssue(issuesById, p.id, 'LEGACY_KAYIT');
+      legacyImportIds.add(p.id);
+    }
+    if (yapayImportKaydi(p)) {
+      pushIssue(issuesById, p.id, 'YAPAY_IMPORT');
+      yapayImportIds.add(p.id);
+    }
+    if (
+      yoklamalar &&
+      personHasYoklamaData(yoklamalar, p.id) &&
+      (yapayImportKaydi(p) || legacyImportKaydi(p) || !String(p.tcNo || '').trim())
+    ) {
+      pushIssue(issuesById, p.id, 'YOKLAMA_YETIM');
+      yoklamaYetimIds.add(p.id);
+    }
+    if (eksikTemelBilgi(p)) {
+      pushIssue(issuesById, p.id, 'EKSIK_BILGI');
+    }
   }
+
+  const nearDuplicateNameGroups = findNearDuplicateGroups(personeller, nearDuplicateMaxDistance);
+  const nearDuplicateNameIds = new Set<string>();
+  for (const group of nearDuplicateNameGroups) {
+    for (const p of group.members) {
+      pushIssue(issuesById, p.id, 'YAKIN_ISIM');
+      nearDuplicateNameIds.add(p.id);
+    }
+  }
+
+  const orphanYoklamaIds = yoklamalar
+    ? Object.keys(yoklamalar).filter((id) => !personelIdSet.has(id))
+    : [];
 
   const duplicateNameGroups = [...byName.entries()]
     .filter(([, list]) => list.length > 1)
-    .sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0], 'tr'));
+    .sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0], 'tr'))
+    .map(([, list]) => {
+      const label = `${list[0].ad} ${list[0].soyad}`.trim().toLocaleLowerCase('tr-TR');
+      return [label, list] as [string, Personel[]];
+    });
 
   return {
     issuesById,
     problematicIds: new Set(issuesById.keys()),
     duplicateNameGroups,
+    nearDuplicateNameGroups,
     duplicateNameIds,
+    nearDuplicateNameIds,
     duplicateTcIds,
     digitNameIds,
     invalidNameIds,
+    tekKelimeIsimIds,
+    invalidTcIds,
+    legacyImportIds,
+    yapayImportIds,
+    yoklamaYetimIds,
+    orphanYoklamaIds,
   };
 }
 
@@ -120,4 +308,26 @@ export function personelKaliteSorunlari(
   personelId: string
 ): PersonelKayitSorunu[] {
   return index.issuesById.get(personelId) || [];
+}
+
+export function formatPersonelKaliteOzet(index: PersonelKaliteIndex): string {
+  const parts: string[] = [];
+  if (index.duplicateNameGroups.length > 0) {
+    parts.push(`${index.duplicateNameGroups.length} çift isim`);
+  }
+  if (index.nearDuplicateNameGroups.length > 0) {
+    parts.push(`${index.nearDuplicateNameGroups.length} yakın isim`);
+  }
+  if (index.digitNameIds.size > 0) parts.push(`${index.digitNameIds.size} isimde rakam`);
+  if (index.invalidNameIds.size > 0) parts.push(`${index.invalidNameIds.size} geçersiz isim`);
+  if (index.tekKelimeIsimIds.size > 0) parts.push(`${index.tekKelimeIsimIds.size} tek kelime`);
+  if (index.invalidTcIds.size > 0) parts.push(`${index.invalidTcIds.size} geçersiz TC`);
+  if (index.legacyImportIds.size > 0) parts.push(`${index.legacyImportIds.size} legacy import`);
+  if (index.yapayImportIds.size > 0) parts.push(`${index.yapayImportIds.size} yapay/import`);
+  if (index.yoklamaYetimIds.size > 0) parts.push(`${index.yoklamaYetimIds.size} yoklama yetim`);
+  if (index.orphanYoklamaIds.length > 0) {
+    parts.push(`${index.orphanYoklamaIds.length} yetim yoklama ID`);
+  }
+  parts.push(`toplam ${index.problematicIds.size} sorunlu`);
+  return parts.join(' · ');
 }

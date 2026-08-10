@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Users, UserPlus, Trash2, CreditCard as Edit3, Camera, Search, ShieldCheck, Mail, Phone, MapPin, Tent, DollarSign, UserX, FileText, CloudUpload as UploadCloud, CircleCheck as CheckCircle2, CircleAlert as AlertCircle, Loader as Loader2, Building2, History, Download, RefreshCw, ListPlus, ArrowLeft, ClipboardList } from 'lucide-react';
-import { CariKart, CariKartIslem, KampKaydi, KampOdasi, Personel, SahaFaaliyeti } from '../types/erp';
+import { CariKart, CariKartIslem, KampKaydi, KampOdasi, Personel, SahaFaaliyeti, AylikYoklamaMap } from '../types/erp';
 import { fetchApiJson } from '../lib/apiClient';
 import { compressImage } from '../lib/imageCompress';
 import { saveDocument } from '../lib/firebase';
@@ -34,6 +34,7 @@ import {
 import { findPersonelMatches, loadPersonellerForDedup, pickBestPersonelMatch } from '../lib/personelMatchUtils';
 import {
   buildPersonelKaliteIndex,
+  formatPersonelKaliteOzet,
   gecersizIsimKaydi,
   isimdeRakamVar,
   PERSONEL_SORUN_LABEL,
@@ -78,6 +79,7 @@ interface PersonelScreenProps {
   personeller: Personel[];
   setPersoneller: React.Dispatch<React.SetStateAction<Personel[]>>;
   onPersonelDeleted?: (deleted: Personel[]) => void;
+  yoklamalar?: AylikYoklamaMap;
   cariKartlar?: CariKart[];
   setCariKartlar?: React.Dispatch<React.SetStateAction<CariKart[]>>;
   setCariIslemGecmisi?: React.Dispatch<React.SetStateAction<CariKartIslem[]>>;
@@ -147,6 +149,7 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
   personeller,
   setPersoneller,
   onPersonelDeleted,
+  yoklamalar = {},
   cariKartlar = [],
   setCariKartlar,
   setCariIslemGecmisi,
@@ -1221,7 +1224,10 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
     return { activeCamp, anyCamp };
   }, [kampKayitlari]);
 
-  const personelKalite = useMemo(() => buildPersonelKaliteIndex(personeller), [personeller]);
+  const personelKalite = useMemo(
+    () => buildPersonelKaliteIndex(personeller, { yoklamalar }),
+    [personeller, yoklamalar]
+  );
 
   const kadroPool = useMemo(
     () => personeller.filter((p) => matchesKadroMode(p) && !isHiddenPendingKampci(p)),
@@ -1347,8 +1353,17 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
   }, [filteredPersonel, sortMode]);
 
   const sorunBadgeClass = (sorun: PersonelKayitSorunu) => {
-    if (sorun === 'ISIMDE_RAKAM' || sorun === 'GECERSIZ_ISIM') {
+    if (sorun === 'ISIMDE_RAKAM' || sorun === 'GECERSIZ_ISIM' || sorun === 'TEK_KELIME_ISIM') {
       return 'bg-orange-50 text-orange-900 border-orange-200';
+    }
+    if (sorun === 'LEGACY_KAYIT' || sorun === 'YAPAY_IMPORT' || sorun === 'YOKLAMA_YETIM') {
+      return 'bg-violet-50 text-violet-900 border-violet-200';
+    }
+    if (sorun === 'YAKIN_ISIM') {
+      return 'bg-amber-50 text-amber-900 border-amber-200';
+    }
+    if (sorun === 'GECERSIZ_TC') {
+      return 'bg-sky-50 text-sky-900 border-sky-200';
     }
     return 'bg-rose-50 text-rose-800 border-rose-200';
   };
@@ -2406,8 +2421,7 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
               <AlertCircle size={16} className="shrink-0 mt-0.5" />
               <div>
                 <p className="text-xs font-bold">
-                  {personelKalite.duplicateNameGroups.length} çift isim · {personelKalite.digitNameIds.size} isimde rakam · {personelKalite.invalidNameIds.size} geçersiz isim
-                  {' '}(toplam {personelKalite.problematicIds.size} sorunlu / Firestore)
+                  {formatPersonelKaliteOzet(personelKalite)} / Firestore
                 </p>
                 <p className="text-[10px] text-rose-700/90 mt-0.5">
                   Bu sekme ({kadroMode === 'ana_firma' ? 'Ana Firma' : 'Taşeron'}): {problematicInKadro} sorunlu kayıt
@@ -2416,11 +2430,25 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
                     : ''}
                   {personelKalite.duplicateNameGroups.length > 0 && (
                     <>
-                      {' '}· Örnek:{' '}
+                      {' '}· Çift:{' '}
                       {personelKalite.duplicateNameGroups
-                        .slice(0, 3)
+                        .slice(0, 2)
                         .map(([name, list]) => `${name} (${list.length})`)
                         .join(' · ')}
+                    </>
+                  )}
+                  {personelKalite.nearDuplicateNameGroups.length > 0 && (
+                    <>
+                      {' '}· Yakın:{' '}
+                      {personelKalite.nearDuplicateNameGroups
+                        .slice(0, 2)
+                        .map((g) => g.label)
+                        .join(' · ')}
+                    </>
+                  )}
+                  {personelKalite.orphanYoklamaIds.length > 0 && (
+                    <>
+                      {' '}· {personelKalite.orphanYoklamaIds.length} yoklama kaydı personel kartında yok (AI import artığı)
                     </>
                   )}
                 </p>
