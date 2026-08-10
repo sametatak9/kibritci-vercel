@@ -23,6 +23,7 @@ import {
   setMesaiHoursInMap,
 } from '../lib/sahaFaaliyetUtils';
 import { submitPersonelCikisTalebi } from '../lib/personelCikisTalebiUtils';
+import { buildKampIstenCikisNedeni, resolveKampTahliyeChoice } from '../lib/kampTahliyeChoiceUtils';
 import {
   CANONICAL_ANA_FIRMA_ADI,
   canonicalizeAnaFirmaAdi,
@@ -1151,7 +1152,11 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
     }
   };
 
-  const sendCikisTalebiForKampTahliye = async (reg: KampKaydi, odaNo?: string) => {
+  const sendCikisTalebiForKampTahliye = async (
+    reg: KampKaydi,
+    odaNo?: string,
+    opts?: { cikisTarihi?: string; cikisNedeni?: string }
+  ) => {
     // Ana firma personeli kamp tahliyesinde ASLA işten çıkarılmaz / çıkış talebi gitmez
     if (isAnaFirmaKampKaydi(reg)) {
       throw new Error('ANA_FIRMA_ISTEN_CIKIS_YASAK');
@@ -1166,8 +1171,10 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
       personelIsim: reg.personelIsim || `${p?.ad || ''} ${p?.soyad || ''}`.trim(),
       personelGorev: p?.gorev || '',
       personelMaas: p?.netMaas ?? p?.maas ?? 0,
-      cikisTarihi: todayStr,
-      cikisNedeni: `Kamp tahliyesi${odaNo ? ` · Oda ${odaNo}` : ''} — taşeron personel; kampçı tarafından odadan çıkarıldı; işten çıkış onayı bekleniyor.`,
+      cikisTarihi: opts?.cikisTarihi || todayStr,
+      cikisNedeni:
+        opts?.cikisNedeni ||
+        `Kamp tahliyesi${odaNo ? ` · Oda ${odaNo}` : ''} — taşeron personel; işten çıkış onayı bekleniyor.`,
       gonderen: currentUser?.email || 'kampci',
       kaynak: 'KAMPCI_TAHLIYE',
       hedefYoneticiRole: 'YÖNETİCİ',
@@ -1175,66 +1182,47 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
   };
 
   const handleCheckOut = async (reg: KampKaydi) => {
-    if (
-      !window.confirm(
-        `${reg.personelIsim} odadan çıkarılsın mı?\n\nKamp çıkışı (tahliye) yapılacak.`
-      )
-    ) {
-      return;
-    }
-
     const anaFirma = isAnaFirmaKampKaydi(reg);
-    // Ana firma: sadece odadan çıkar; işten çıkış sorulmaz / gönderilmez
-    let sendIstenCikis = false;
-    if (!anaFirma) {
-      sendIstenCikis = window.confirm(
-        `${reg.personelIsim} (taşeron) için işten çıkış talebi yönetime gönderilsin mi?\n\nEvet: işten çıkış onay havuzuna düşer.\nHayır: sadece kamp odasından çıkarılır.\n\nNot: Ana firma personelinde işten çıkış kamp tahliyesiyle yapılmaz.`
-      );
-    }
+    const choice = resolveKampTahliyeChoice(reg.personelIsim, anaFirma);
+    if (choice.mode === 'cancelled') return;
 
     try {
-      const targetRoom = kampOdalari.find(r => r.id === reg.odaId || r.id === reg.roomId);
-      await evictKampResident(reg, kampOdalari, kampKayitlari);
-      if (sendIstenCikis) {
-        try {
-          await sendCikisTalebiForKampTahliye(reg, targetRoom?.odaNo);
-        } catch (talebiErr) {
-          if (String(talebiErr).includes('ANA_FIRMA_ISTEN_CIKIS_YASAK')) {
-            showStatus(
-              'info',
-              `${reg.personelIsim} odadan çıktı. Ana firma personeli için işten çıkış yapılmadı.`
-            );
-          } else {
-            console.warn('İşten çıkış talebi gönderilemedi:', talebiErr);
-            showStatus(
-              'error',
-              `${reg.personelIsim} odadan çıktı ancak işten çıkış talebi gönderilemedi — Onay Havuzu'nu kontrol edin.`
-            );
-            return;
-          }
+      const targetRoom = kampOdalari.find((r) => r.id === reg.odaId || r.id === reg.roomId);
+      const roomNo = targetRoom ? targetRoom.odaNo : 'oda';
+
+      if (choice.mode === 'oda') {
+        await evictKampResident(reg, kampOdalari, kampKayitlari);
+        if (addNotification) {
+          addNotification(`${reg.personelIsim} ${roomNo} nolu odadan tahliye edildi (işten çıkış yok).`);
         }
+        showStatus('success', `${reg.personelIsim} odadan tahliye edildi.`);
+        return;
       }
+
+      await sendCikisTalebiForKampTahliye(reg, targetRoom?.odaNo, {
+        cikisTarihi: choice.cikisTarihi,
+        cikisNedeni: buildKampIstenCikisNedeni({
+          odaNo: targetRoom?.odaNo,
+          kaynak: 'KAMPCI_TAHLIYE',
+          aciklama: choice.cikisNedeni,
+        }),
+      });
       if (addNotification) {
-        const roomNo = targetRoom ? targetRoom.odaNo : 'oda';
         addNotification(
-          sendIstenCikis
-            ? `${reg.personelIsim} ${roomNo} nolu odadan çıkış yaptı · işten çıkış talebi yönetime gönderildi.`
-            : anaFirma
-              ? `${reg.personelIsim} ${roomNo} nolu odadan çıkış yaptı (ana firma — işten çıkış yok).`
-              : `${reg.personelIsim} ${roomNo} nolu odadan çıkış yaptı (işten çıkış talebi gönderilmedi).`
+          `${reg.personelIsim} için işten çıkış talebi yönetime gönderildi (${choice.cikisTarihi}). Oda tahliyesi yönetici onayında yapılır.`
         );
       }
       showStatus(
         'success',
-        sendIstenCikis
-          ? `${reg.personelIsim} odadan çıkarıldı; işten çıkış talebi yönetime iletildi.`
-          : anaFirma
-            ? `${reg.personelIsim} odadan çıkarıldı. Ana firma personeli işten çıkarılmaz.`
-            : `${reg.personelIsim} odadan çıkarıldı (işten çıkış talebi gönderilmedi).`
+        `${reg.personelIsim} — işten çıkış talebi gönderildi. Yönetici onayı bekleniyor; personel odada aktif kalır.`
       );
     } catch (err) {
+      if (String(err).includes('ANA_FIRMA_ISTEN_CIKIS_YASAK')) {
+        showStatus('info', `${reg.personelIsim} ana firma personeli — işten çıkış talebi gönderilemez.`);
+        return;
+      }
       console.error(err);
-      showStatus('error', 'Check-out işlemi başarısız!');
+      showStatus('error', 'Tahliye / çıkış talebi işlemi başarısız!');
     }
   };
 
@@ -1253,59 +1241,33 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
 
     if (
       !window.confirm(
-        `${targetRoom.odaNo} numaralı odadaki TÜM personeller (${occupants.length} kişi) tahliye edilsin mi?\n\nKamp çıkışı yapılacak.\nAna firma personeli işten çıkarılmaz.`
+        `${targetRoom.odaNo} numaralı odadaki TÜM personeller (${occupants.length} kişi) odadan tahliye edilsin mi?\n\nBu işlem yalnızca kamp odası çıkışıdır; işten çıkış talebi gönderilmez.`
       )
     ) {
       return;
     }
 
-    const taseronOccupants = occupants.filter((r) => !isAnaFirmaKampKaydi(r));
-    let sendIstenCikis = false;
-    if (taseronOccupants.length > 0) {
-      sendIstenCikis = window.confirm(
-        `Tahliyede ${taseronOccupants.length} taşeron personel var.\n\nBunlar için işten çıkış talebi yönetime gönderilsin mi?\n\nAna firma personeli (${occupants.length - taseronOccupants.length} kişi) için işten çıkış ASLA yapılmaz.`
-      );
-    }
-
     try {
       const todayStr = new Date().toISOString().slice(0, 10);
-      let cikisTalebiSayisi = 0;
       for (const reg of occupants) {
         const updatedReg: KampKaydi = {
           ...reg,
           durum: 'PASIF',
-          cikisTarihi: todayStr
+          cikisTarihi: todayStr,
         };
         await saveDocument('kampKayitlari', updatedReg);
-        if (sendIstenCikis && !isAnaFirmaKampKaydi(reg)) {
-          try {
-            await sendCikisTalebiForKampTahliye(reg, targetRoom.odaNo);
-            cikisTalebiSayisi += 1;
-          } catch (talebiErr) {
-            console.warn('İşten çıkış talebi atlandı:', reg.personelIsim, talebiErr);
-          }
-        }
       }
       if (addNotification) {
-        addNotification(
-          `${targetRoom.odaNo} nolu oda tahliye edildi (${occupants.length} kişi)${
-            cikisTalebiSayisi > 0 ? ` · ${cikisTalebiSayisi} taşeron işten çıkış talebi` : ''
-          }.`
-        );
+        addNotification(`${targetRoom.odaNo} nolu oda tahliye edildi (${occupants.length} kişi).`);
       }
 
       const updatedRoom: KampOdasi = {
         ...targetRoom,
-        durum: 'BOŞ'
+        durum: 'BOŞ',
       };
       await saveDocument('kampOdalari', updatedRoom);
 
-      showStatus(
-        'success',
-        `${targetRoom.odaNo} tahliye edildi. Ana firma işten çıkış yok${
-          cikisTalebiSayisi > 0 ? ` · ${cikisTalebiSayisi} taşeron çıkış talebi gönderildi` : ''
-        }.`
-      );
+      showStatus('success', `${targetRoom.odaNo} tahliye edildi. İşten çıkış için personel bazında talep gönderin.`);
     } catch (err) {
       console.error(err);
       showStatus('error', 'Oda tahliye edilirken hata oluştu.');
@@ -2335,9 +2297,9 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
                                   <button
                                     onClick={() => handleCheckOut(occ)}
                                     className="text-[9px] font-bold text-rose-400 hover:text-rose-350 cursor-pointer p-0.5 hover:bg-rose-500/10 rounded transition"
-                                    title="Odadan Çıkar"
+                                    title="Odadan tahliye veya işten çıkış talebi"
                                   >
-                                    Çıkış Yap
+                                    Tahliye Et
                                   </button>
                                 </div>
                               );

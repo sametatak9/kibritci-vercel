@@ -13,6 +13,7 @@ import {
   evictKampResident 
 } from '../lib/kampPlacementUtils';
 import { submitPersonelCikisTalebi } from '../lib/personelCikisTalebiUtils';
+import { buildKampIstenCikisNedeni, resolveKampTahliyeChoice } from '../lib/kampTahliyeChoiceUtils';
 import { isTaseronPersonel, isKibritciCompany } from '../lib/yoklamaUtils';
 
 interface KampHaftalikYoklamaTabProps {
@@ -129,57 +130,54 @@ export const KampHaftalikYoklamaTab: React.FC<KampHaftalikYoklamaTabProps> = ({
   };
 
   const handleTahliye = async (reg: KampKaydi) => {
-    if (
-      !window.confirm(
-        `${reg.personelIsim} odadan tahliye edilsin mi?\n\nKamp çıkışı yapılacak.`
-      )
-    ) {
-      return;
-    }
-
     const anaFirma = isAnaFirmaKampKaydi(reg);
-    let sendIstenCikis = false;
-    if (!anaFirma) {
-      sendIstenCikis = window.confirm(
-        `${reg.personelIsim} (taşeron) için işten çıkış talebi yönetime gönderilsin mi?\n\nEvet: işten çıkış onay havuzuna düşer.\nHayır: sadece kamp odasından çıkarılır.\n\nAna firma personeli kamp tahliyesinde işten çıkarılmaz.`
-      );
-    }
+    const choice = resolveKampTahliyeChoice(reg.personelIsim, anaFirma);
+    if (choice.mode === 'cancelled') return;
 
     try {
-      await evictKampResident(reg, kampOdalari, kampKayitlari);
-      if (sendIstenCikis && !anaFirma) {
-        try {
-          await submitPersonelCikisTalebi({
-            personelId: reg.personelId,
-            personelIsim: reg.personelIsim,
-            cikisTarihi: new Date().toISOString().slice(0, 10),
-            cikisNedeni: `Kamp tahliyesi · Oda ${reg.odaNo || ''} — taşeron; haftalık sayım; işten çıkış onayı bekleniyor.`,
-            gonderen: currentUser?.email || 'kampci',
-            kaynak: 'KAMPCI_HAFTALIK_TAHLIYE',
-          });
-        } catch (talebiErr) {
-          console.warn('İşten çıkış talebi gönderilemedi:', talebiErr);
+      if (choice.mode === 'oda') {
+        await evictKampResident(reg, kampOdalari, kampKayitlari);
+        setSessionLogs((prev) => [
+          ...prev,
+          `${reg.odaNo} nolu odadan ${reg.personelIsim} tahliye edildi (işten çıkış yok).`,
+        ]);
+        if (addNotification) {
+          addNotification(
+            `${reg.personelIsim} haftalık sayımda ${reg.odaNo} nolu odadan tahliye edildi.`
+          );
         }
+        return;
       }
+
+      const p = reg.personelId ? personeller.find((x) => x.id === reg.personelId) : undefined;
+      await submitPersonelCikisTalebi({
+        personelId: reg.personelId || p?.id,
+        personelIsim: reg.personelIsim,
+        personelGorev: p?.gorev || '',
+        personelMaas: p?.netMaas ?? p?.maas ?? 0,
+        cikisTarihi: choice.cikisTarihi,
+        cikisNedeni: buildKampIstenCikisNedeni({
+          odaNo: reg.odaNo,
+          kaynak: 'KAMPCI_HAFTALIK_TAHLIYE',
+          aciklama: choice.cikisNedeni,
+        }),
+        gonderen: currentUser?.email || 'kampci',
+        kaynak: 'KAMPCI_HAFTALIK_TAHLIYE',
+        hedefYoneticiRole: 'YÖNETİCİ',
+      });
+
       setSessionLogs((prev) => [
         ...prev,
-        sendIstenCikis
-          ? `${reg.odaNo} nolu odadan ${reg.personelIsim} tahliye edildi · işten çıkış talebi gönderildi.`
-          : anaFirma
-            ? `${reg.odaNo} nolu odadan ${reg.personelIsim} tahliye edildi (ana firma — işten çıkış yok).`
-            : `${reg.odaNo} nolu odadan ${reg.personelIsim} tahliye edildi (işten çıkış talebi gönderilmedi).`,
+        `${reg.personelIsim} için işten çıkış talebi gönderildi (${choice.cikisTarihi}) · oda tahliyesi yönetici onayında.`,
       ]);
       if (addNotification) {
         addNotification(
-          sendIstenCikis
-            ? `${reg.personelIsim} haftalık sayımda ${reg.odaNo} nolu odadan tahliye edildi · işten çıkış talebi yönetime gönderildi.`
-            : anaFirma
-              ? `${reg.personelIsim} haftalık sayımda ${reg.odaNo} nolu odadan tahliye edildi (ana firma — işten çıkış yok).`
-              : `${reg.personelIsim} haftalık sayımda ${reg.odaNo} nolu odadan tahliye edildi (işten çıkış talebi gönderilmedi).`
+          `${reg.personelIsim} haftalık sayımda işten çıkış talebi yönetime gönderildi (${choice.cikisTarihi}).`
         );
       }
-    } catch (err: any) {
-      alert('Tahliye edilirken hata oluştu: ' + err.message);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      alert('Tahliye / çıkış talebi sırasında hata oluştu: ' + msg);
     }
   };
 
