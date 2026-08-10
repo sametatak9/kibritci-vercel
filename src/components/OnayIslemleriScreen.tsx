@@ -1646,7 +1646,7 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
     pendingMicirGateCount;
 
   const guvenlikCount =
-    pendingWaybills.length + pendingInvoices.length + pendingMicirGateCount + pendingGateDocs.length;
+    pendingWaybills.length + pendingMicirGateCount + pendingGateDocs.length;
   const kampciCount =
     pendingKampSayimlar.length +
     pendingKampFaaliyetler.length +
@@ -2664,8 +2664,6 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
             <GuvenlikEvrakOnayHavuzu
               pendingGateDocs={pendingGateDocs}
               pendingWaybills={pendingWaybills}
-              pendingInvoices={pendingInvoices}
-              irsaliyeler={irsaliyeler}
               signatureText={signatureText}
               setActiveDocForDetail={setActiveDocForDetail}
               handleApproveDocument={handleApproveDocument}

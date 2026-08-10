@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Truck, CreditCard, Eye, Check, X, Sparkles, ExternalLink, FileText, Download, ZoomIn, Loader2 } from 'lucide-react';
+import { Truck, Eye, Check, X, Sparkles, ExternalLink, FileText, Download, ZoomIn, Loader2 } from 'lucide-react';
 import { openBase64InNewTab } from '../lib/fileViewerUtils';
 import { ImzaOnizlemeStrip } from './ImzaOnizlemeStrip';
 import { AcilOnayBadge } from './AcilOnayBadge';
@@ -12,15 +12,11 @@ import {
   pickPrimaryFotoUrl,
   formatEvrakGonderimLabel,
 } from '../lib/guvenlikEvrakFotolar';
-import { resolveGuvenlikEvrakProvenance, buildFaturaMutabakatOzet, resolveFaturaProvenance } from '../lib/evrakProvenance';
-import type { Irsaliye } from '../types/erp';
+import { resolveGuvenlikEvrakProvenance } from '../lib/evrakProvenance';
 
 interface GuvenlikEvrakOnayHavuzuProps {
   pendingGateDocs: any[];
   pendingWaybills: any[];
-  pendingInvoices: any[];
-  /** Bağlı irsaliye foto / kanal özeti için */
-  irsaliyeler?: Irsaliye[];
   signatureText?: string;
   setActiveDocForDetail: (val: any) => void;
   handleApproveDocument: (type: 'waybill' | 'invoice', id: string) => void;
@@ -94,8 +90,6 @@ interface GuvenlikEvrakOnayHavuzuProps {
 export const GuvenlikEvrakOnayHavuzu: React.FC<GuvenlikEvrakOnayHavuzuProps> = ({
   pendingGateDocs,
   pendingWaybills,
-  pendingInvoices,
-  irsaliyeler = [],
   signatureText,
   setActiveDocForDetail,
   handleApproveDocument,
@@ -217,7 +211,6 @@ export const GuvenlikEvrakOnayHavuzu: React.FC<GuvenlikEvrakOnayHavuzuProps> = (
         <div className="flex items-center gap-2 text-[10px] font-bold flex-wrap">
           <span className="bg-[#E3F2EE] text-[#0F6C5C] border border-[#B9DBD2] px-2 py-1 rounded-lg">{pendingGateDocs.length} kapı</span>
           <span className="bg-[#FFF6EB] text-[#9A5B12] border border-[#F0D9B5] px-2 py-1 rounded-lg">{pendingWaybills.length} irsaliye</span>
-          <span className="bg-[#F3F6F7] text-[#3D4F56] border border-[#D5DEE3] px-2 py-1 rounded-lg">{pendingInvoices.length} fatura</span>
         </div>
       </div>
 
@@ -444,13 +437,12 @@ export const GuvenlikEvrakOnayHavuzu: React.FC<GuvenlikEvrakOnayHavuzuProps> = (
         )}
       </div>
 
-      {/* 2. DİĞER BEKLEYEN ONALAR (OFİS LİSTESİ) */}
+      {/* 2. DİĞER BEKLEYEN ONAYLAR (OFİS LİSTESİ) */}
       <div className="border-t border-slate-200 pt-6 space-y-4">
-        {(pendingWaybills.length > 0 || pendingInvoices.length > 0) && (
+        {pendingWaybills.length > 0 && (
           <div className="space-y-6">
             {/* İrsaliyeler Grid */}
-            {pendingWaybills.length > 0 && (
-              <div className="space-y-3">
+            <div className="space-y-3">
                 <h3 className="font-display font-black text-xs text-slate-500 tracking-wider flex items-center space-x-2 uppercase">
                   <Truck size={14} className="text-emerald-500" />
                   <span>Ofisten Kayıtlı Bekleyen İrsaliyeler ({pendingWaybills.length})</span>
@@ -506,188 +498,7 @@ export const GuvenlikEvrakOnayHavuzu: React.FC<GuvenlikEvrakOnayHavuzuProps> = (
                     </div>
                   ))}
                 </div>
-              </div>
-            )}
-
-            {/* Faturalar Grid — mobil/kapı dönüşüm mutabakatı */}
-            {pendingInvoices.length > 0 && (
-              <div className="space-y-3 pt-4">
-                <div className="space-y-1">
-                  <h3 className="font-display font-black text-xs text-slate-500 tracking-wider flex items-center space-x-2 uppercase">
-                    <CreditCard size={14} className="text-purple-500" />
-                    <span>İrsaliye → Fatura mutabakatı ({pendingInvoices.length})</span>
-                  </h3>
-                  <p className="text-[10px] text-slate-500 leading-relaxed max-w-3xl">
-                    Burada görünenler: Güvenlik (Ento mıcır), Kampçı (Şeker vidanjör) ve Tesisatçı
-                    (Yıldırım tanker) onayından oluşan <strong>irsaliye paketlerinin fatura taslağı</strong>.
-                    ₺0 = birim fiyat henüz girilmedi; asıl içerik bağlı sevk + fotoğraflardır.
-                  </p>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {pendingInvoices.map((doc) => {
-                    const ozet = buildFaturaMutabakatOzet(doc, irsaliyeler);
-                    const prov = resolveFaturaProvenance(doc);
-                    const tutar = Number(doc.genelToplam || doc.toplamTutar || 0);
-                    return (
-                      <div
-                        key={doc.id}
-                        className="bg-white border border-purple-100 p-4 rounded-2xl flex flex-col justify-between hover:border-purple-300 hover:shadow-md transition space-y-3 shadow-sm"
-                      >
-                        <div className="space-y-2.5">
-                          <div className="flex justify-between items-start gap-2">
-                            <span className="font-mono bg-purple-50 border border-purple-200 text-purple-700 text-[10px] font-bold px-2 py-0.5 rounded-md">
-                              {doc.faturaNo}
-                            </span>
-                            <span className="flex items-center gap-1.5 shrink-0">
-                              <AcilOnayBadge tarih={doc.tarih} />
-                              <span className="text-[10px] text-slate-500 font-mono font-bold">{doc.tarih}</span>
-                            </span>
-                          </div>
-
-                          <div className="flex flex-wrap gap-1">
-                            {prov.map((b) => (
-                              <span key={b.label} className={b.className} title={b.title}>
-                                {b.label}
-                              </span>
-                            ))}
-                          </div>
-
-                          <p className="text-xs text-slate-900 font-black leading-snug">
-                            {doc.cariUnvan || 'Cari yok'}
-                          </p>
-                          <p className="text-[10px] text-slate-600 font-semibold">{ozet.kanalOzeti}</p>
-                          {doc.saId && (
-                            <p className="text-[10px] font-mono text-violet-700 font-bold">SA · {doc.saId}</p>
-                          )}
-
-                          {ozet.fotoUrls.length > 0 ? (
-                            <div className="space-y-1">
-                              <span className="text-[8px] font-black uppercase text-slate-500">
-                                Sevk / fiş fotoğrafları ({ozet.fotoUrls.length})
-                              </span>
-                              <div className="flex flex-wrap gap-1.5">
-                                {ozet.fotoUrls.slice(0, 6).map((url, i) => (
-                                  <button
-                                    key={`${doc.id}-foto-${i}`}
-                                    type="button"
-                                    onClick={() => openCardPreview(url, `${doc.faturaNo}-fis-${i + 1}`)}
-                                    className="w-14 h-14 rounded-lg overflow-hidden border border-slate-200 cursor-pointer hover:ring-2 hover:ring-purple-300"
-                                    title="Büyüt"
-                                  >
-                                    {isLikelyImageUrl(url) ? (
-                                      <img src={url} alt="" className="w-full h-full object-cover" />
-                                    ) : (
-                                      <span className="text-[8px] font-bold text-slate-500 flex items-center justify-center h-full bg-slate-50">
-                                        DOSYA
-                                      </span>
-                                    )}
-                                  </button>
-                                ))}
-                                {ozet.fotoUrls.length > 6 && (
-                                  <span className="text-[9px] text-slate-500 self-center font-bold">
-                                    +{ozet.fotoUrls.length - 6}
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                          ) : (
-                            <p className="text-[10px] text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-2 py-1.5">
-                              Bağlı irsaliyelerde fiş görseli yok — Karşılaştır ile detaya bakın.
-                            </p>
-                          )}
-
-                          <div className="rounded-xl border border-slate-100 bg-slate-50/80 p-2.5 space-y-1.5 max-h-36 overflow-y-auto">
-                            <span className="text-[8px] font-black uppercase text-slate-500 tracking-wider">
-                              Oluşan / bağlanan evraklar
-                            </span>
-                            {ozet.linked.length === 0 ? (
-                              <p className="text-[10px] text-slate-500">Bağlı irsaliye yok</p>
-                            ) : (
-                              ozet.linked.slice(0, 8).map((ir) => (
-                                <div
-                                  key={ir.id}
-                                  className="text-[10px] border-b border-slate-100 last:border-0 pb-1.5 last:pb-0"
-                                >
-                                  <div className="flex flex-wrap items-center gap-1">
-                                    <span className={ir.badgeClass}>
-                                      {ir.kanal}
-                                    </span>
-                                    <span className="font-mono font-bold text-slate-800">{ir.irsaliyeNo}</span>
-                                    {ir.plaka && (
-                                      <span className="font-mono text-slate-500">{ir.plaka}</span>
-                                    )}
-                                  </div>
-                                  <p className="text-slate-600 mt-0.5 truncate" title={ir.kalemOzet}>
-                                    {ir.evrakTuru} · {ir.kalemOzet}
-                                    {ir.kiloKg
-                                      ? ` · ${Number(ir.kiloKg).toLocaleString('tr-TR')} kg`
-                                      : ir.tonaj
-                                        ? ` · ${Number(ir.tonaj).toLocaleString('tr-TR')} ton`
-                                        : ''}
-                                  </p>
-                                </div>
-                              ))
-                            )}
-                            {ozet.linked.length > 8 && (
-                              <p className="text-[9px] text-slate-500 font-bold">
-                                +{ozet.linked.length - 8} irsaliye daha
-                              </p>
-                            )}
-                          </div>
-
-                          <div className="flex flex-wrap gap-2 text-[9px]">
-                            <span className="bg-white border border-slate-200 rounded-lg px-2 py-1 font-bold text-slate-600">
-                              {ozet.miktarOzeti}
-                            </span>
-                            <span
-                              className={`rounded-lg px-2 py-1 font-bold border ${
-                                ozet.stokToplamKalem === 0
-                                  ? 'bg-slate-50 text-slate-500 border-slate-200'
-                                  : ozet.stokBagliKalem === ozet.stokToplamKalem
-                                    ? 'bg-teal-50 text-teal-800 border-teal-200'
-                                    : 'bg-amber-50 text-amber-800 border-amber-200'
-                              }`}
-                            >
-                              Stok {ozet.stokBagliKalem}/{ozet.stokToplamKalem || 0}
-                            </span>
-                          </div>
-
-                          <div className="p-2 bg-purple-50 rounded-xl border border-purple-100 flex justify-between items-center text-[10px]">
-                            <span className="text-slate-500 font-bold">
-                              {tutar > 0 ? 'Toplam Tutar' : 'Tutar (fiyat bekliyor)'}
-                            </span>
-                            <span className="text-purple-700 font-black font-mono">
-                              ₺{tutar.toLocaleString('tr-TR')}
-                            </span>
-                          </div>
-                          <ImzaOnizlemeStrip doc={doc} pendingSignatureText={signatureText} className="mt-1" />
-                        </div>
-
-                        <div className="flex gap-2 pt-2.5 border-t border-slate-100">
-                          <button
-                            type="button"
-                            onClick={() => setActiveDocForDetail({ id: doc.id, type: 'invoice', data: doc })}
-                            className="flex-1 bg-slate-50 border border-slate-200 hover:bg-slate-100 hover:border-slate-300 text-slate-800 py-1.5 px-3 rounded-lg text-[10px] font-black tracking-widest transition flex items-center justify-center space-x-1"
-                          >
-                            <Eye size={11} />
-                            <span>Karşılaştır &amp; Gör</span>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleApproveDocument('invoice', doc.id)}
-                            className="flex-1 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white py-1.5 px-3 rounded-lg text-[10px] font-black tracking-widest transition flex items-center justify-center space-x-1"
-                          >
-                            <Check size={11} />
-                            <span>Mutabakat Onayla</span>
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
+            </div>
           </div>
         )}
       </div>
