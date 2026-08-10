@@ -6,8 +6,10 @@ import { openHtmlReportWindow } from './reportEmail';
 import { firmaEslesir } from './taseronUtils';
 import {
   CANONICAL_ANA_FIRMA_ADI,
+  findPersonelByName,
   isKibritciCompany,
   isTaseronPersonel,
+  normalizeTurkishName,
 } from './yoklamaUtils';
 
 export type KampFirmaOzetRow = {
@@ -55,13 +57,31 @@ export function resolveKampYerlesimFirma(k: KampKaydi, personeller: Personel[]):
   return 'TAŞERON';
 }
 
-function residentDedupeKey(k: KampKaydi): string {
-  if (k.personelId) return `id:${k.personelId}`;
-  const name = String(k.personelIsim || '')
-    .trim()
-    .toLocaleLowerCase('tr-TR')
-    .replace(/\s+/g, ' ');
-  return name ? `name:${name}` : `row:${k.id}`;
+/** Tek kişi = personel kartı id veya normalize isim (id/isim çapraz eşleşme). */
+export function resolveResidentCanonicalKey(
+  k: KampKaydi,
+  personeller: Personel[] = []
+): string {
+  if (k.personelId) {
+    const linked = personeller.find((p) => p.id === k.personelId);
+    if (linked) return `pid:${linked.id}`;
+    return `pid:${k.personelId}`;
+  }
+
+  const rawName = String(k.personelIsim || '').trim();
+  if (rawName && personeller.length > 0) {
+    const byName = findPersonelByName(personeller, rawName);
+    if (byName?.id) return `pid:${byName.id}`;
+  }
+
+  const name = normalizeTurkishName(rawName);
+  if (name) return `name:${name}`;
+
+  return `row:${k.id}`;
+}
+
+function residentDedupeKey(k: KampKaydi, personeller: Personel[] = []): string {
+  return resolveResidentCanonicalKey(k, personeller);
 }
 
 /** Firma bazında: toplam çalışan + kampta kalan + oda sayısı. */
@@ -96,7 +116,7 @@ export function buildKampFirmaOzeti(
 
   for (const k of kampKayitlari) {
     if (k.durum !== 'AKTIF') continue;
-    const dedupe = residentDedupeKey(k);
+    const dedupe = residentDedupeKey(k, personeller);
     if (seenResidents.has(dedupe)) continue;
     seenResidents.add(dedupe);
 
@@ -133,23 +153,78 @@ export function auditKampYerlesimCounts(
   uniqueYerlesik: number;
   firmaToplam: number;
   duplicateSkipped: number;
+  totalsMatch: boolean;
+  duplicateGroups: Array<{
+    key: string;
+    label: string;
+    kayitlar: Array<{ id: string; personelIsim: string; odaNo?: string; yerleskeAdi?: string }>;
+  }>;
+  idsizAktifKayit: number;
+  personelKartiEslesmeyen: number;
 } {
   const rawAktif = kampKayitlari.filter((k) => k.durum === 'AKTIF');
-  const seen = new Set<string>();
-  let unique = 0;
+  const groups = new Map<
+    string,
+    Array<{ id: string; personelIsim: string; odaNo?: string; yerleskeAdi?: string }>
+  >();
+
   for (const k of rawAktif) {
-    const key = residentDedupeKey(k);
-    if (seen.has(key)) continue;
-    seen.add(key);
-    unique += 1;
+    const key = residentDedupeKey(k, personeller);
+    const row = {
+      id: k.id,
+      personelIsim: k.personelIsim || '—',
+      odaNo: k.odaNo,
+      yerleskeAdi: k.yerleskeAdi,
+    };
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key)!.push(row);
   }
+
+  let unique = 0;
+  const duplicateGroups: Array<{
+    key: string;
+    label: string;
+    kayitlar: Array<{ id: string; personelIsim: string; odaNo?: string; yerleskeAdi?: string }>;
+  }> = [];
+
+  for (const [key, kayitlar] of groups) {
+    if (kayitlar.length === 1) {
+      unique += 1;
+      continue;
+    }
+    unique += 1;
+    duplicateGroups.push({
+      key,
+      label: kayitlar.map((x) => x.personelIsim).join(' / '),
+      kayitlar,
+    });
+  }
+
+  duplicateGroups.sort((a, b) => b.kayitlar.length - a.kayitlar.length);
+
   const rows = buildKampFirmaOzeti(personeller, kampKayitlari);
   const firmaToplam = rows.reduce((s, r) => s + r.kampta, 0);
+
+  let idsizAktifKayit = 0;
+  let personelKartiEslesmeyen = 0;
+  const seenUniqueResidents = new Set<string>();
+  for (const k of rawAktif) {
+    if (!k.personelId) idsizAktifKayit += 1;
+    const key = resolveResidentCanonicalKey(k, personeller);
+    if (seenUniqueResidents.has(key)) continue;
+    seenUniqueResidents.add(key);
+    if (!key.startsWith('pid:')) personelKartiEslesmeyen += 1;
+  }
+
   return {
     rawAktifKayit: rawAktif.length,
     uniqueYerlesik: unique,
     firmaToplam,
     duplicateSkipped: Math.max(0, rawAktif.length - unique),
+    totalsMatch: firmaToplam === unique,
+    duplicateGroups,
+    idsizAktifKayit,
+    personelKartiEslesmeyen,
   };
 }
 
