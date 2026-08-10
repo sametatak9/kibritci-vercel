@@ -5,6 +5,16 @@ import { getFaaliyetFotolar, MAX_SAHA_FOTO_COUNT } from './sahaFaaliyetUtils';
 import type { SahaFaaliyeti } from '../types/erp';
 
 const UPLOAD_TIMEOUT_MS = 12000;
+const PDF_UPLOAD_TIMEOUT_MS = 30000;
+const MAX_KASA_PDF_BYTES = 12 * 1024 * 1024;
+
+export const KASA_FIS_EVRAK_ACCEPT =
+  '.pdf,application/pdf,image/jpeg,image/jpg,image/png,image/webp,image/*';
+
+export function isKasaFisPdfUrl(url?: string | null): boolean {
+  const u = String(url || '').trim();
+  return u.includes('application/pdf') || /\.pdf(\?|#|$)/i.test(u);
+}
 
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -210,6 +220,7 @@ export async function ensureYolHarcamaFotoPersisted(
 /**
  * Haftalık Kasa fiş görselini Storage'a taşır (`kasa-fis/{id}/…`).
  * Büyük data URL Firestore yazımını düşürüp kaydı rollback ettiriyordu.
+ * PDF dosyaları sıkıştırılmadan `.pdf` olarak yüklenir.
  */
 export async function ensureKasaFisFotoPersisted(
   hareketId: string,
@@ -218,6 +229,25 @@ export async function ensureKasaFisFotoPersisted(
   const raw = String(fotoUrl || '').trim();
   if (!raw) return '';
   if (/^https?:\/\//i.test(raw) || raw.startsWith('blob:')) return raw;
+
+  const isPdf = isKasaFisPdfUrl(raw);
+
+  if (isPdf) {
+    try {
+      const path = `kasa-fis/${hareketId}/fis_${Date.now()}.pdf`;
+      const storageRef = ref(storage, path);
+      await withTimeout(
+        uploadString(storageRef, raw, 'data_url', { contentType: 'application/pdf' }),
+        PDF_UPLOAD_TIMEOUT_MS,
+        'Kasa fiş PDF Storage'
+      );
+      return await withTimeout(getDownloadURL(storageRef), 8000, 'Kasa fiş PDF URL');
+    } catch (err) {
+      console.warn('Kasa fiş PDF Storage atlandı:', hareketId, err);
+      if (raw.length > 700_000) return '';
+      return raw;
+    }
+  }
 
   const payload = await preparePayload(
     raw.startsWith('data:') ? raw : `data:image/jpeg;base64,${raw}`
@@ -243,6 +273,31 @@ export async function ensureKasaFisFotoPersisted(
     // Firestore 1MB limiti — büyük inline yazma; boş bırak (kayıt yine de kalsın)
     if (payload.length > 700_000) return '';
     return payload;
+  }
+}
+
+/** Kasa fiş/fatura — fotoğraf veya PDF (PDF sıkıştırılmaz). */
+export async function prepareKasaFisEvrakFromFile(file: File): Promise<string> {
+  const isPdf =
+    file.type.toLowerCase().includes('pdf') || file.name.toLowerCase().endsWith('.pdf');
+  if (isPdf && file.size > MAX_KASA_PDF_BYTES) {
+    throw new Error(
+      `"${file.name}" çok büyük (en fazla ${Math.round(MAX_KASA_PDF_BYTES / 1024 / 1024)} MB PDF).`
+    );
+  }
+
+  const raw = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(new Error('Dosya okunamadı'));
+    reader.readAsDataURL(file);
+  });
+
+  if (isPdf) return raw;
+  try {
+    return await compressImage(raw);
+  } catch {
+    return raw;
   }
 }
 

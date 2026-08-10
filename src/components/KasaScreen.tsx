@@ -7,9 +7,13 @@ import {
 import { KasaHareketi, KasaOdemeDurumu, Personel } from '../types/erp';
 import { ImageLightbox } from './ImageLightbox';
 import { exportKasaExcel } from '../lib/kasaExcelExport';
-import { compressImage } from '../lib/imageCompress';
 import { saveDocument } from '../lib/firebase';
-import { ensureKasaFisFotoPersisted } from '../lib/sahaFaaliyetFotoStorage';
+import {
+  ensureKasaFisFotoPersisted,
+  isKasaFisPdfUrl,
+  KASA_FIS_EVRAK_ACCEPT,
+  prepareKasaFisEvrakFromFile,
+} from '../lib/sahaFaaliyetFotoStorage';
 import { todayDateKey } from '../lib/dateKeyUtils';
 import {
   isSoforIadeKasaHareketi,
@@ -319,25 +323,26 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
     setDragActive(false);
 
     if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      processFile(e.dataTransfer.files[0]);
+      void processFile(e.dataTransfer.files[0]);
     }
   };
 
-  const processFile = (file: File) => {
-    setUploadedFileName(file.name);
-    const reader = new FileReader();
-    reader.onload = async () => {
-      const rawBase64 = reader.result as string;
-      const compressed = await compressImage(rawBase64);
-      setUploadedFileBase64(compressed);
-    };
-    reader.readAsDataURL(file);
+  const processFile = async (file: File) => {
+    try {
+      setUploadedFileName(file.name);
+      const prepared = await prepareKasaFisEvrakFromFile(file);
+      setUploadedFileBase64(prepared);
+    } catch (err) {
+      setUploadedFileName(null);
+      setUploadedFileBase64(null);
+      alert(err instanceof Error ? err.message : 'Evrak yüklenemedi.');
+    }
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.value === "") return;
     if (e.target.files && e.target.files[0]) {
-      processFile(e.target.files[0]);
+      void processFile(e.target.files[0]);
     }
   };
 
@@ -437,7 +442,7 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
             fisUrl = persisted;
           } else {
             const keep = window.confirm(
-              'Fiş görseli yüklenemedi (çok büyük veya ağ hatası).\nKayıt görselsiz devam edilsin mi?'
+              'Fiş evrakı yüklenemedi (çok büyük veya ağ hatası).\nKayıt evraksız devam edilsin mi?'
             );
             if (!keep) return;
             fisUrl = '';
@@ -445,7 +450,7 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
         } catch (fotoErr) {
           console.warn('[kasa] fiş Storage atlandı:', fotoErr);
           const keep = window.confirm(
-            'Fiş görseli Storage’a taşınamadı.\nKayıt görselsiz devam etsin mi?'
+            'Fiş evrakı Storage’a taşınamadı.\nKayıt evraksız devam etsin mi?'
           );
           if (!keep) return;
           fisUrl = '';
@@ -832,9 +837,11 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
 
             
 
-            {/* Fiş/Fotoğraf Dropzone Drag & Drop */}
+            {/* Fiş/Fotoğraf/PDF Dropzone */}
             <div className="space-y-1">
-              <label className="text-[10px] font-bold text-slate-500 uppercase block font-sans">📷 Fiş/Fatura Evrak Fotoğrafı</label>
+              <label className="text-[10px] font-bold text-slate-500 uppercase block font-sans">
+                📷 Fiş / Fatura Evrakı (Foto veya PDF)
+              </label>
               
               <div 
                 className={`border-2 border-dashed rounded-xl p-3 flex flex-col items-center justify-center transition text-center relative ${
@@ -850,7 +857,7 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
                   id="receipt-file-input"
                   ref={fileInputRef}
                   onChange={handleFileChange}
-                  accept="image/*,application/pdf"
+                  accept={KASA_FIS_EVRAK_ACCEPT}
                   className="hidden"
                 />
 
@@ -860,12 +867,17 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
                     <div className="text-[10px] font-bold text-slate-700 max-w-[280px] truncate">
                       {uploadedFileName}
                     </div>
+                    {uploadedFileBase64 && isKasaFisPdfUrl(uploadedFileBase64) && (
+                      <span className="text-[9px] font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-full">
+                        PDF evrak
+                      </span>
+                    )}
                     <button 
                       type="button" 
                       onClick={() => { setUploadedFileName(null); setUploadedFileBase64(null); }}
                       className="text-[9px] text-rose-500 hover:underline font-bold cursor-pointer"
                     >
-                      Evrak Görselini Kaldır
+                      Evrakı Kaldır
                     </button>
                   </div>
                 ) : (
@@ -876,9 +888,11 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
                       onClick={triggerFileInput}
                       className="bg-slate-900 hover:bg-slate-900 text-white font-bold text-[10px] py-1.5 px-3 rounded-lg shadow-sm transition cursor-pointer"
                     >
-                      📁 Evrak Görseli Seç
+                      📁 Fotoğraf veya PDF Seç
                     </button>
-                    <p className="text-[9px] text-slate-400 font-sans">veya buraya sürükleyip bırakın</p>
+                    <p className="text-[9px] text-slate-400 font-sans">
+                      JPG · PNG · WEBP · PDF — veya buraya sürükleyip bırakın
+                    </p>
                   </div>
                 )}
               </div>
@@ -1072,10 +1086,10 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
                             );
                           }}
                           className="inline-flex items-center gap-1 px-2 py-1.5 hover:bg-sky-50 text-slate-600 hover:text-sky-700 rounded-lg cursor-pointer text-[10px] font-bold border border-slate-200"
-                          title="Fiş görselini aç"
+                          title={isKasaFisPdfUrl(kh.fisEvrakUrl) ? 'PDF evrakı aç' : 'Fiş görselini aç'}
                         >
                           <Eye size={14} />
-                          Fiş Gör
+                          {isKasaFisPdfUrl(kh.fisEvrakUrl) ? 'PDF Gör' : 'Fiş Gör'}
                         </button>
                       )}
                     </div>
@@ -1192,10 +1206,10 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
                               );
                             }}
                             className="p-1 px-1.5 bg-slate-50 border border-slate-200 hover:bg-slate-100 text-slate-800 rounded-lg flex items-center space-x-1 transition shadow-xs text-[9px] font-bold cursor-pointer"
-                            title="Fiş görselini aç"
+                            title={isKasaFisPdfUrl(kh.fisEvrakUrl) ? 'PDF evrakı aç' : 'Fiş görselini aç'}
                           >
                             <ImageIcon size={10} />
-                            <span>Fiş Gör</span>
+                            <span>{isKasaFisPdfUrl(kh.fisEvrakUrl) ? 'PDF Gör' : 'Fiş Gör'}</span>
                           </button>
                         )}
                       </div>

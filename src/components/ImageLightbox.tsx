@@ -8,6 +8,11 @@ export type ImageLightboxProps = {
   onClose: () => void;
 };
 
+function isPdfUrl(url: string): boolean {
+  const u = String(url || '').trim();
+  return u.includes('application/pdf') || /\.pdf(\?|#|$)/i.test(u);
+}
+
 async function downloadImage(url: string, fileName: string) {
   try {
     if (url.startsWith('data:')) {
@@ -42,10 +47,13 @@ export function ImageLightbox({ url, title, fileName, onClose }: ImageLightboxPr
       .replace(/[^\wğüşıöçĞÜŞİÖÇ\-_. ]+/gi, '_')
       .trim()
       .slice(0, 80) || 'fis-gorseli';
-  const downloadName = /\.(jpe?g|png|webp|gif)$/i.test(safeName)
+  const downloadName = /\.(jpe?g|png|webp|gif|pdf)$/i.test(safeName)
     ? safeName
-    : `${safeName}.jpg`;
+    : isPdfUrl(url)
+      ? `${safeName}.pdf`
+      : `${safeName}.jpg`;
   const canOpenExternal = /^https?:\/\//i.test(url);
+  const pdfMode = isPdfUrl(url);
 
   useEffect(() => {
     setScale(1);
@@ -78,33 +86,37 @@ export function ImageLightbox({ url, title, fileName, onClose }: ImageLightboxPr
           {title || 'Evrak / Fiş Görseli'}
         </p>
         <div className="flex items-center gap-1.5 shrink-0">
-          <button
-            type="button"
-            title="Uzaklaştır (−)"
-            onClick={() => setScale((s) => Math.max(0.5, +(s - 0.25).toFixed(2)))}
-            className="p-2 rounded-lg bg-white/10 text-white hover:bg-white/20 cursor-pointer"
-          >
-            <ZoomOut size={16} />
-          </button>
-          <span className="text-[10px] font-mono font-bold text-white/80 w-12 text-center">
-            {Math.round(scale * 100)}%
-          </span>
-          <button
-            type="button"
-            title="Yakınlaştır (+)"
-            onClick={() => setScale((s) => Math.min(4, +(s + 0.25).toFixed(2)))}
-            className="p-2 rounded-lg bg-white/10 text-white hover:bg-white/20 cursor-pointer"
-          >
-            <ZoomIn size={16} />
-          </button>
-          <button
-            type="button"
-            title="Sıfırla"
-            onClick={() => setScale(1)}
-            className="p-2 rounded-lg bg-white/10 text-white hover:bg-white/20 cursor-pointer"
-          >
-            <RotateCcw size={15} />
-          </button>
+          {!pdfMode && (
+            <>
+              <button
+                type="button"
+                title="Uzaklaştır (−)"
+                onClick={() => setScale((s) => Math.max(0.5, +(s - 0.25).toFixed(2)))}
+                className="p-2 rounded-lg bg-white/10 text-white hover:bg-white/20 cursor-pointer"
+              >
+                <ZoomOut size={16} />
+              </button>
+              <span className="text-[10px] font-mono font-bold text-white/80 w-12 text-center">
+                {Math.round(scale * 100)}%
+              </span>
+              <button
+                type="button"
+                title="Yakınlaştır (+)"
+                onClick={() => setScale((s) => Math.min(4, +(s + 0.25).toFixed(2)))}
+                className="p-2 rounded-lg bg-white/10 text-white hover:bg-white/20 cursor-pointer"
+              >
+                <ZoomIn size={16} />
+              </button>
+              <button
+                type="button"
+                title="Sıfırla"
+                onClick={() => setScale(1)}
+                className="p-2 rounded-lg bg-white/10 text-white hover:bg-white/20 cursor-pointer"
+              >
+                <RotateCcw size={15} />
+              </button>
+            </>
+          )}
           {canOpenExternal && (
             <button
               type="button"
@@ -140,29 +152,44 @@ export function ImageLightbox({ url, title, fileName, onClose }: ImageLightboxPr
       <div
         className="flex-1 overflow-auto flex items-center justify-center p-4"
         onClick={(e) => e.stopPropagation()}
-        onWheel={(e) => {
-          e.preventDefault();
-          const delta = e.deltaY > 0 ? -0.15 : 0.15;
-          setScale((s) => Math.min(4, Math.max(0.5, +(s + delta).toFixed(2))));
-        }}
+        onWheel={
+          pdfMode
+            ? undefined
+            : (e) => {
+                e.preventDefault();
+                const delta = e.deltaY > 0 ? -0.15 : 0.15;
+                setScale((s) => Math.min(4, Math.max(0.5, +(s + delta).toFixed(2))));
+              }
+        }
       >
-        <img
-          src={url}
-          alt={title || 'Fiş görseli'}
-          referrerPolicy="no-referrer"
-          className="max-w-none object-contain rounded-lg shadow-2xl origin-center transition-transform duration-100"
-          style={{
-            transform: `scale(${scale})`,
-            maxHeight: scale <= 1 ? '82vh' : undefined,
-            maxWidth: scale <= 1 ? 'min(96vw, 1100px)' : undefined,
-          }}
-          draggable={false}
-        />
+        {pdfMode ? (
+          <iframe
+            src={url}
+            title={title || 'PDF evrak'}
+            className="w-full max-w-5xl h-[82vh] rounded-lg shadow-2xl bg-white border-0"
+          />
+        ) : (
+          <img
+            src={url}
+            alt={title || 'Fiş görseli'}
+            referrerPolicy="no-referrer"
+            className="max-w-none object-contain rounded-lg shadow-2xl origin-center transition-transform duration-100"
+            style={{
+              transform: `scale(${scale})`,
+              maxHeight: scale <= 1 ? '82vh' : undefined,
+              maxWidth: scale <= 1 ? 'min(96vw, 1100px)' : undefined,
+            }}
+            draggable={false}
+          />
+        )}
       </div>
 
       <p className="shrink-0 text-center text-[10px] text-white/55 font-semibold py-2">
-        Fare tekeriği veya +/− ile yakınlaştır · Esc ile kapat
-        {canOpenExternal ? ' · Orijinal = yeni sekmede tam dosya' : ''}
+        {pdfMode
+          ? 'PDF önizleme · Esc ile kapat'
+          : `Fare tekeriği veya +/− ile yakınlaştır · Esc ile kapat${
+              canOpenExternal ? ' · Orijinal = yeni sekmede tam dosya' : ''
+            }`}
       </p>
     </div>
   );
