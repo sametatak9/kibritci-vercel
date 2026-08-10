@@ -29,19 +29,20 @@ import {
   countPaketFotolar,
   createEmptyUploadPackage,
   createEmptyUploadKalem,
-  GuvenlikFotoSlot,
   hasEvrakFotografi,
   pickPrimaryFotoUrl,
   formatEvrakGonderimLabel,
 } from '../lib/guvenlikEvrakFotolar';
-import { convertImageToScanPdfDataUrl, isPdfDataUrl } from '../lib/imageToScanPdf';
-import { buildCariEvrakHistory } from '../lib/evrakCariStokSync';
-import { getTaseronCariKartlar } from '../lib/taseronUtils';
 import {
   buildLeanGuvenlikEvrakFotoFields,
+  GUVENLIK_EVRAK_ACCEPT,
   isPaketTooLargeForFirestore,
+  prepareGuvenlikEvrakFileForQueue,
   prepareGuvenlikFotoPaketForSave,
+  uploadGuvenlikFotoPaket,
 } from '../lib/guvenlikFotoStorage';
+import { buildCariEvrakHistory } from '../lib/evrakCariStokSync';
+import { getTaseronCariKartlar } from '../lib/taseronUtils';
 import { CorporateReportLayout } from './CorporateReportLayout';
 import { KibritciLogo } from './KibritciLogo';
 import { openBase64InNewTab } from '../lib/fileViewerUtils';
@@ -179,64 +180,24 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
     const file = e.target.files?.[0];
     if (!file) return;
     void (async () => {
-      const rawBase64 = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result as string);
-        reader.onerror = reject;
-        reader.readAsDataURL(file);
-      });
-      let displayBase64 = rawBase64;
-      if (file.type.startsWith('image/')) {
-        try {
-          displayBase64 = await compressImage(rawBase64, 960, 960, 0.55, 4000);
-        } catch (err) {
-          console.error('Image compression failed, using original', err);
-        }
-      } else if (
-        file.type.includes('pdf') ||
-        rawBase64.startsWith('data:application/pdf')
-      ) {
-        if (rawBase64.length > 140_000) {
-          alert(
-            `"${file.name}" PDF'si çok büyük. Lütfen belgeyi fotoğraf olarak çekip yükleyin.`
-          );
-          return;
-        }
+      try {
+        const { slot, scanPdfUrl } = await prepareGuvenlikEvrakFileForQueue(file, packageId);
+        setUploadQueue((prev) =>
+          prev.map((pkg) => {
+            if (pkg.id !== packageId) return pkg;
+            return {
+              ...pkg,
+              evrakFotolar: [slot],
+              kalemFotolar: [],
+              firmaFotolar: [],
+              faturaFotolar: [],
+              scanPdfUrl,
+            };
+          })
+        );
+      } catch (err) {
+        alert(err instanceof Error ? err.message : 'Evrak yüklenemedi.');
       }
-
-      let scanPdfUrl: string | undefined;
-      if (file.type.startsWith('image/') || displayBase64.startsWith('data:image/')) {
-        try {
-          scanPdfUrl = await convertImageToScanPdfDataUrl(displayBase64);
-          if (scanPdfUrl.length > 140_000) scanPdfUrl = undefined;
-        } catch (err) {
-          console.warn('Tarama PDF oluşturulamadı:', err);
-        }
-      } else if (isPdfDataUrl(rawBase64)) {
-        scanPdfUrl = rawBase64;
-      }
-
-      const slot: GuvenlikFotoSlot = {
-        id: `f_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-        dataUrl: displayBase64,
-        fileName: file.name,
-        fileType: file.type,
-        metod: 'EVRAK',
-      };
-
-      setUploadQueue((prev) =>
-        prev.map((pkg) => {
-          if (pkg.id !== packageId) return pkg;
-          return {
-            ...pkg,
-            evrakFotolar: [slot],
-            kalemFotolar: [],
-            firmaFotolar: [],
-            faturaFotolar: [],
-            scanPdfUrl,
-          };
-        })
-      );
     })();
     e.target.value = '';
   };
@@ -266,50 +227,15 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
     if (!e.target.files?.length) return;
     const file = e.target.files[0];
     void (async () => {
-      const rawBase64 = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result as string);
-        reader.onerror = reject;
-        reader.readAsDataURL(file);
-      });
-      let displayBase64 = rawBase64;
-      if (file.type.startsWith('image/')) {
-        try {
-          displayBase64 = await compressImage(rawBase64, 960, 960, 0.55, 4000);
-        } catch {
-          /* keep original */
-        }
-      } else if (
-        file.type.includes('pdf') ||
-        rawBase64.startsWith('data:application/pdf')
-      ) {
-        if (rawBase64.length > 140_000) {
-          alert(
-            `"${file.name}" PDF'si çok büyük. Lütfen belgeyi fotoğraf olarak çekip yükleyin.`
-          );
-          return;
-        }
+      try {
+        const { slot, scanPdfUrl } = await prepareGuvenlikEvrakFileForQueue(file);
+        setUploadQueue((prev) => [
+          ...prev,
+          { ...createEmptyUploadPackage(), evrakFotolar: [slot], scanPdfUrl },
+        ]);
+      } catch (err) {
+        alert(err instanceof Error ? err.message : 'Evrak yüklenemedi.');
       }
-      let scanPdfUrl: string | undefined;
-      if (file.type.startsWith('image/')) {
-        try {
-          scanPdfUrl = await convertImageToScanPdfDataUrl(displayBase64);
-          if (scanPdfUrl.length > 140_000) scanPdfUrl = undefined;
-        } catch {
-          /* skip */
-        }
-      }
-      const slot: GuvenlikFotoSlot = {
-        id: `f_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-        dataUrl: displayBase64,
-        fileName: file.name,
-        fileType: file.type,
-        metod: 'EVRAK',
-      };
-      setUploadQueue((prev) => [
-        ...prev,
-        { ...createEmptyUploadPackage(), evrakFotolar: [slot], scanPdfUrl },
-      ]);
     })();
     e.target.value = '';
   };
@@ -979,7 +905,7 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
 
     const eksikFoto = uploadQueue.filter((item) => countPaketFotolar(item) === 0);
     if (eksikFoto.length > 0) {
-      alert('Her evrak paketinde en az bir fotoğraf olmalı.');
+      alert('Her evrak paketinde en az bir fotoğraf veya PDF olmalı.');
       return;
     }
 
@@ -987,7 +913,7 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
       (item) => item.firmaKaynakTipi === 'ANA_FIRMA' && !hasEvrakFotografi(item)
     );
     if (anaEksikFoto.length > 0) {
-      alert('Ana Firma (Kibritçi) evraklarında en az bir evrak fotoğrafı zorunludur.');
+      alert('Ana Firma (Kibritçi) evraklarında en az bir evrak fotoğrafı veya PDF zorunludur.');
       return;
     }
 
@@ -1122,7 +1048,7 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
       for (const item of queueSnapshot) {
         const uniqueId = `EVR-${islemTarihi.replace(/-/g, '')}-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
         try {
-          const prepared = await withTimeout(
+          let prepared = await withTimeout(
             prepareGuvenlikFotoPaketForSave({
               evrakFotolar: item.evrakFotolar || [],
               kalemFotolar: item.kalemFotolar || [],
@@ -1132,6 +1058,8 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
             }),
             8000
           );
+
+          prepared = await withTimeout(uploadGuvenlikFotoPaket(uniqueId, prepared), 35000);
 
           const lean = buildLeanGuvenlikEvrakFotoFields(prepared);
           const primarySlot =
@@ -1145,7 +1073,7 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
 
           if (isPaketTooLargeForFirestore(prepared)) {
             throw new Error(
-              'Fotoğraflar çok büyük. Lütfen tek net fotoğraf kullanın (PDF yerine kamera).'
+              'Evrak dosyası çok büyük. Daha küçük bir PDF/fotoğraf deneyin veya bağlantınızı kontrol edin.'
             );
           }
 
@@ -3399,7 +3327,7 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
                     <input
                       type="file"
                       multiple
-                      accept="image/*,application/pdf"
+                      accept={GUVENLIK_EVRAK_ACCEPT}
                       onChange={handleFileChange}
                       className="hidden"
                     />
@@ -5229,43 +5157,31 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
                           <div className="relative border border-dashed border-slate-350 rounded-2xl p-4 text-center bg-slate-50 hover:bg-slate-100/60 transition cursor-pointer group">
                             <input
                               type="file"
-                              accept="image/*,application/pdf"
-                              capture="environment"
+                              accept={GUVENLIK_EVRAK_ACCEPT}
                               onChange={(e) => {
                                 if (!e.target.files || !e.target.files[0]) return;
                                 const file = e.target.files[0];
                                 setTankerFileName(file.name);
-                                const reader = new FileReader();
-                                reader.onload = async () => {
-                                  const rawBase64 = reader.result as string;
-                                  let compressed = rawBase64;
-                                  if (file.type.startsWith('image/')) {
-                                    try {
-                                      // Kapı mıcır onayında büyük foto timeout/rollback yapıyordu
-                                      compressed = await compressImage(rawBase64, 720, 720, 0.52, 4000);
-                                    } catch (err) {
-                                      console.error('Image compression failed', err);
-                                    }
-                                  } else if (
-                                    file.type.includes('pdf') ||
-                                    rawBase64.startsWith('data:application/pdf')
-                                  ) {
-                                    if (rawBase64.length > 140_000) {
-                                      alert(
-                                        'PDF çok büyük. Lütfen irsaliyeyi fotoğraf olarak çekip yükleyin.'
-                                      );
-                                      return;
-                                    }
+                                void (async () => {
+                                  try {
+                                    const { slot } = await prepareGuvenlikEvrakFileForQueue(
+                                      file,
+                                      `tanker_${Date.now()}`
+                                    );
+                                    setTankerFotoUrl(slot.dataUrl);
+                                  } catch (err) {
+                                    alert(err instanceof Error ? err.message : 'Belge yüklenemedi.');
+                                    setTankerFileName('');
                                   }
-                                  setTankerFotoUrl(compressed);
-                                };
-                                reader.readAsDataURL(file);
+                                })();
                               }}
                               className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
                             />
                             <div className="space-y-1 py-1">
                               <Camera size={18} className="text-slate-400 mx-auto" />
-                              <span className="text-[10px] font-bold text-slate-500 block">Belge / Fotoğraf Çek veya Yükle</span>
+                              <span className="text-[10px] font-bold text-slate-500 block">
+                                Fotoğraf çek veya PDF yükle
+                              </span>
                             </div>
                           </div>
                         )}

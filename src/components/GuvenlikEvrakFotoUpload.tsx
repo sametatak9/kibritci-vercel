@@ -4,6 +4,7 @@ import type { GuvenlikFotoSlot } from '../lib/guvenlikEvrakFotolar';
 import { GUVENLIK_FOTO_METOD_HINT, hasEvrakFotografi } from '../lib/guvenlikEvrakFotolar';
 import { isLikelyImageUrl } from '../lib/guvenlikEvrakFotolar';
 import { openBase64InNewTab } from '../lib/fileViewerUtils';
+import { GUVENLIK_EVRAK_ACCEPT } from '../lib/guvenlikFotoStorage';
 
 type Accent = 'teal' | 'indigo';
 
@@ -30,6 +31,12 @@ const ACCENT: Record<
     link: 'text-indigo-700',
   },
 };
+
+function isPdfSlot(slot: GuvenlikFotoSlot): boolean {
+  const t = String(slot.fileType || '').toLowerCase();
+  const url = String(slot.dataUrl || '').toLowerCase();
+  return t.includes('pdf') || url.includes('application/pdf') || /\.pdf(\?|#|$)/i.test(url);
+}
 
 type Props = {
   accent: Accent;
@@ -58,13 +65,14 @@ export function GuvenlikEvrakFotoUpload({
   const evrakFoto =
     evrakFotolar[0] || faturaFotolar[0] || firmaFotolar[0] || kalemFotolar[0] || null;
   const paket = { evrakFotolar, kalemFotolar, firmaFotolar, faturaFotolar };
+  const pdfSlot = evrakFoto && isPdfSlot(evrakFoto);
 
   return (
     <div className="space-y-2">
       <div className={`rounded-xl border border-dashed ${a.border} bg-white p-4 space-y-3`}>
         <div>
           <p className={`text-[10px] font-black uppercase ${a.title} tracking-wide`}>
-            Evrak fotoğrafı *
+            Evrak fotoğrafı / PDF *
           </p>
           <p className={`text-[9px] ${a.hint} font-semibold mt-1`}>
             {GUVENLIK_FOTO_METOD_HINT.EVRAK}
@@ -73,16 +81,21 @@ export function GuvenlikEvrakFotoUpload({
         {evrakFoto ? (
           <div className="space-y-2">
             <div className="relative max-w-xs">
-              {String(evrakFoto.fileType || '').startsWith('image/') ||
-              isLikelyImageUrl(evrakFoto.dataUrl) ? (
+              {!pdfSlot &&
+              (String(evrakFoto.fileType || '').startsWith('image/') ||
+                isLikelyImageUrl(evrakFoto.dataUrl)) ? (
                 <img
                   src={evrakFoto.dataUrl}
                   alt={evrakFoto.fileName}
                   className="w-full max-h-48 object-contain rounded-lg border border-slate-200 bg-slate-50"
                 />
               ) : (
-                <div className="h-32 rounded-lg border border-slate-200 bg-slate-50 flex items-center justify-center text-xs font-bold text-slate-500">
-                  PDF
+                <div className="min-h-[8rem] rounded-lg border border-slate-200 bg-slate-50 flex flex-col items-center justify-center gap-2 px-3 py-4 text-center">
+                  <FileText size={28} className="text-rose-600" />
+                  <span className="text-[10px] font-bold text-slate-700 break-all">
+                    {evrakFoto.fileName || 'PDF belgesi'}
+                  </span>
+                  <span className="text-[9px] text-slate-500">PDF yüklendi</span>
                 </div>
               )}
               <button
@@ -94,20 +107,24 @@ export function GuvenlikEvrakFotoUpload({
                 ×
               </button>
             </div>
-            {scanPdfUrl && (
+            {(scanPdfUrl || pdfSlot) && (
               <button
                 type="button"
-                onClick={() => openBase64InNewTab(scanPdfUrl)}
+                onClick={() => {
+                  const url = scanPdfUrl || evrakFoto.dataUrl;
+                  if (url.startsWith('http')) window.open(url, '_blank', 'noopener,noreferrer');
+                  else openBase64InNewTab(url);
+                }}
                 className={`inline-flex items-center gap-1 text-[10px] font-bold ${a.link} underline cursor-pointer`}
               >
-                <FileText size={12} /> Tarama PDF görüntüle
+                <FileText size={12} /> PDF görüntüle
               </button>
             )}
             <label className={`inline-flex items-center gap-1 text-[10px] font-bold ${a.link} cursor-pointer`}>
-              <Camera size={12} /> Değiştir
+              <Camera size={12} /> Değiştir (foto veya PDF)
               <input
                 type="file"
-                accept="image/*,application/pdf"
+                accept={GUVENLIK_EVRAK_ACCEPT}
                 className="hidden"
                 onChange={(e) => onAdd(packageId, e)}
               />
@@ -118,11 +135,13 @@ export function GuvenlikEvrakFotoUpload({
             className={`flex flex-col items-center justify-center gap-2 border border-dashed ${a.dash} rounded-xl py-8 cursor-pointer ${a.hover} transition`}
           >
             <FileUp size={22} className={a.btn.replace('text-', 'text-')} />
-            <span className={`text-[11px] font-bold ${a.btn}`}>Fotoğraf çek / yükle</span>
-            <span className="text-[9px] text-slate-400">Otomatik tarama PDF oluşturulur</span>
+            <span className={`text-[11px] font-bold ${a.btn}`}>Fotoğraf çek veya PDF yükle</span>
+            <span className="text-[9px] text-slate-400 text-center px-4">
+              JPG · PNG · WEBP · PDF — fotoğraftan tarama PDF otomatik oluşur
+            </span>
             <input
               type="file"
-              accept="image/*,application/pdf"
+              accept={GUVENLIK_EVRAK_ACCEPT}
               className="hidden"
               onChange={(e) => onAdd(packageId, e)}
             />
@@ -131,8 +150,10 @@ export function GuvenlikEvrakFotoUpload({
       </div>
       <p className="text-[9px] text-slate-500 font-semibold">
         {hasEvrakFotografi(paket)
-          ? 'Evrak fotoğrafı yüklendi ✓'
-          : 'En az bir evrak fotoğrafı ekleyin'}
+          ? pdfSlot
+            ? 'PDF evrak yüklendi ✓'
+            : 'Evrak fotoğrafı yüklendi ✓'
+          : 'En az bir evrak fotoğrafı veya PDF ekleyin'}
       </p>
     </div>
   );

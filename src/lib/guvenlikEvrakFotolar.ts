@@ -29,7 +29,7 @@ export const GUVENLIK_FOTO_METOD_LABEL: Record<GuvenlikFotoMetod, string> = {
 };
 
 export const GUVENLIK_FOTO_METOD_HINT: Record<GuvenlikFotoMetod, string> = {
-  EVRAK: 'Belgenin net bir fotoğrafı — tarama PDF otomatik oluşturulur',
+  EVRAK: 'Belgenin fotoğrafını çekin veya doğrudan PDF yükleyin — fotoğraftan tarama PDF otomatik oluşur',
   FIRMA: 'Evrakta / antette firma unvanı net görünsün',
   KALEM: 'Ürün adları ve kilolar net görünsün',
   FATURA: 'Evrakın tamamı tek karede net görünsün',

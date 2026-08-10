@@ -2,14 +2,38 @@ import { getDownloadURL, ref, uploadString } from 'firebase/storage';
 import { storage } from './firebase';
 import type { GuvenlikFotoMetod, GuvenlikFotoPaket, GuvenlikFotoSlot } from './guvenlikEvrakFotolar';
 import { compressImage } from './imageCompress';
+import { convertImageToScanPdfDataUrl, isPdfDataUrl } from './imageToScanPdf';
 
 const STORAGE_UPLOAD_TIMEOUT_MS = 7000;
+const PDF_STORAGE_UPLOAD_TIMEOUT_MS = 30000;
 const COMPRESS_TIMEOUT_MS = 4000;
 /** Tek slot için güvenli üst sınır (karakter) — Firestore 1MB doküman limiti */
 const MAX_SLOT_CHARS = 140_000;
+/** PDF dosya boyutu üst sınırı (byte) */
+const MAX_PDF_FILE_BYTES = 12 * 1024 * 1024;
 /** Tüm data URL’lerin toplamı (karakter) — UTF-16 tahmini için *2 sonra ~700KB hedef */
 const MAX_TOTAL_DATA_CHARS = 320_000;
 const MAX_SLOTS_PER_METOD = 1;
+
+export const GUVENLIK_EVRAK_ACCEPT =
+  '.pdf,application/pdf,image/jpeg,image/jpg,image/png,image/webp,image/*';
+
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+function isPdfFile(file: File, dataUrl: string): boolean {
+  return (
+    file.type.toLowerCase().includes('pdf') ||
+    file.name.toLowerCase().endsWith('.pdf') ||
+    isPdfDataUrl(dataUrl)
+  );
+}
 
 function extForSlot(slot: GuvenlikFotoSlot): string {
   const t = (slot.fileType || '').toLowerCase();
@@ -180,18 +204,28 @@ export function isPaketTooLargeForFirestore(paket: GuvenlikFotoPaket): boolean {
  */
 export async function uploadGuvenlikFotoSlot(
   docId: string,
-  slot: GuvenlikFotoSlot
+  slot: GuvenlikFotoSlot,
+  opts?: { forceStorage?: boolean; timeoutMs?: number }
 ): Promise<GuvenlikFotoSlot> {
   const raw = String(slot.dataUrl || '').trim();
   if (!raw) return slot;
   if (/^https?:\/\//i.test(raw)) return slot;
 
-  const payload = await compressSlotPayload(slot);
+  const isPdf =
+    (slot.fileType || '').toLowerCase().includes('pdf') || raw.startsWith('data:application/pdf');
+  const payload = isPdf ? raw : await compressSlotPayload(slot);
 
-  if (payload.startsWith('data:') && payload.length > 900_000) {
+  if (
+    !opts?.forceStorage &&
+    !isPdf &&
+    payload.startsWith('data:') &&
+    payload.length > 900_000
+  ) {
     console.warn('Güvenlik foto çok büyük, Storage atlandı:', slot.fileName);
     return { ...slot, dataUrl: payload };
   }
+
+  const timeoutMs = opts?.timeoutMs ?? (isPdf ? PDF_STORAGE_UPLOAD_TIMEOUT_MS : STORAGE_UPLOAD_TIMEOUT_MS);
 
   try {
     const path = `guvenlik-evrak/${docId}/${slot.metod}/${slot.id}.${extForSlot(slot)}`;
@@ -200,25 +234,101 @@ export async function uploadGuvenlikFotoSlot(
       uploadString(storageRef, payload, 'data_url', {
         contentType:
           slot.fileType ||
-          (payload.startsWith('data:image/') ? 'image/jpeg' : 'application/octet-stream'),
+          (isPdf
+            ? 'application/pdf'
+            : payload.startsWith('data:image/')
+              ? 'image/jpeg'
+              : 'application/octet-stream'),
         customMetadata: {
           metod: slot.metod,
           fileName: slot.fileName || '',
         },
       }),
-      STORAGE_UPLOAD_TIMEOUT_MS,
+      timeoutMs,
       'Storage upload'
     );
-    const url = await withTimeout(getDownloadURL(storageRef), 5000, 'Storage downloadURL');
+    const url = await withTimeout(getDownloadURL(storageRef), 8000, 'Storage downloadURL');
     return { ...slot, dataUrl: url };
   } catch (err) {
     console.warn(
-      'Güvenlik foto Storage atlandı (timeout/izin/ağ), data URL kullanılacak:',
+      'Güvenlik evrak Storage atlandı (timeout/izin/ağ), data URL kullanılacak:',
       slot.fileName,
       err
     );
+    if (isPdf && payload.length > MAX_SLOT_CHARS) {
+      throw new Error(
+        `"${slot.fileName || 'PDF'}" yüklenemedi. İnternet bağlantınızı kontrol edip tekrar deneyin.`
+      );
+    }
     return { ...slot, dataUrl: payload };
   }
+}
+
+/**
+ * Kapı evrak kuyruğu — fotoğraf veya PDF.
+ * Büyük PDF doğrudan Firebase Storage'a yüklenir (Firestore limiti aşılmaz).
+ */
+export async function prepareGuvenlikEvrakFileForQueue(
+  file: File,
+  tempDocId?: string
+): Promise<{ slot: GuvenlikFotoSlot; scanPdfUrl?: string }> {
+  const rawBase64 = await readFileAsDataUrl(file);
+  const slotId = `f_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+  const pendingId = tempDocId || `pending_${Date.now()}`;
+
+  if (isPdfFile(file, rawBase64)) {
+    if (file.size > MAX_PDF_FILE_BYTES) {
+      throw new Error(
+        `"${file.name}" çok büyük (en fazla ${Math.round(MAX_PDF_FILE_BYTES / 1024 / 1024)} MB PDF).`
+      );
+    }
+    const baseSlot: GuvenlikFotoSlot = {
+      id: slotId,
+      dataUrl: rawBase64,
+      fileName: file.name,
+      fileType: file.type || 'application/pdf',
+      metod: 'EVRAK',
+    };
+    if (rawBase64.length <= MAX_SLOT_CHARS) {
+      return { slot: baseSlot, scanPdfUrl: rawBase64 };
+    }
+    const uploaded = await uploadGuvenlikFotoSlot(pendingId, baseSlot, {
+      forceStorage: true,
+      timeoutMs: PDF_STORAGE_UPLOAD_TIMEOUT_MS,
+    });
+    const pdfUrl = String(uploaded.dataUrl || '').trim();
+    return {
+      slot: uploaded,
+      scanPdfUrl: pdfUrl.startsWith('http') ? pdfUrl : rawBase64,
+    };
+  }
+
+  let displayBase64 = rawBase64;
+  if (file.type.startsWith('image/') || rawBase64.startsWith('data:image/')) {
+    try {
+      displayBase64 = await compressImage(rawBase64, 960, 960, 0.55, 4000);
+    } catch (err) {
+      console.warn('Güvenlik evrak foto sıkıştırma atlandı:', err);
+    }
+  }
+
+  let scanPdfUrl: string | undefined;
+  try {
+    scanPdfUrl = await convertImageToScanPdfDataUrl(displayBase64);
+    if (scanPdfUrl && scanPdfUrl.length > MAX_SLOT_CHARS) scanPdfUrl = undefined;
+  } catch (err) {
+    console.warn('Tarama PDF oluşturulamadı:', err);
+  }
+
+  const slot: GuvenlikFotoSlot = {
+    id: slotId,
+    dataUrl: displayBase64,
+    fileName: file.name,
+    fileType: file.type || 'image/jpeg',
+    metod: 'EVRAK',
+  };
+
+  return { slot, scanPdfUrl };
 }
 
 export async function uploadGuvenlikFotoPaket(
