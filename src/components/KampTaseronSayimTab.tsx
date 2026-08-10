@@ -434,7 +434,11 @@ export const KampTaseronSayimTab: React.FC<KampTaseronSayimTabProps> = ({
         </div>
 
         {selectedFirma && (
-          <div className="mt-4 flex flex-wrap gap-3 text-[10px] font-bold">
+          <div className="mt-4 space-y-3">
+            <p className="text-[10px] font-bold text-amber-800 bg-amber-50 border border-amber-100 rounded-xl px-3 py-2 leading-relaxed">
+              Sayımda tespit edilmeyen aktif personel için kart altındaki <strong>Personel İşten Çıkar</strong> butonunu kullanın.
+            </p>
+            <div className="flex flex-wrap gap-3 text-[10px] font-bold">
             <span className="px-2 py-1 rounded-lg bg-slate-100 text-slate-700">
               <Users size={12} className="inline mr-1" />
               {firmaPersonelleri.length} personel
@@ -447,6 +451,7 @@ export const KampTaseronSayimTab: React.FC<KampTaseronSayimTabProps> = ({
               <CheckCircle2 size={12} className="inline mr-1" />
               {sessionIslemler.length} işlem bu oturumda
             </span>
+            </div>
           </div>
         )}
       </div>
@@ -476,8 +481,8 @@ export const KampTaseronSayimTab: React.FC<KampTaseronSayimTabProps> = ({
                   tcEksik || telEksik || mykEksik ? 'border-amber-200' : 'border-slate-200'
                 }`}
               >
-                <div className="flex flex-wrap items-start justify-between gap-2 mb-3">
-                  <div>
+                <div className="flex flex-wrap items-start gap-2 mb-3">
+                  <div className="min-w-0 flex-1">
                     <div className="font-bold text-sm text-slate-800">
                       {p.ad} {p.soyad}
                       <span
@@ -507,27 +512,6 @@ export const KampTaseronSayimTab: React.FC<KampTaseronSayimTabProps> = ({
                           </span>
                         )}
                       </div>
-                    )}
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    {aktif ? (
-                      <button
-                        type="button"
-                        disabled={busy}
-                        onClick={() => handleIstenCikis(p)}
-                        className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-red-50 text-red-700 text-[10px] font-black border border-red-100"
-                      >
-                        <LogOut size={12} /> İşten Çıkar
-                      </button>
-                    ) : (
-                      <button
-                        type="button"
-                        disabled={busy}
-                        onClick={() => handleIseGiris(p)}
-                        className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-emerald-50 text-emerald-800 text-[10px] font-black border border-emerald-100"
-                      >
-                        <UserCheck size={12} /> İşe Al / Aktif
-                      </button>
                     )}
                   </div>
                 </div>
@@ -584,14 +568,33 @@ export const KampTaseronSayimTab: React.FC<KampTaseronSayimTabProps> = ({
                   </div>
                 </div>
 
-                <div className="mt-3 flex justify-end">
+                <div className="mt-3 flex flex-col sm:flex-row gap-2">
+                  {aktif ? (
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => handleIstenCikis(p)}
+                      className="w-full sm:flex-1 inline-flex items-center justify-center gap-2 min-h-[44px] px-4 py-3 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-black border border-red-500 disabled:opacity-50 shadow-sm"
+                    >
+                      <LogOut size={15} /> Personel İşten Çıkar
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => handleIseGiris(p)}
+                      className="w-full sm:flex-1 inline-flex items-center justify-center gap-2 min-h-[44px] px-4 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black border border-emerald-500 disabled:opacity-50 shadow-sm"
+                    >
+                      <UserCheck size={15} /> İşe Al / Aktif
+                    </button>
+                  )}
                   <button
                     type="button"
                     disabled={busy}
                     onClick={() => handleSavePerson(p)}
-                    className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-sky-700 hover:bg-sky-800 text-white text-[10px] font-black disabled:opacity-50"
+                    className="w-full sm:flex-1 inline-flex items-center justify-center gap-2 min-h-[44px] px-4 py-3 rounded-xl bg-sky-700 hover:bg-sky-800 text-white text-xs font-black disabled:opacity-50 shadow-sm"
                   >
-                    {busy ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+                    {busy ? <Loader2 size={15} className="animate-spin" /> : <Save size={15} />}
                     Kaydet
                   </button>
                 </div>
