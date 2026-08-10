@@ -245,3 +245,41 @@ export async function ensureKasaFisFotoPersisted(
     return payload;
   }
 }
+
+/**
+ * Kapı irsaliye onayında evrak görselini Storage'a taşır (`kapi-irsaliye/{id}/…`).
+ * Inline data URL irsaliye dokümanını şişirip Firestore yazımını düşürüyordu.
+ */
+export async function ensureKapiIrsaliyeFotoPersisted(
+  irsaliyeId: string,
+  fotoUrl?: string | null
+): Promise<string> {
+  const raw = String(fotoUrl || '').trim();
+  if (!raw) return '';
+  if (/^https?:\/\//i.test(raw) || raw.startsWith('blob:')) return raw;
+
+  const payload = await preparePayload(
+    raw.startsWith('data:') ? raw : `data:image/jpeg;base64,${raw}`
+  );
+
+  try {
+    const path = `kapi-irsaliye/${irsaliyeId}/evrak_${Date.now()}.jpg`;
+    const storageRef = ref(storage, path);
+    await withTimeout(
+      uploadString(storageRef, payload, 'data_url', {
+        contentType: payload.includes('image/png')
+          ? 'image/png'
+          : payload.includes('image/webp')
+            ? 'image/webp'
+            : 'image/jpeg',
+      }),
+      UPLOAD_TIMEOUT_MS,
+      'Kapı irsaliye foto Storage'
+    );
+    return await withTimeout(getDownloadURL(storageRef), 6000, 'Kapı irsaliye foto URL');
+  } catch (err) {
+    console.warn('Kapı irsaliye Storage atlandı:', irsaliyeId, err);
+    if (payload.length > 700_000) return '';
+    return payload;
+  }
+}

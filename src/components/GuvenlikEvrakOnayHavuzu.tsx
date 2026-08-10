@@ -1101,17 +1101,24 @@ export const GuvenlikEvrakOnayHavuzu: React.FC<GuvenlikEvrakOnayHavuzuProps> = (
                             onChange={(e) => setIrsaliyeFirma(e.target.value)}
                             className="w-full bg-white border border-slate-200 text-slate-900 p-2 rounded-lg font-bold"
                           />
-                          {activeGateDoc?.matchSummary && (
-                            <p className={`text-[9px] font-bold mt-1 ${
-                              activeGateDoc.matchSummary.cariMatched ? 'text-teal-700' : 'text-amber-700'
-                            }`}>
-                              {activeGateDoc.matchSummary.cariMatched
-                                ? `Cari kart eşleşti${activeGateDoc.matchSummary.cariKartId ? ` · ${activeGateDoc.matchSummary.cariKartId}` : ''} — altına işlem yazılır (yeni kart açılmaz)`
-                                : 'Cari kart bulunamadı — onayda unvan serbest kaydedilir, yeni kart açılmaz'}
-                              {' · '}
-                              Stok {activeGateDoc.matchSummary.stokLinked || 0}/{activeGateDoc.matchSummary.stokTotal || 0} kalem bağlandı
-                            </p>
-                          )}
+                          {(() => {
+                            const liveLinked = irsaliyeKalemler.filter((k: any) => k.stokKartId).length;
+                            const liveTotal = irsaliyeKalemler.length;
+                            const ms = activeGateDoc?.matchSummary;
+                            const cariOk = Boolean(ms?.cariMatched);
+                            return (
+                              <p className={`text-[9px] font-bold mt-1 ${cariOk ? 'text-teal-700' : 'text-amber-700'}`}>
+                                {cariOk
+                                  ? `Cari kart eşleşti${ms?.cariKartId ? ` · ${ms.cariKartId}` : ''} — altına işlem yazılır`
+                                  : 'Cari kart yok — onayda yeni tedarikçi kartı açılır'}
+                                {' · '}
+                                Stok {liveLinked}/{liveTotal} kalem bağlı
+                                {liveTotal > liveLinked
+                                  ? ` · ${liveTotal - liveLinked} kalem için onayda stok kartı açılır`
+                                  : ''}
+                              </p>
+                            );
+                          })()}
                           {handleRematchActiveGateIrsaliye && (
                             <button
                               type="button"

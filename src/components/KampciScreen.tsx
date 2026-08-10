@@ -340,6 +340,19 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
     return personeller.find((p) => digitsOnly(p.tcNo || '') === tc);
   };
 
+  /** İsim ve TC birlikte eşleşirse mevcut personeli döndürür (fazladan kayıt açılmasın). */
+  const findPersonelByNameAndTc = (rawName: string, tcRaw: string) => {
+    const tc = digitsOnly(tcRaw);
+    if (!validateTC(tc)) return undefined;
+    const nameKey = normalizeNameKey(sanitizeManualName(rawName));
+    if (!nameKey) return undefined;
+    return personeller.find(
+      (p) =>
+        digitsOnly(p.tcNo || '') === tc &&
+        normalizeNameKey(`${p.ad} ${p.soyad}`) === nameKey
+    );
+  };
+
   const findPersonelByTel = (telRaw: string) => {
     const key = phoneMatchKey(telRaw);
     if (key.length < 10) return undefined;
@@ -354,6 +367,8 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
     telefonNo: string
   ) => {
     const tc = digitsOnly(tcNo);
+    const byNameAndTc = findPersonelByNameAndTc(rawName, tc);
+    if (byNameAndTc) return byNameAndTc;
     const byTc = findPersonelByTc(tc);
     if (byTc) return byTc;
     const byTel = findPersonelByTel(telefonNo);
@@ -947,6 +962,15 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
       }
 
       if (!matchedPersonel && placementType === 'MANUAL') {
+        const byNameAndTc = findPersonelByNameAndTc(personelIsim, placementTcNo);
+        if (byNameAndTc) {
+          matchedPersonel = byNameAndTc;
+          personelId = byNameAndTc.id;
+          personelIsim = `${byNameAndTc.ad} ${byNameAndTc.soyad}`;
+        }
+      }
+
+      if (!matchedPersonel && placementType === 'MANUAL') {
         const alreadyInList = (id: string) => personeller.some((p) => p.id === id);
         const created = await createKampPersonel(
           personelIsim,
@@ -1052,34 +1076,44 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
   const handleCheckOut = async (reg: KampKaydi) => {
     if (
       !window.confirm(
-        `${reg.personelIsim} odadan çıkarılsın mı?\n\nKamp çıkışı yapılacak ve yönetime işten çıkış talebi gönderilecek.`
+        `${reg.personelIsim} odadan çıkarılsın mı?\n\nKamp çıkışı (tahliye) yapılacak.`
       )
     ) {
       return;
     }
 
+    const sendIstenCikis = window.confirm(
+      `${reg.personelIsim} için işten çıkış talebi yönetime gönderilsin mi?\n\nEvet: işten çıkış onay havuzuna düşer.\nHayır: sadece kamp odasından çıkarılır.`
+    );
+
     try {
       const targetRoom = kampOdalari.find(r => r.id === reg.odaId || r.id === reg.roomId);
       await evictKampResident(reg, kampOdalari, kampKayitlari);
-      try {
-        await sendCikisTalebiForKampTahliye(reg, targetRoom?.odaNo);
-      } catch (talebiErr) {
-        console.warn('İşten çıkış talebi gönderilemedi:', talebiErr);
-        showStatus(
-          'error',
-          `${reg.personelIsim} odadan çıktı ancak işten çıkış talebi gönderilemedi — Onay Havuzu’nu kontrol edin.`
-        );
-        return;
+      if (sendIstenCikis) {
+        try {
+          await sendCikisTalebiForKampTahliye(reg, targetRoom?.odaNo);
+        } catch (talebiErr) {
+          console.warn('İşten çıkış talebi gönderilemedi:', talebiErr);
+          showStatus(
+            'error',
+            `${reg.personelIsim} odadan çıktı ancak işten çıkış talebi gönderilemedi — Onay Havuzu’nu kontrol edin.`
+          );
+          return;
+        }
       }
       if (addNotification) {
         const roomNo = targetRoom ? targetRoom.odaNo : 'oda';
         addNotification(
-          `${reg.personelIsim} ${roomNo} nolu odadan çıkış yaptı · işten çıkış talebi yönetime gönderildi.`
+          sendIstenCikis
+            ? `${reg.personelIsim} ${roomNo} nolu odadan çıkış yaptı · işten çıkış talebi yönetime gönderildi.`
+            : `${reg.personelIsim} ${roomNo} nolu odadan çıkış yaptı (işten çıkış talebi gönderilmedi).`
         );
       }
       showStatus(
         'success',
-        `${reg.personelIsim} odadan çıkarıldı; işten çıkış talebi yönetime iletildi.`
+        sendIstenCikis
+          ? `${reg.personelIsim} odadan çıkarıldı; işten çıkış talebi yönetime iletildi.`
+          : `${reg.personelIsim} odadan çıkarıldı (işten çıkış talebi gönderilmedi).`
       );
     } catch (err) {
       console.error(err);
@@ -1102,11 +1136,15 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
 
     if (
       !window.confirm(
-        `${targetRoom.odaNo} numaralı odadaki TÜM personeller (${occupants.length} kişi) tahliye edilsin mi?\n\nHer biri için yönetime işten çıkış talebi de gönderilecek.`
+        `${targetRoom.odaNo} numaralı odadaki TÜM personeller (${occupants.length} kişi) tahliye edilsin mi?\n\nKamp çıkışı yapılacak.`
       )
     ) {
       return;
     }
+
+    const sendIstenCikis = window.confirm(
+      `Tahliye edilen ${occupants.length} personel için işten çıkış talebi yönetime gönderilsin mi?\n\nEvet: her biri için işten çıkış onay havuzuna düşer.\nHayır: sadece kamp odasından çıkarılırlar.`
+    );
 
     try {
       const todayStr = new Date().toISOString().slice(0, 10);
@@ -1117,15 +1155,19 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
           cikisTarihi: todayStr
         };
         await saveDocument('kampKayitlari', updatedReg);
-        try {
-          await sendCikisTalebiForKampTahliye(reg, targetRoom.odaNo);
-        } catch (talebiErr) {
-          console.warn('İşten çıkış talebi atlandı:', reg.personelIsim, talebiErr);
+        if (sendIstenCikis) {
+          try {
+            await sendCikisTalebiForKampTahliye(reg, targetRoom.odaNo);
+          } catch (talebiErr) {
+            console.warn('İşten çıkış talebi atlandı:', reg.personelIsim, talebiErr);
+          }
         }
       }
       if (addNotification) {
         addNotification(
-          `${targetRoom.odaNo} nolu odadaki tüm personeller (${occupants.length} kişi) tahliye edildi · işten çıkış talepleri yönetime gönderildi.`
+          sendIstenCikis
+            ? `${targetRoom.odaNo} nolu odadaki tüm personeller (${occupants.length} kişi) tahliye edildi · işten çıkış talepleri yönetime gönderildi.`
+            : `${targetRoom.odaNo} nolu odadaki tüm personeller (${occupants.length} kişi) tahliye edildi (işten çıkış talebi gönderilmedi).`
         );
       }
 
@@ -1137,7 +1179,9 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
 
       showStatus(
         'success',
-        `${targetRoom.odaNo} tahliye edildi; ${occupants.length} işten çıkış talebi yönetime iletildi.`
+        sendIstenCikis
+          ? `${targetRoom.odaNo} tahliye edildi; ${occupants.length} işten çıkış talebi yönetime iletildi.`
+          : `${targetRoom.odaNo} tahliye edildi (işten çıkış talebi gönderilmedi).`
       );
     } catch (err) {
       console.error(err);
@@ -1337,8 +1381,10 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
       const email = currentUser?.email || 'kampci';
       let createdPersonelNote = '';
 
-      // Aynı TC yoksa ilgili firmaya personel kaydı oluştur
-      let existing = findPersonelByTc(yeniTcNo);
+      // İsim + TC eşleşirse mevcut kaydı kullan; fazladan personel açma
+      const fullName = `${yeniAd.trim()} ${yeniSoyad.trim()}`;
+      let existing =
+        findPersonelByNameAndTc(fullName, yeniTcNo) || findPersonelByTc(yeniTcNo);
       if (!existing) {
         if (firmaTipi === 'TASERON' && firmaAdi) {
           await ensureTaseronCari(firmaAdi);

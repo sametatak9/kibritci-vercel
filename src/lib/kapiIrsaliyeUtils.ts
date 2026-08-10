@@ -17,6 +17,8 @@ import {
   linkIrsaliyeKalemler,
   resolveCariKartId,
 } from './evrakCariStokSync';
+import { autoEnsureCari, autoEnsureStok } from './evrakBatchImportUtils';
+import { ensureKapiIrsaliyeFotoPersisted } from './sahaFaaliyetFotoStorage';
 import { kalanMiktarForSaKalem } from './satinAlmaIrsaliyeUtils';
 
 export const KAPI_EVRAK_KAYNAK = 'KAPI_EVRAK';
@@ -34,8 +36,12 @@ export type KapiMatchSummary = {
   cariMatched: boolean;
   cariKartId: string;
   cariUnvan: string;
+  /** Onayda yeni cari kart açıldıysa true */
+  cariCreated?: boolean;
   stokLinked: number;
   stokTotal: number;
+  /** Onayda otomatik oluşturulan stok kartı sayısı */
+  stokCreated?: number;
   unmatchedKalemler: string[];
   /** Kapı ↔ SA eşleşmesi (opsiyonel) */
   saId?: string;
@@ -354,7 +360,8 @@ export async function upsertKapiDraftIrsaliye(opts: {
 
 /**
  * Yönetici kapı evrak onayında irsaliyeyi finalize eder + cari/stok bağlar.
- * Stok miktarı yalnızca onayda artar.
+ * Eşleşmeyen cari/stok için kart oluşturur. Stok miktarı yalnızca onayda artar.
+ * Evrak görseli Storage'a alınır (büyük data URL Firestore yazımını düşürmesin).
  */
 export async function finalizeKapiIrsaliyeApproval(opts: {
   guvenlikEvrakId: string;
@@ -367,28 +374,108 @@ export async function finalizeKapiIrsaliyeApproval(opts: {
   cariKartlar: CariKart[];
   stokKartlar: StokKart[];
   setIrsaliyeler?: Dispatch<SetStateAction<Irsaliye[]>>;
+  setCariKartlar?: Dispatch<SetStateAction<CariKart[]>>;
   setCariIslemGecmisi?: Dispatch<SetStateAction<CariKartIslem[]>>;
   setStokKartlar?: Dispatch<SetStateAction<StokKart[]>>;
   setStokIslemGecmisi?: Dispatch<SetStateAction<StokKartIslem[]>>;
   saId?: string;
   satinAlmaTalepleri?: SatinAlmaTalebi[];
   irsaliyeler?: Irsaliye[];
-}): Promise<{ irsaliye: Irsaliye; summary: KapiMatchSummary }> {
+}): Promise<{ irsaliye: Irsaliye; summary: KapiMatchSummary; kalemler: IrsaliyeItem[] }> {
   const now = new Date().toISOString();
-  const { summary, kalemler } = doubleCheckKapiMatch(
+  const { summary: matchedSummary, kalemler } = doubleCheckKapiMatch(
     opts.firma,
     opts.kalemler,
     opts.cariKartlar,
     opts.stokKartlar
   );
 
+  let workingCari = [...opts.cariKartlar];
+  let workingStok = [...opts.stokKartlar];
+  let cariCreated = false;
+  let stokCreated = 0;
+
+  let summary: KapiMatchSummary = { ...matchedSummary };
+
+  // Eşleşmeyen gönderen firma → tedarikçi cari kartı oluştur
+  if (!summary.cariKartId && String(opts.firma || '').trim()) {
+    const ensured = autoEnsureCari(
+      String(opts.firma).trim(),
+      workingCari,
+      'Kapı irsaliye onayından otomatik oluşturuldu.'
+    );
+    if (ensured.cari) {
+      workingCari = ensured.cariler;
+      cariCreated = true;
+      summary = {
+        ...summary,
+        cariMatched: true,
+        cariKartId: ensured.cari.id,
+        cariUnvan: ensured.cari.unvan,
+        cariCreated: true,
+      };
+      await saveDocument('cariKartlar', ensured.cari);
+      opts.setCariKartlar?.((prev) => [ensured.cari!, ...prev.filter((c) => c.id !== ensured.cari!.id)]);
+    }
+  }
+
   const saId = String(opts.saId || '').trim();
   const sa = saId
     ? (opts.satinAlmaTalepleri || []).find((s) => s.saId === saId || s.id === saId)
     : undefined;
-  const linkedKalemler = linkKapiKalemlerToSa(kalemler, sa, opts.irsaliyeler || []);
+  let linkedKalemler = linkKapiKalemlerToSa(kalemler, sa, opts.irsaliyeler || []);
+
+  // Eşleşmeyen kalemler → stok kartı oluştur (irsaliye satırına id yazılsın)
+  linkedKalemler = linkedKalemler.map((k) => {
+    if (k.stokKartId) return k;
+    const beforeIds = new Set(workingStok.map((s) => s.id));
+    const ensured = autoEnsureStok(
+      k.urunAdi,
+      k.birim || 'Adet',
+      workingStok,
+      'Kapı irsaliye onayından otomatik oluşturuldu.'
+    );
+    if (!ensured.stok) return k;
+    workingStok = ensured.stoklar;
+    if (!beforeIds.has(ensured.stok.id)) stokCreated += 1;
+    return {
+      ...k,
+      urunAdi: ensured.stok.stokAdi,
+      birim: k.birim || ensured.stok.birim || 'Adet',
+      stokKartId: ensured.stok.id,
+    };
+  });
+
+  const newlyCreatedStok = workingStok.filter(
+    (s) => !opts.stokKartlar.some((o) => o.id === s.id)
+  );
+  for (const stok of newlyCreatedStok) {
+    await saveDocument('stokKartlar', stok);
+  }
+  if (newlyCreatedStok.length > 0) {
+    opts.setStokKartlar?.((prev) => {
+      const ids = new Set(prev.map((p) => p.id));
+      const add = newlyCreatedStok.filter((s) => !ids.has(s.id));
+      return add.length ? [...add, ...prev] : prev;
+    });
+  }
+
+  const stokCounts = countLinkedStok(linkedKalemler);
+  summary = {
+    ...summary,
+    stokLinked: stokCounts.linked,
+    stokTotal: stokCounts.total,
+    stokCreated,
+    unmatchedKalemler: [],
+    cariCreated,
+  };
 
   const firmaUnvan = summary.cariUnvan || String(opts.firma || '').trim();
+  const fisEvrakUrl = await ensureKapiIrsaliyeFotoPersisted(
+    opts.guvenlikEvrakId,
+    opts.fotoUrl
+  );
+
   const irsaliye: Irsaliye = {
     id: opts.guvenlikEvrakId,
     irsaliyeId: opts.guvenlikEvrakId,
@@ -398,7 +485,7 @@ export async function finalizeKapiIrsaliyeApproval(opts: {
     saId: saId || '',
     tarih: opts.tarih,
     onayDurumu: 'ONAYLANDI',
-    fisEvrakUrl: opts.fotoUrl || '',
+    fisEvrakUrl,
     kaynak: KAPI_EVRAK_KAYNAK,
     guvenlikEvrakId: opts.guvenlikEvrakId,
     kalemler: linkedKalemler,
@@ -424,7 +511,7 @@ export async function finalizeKapiIrsaliyeApproval(opts: {
       islemBaslik: `Kapı İrsaliyesi · ${firmaUnvan}`,
       islemDetay: `${irsaliye.irsaliyeNo} · ${linkedKalemler.length} kalem · güvenlik kapısı${
         saId ? ` · SA ${saId}` : ''
-      }`,
+      }${cariCreated ? ' · yeni cari kart açıldı' : ''}`,
       tarih: opts.tarih,
       belgeNo: irsaliye.irsaliyeNo,
     });
@@ -441,7 +528,7 @@ export async function finalizeKapiIrsaliyeApproval(opts: {
     islemBaslik: 'Kapı İrsaliye Girişi',
     islemDetayPrefix: 'Güvenlik kapısı onaylı sevk ·',
     bumpMiktar: true,
-    stokKartlar: opts.stokKartlar,
+    stokKartlar: workingStok,
     setStokKartlar: opts.setStokKartlar,
     setStokIslemGecmisi: opts.setStokIslemGecmisi,
     aciklamaTag: 'Kapı İrsaliye',
@@ -449,19 +536,28 @@ export async function finalizeKapiIrsaliyeApproval(opts: {
 
   return {
     irsaliye,
+    kalemler: linkedKalemler,
     summary: withSaMatchSummary(summary, saId),
   };
 }
 
 export function formatKapiMatchLabel(summary?: Partial<KapiMatchSummary> | null): string {
   if (!summary) return '';
-  const cari = summary.cariMatched ? 'Cari eşleşti' : 'Cari bulunamadı';
+  const cari = summary.cariMatched
+    ? summary.cariCreated
+      ? 'Cari oluşturuldu'
+      : 'Cari eşleşti'
+    : 'Cari bulunamadı';
   const stok =
     typeof summary.stokTotal === 'number' && summary.stokTotal > 0
       ? `Stok ${summary.stokLinked || 0}/${summary.stokTotal}`
       : 'Kalem yok';
+  const created =
+    summary.stokCreated && summary.stokCreated > 0
+      ? ` · ${summary.stokCreated} stok kartı açıldı`
+      : '';
   const sa = summary.saMatched && summary.saId ? ` · SA ${summary.saId}` : '';
-  return `${cari} · ${stok}${sa}`;
+  return `${cari} · ${stok}${created}${sa}`;
 }
 
 export type CariOneri = {
