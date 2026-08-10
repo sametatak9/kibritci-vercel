@@ -751,18 +751,19 @@ function buildFotoGridHtml(rows: RaporKalem[]): string {
   const photos = rows
     .filter((r) => r.fotoUrl)
     .map(
-      (r) => `<figure style="margin:0 0 18px;border:1px solid #cbd5e1;border-radius:10px;overflow:hidden;background:#fff;page-break-inside:avoid;break-inside:avoid">
-      <div style="padding:8px 10px;background:#f1f5f9;font-size:11px;font-weight:800;color:#0f172a">
+      (r, idx) => `<figure style="margin:0 0 22px;border:2px solid #cbd5e1;border-radius:12px;overflow:hidden;background:#fff;page-break-inside:avoid;break-inside:avoid">
+      <div style="padding:10px 12px;background:linear-gradient(90deg,#fff7ed,#f8fafc);font-size:12px;font-weight:800;color:#0f172a;line-height:1.45">
+        <div style="font-size:10px;color:#64748b;margin-bottom:4px">FİŞ KAYDI #${idx + 1}</div>
         ${escapeHtml(raporKalemKisiAdi(r))} · ${escapeHtml(r.fisNo || r.id)} · ${escapeHtml(r.tarih)} · −${Number(r.tutar || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺
       </div>
-      <div style="padding:10px;background:#f8fafc;text-align:center">
-        <img src="${escapeHtml(r.fotoUrl!)}" alt="Fiş" style="display:inline-block;max-width:100%;width:auto;height:auto;max-height:none;object-fit:contain" />
+      <div style="padding:12px;background:#f8fafc;text-align:center">
+        <img src="${escapeHtml(r.fotoUrl!)}" alt="Fiş ${escapeHtml(r.fisNo || r.id)}" style="display:inline-block;max-width:100%;width:auto;height:auto;max-height:720px;object-fit:contain;image-rendering:auto" />
       </div>
-      <figcaption style="padding:8px 10px;font-size:11px;color:#475569;line-height:1.4">${escapeHtml(r.aciklama || '')}</figcaption>
+      <figcaption style="padding:10px 12px;font-size:11px;color:#475569;line-height:1.5;border-top:1px solid #e2e8f0">${escapeHtml(r.aciklama || '')}</figcaption>
     </figure>`
     )
     .join('');
-  return `<h3 style="font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:#1e3a5f;margin:18px 0 10px">Fiş görselleri (tam boyut)</h3>
+  return `<h3 style="font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:#1e3a5f;margin:18px 0 10px">Fiş görselleri — tam boyut (her biri ilgili kasa kaydına etiketli)</h3>
     <div style="display:block">
       ${photos || '<p style="color:#94a3b8;font-style:italic">Fiş görseli yok</p>'}
     </div>`;
