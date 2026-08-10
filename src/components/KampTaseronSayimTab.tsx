@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
   CheckCircle2,
@@ -11,6 +11,7 @@ import {
   UserCheck,
   Users,
 } from 'lucide-react';
+import { collection, onSnapshot, query, where } from 'firebase/firestore';
 import {
   CariKart,
   KampTaseronSayim,
@@ -18,7 +19,7 @@ import {
   KampTaseronSayimIslemTipi,
   Personel,
 } from '../types/erp';
-import { saveDocument } from '../lib/firebase';
+import { db, saveDocument } from '../lib/firebase';
 import { validateTC } from '../lib/personelOdemeUtils';
 import { submitPersonelCikisTalebi } from '../lib/personelCikisTalebiUtils';
 import { openTaseronSayimListeRaporu } from '../lib/taseronSayimListeRapor';
@@ -75,6 +76,23 @@ export const KampTaseronSayimTab: React.FC<KampTaseronSayimTabProps> = ({
   const [sessionId] = useState(() => `sayim_${Date.now()}`);
   const [sessionIslemler, setSessionIslemler] = useState<KampTaseronSayimIslem[]>([]);
   const [savingSession, setSavingSession] = useState(false);
+  const [pendingCikisPersonelIds, setPendingCikisPersonelIds] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    const q = query(collection(db, 'personelCikisTalepleri'), where('durum', '==', 'BEKLEMEDE'));
+    return onSnapshot(
+      q,
+      (snap) => {
+        const ids = new Set<string>();
+        snap.docs.forEach((docSnap) => {
+          const personelId = String(docSnap.data().personelId || '').trim();
+          if (personelId) ids.add(personelId);
+        });
+        setPendingCikisPersonelIds(ids);
+      },
+      (err) => console.warn('İşten çıkış talepleri dinlenemedi:', err)
+    );
+  }, []);
 
   const taseronCariler = useMemo(() => getTaseronCariKartlar(cariKartlar), [cariKartlar]);
 
@@ -219,51 +237,45 @@ export const KampTaseronSayimTab: React.FC<KampTaseronSayimTabProps> = ({
   };
 
   const handleIstenCikis = async (personel: Personel) => {
+    if (pendingCikisPersonelIds.has(personel.id)) {
+      showStatus?.('info', 'Bu personel için zaten yönetici onayı bekleyen işten çıkış talebi var.');
+      return;
+    }
+
     if (
       !window.confirm(
-        `${personel.ad} ${personel.soyad} işten çıkarılsın mı?\n\nPersonel pasif yapılacak.`
+        `${personel.ad} ${personel.soyad} için işten çıkış talebi gönderilsin mi?\n\nPersonel yönetici onayından sonra pasife alınır. Onay gelene kadar aktif kalır.`
       )
     ) {
       return;
     }
-    const sendTalebi = window.confirm(
-      'Yönetime işten çıkış onay talebi de gönderilsin mi?\n\nEvet: onay havuzuna düşer.\nHayır: sadece personel pasif yapılır.'
-    );
 
     setSavingId(personel.id);
     try {
       const today = new Date().toISOString().slice(0, 10);
-      const next: Personel = {
-        ...personel,
-        durum: false,
-        istenCikisTarihi: today,
-      };
-      await saveDocument('personeller', next);
-      setPersoneller?.((prev) => prev.map((p) => (p.id === next.id ? next : p)));
+      await submitPersonelCikisTalebi({
+        personelId: personel.id,
+        personelIsim: `${personel.ad} ${personel.soyad}`,
+        personelGorev: personel.gorev || '',
+        personelMaas: personel.maas ?? 0,
+        cikisTarihi: today,
+        cikisNedeni: `Taşeron sayım — ${selectedFirma}; sayımda tespit edilmedi; kampçı işten çıkış talebi.`,
+        gonderen: email,
+        kaynak: 'KAMPCI_TASERON_SAYIM',
+        hedefYoneticiRole: 'YÖNETİCİ',
+      });
 
-      if (sendTalebi) {
-        await submitPersonelCikisTalebi({
-          personelId: personel.id,
-          personelIsim: `${personel.ad} ${personel.soyad}`,
-          personelGorev: personel.gorev || '',
-          personelMaas: personel.maas ?? 0,
-          cikisTarihi: today,
-          cikisNedeni: `Taşeron sayım — ${selectedFirma}; kampçı tarafından işten çıkış.`,
-          gonderen: email,
-          kaynak: 'KAMPCI_TASERON_SAYIM',
-        });
-      }
-
-      await logIslem(
-        personel,
-        'ISTEN_CIKIS',
-        sendTalebi ? 'Pasif yapıldı · işten çıkış talebi gönderildi' : 'Pasif yapıldı (talep gönderilmedi)'
+      await logIslem(personel, 'ISTEN_CIKIS', 'İşten çıkış talebi yönetim onayına gönderildi');
+      showStatus?.(
+        'success',
+        `${personel.ad} ${personel.soyad} — işten çıkış talebi gönderildi. Yönetici onayı bekleniyor.`
       );
-      showStatus?.('success', `${personel.ad} ${personel.soyad} işten çıkarıldı.`);
-      addNotification?.(`${personel.ad} ${personel.soyad} taşeron sayımda işten çıkarıldı.`);
+      addNotification?.(
+        `${personel.ad} ${personel.soyad} taşeron sayımda işten çıkış talebi gönderildi (yönetici onayı bekleniyor).`
+      );
     } catch (err) {
       console.error(err);
-      showStatus?.('error', 'İşten çıkış kaydedilemedi.');
+      showStatus?.('error', 'İşten çıkış talebi gönderilemedi.');
     } finally {
       setSavingId(null);
     }
@@ -436,7 +448,7 @@ export const KampTaseronSayimTab: React.FC<KampTaseronSayimTabProps> = ({
         {selectedFirma && (
           <div className="mt-4 space-y-3">
             <p className="text-[10px] font-bold text-amber-800 bg-amber-50 border border-amber-100 rounded-xl px-3 py-2 leading-relaxed">
-              Sayımda tespit edilmeyen aktif personel için kart altındaki <strong>Personel İşten Çıkar</strong> butonunu kullanın.
+              Sayımda tespit edilmeyen aktif personel için <strong>Personel İşten Çıkar</strong> ile yönetime talep gönderin. Personel, yönetici onayından sonra pasife alınır.
             </p>
             <div className="flex flex-wrap gap-3 text-[10px] font-bold">
             <span className="px-2 py-1 rounded-lg bg-slate-100 text-slate-700">
@@ -473,6 +485,7 @@ export const KampTaseronSayimTab: React.FC<KampTaseronSayimTabProps> = ({
             const mykEksik = !p.mykDurumu || p.mykDurumu === 'BILINMIYOR';
             const aktif = personelAktif(p);
             const busy = savingId === p.id;
+            const cikisOnayBekliyor = pendingCikisPersonelIds.has(p.id);
 
             return (
               <div
@@ -492,6 +505,11 @@ export const KampTaseronSayimTab: React.FC<KampTaseronSayimTabProps> = ({
                       >
                         {aktif ? 'AKTİF' : 'PASİF'}
                       </span>
+                      {cikisOnayBekliyor && (
+                        <span className="ml-2 text-[10px] font-black px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">
+                          ÇIKIŞ ONAY BEKLİYOR
+                        </span>
+                      )}
                     </div>
                     <div className="text-[10px] text-slate-500 mt-0.5">{p.gorev || 'Görev belirtilmedi'}</div>
                     {(tcEksik || telEksik || mykEksik) && (
@@ -572,11 +590,12 @@ export const KampTaseronSayimTab: React.FC<KampTaseronSayimTabProps> = ({
                   {aktif ? (
                     <button
                       type="button"
-                      disabled={busy}
+                      disabled={busy || cikisOnayBekliyor}
                       onClick={() => handleIstenCikis(p)}
                       className="w-full sm:flex-1 inline-flex items-center justify-center gap-2 min-h-[44px] px-4 py-3 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-black border border-red-500 disabled:opacity-50 shadow-sm"
                     >
-                      <LogOut size={15} /> Personel İşten Çıkar
+                      <LogOut size={15} />
+                      {cikisOnayBekliyor ? 'Çıkış Onayı Bekleniyor' : 'Personel İşten Çıkar'}
                     </button>
                   ) : (
                     <button
