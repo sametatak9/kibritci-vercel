@@ -32,6 +32,13 @@ import {
   openPersonelListeRaporu,
 } from '../lib/taseronPersonelExcelExport';
 import { findPersonelMatches, loadPersonellerForDedup, pickBestPersonelMatch } from '../lib/personelMatchUtils';
+import {
+  buildPersonelKaliteIndex,
+  gecersizIsimKaydi,
+  isimdeRakamVar,
+  PERSONEL_SORUN_LABEL,
+  type PersonelKayitSorunu,
+} from '../lib/personelKayitKaliteUtils';
 import { SmartCatalogField } from './SmartCatalogField';
 
 const MAX_PERSONEL_INLINE_MEDIA = 120_000;
@@ -151,7 +158,7 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [historyPersonel, setHistoryPersonel] = useState<Personel | null>(null);
   const [showOnlyActive, setShowOnlyActive] = useState(true);
-  const [showOnlyDuplicateNames, setShowOnlyDuplicateNames] = useState(false);
+  const [showOnlyProblematic, setShowOnlyProblematic] = useState(false);
   const [sortMode, setSortMode] = useState<'NAME_ASC' | 'NAME_DESC' | 'DATE_NEWEST' | 'DATE_OLDEST'>('NAME_ASC');
   const [repairingKampTaseron, setRepairingKampTaseron] = useState(false);
   const [exportingListe, setExportingListe] = useState<'excel' | 'html' | null>(null);
@@ -857,6 +864,12 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
       alert('Lütfen en az Ad ve Soyad alanlarını doldurun.');
       return;
     }
+    if (isimdeRakamVar(formData) || gecersizIsimKaydi(formData)) {
+      const ok = window.confirm(
+        'Ad veya soyad geçersiz görünüyor (rakam, placeholder veya çok kısa).\n\nFirestore\'a yine de yazılsın mı?'
+      );
+      if (!ok) return;
+    }
     if (!isTaseronForm && !formData.tcNo) {
       alert('Ana firma personeli için TC Kimlik No zorunludur.');
       return;
@@ -1070,7 +1083,7 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
   const switchKadroMode = (mode: KadroMode) => {
     setKadroMode(mode);
     setFirmaFilterOpen(false);
-    setShowOnlyDuplicateNames(false);
+    setShowOnlyProblematic(false);
     if (mode === 'ana_firma') {
       setFirmaFilters(['ANA_FIRMA']);
       setShowOnlyActive(true);
@@ -1079,6 +1092,20 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
       setShowOnlyActive(true);
     }
   };
+
+  const toggleProblematicFilter = () => {
+    setShowOnlyProblematic((prev) => {
+      const next = !prev;
+      if (next) setShowOnlyActive(false);
+      return next;
+    });
+  };
+
+  const matchesKadroMode = (p: Personel) =>
+    kadroMode === 'ana_firma' ? !isTaseronPersonel(p) : isTaseronPersonel(p);
+
+  const isHiddenPendingKampci = (p: Personel) =>
+    p.onayDurumu === 'ONAY BEKLİYOR' && p.kaynak === 'KAMPCI' && !isTaseronPersonel(p);
 
   /** Kampçı "KAMP PERSONEL" diye kaydetmiş ama kamp/cari taşeron olanlar */
   const misclassifiedKampTaseron = useMemo(() => {
@@ -1185,37 +1212,27 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
     return { activeCamp, anyCamp };
   }, [kampKayitlari]);
 
-  /** Aynı ad-soyad ile birden fazla kayıt — düzeltme için tespit */
-  const duplicateNameGroups = useMemo(() => {
-    const groups = new Map<string, Personel[]>();
-    personeller.forEach((p) => {
-      const name = `${p.ad} ${p.soyad}`.trim().toLowerCase();
-      if (!name || name.length < 3) return;
-      const list = groups.get(name) || [];
-      list.push(p);
-      groups.set(name, list);
-    });
-    return [...groups.entries()]
-      .filter(([, list]) => list.length > 1)
-      .sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0], 'tr'));
-  }, [personeller]);
+  const personelKalite = useMemo(() => buildPersonelKaliteIndex(personeller), [personeller]);
 
-  const duplicateNameIds = useMemo(() => {
-    const ids = new Set<string>();
-    duplicateNameGroups.forEach(([, list]) => list.forEach((p) => ids.add(p.id)));
-    return ids;
-  }, [duplicateNameGroups]);
+  const kadroPool = useMemo(
+    () => personeller.filter((p) => matchesKadroMode(p) && !isHiddenPendingKampci(p)),
+    [personeller, kadroMode]
+  );
+
+  const problematicInKadro = useMemo(
+    () => kadroPool.filter((p) => personelKalite.problematicIds.has(p.id)).length,
+    [kadroPool, personelKalite.problematicIds]
+  );
+
+  const duplicateInKadro = useMemo(
+    () => kadroPool.filter((p) => personelKalite.duplicateNameIds.has(p.id)).length,
+    [kadroPool, personelKalite.duplicateNameIds]
+  );
 
   const filteredPersonel = useMemo(
     () =>
       personeller.filter((p) => {
-        if (
-          p.onayDurumu === 'ONAY BEKLİYOR' &&
-          p.kaynak === 'KAMPCI' &&
-          !isTaseronPersonel(p)
-        ) {
-          return false;
-        }
+        if (isHiddenPendingKampci(p)) return false;
 
         if (kadroMode === 'ana_firma') {
           if (isTaseronPersonel(p)) return false;
@@ -1225,8 +1242,11 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
           if (firmaFilters.length > 0 && !matchesFirmaFilter(p, firmaFilters)) return false;
         }
 
-        if (showOnlyActive && !is_aktif_status(p.durum)) return false;
-        if (showOnlyDuplicateNames && !duplicateNameIds.has(p.id)) return false;
+        if (showOnlyProblematic) {
+          if (!personelKalite.problematicIds.has(p.id)) return false;
+        } else if (showOnlyActive && !is_aktif_status(p.durum)) {
+          return false;
+        }
 
         const term = searchTerm.toLowerCase();
         const fullName = `${p.ad} ${p.soyad}`.toLowerCase();
@@ -1241,24 +1261,11 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
       kadroMode,
       firmaFilters,
       showOnlyActive,
-      showOnlyDuplicateNames,
-      duplicateNameIds,
+      showOnlyProblematic,
+      personelKalite.problematicIds,
       searchTerm,
-      firmaFilterOptions,
     ]
   );
-
-  const personelQualityMap = useMemo(() => {
-    const tcCount = new Map<string, number>();
-    const nameCount = new Map<string, number>();
-    personeller.forEach((p) => {
-      const tc = String(p.tcNo || '').trim();
-      if (tc) tcCount.set(tc, (tcCount.get(tc) || 0) + 1);
-      const name = `${p.ad} ${p.soyad}`.trim().toLowerCase();
-      if (name) nameCount.set(name, (nameCount.get(name) || 0) + 1);
-    });
-    return { tcCount, nameCount };
-  }, [personeller]);
 
   const parseDateValue = (value: string) => {
     if (!value) return 0;
@@ -1292,13 +1299,20 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
     }
   }, [filteredPersonel, sortMode]);
 
+  const sorunBadgeClass = (sorun: PersonelKayitSorunu) => {
+    if (sorun === 'ISIMDE_RAKAM' || sorun === 'GECERSIZ_ISIM') {
+      return 'bg-orange-50 text-orange-900 border-orange-200';
+    }
+    return 'bg-rose-50 text-rose-800 border-rose-200';
+  };
+
   const buildListeRaporSubtitle = () => {
     const parts: string[] = [
       kadroMode === 'ana_firma' ? 'Ana Firma' : 'Taşeron',
       firmaFilterSummary,
     ];
     if (showOnlyActive) parts.push('Yalnız aktif');
-    if (showOnlyDuplicateNames) parts.push('Çift isim');
+    if (showOnlyProblematic) parts.push('Sorunlu kayıtlar');
     if (searchTerm.trim()) parts.push(`Arama: ${searchTerm.trim()}`);
     return parts.join(' · ');
   };
@@ -1470,8 +1484,8 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
             </div>
             <span className="text-[10px] text-slate-500 font-semibold">
               {kadroMode === 'ana_firma'
-                ? 'Varsayılan: aktif · ana firma personeli'
-                : 'Taşeron firmalar · yoklama/maaş dışı'}
+                ? 'Varsayılan: aktif · ana firma · Firestore personeller'
+                : 'Taşeron firmalar · Firestore personeller'}
             </span>
           </div>
         )}
@@ -2112,10 +2126,14 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
                 </h4>
                 <p className="text-[11px] text-slate-500 mt-1">
                   Gösterilen: {visiblePersonel.length} / Toplam: {personeller.length} · {firmaFilterSummary}
-                  {showOnlyActive ? ' · Aktif' : ' · Tüm durumlar'}
-                  {duplicateNameGroups.length > 0 && (
+                  {showOnlyProblematic
+                    ? ' · Sorunlu kayıtlar (pasifler dahil)'
+                    : showOnlyActive
+                      ? ' · Aktif'
+                      : ' · Tüm durumlar'}
+                  {problematicInKadro > 0 && (
                     <span className="text-rose-600 font-bold">
-                      {' '}· {duplicateNameGroups.length} çift isim grubu ({duplicateNameIds.size} kayıt)
+                      {' '}· bu sekmede {problematicInKadro} sorunlu ({duplicateInKadro} çift isim)
                     </span>
                   )}
                 </p>
@@ -2206,18 +2224,18 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
                   {showOnlyActive ? 'Sadece Aktifler' : 'Pasifler Dahil'}
                 </button>
 
-                {duplicateNameIds.size > 0 && (
+                {problematicInKadro > 0 && (
                   <button
                     type="button"
-                    onClick={() => setShowOnlyDuplicateNames((prev) => !prev)}
+                    onClick={toggleProblematicFilter}
                     className={`text-[10px] font-bold px-3 py-2 rounded-xl border cursor-pointer ${
-                      showOnlyDuplicateNames
+                      showOnlyProblematic
                         ? 'bg-rose-600 text-white border-rose-700'
                         : 'bg-rose-50 text-rose-800 border-rose-200 hover:bg-rose-100'
                     }`}
-                    title="Aynı ad-soyad ile birden fazla kayıt"
+                    title="Çift isim, isimde rakam, geçersiz/eksik kayıt — pasifler dahil listeler"
                   >
-                    Çift İsim ({duplicateNameIds.size})
+                    Sorunlu Kayıt ({problematicInKadro})
                   </button>
                 )}
 
@@ -2300,30 +2318,42 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
             </div>
           </div>
 
-        {duplicateNameGroups.length > 0 && (
+        {(personelKalite.problematicIds.size > 0 || personelKalite.duplicateNameGroups.length > 0) && (
           <div className="mx-4 mt-0 mb-0 rounded-xl border border-rose-200 bg-rose-50/80 px-4 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
             <div className="flex items-start gap-2 text-rose-900">
               <AlertCircle size={16} className="shrink-0 mt-0.5" />
               <div>
                 <p className="text-xs font-bold">
-                  {duplicateNameGroups.length} ad-soyad için çift kayıt tespit edildi ({duplicateNameIds.size} personel)
+                  {personelKalite.duplicateNameGroups.length} çift isim · {personelKalite.digitNameIds.size} isimde rakam · {personelKalite.invalidNameIds.size} geçersiz isim
+                  {' '}(toplam {personelKalite.problematicIds.size} sorunlu / Firestore)
                 </p>
                 <p className="text-[10px] text-rose-700/90 mt-0.5">
-                  Örnek: {duplicateNameGroups.slice(0, 3).map(([name, list]) => `${name} (${list.length})`).join(' · ')}
-                  {duplicateNameGroups.length > 3 ? ' …' : ''} — birleştirme/düzeltme sonraki adımda yapılacak.
+                  Bu sekme ({kadroMode === 'ana_firma' ? 'Ana Firma' : 'Taşeron'}): {problematicInKadro} sorunlu kayıt
+                  {problematicInKadro === 0 && personelKalite.problematicIds.size > 0
+                    ? ' — sorunlular diğer sekmede veya pasif olabilir; filtreye tıklayınca pasifler de açılır.'
+                    : ''}
+                  {personelKalite.duplicateNameGroups.length > 0 && (
+                    <>
+                      {' '}· Örnek:{' '}
+                      {personelKalite.duplicateNameGroups
+                        .slice(0, 3)
+                        .map(([name, list]) => `${name} (${list.length})`)
+                        .join(' · ')}
+                    </>
+                  )}
                 </p>
               </div>
             </div>
             <button
               type="button"
-              onClick={() => setShowOnlyDuplicateNames((prev) => !prev)}
+              onClick={toggleProblematicFilter}
               className={`shrink-0 text-[10px] font-bold px-3 py-2 rounded-xl border cursor-pointer ${
-                showOnlyDuplicateNames
+                showOnlyProblematic
                   ? 'bg-rose-700 text-white border-rose-800'
                   : 'bg-white text-rose-800 border-rose-300 hover:bg-rose-100'
               }`}
             >
-              {showOnlyDuplicateNames ? 'Tüm listeyi göster' : 'Sadece çift isimleri göster'}
+              {showOnlyProblematic ? 'Normal listeye dön' : 'Sorunlu kayıtları göster'}
             </button>
           </div>
         )}
@@ -2331,9 +2361,29 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
         {/* Scrollable list grid */}
         <div className="flex-1 overflow-y-auto p-4 space-y-3">
           {visiblePersonel.length === 0 ? (
-            <div className="h-full flex flex-col items-center justify-center text-slate-400 py-16 space-y-2">
+            <div className="h-full flex flex-col items-center justify-center text-slate-400 py-16 space-y-2 px-6 text-center">
               <span className="text-3xl">👤</span>
-              <p className="text-xs font-medium">Uyanık personel kaydı bulunamadı.</p>
+              <p className="text-xs font-medium text-slate-600">
+                {(() => {
+                  if (!showOnlyProblematic) return 'Uygun personel kaydı bulunamadı.';
+                  if (problematicInKadro > 0) {
+                    return 'Filtreye uyan sorunlu kayıt bu aralıkta görünmüyor — arama kutusunu temizleyin.';
+                  }
+                  if (kadroMode === 'ana_firma') {
+                    return `Bu sekmede (Ana Firma) sorunlu kayıt yok. Toplam ${personelKalite.problematicIds.size} sorunlu kayıt var — Taşeron Kadrosu sekmesine bakın.`;
+                  }
+                  return 'Bu sekmede sorunlu kayıt bulunamadı.';
+                })()}
+              </p>
+              {showOnlyProblematic && (
+                <button
+                  type="button"
+                  onClick={toggleProblematicFilter}
+                  className="text-[10px] font-bold px-3 py-2 rounded-xl border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 cursor-pointer"
+                >
+                  Normal listeye dön
+                </button>
+              )}
             </div>
           ) : (
             visiblePersonel.map((p) => {
@@ -2382,26 +2432,16 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
                         )}
                       </h4>
                       <div className="mt-1 flex flex-wrap gap-2">
-                        {(!p.ad || !p.soyad || !p.tcNo || !p.iseGirisTarihi) && (
-                          <span className="text-[10px] bg-rose-50 text-rose-800 border border-rose-200 px-2 py-0.5 rounded-full font-bold">
-                            Eksik Bilgi
+                        {(personelKalite.issuesById.get(p.id) || []).map((sorun) => (
+                          <span
+                            key={`${p.id}-${sorun}`}
+                            className={`text-[10px] border px-2 py-0.5 rounded-full font-bold ${sorunBadgeClass(sorun)}`}
+                          >
+                            {sorun === 'CIFT_ISIM'
+                              ? `Çift İsim ×${personelKalite.duplicateNameGroups.find(([, list]) => list.some((x) => x.id === p.id))?.[1].length || 2}`
+                              : PERSONEL_SORUN_LABEL[sorun]}
                           </span>
-                        )}
-                        {personelQualityMap.tcCount.get(String(p.tcNo || '').trim())! > 1 && (
-                          <span className="text-[10px] bg-rose-50 text-rose-800 border border-rose-200 px-2 py-0.5 rounded-full font-bold">
-                            Çift TC
-                          </span>
-                        )}
-                        {(() => {
-                          const nameKey = `${p.ad} ${p.soyad}`.trim().toLowerCase();
-                          const dupCount = personelQualityMap.nameCount.get(nameKey) || 0;
-                          if (dupCount <= 1) return null;
-                          return (
-                            <span className="text-[10px] bg-rose-50 text-rose-800 border border-rose-200 px-2 py-0.5 rounded-full font-bold">
-                              Çift İsim ×{dupCount}
-                            </span>
-                          );
-                        })()}
+                        ))}
                         {(personelSahaTagData.byId.has(p.id) || personelSahaTagData.normalizedNames.has(normalizeTurkishName(`${p.ad} ${p.soyad}`))) && (
                           <span className="text-[10px] bg-emerald-50 text-emerald-800 border border-emerald-200 px-2 py-0.5 rounded-full font-bold">
                             Saha Kayıtlı
