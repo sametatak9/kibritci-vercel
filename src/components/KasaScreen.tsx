@@ -193,7 +193,7 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
       return null;
     }
     const toplam = rows.reduce((s, r) => s + (Number(r.tutar) || 0), 0);
-    const html = buildSoforMasrafIadeReportHtml({
+    const html = await buildSoforMasrafIadeReportHtml({
       startDate: start,
       endDate: end,
       items: rows.map((r) => ({
@@ -249,7 +249,7 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
       return null;
     }
     const toplam = rows.reduce((s, r) => s + (Number(r.tutar) || 0), 0);
-    const html = buildKasaHarcamaAralikReportHtml({
+    const html = await buildKasaHarcamaAralikReportHtml({
       startDate: start,
       endDate: end,
       items: rows,
@@ -1322,7 +1322,7 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
                 className="bg-indigo-600 hover:bg-indigo-700 border border-indigo-700 text-white text-[11px] font-bold py-1.5 px-3 rounded-lg flex items-center space-x-1.5 transition cursor-pointer"
               >
                 <Printer size={12} />
-                <span>Şoför Masraf Raporu</span>
+                <span>Şoför Masraf Raporu (HTML)</span>
               </button>
               <button
                 type="button"
@@ -1342,7 +1342,7 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
               title="Filtredeki aralığın tüm kasa çıkışları"
             >
               <Printer size={12} />
-              <span>Aralık Harcama Raporu</span>
+              <span>Aralık Harcama Raporu (HTML)</span>
             </button>
             <button
               type="button"
@@ -1378,7 +1378,7 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
                 })();
               }}
               className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 disabled:cursor-wait border border-emerald-700 text-white text-[11px] font-bold py-1.5 px-3 rounded-lg flex items-center space-x-1.5 transition cursor-pointer text-left"
-              title="Kibritçi antetli · kişi bazlı · fiş önizleme + orijinal foto linki"
+              title="EXCEL — Kibritçi antetli · 3 sayfa · kişi bazlı · fiş foto (HTML için «Aralık Harcama Raporu»)"
             >
               <FileText size={12} />
               <span>{exportingKasaExcel ? 'Excel hazırlanıyor…' : 'Kasa Excel'}</span>
