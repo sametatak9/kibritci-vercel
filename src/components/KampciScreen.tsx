@@ -2025,7 +2025,7 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
           }`}
         >
           <ClipboardList size={14} />
-          <span>📋 Taşeron Sayım</span>
+          <span>📋 Personel &amp; Yoklama</span>
         </button>
 
         <button
@@ -3210,6 +3210,9 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
           currentUser={currentUser}
           addNotification={addNotification}
           showStatus={showStatus}
+          yoklamalar={yoklamalar}
+          setYoklamalar={setYoklamalar}
+          saveYoklamalarNow={saveYoklamalarNow}
         />
       )}
 

@@ -9,7 +9,8 @@ export type PersonelMissingField =
   | 'SGK'
   | 'Fotoğraf'
   | 'Sigorta Evrakı'
-  | 'Telefon';
+  | 'Telefon'
+  | 'MYK';
 
 function hasPhoto(p: Personel): boolean {
   const anyP = p as Personel & { fotograf_url?: string };
@@ -46,7 +47,8 @@ export function getPersonelMissingDocs(p: Personel): PersonelMissingField[] {
   if (!taseron && sgk.includes('SGK') && !String(p.sigortaEvrakUrl || '').trim()) {
     missing.push('Sigorta Evrakı');
   }
-  if (!taseron && !String(p.telefonNo || '').trim()) missing.push('Telefon');
+  if (taseron && (!p.mykDurumu || p.mykDurumu === 'BILINMIYOR')) missing.push('MYK');
+  if (taseron && !String(p.telefonNo || '').trim()) missing.push('Telefon');
   return missing;
 }
 
