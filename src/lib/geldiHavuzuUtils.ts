@@ -22,6 +22,16 @@ export interface GunlukProgramCetvelSatir {
   fotoSayisi: number;
   faaliyetIds: string[];
   atandi: boolean;
+  /** Göreve atandı ama gün içi ilerleme kaydı yok */
+  faaliyetsiz: boolean;
+  ilerlemeKayitSayisi: number;
+}
+
+/** Sabah ataması dışında gün içi ilerleme (yorum/foto/aşama) var mı */
+export function sahaFaaliyetHasGunIciIlerleme(sf: SahaFaaliyeti): boolean {
+  if ((sf.ilerlemeKayitlari?.length || 0) > 0) return true;
+  const d = String(sf.ilerlemeDurumu || '').toUpperCase();
+  return d === 'DEVAM' || d === 'TAMAMLANDI';
 }
 
 export interface GunlukProgramOzeti {
@@ -195,6 +205,12 @@ export function buildGunlukProgramCetveli(
     const matchedSaha = dayFaaliyetler.filter((sf) => personMatchesFaaliyet(p, sf));
     const matchedKamp = dayKamp.filter((kf) => personMatchesFaaliyet(p, kf));
     const matched = [...matchedSaha, ...matchedKamp];
+    const ilerlemeKayitSayisi = matchedSaha.reduce(
+      (n, sf) => n + (sf.ilerlemeKayitlari?.length || 0),
+      0
+    );
+    const gunIciIlerleme = matchedSaha.some((sf) => sahaFaaliyetHasGunIciIlerleme(sf));
+    const atandi = matched.length > 0;
     return {
       personelId: p.id,
       adSoyad: `${p.ad} ${p.soyad}`.trim(),
@@ -205,7 +221,9 @@ export function buildGunlukProgramCetveli(
       faaliyetSayisi: matched.length,
       fotoSayisi: matchedSaha.reduce((n, f) => n + getFaaliyetFotolar(f).length, 0),
       faaliyetIds: matchedSaha.map((f) => f.id),
-      atandi: matched.length > 0,
+      atandi,
+      faaliyetsiz: atandi && matchedSaha.length > 0 && !gunIciIlerleme,
+      ilerlemeKayitSayisi,
     };
   });
 }

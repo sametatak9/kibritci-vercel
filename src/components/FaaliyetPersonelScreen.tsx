@@ -21,7 +21,6 @@ import {
   FileSpreadsheet,
   Printer,
   Loader2,
-  UserX,
   Send,
   Tag,
   Trash2,
@@ -44,7 +43,6 @@ import {
   buildDayFaaliyetOzeti,
   buildDayPersonelRaporu,
   buildFaaliyetPersoneller,
-  buildFaaliyetsizPersoneller,
   buildPeriodFaaliyetOzeti,
   buildPersonelAyOzeti,
   countPersonFaaliyetFotolar,
@@ -71,7 +69,7 @@ import {
   defaultBlokForParsel,
 } from '../data/parselBlokMap';
 
-type ViewMode = 'personel' | 'gun' | 'faaliyetsiz' | 'program';
+type ViewMode = 'personel' | 'gun' | 'program';
 
 interface FaaliyetPersonelScreenProps {
   personeller: Personel[];
@@ -143,7 +141,6 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
   const [exportingExcel, setExportingExcel] = useState(false);
   const [exportingAylikRapor, setExportingAylikRapor] = useState(false);
   const [programFocusPersonId, setProgramFocusPersonId] = useState<string | null>(null);
-  const [faaliyetsizSearch, setFaaliyetsizSearch] = useState('');
   const [etiketFilter, setEtiketFilter] = useState('');
   const [gunSonuNot, setGunSonuNot] = useState('');
   const [gunSonuBusy, setGunSonuBusy] = useState(false);
@@ -244,45 +241,6 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
       ),
     [tumSahaFaaliyetleri, kampFaaliyetleri, personeller, selectedYear, selectedMonth, yoklamalar]
   );
-
-  const faaliyetsizPersoneller = useMemo(
-    () =>
-      buildFaaliyetsizPersoneller(
-        tumSahaFaaliyetleri,
-        personeller,
-        selectedYear,
-        selectedMonth,
-        kampFaaliyetleri,
-        yoklamalar
-      ),
-    [tumSahaFaaliyetleri, kampFaaliyetleri, personeller, selectedYear, selectedMonth, yoklamalar]
-  );
-
-  const filteredFaaliyetsiz = useMemo(() => {
-    const term = faaliyetsizSearch.trim().toLowerCase();
-    if (!term) return faaliyetsizPersoneller;
-    return faaliyetsizPersoneller.filter((p) => {
-      const full = `${p.ad} ${p.soyad}`.toLowerCase();
-      return (
-        full.includes(term) ||
-        (p.tcNo || '').includes(term) ||
-        displayPersonelGorev(p).toLowerCase().includes(term)
-      );
-    });
-  }, [faaliyetsizPersoneller, faaliyetsizSearch]);
-
-  const faaliyetsizByGorev = useMemo(() => {
-    const map = new Map<string, Personel[]>();
-    for (const p of filteredFaaliyetsiz) {
-      const g = normalizeGorev(displayPersonelGorev(p));
-      const list = map.get(g) || [];
-      list.push(p);
-      map.set(g, list);
-    }
-    return Array.from(map.entries()).sort(([a], [b]) =>
-      a.localeCompare(b, 'tr', { sensitivity: 'base' })
-    );
-  }, [filteredFaaliyetsiz]);
 
   const atanmamisGeldiGun = useMemo(
     () =>
@@ -967,23 +925,6 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
                 <Calendar size={12} />
                 Güne Göre
               </button>
-              <button
-                type="button"
-                onClick={() => setViewMode('faaliyetsiz')}
-                className={`px-3 py-2 rounded-xl text-[10px] font-black uppercase tracking-wide cursor-pointer transition inline-flex items-center gap-1.5 ${
-                  viewMode === 'faaliyetsiz'
-                    ? 'bg-rose-400 text-slate-900'
-                    : 'text-white/80 hover:bg-white/10'
-                }`}
-              >
-                <UserX size={12} />
-                Faaliyetsiz
-                {faaliyetsizPersoneller.length > 0 ? (
-                  <span className="ml-0.5 bg-slate-900/20 rounded-full px-1.5 py-0.5 text-[9px]">
-                    {faaliyetsizPersoneller.length}
-                  </span>
-                ) : null}
-              </button>
               {canAssignProgram && (
                 <button
                   type="button"
@@ -1002,7 +943,7 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
                 </button>
               )}
             </div>
-            {viewMode === 'personel' || viewMode === 'faaliyetsiz' ? (
+            {viewMode === 'personel' ? (
               <div className="flex items-center gap-2 bg-white/10 border border-white/15 rounded-2xl p-2">
                 <button
                   type="button"
@@ -1044,7 +985,7 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
                 >
                   <ChevronRight size={18} />
                 </button>
-                {(viewMode === 'personel' || viewMode === 'faaliyetsiz') && (
+                {viewMode === 'personel' && (
                   <button
                     type="button"
                     onClick={() => void handleAyiRaporla()}
@@ -1107,9 +1048,7 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
         <div className={`relative mt-5 grid grid-cols-2 gap-2 ${
           viewMode === 'personel'
             ? 'sm:grid-cols-3 lg:grid-cols-6'
-            : viewMode === 'faaliyetsiz'
-              ? 'sm:grid-cols-3 lg:grid-cols-4'
-              : 'sm:grid-cols-5'
+            : 'sm:grid-cols-5'
         }`}>
           {(viewMode === 'personel'
             ? [
@@ -1128,25 +1067,6 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
                   value: `${periodOzet.sahaFaaliyetSayisi} · ${periodOzet.kampFaaliyetSayisi}`,
                 },
               ]
-            : viewMode === 'faaliyetsiz'
-              ? [
-                  { icon: Calendar, label: 'Dönem', value: periodLabel, mono: false },
-                  {
-                    icon: UserX,
-                    label: 'Faaliyetsiz',
-                    value: String(faaliyetsizPersoneller.length),
-                  },
-                  {
-                    icon: Users,
-                    label: 'Faaliyetli',
-                    value: String(periodOzet.personelSayisi),
-                  },
-                  {
-                    icon: Layers,
-                    label: 'Görev grubu',
-                    value: String(faaliyetsizByGorev.length),
-                  },
-                ]
             : [
                 { icon: Calendar, label: 'Gün', value: dayLabel, mono: false },
                 { icon: Users, label: 'Faaliyetli', value: String(dayOzet.personelSayisi) },
@@ -1199,133 +1119,6 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
           initialDate={selectedDate}
           focusPersonId={programFocusPersonId}
         />
-      ) : viewMode === 'faaliyetsiz' ? (
-        <section className="bg-white border border-rose-200 rounded-2xl shadow-sm overflow-hidden">
-          <div className="px-4 sm:px-5 py-4 border-b border-rose-100 bg-rose-50/50 flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <h2 className="text-sm font-black text-slate-900 flex items-center gap-2">
-                <UserX size={16} className="text-rose-600" />
-                Faaliyet Verilmemiş Personeller
-              </h2>
-              <p className="text-[11px] text-slate-500 mt-1 font-semibold">
-                {periodLabel} · Ana firma saha kadrosundan henüz hiç faaliyet kaydı olmayanlar
-                (göreve göre gruplu)
-              </p>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <label className="relative block">
-                <Search
-                  size={14}
-                  className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
-                />
-                <input
-                  value={faaliyetsizSearch}
-                  onChange={(e) => setFaaliyetsizSearch(e.target.value)}
-                  placeholder="Ad, TC veya görev ara…"
-                  className="w-56 pl-9 pr-3 py-2 text-xs font-medium bg-white border border-slate-200 rounded-xl outline-none focus:border-rose-400"
-                />
-              </label>
-              {canAssignProgram && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setProgramFocusPersonId(null);
-                    setViewMode('program');
-                  }}
-                  className="inline-flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 text-white text-[10px] font-black px-3 py-2 rounded-xl cursor-pointer"
-                >
-                  <HardHat size={13} />
-                  Görev Merkezi
-                </button>
-              )}
-            </div>
-          </div>
-
-          {filteredFaaliyetsiz.length === 0 ? (
-            <div className="p-12 text-center text-slate-400 text-xs space-y-2">
-              <CheckCircle2 className="mx-auto text-emerald-500 opacity-80" size={32} />
-              <p className="font-bold text-slate-600">
-                {faaliyetsizSearch.trim()
-                  ? 'Aramaya uyan faaliyetsiz personel yok'
-                  : 'Bu dönemde faaliyetsiz personel kalmadı'}
-              </p>
-              <p>Tüm kapsam personeline en az bir faaliyet bağlanmış görünüyor.</p>
-            </div>
-          ) : (
-            <div className="p-4 sm:p-5 space-y-4 max-h-[70vh] overflow-y-auto">
-              <p className="text-[11px] text-slate-600 font-semibold">
-                {filteredFaaliyetsiz.length} kişi · {faaliyetsizByGorev.length} görev grubu
-                {!canAssignProgram
-                  ? ' · Faaliyet atamak için Formen/Yönetici yetkisi gerekir'
-                  : ' · Satırdan “Göreve Gönder” ile günlük görev merkezine geçebilirsiniz'}
-              </p>
-              {faaliyetsizByGorev.map(([gorev, list]) => (
-                <div
-                  key={gorev}
-                  className="rounded-2xl border border-slate-200 overflow-hidden"
-                >
-                  <div className="px-4 py-2.5 bg-slate-900 text-white flex items-center justify-between gap-2">
-                    <h3 className="text-[11px] font-black uppercase tracking-wider">{gorev}</h3>
-                    <span className="text-[10px] font-bold bg-white/15 rounded-full px-2.5 py-0.5">
-                      {list.length} kişi
-                    </span>
-                  </div>
-                  <ul className="divide-y divide-slate-100">
-                    {list.map((p) => (
-                      <li
-                        key={p.id}
-                        className="px-4 py-3 flex flex-wrap items-center justify-between gap-2 bg-white hover:bg-rose-50/40"
-                      >
-                        <div className="flex items-center gap-3 min-w-0">
-                          {p.fotografUrl ? (
-                            <img
-                              src={p.fotografUrl}
-                              alt=""
-                              className="w-9 h-9 rounded-xl object-cover border border-slate-200 shrink-0"
-                            />
-                          ) : (
-                            <div className="w-9 h-9 rounded-xl bg-slate-100 border border-slate-200 flex items-center justify-center text-[10px] font-black text-slate-500 shrink-0">
-                              {(p.ad?.[0] || '').toUpperCase()}
-                              {(p.soyad?.[0] || '').toUpperCase()}
-                            </div>
-                          )}
-                          <div className="min-w-0">
-                            <p className="text-xs font-black text-slate-900 truncate">
-                              {p.ad} {p.soyad}
-                            </p>
-                            <p className="text-[10px] text-slate-500 mt-0.5 truncate">
-                              {p.tcNo ? `TC ${p.tcNo}` : 'TC yok'}
-                              {p.telefonNo ? ` · ${p.telefonNo}` : ''}
-                              {p.iseGirisTarihi ? ` · Giriş ${p.iseGirisTarihi}` : ''}
-                            </p>
-                          </div>
-                        </div>
-                        {canAssignProgram ? (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setProgramFocusPersonId(p.id);
-                              setSelectedDate(todayDateKey());
-                              setViewMode('program');
-                            }}
-                            className="inline-flex items-center gap-1.5 text-[10px] font-black px-3 py-1.5 rounded-xl bg-amber-500 text-slate-900 hover:bg-amber-400 cursor-pointer"
-                          >
-                            <HardHat size={12} />
-                            Göreve Gönder
-                          </button>
-                        ) : (
-                          <span className="text-[9px] font-black uppercase tracking-wide text-rose-700 bg-rose-50 border border-rose-100 px-2 py-1 rounded-lg">
-                            Faaliyet yok
-                          </span>
-                        )}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              ))}
-            </div>
-          )}
-        </section>
       ) : viewMode === 'personel' ? (
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 min-h-[60vh]">
         <aside className="lg:col-span-4 xl:col-span-3 bg-white border border-slate-200 rounded-2xl shadow-sm flex flex-col overflow-hidden max-h-[75vh]">

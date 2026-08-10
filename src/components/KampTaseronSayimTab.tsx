@@ -44,7 +44,7 @@ import { submitPersonelCikisTalebi } from '../lib/personelCikisTalebiUtils';
 import { openTaseronSayimListeRaporu } from '../lib/taseronSayimListeRapor';
 import { exportMykYoklamaExcel, openMykYoklamaReport } from '../lib/mykYoklamaRapor';
 import { firmaEslesir, getTaseronCariKartlar } from '../lib/taseronUtils';
-import { CANONICAL_ANA_FIRMA_ADI, isTaseronPersonel } from '../lib/yoklamaUtils';
+import { CANONICAL_ANA_FIRMA_ADI, isKibritciCompany, isTaseronPersonel } from '../lib/yoklamaUtils';
 import type { YoklamaSaveSource } from '../lib/yoklamaPersistence';
 
 const digitsOnly = (raw: string) => String(raw || '').replace(/\D/g, '');
@@ -163,7 +163,10 @@ export const KampTaseronSayimTab: React.FC<KampTaseronSayimTabProps> = ({
       .filter(isTaseronPersonel)
       .map((p) => String(p.firmaAdi || '').trim())
       .filter(Boolean);
-    const merged = [...fromCari, ...fromPersonel];
+    const merged =
+      panelView === 'eksik_myk'
+        ? [CANONICAL_ANA_FIRMA_ADI, ...fromCari, ...fromPersonel]
+        : [...fromCari, ...fromPersonel];
     const seen = new Set<string>();
     const out: string[] = [];
     merged.forEach((f) => {
@@ -173,7 +176,7 @@ export const KampTaseronSayimTab: React.FC<KampTaseronSayimTabProps> = ({
       out.push(f);
     });
     return out.sort((a, b) => a.localeCompare(b, 'tr'));
-  }, [taseronCariler, personeller]);
+  }, [taseronCariler, personeller, panelView]);
 
   const anaFirmaPersonelleri = useMemo(() => {
     const q = searchQuery.trim().toLocaleLowerCase('tr-TR');
@@ -204,10 +207,13 @@ export const KampTaseronSayimTab: React.FC<KampTaseronSayimTabProps> = ({
 
     if (panelView === 'eksik_myk') {
       return personeller
-        .filter(isTaseronPersonel)
         .filter(personelAktif)
         .filter((p) => personHasEksik(p))
-        .filter((p) => !selectedFirma || firmaEslesir(p.firmaAdi || '', selectedFirma))
+        .filter((p) => {
+          if (!selectedFirma) return isTaseronPersonel(p) || isAnaFirmaPersonel(p);
+          if (isKibritciCompany(selectedFirma)) return isAnaFirmaPersonel(p);
+          return isTaseronPersonel(p) && firmaEslesir(p.firmaAdi || '', selectedFirma);
+        })
         .filter(matchSearch)
         .sort((a, b) => `${a.ad} ${a.soyad}`.localeCompare(`${b.ad} ${b.soyad}`, 'tr'));
     }
@@ -875,7 +881,7 @@ export const KampTaseronSayimTab: React.FC<KampTaseronSayimTabProps> = ({
               </h3>
               <p className="text-xs text-slate-500">
                 {panelView === 'eksik_myk'
-                  ? 'Aktif taşeron personelde TC · telefon · MYK eksikleri · arama ve düzenleme'
+                  ? 'Aktif personelde TC · telefon · MYK eksikleri (KİBRİTÇİ İNŞAAT + taşeron)'
                   : 'Taşeron firma personel listesi · eksik evrak · MYK · işe giriş/çıkış'}
               </p>
             </div>
@@ -918,7 +924,7 @@ export const KampTaseronSayimTab: React.FC<KampTaseronSayimTabProps> = ({
               }}
               className="w-full bg-slate-50 border border-slate-200 text-xs font-bold text-slate-800 rounded-xl p-3 outline-none"
             >
-              <option value="">{panelView === 'eksik_myk' ? '— Tüm Taşeron Firmalar —' : '— Firma Seçin —'}</option>
+              <option value="">{panelView === 'eksik_myk' ? '— Tüm Firmalar —' : '— Firma Seçin —'}</option>
               {firmaOptions.map((f) => (
                 <option key={f} value={f}>
                   {f}
@@ -1061,7 +1067,7 @@ export const KampTaseronSayimTab: React.FC<KampTaseronSayimTabProps> = ({
         </div>
       ) : firmaPersonelleri.length === 0 ? (
         <div className="text-center p-12 text-slate-500 italic bg-white border border-slate-200 rounded-2xl">
-          {panelView === 'eksik_myk' ? 'Eksik bilgili aktif taşeron personel bulunamadı.' : 'Bu firmaya bağlı personel bulunamadı.'}
+          {panelView === 'eksik_myk' ? 'Eksik bilgili aktif personel bulunamadı.' : 'Bu firmaya bağlı personel bulunamadı.'}
         </div>
       ) : (
         <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
