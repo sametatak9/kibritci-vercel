@@ -34,6 +34,7 @@ import {
   isMobilDocPending,
   normalizeKampFaaliyetForDisplay,
   normalizeKampSayimForDisplay,
+  normalizeKampTaseronSayimForDisplay,
 } from '../lib/mobilOnayUtils';
 import { wrapCorporateReportHtml } from '../lib/corporateReportHtml';
 import { fetchApiJson } from '../lib/apiClient';
@@ -65,6 +66,12 @@ import {
 import type { OperatorFaaliyet } from '../types/erp';
 import { pickPrimaryFotoUrl } from '../lib/guvenlikEvrakFotolar';
 import { toAiParsePayload } from '../lib/guvenlikFotoStorage';
+import {
+  applyTaseronSayimOnApproval,
+  markTaseronSayimApproved,
+  markTaseronSayimRejected,
+  validateTaseronSayimSession,
+} from '../lib/kampTaseronSayimOnayUtils';
 
 interface OnayIslemleriScreenProps {
   satinAlmaTalepleri: SatinAlmaTalebi[];
@@ -111,6 +118,7 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
   setStokKartlar,
   setStokIslemGecmisi,
   setPersoneller,
+  personeller = [],
   kampKayitlari = [],
   setKampKayitlari,
   kampOdalari = [],
@@ -134,6 +142,7 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
   const [uploadedPdfBase64, setUploadedPdfBase64] = useState<string | null>(null);
 
   const [kampSayimlar, setKampSayimlar] = useState<any[]>([]);
+  const [kampTaseronSayimlari, setKampTaseronSayimlari] = useState<any[]>([]);
   const [kampFaaliyetler, setKampFaaliyetler] = useState<any[]>([]);
   const [tesisatciFaaliyetler, setTesisatciFaaliyetler] = useState<any[]>([]);
   const [mermerciFaaliyetler, setMermerciFaaliyetler] = useState<any[]>([]);
@@ -600,6 +609,14 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
       setKampSayimlar(list);
     });
 
+    const unsubTaseronSayim = onSnapshot(collection(db, 'kampTaseronSayimlari'), (snapshot) => {
+      const list: any[] = [];
+      snapshot.forEach((doc) => {
+        list.push({ id: doc.id, ...doc.data() });
+      });
+      setKampTaseronSayimlari(list);
+    });
+
     const unsubFaaliyet = onSnapshot(collection(db, 'kampGunlukFaaliyetleri'), (snapshot) => {
       const list: any[] = [];
       snapshot.forEach((doc) => {
@@ -610,6 +627,7 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
 
     return () => {
       unsubSayim();
+      unsubTaseronSayim();
       unsubFaaliyet();
     };
   }, []);
@@ -799,6 +817,57 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
     } catch (err) {
       console.error(err);
       alert("Reddetme işlemi başarısız.");
+    }
+  };
+
+  const handleApproveTaseronSayim = async (item: any) => {
+    const guncellemeler = item.personelGuncellemeleri || [];
+    const validation = validateTaseronSayimSession({
+      firmaAdi: item.firmaAdi,
+      personelGuncellemeleri: guncellemeler,
+      personeller,
+    });
+    if (validation.ok === false) {
+      alert(`Onaylanamadı: ${validation.error}`);
+      return;
+    }
+
+    if (
+      !window.confirm(
+        `${item.firmaAdi} taşeron sayımını onaylıyor musunuz?\n\n${guncellemeler.length} personel kaydı Personel Yönetimi'nde güncellenecek.`
+      )
+    ) {
+      return;
+    }
+
+    try {
+      const matchedUser = kullanicilar.find((u) => u.email?.toLowerCase() === currentUser?.email?.toLowerCase());
+      const role = matchedUser?.yetki || 'YÖNETİCİ';
+      if (!canApproveMobilDocuments(role, currentUser?.email)) {
+        alert('Bu sayımı onaylama yetkiniz bulunmuyor.');
+        return;
+      }
+
+      const { updatedPersoneller, appliedCount } = await applyTaseronSayimOnApproval(item, personeller);
+      await markTaseronSayimApproved(item.id, currentUser?.email || 'yonetici', role);
+      setPersoneller?.(updatedPersoneller);
+      alert(`Taşeron sayımı onaylandı. ${appliedCount} personel kaydı güncellendi.`);
+    } catch (err) {
+      console.error(err);
+      alert(`Onaylama sırasında hata oluştu: ${formatFirestoreWriteError(err)}`);
+    }
+  };
+
+  const handleRejectTaseronSayim = async (item: any) => {
+    if (!window.confirm(`${item.firmaAdi} taşeron sayımını reddetmek istiyor musunuz? Personel kayıtları değişmeyecek.`)) {
+      return;
+    }
+    try {
+      await markTaseronSayimRejected(item.id, currentUser?.email || 'yonetici');
+      alert('Taşeron sayımı reddedildi.');
+    } catch (err) {
+      console.error(err);
+      alert('Reddetme işlemi başarısız.');
     }
   };
 
@@ -1462,6 +1531,11 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
     return canApproveMobilDocuments(currentUserRole, currentUser?.email);
   });
 
+  const pendingTaseronSayimlar = kampTaseronSayimlari.filter((doc) => {
+    if (doc.durum !== 'BEKLEMEDE') return false;
+    return canApproveMobilDocuments(currentUserRole, currentUser?.email);
+  });
+
   const pendingTesisatciFaaliyetler = tesisatciFaaliyetler.filter((doc) => {
     if (!isMobilDocPending(doc)) return false;
     return canApproveMobilDocuments(currentUserRole, currentUser?.email);
@@ -1540,6 +1614,7 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
     pendingPersonelCount +
     pendingKampSayimlar.length +
     pendingKampFaaliyetler.length +
+    pendingTaseronSayimlar.length +
     bekleyenKampPersonelleri.length +
     tesisatMermerCount +
     operatorOnayCount +
@@ -1553,7 +1628,11 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
   const guvenlikCount =
     pendingWaybills.length + pendingInvoices.length + pendingMicirGateCount + pendingGateDocs.length;
   const kampciCount =
-    pendingKampSayimlar.length + pendingKampFaaliyetler.length + pendingVidanjorGateCount + bekleyenKampPersonelleri.length;
+    pendingKampSayimlar.length +
+    pendingKampFaaliyetler.length +
+    pendingTaseronSayimlar.length +
+    pendingVidanjorGateCount +
+    bekleyenKampPersonelleri.length;
 
   type OnayTab =
     | 'satin_alma'
@@ -2704,7 +2783,9 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
                 </div>
               </div>
 
-              {(pendingKampSayimlar.length === 0 && pendingKampFaaliyetler.length === 0) ? (
+              {(pendingKampSayimlar.length === 0 &&
+                pendingKampFaaliyetler.length === 0 &&
+                pendingTaseronSayimlar.length === 0) ? (
                 <div className="bg-white rounded-3xl p-15 text-center flex flex-col items-center justify-center space-y-4 border border-slate-200">
                   <span className="text-4xl">🎉</span>
                   <div>
@@ -2714,6 +2795,87 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
                 </div>
               ) : (
                 <div className="space-y-6">
+                  {/* Taşeron Sayım Onayları */}
+                  {pendingTaseronSayimlar.length > 0 && (
+                    <div className="space-y-3">
+                      <h3 className="font-display font-black text-xs text-slate-600 tracking-wider flex items-center space-x-2 uppercase">
+                        <HardHat size={14} className="text-amber-700" />
+                        <span>Taşeron Sayım Onayları ({pendingTaseronSayimlar.length})</span>
+                      </h3>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {pendingTaseronSayimlar.map((doc) => {
+                          const view = normalizeKampTaseronSayimForDisplay(doc);
+                          return (
+                            <div
+                              key={doc.id}
+                              className="bg-white border border-amber-200 p-4 rounded-2xl flex flex-col justify-between hover:border-amber-300 transition space-y-3"
+                            >
+                              <div>
+                                <div className="flex justify-between items-start">
+                                  <span className="font-mono bg-amber-500/10 border border-amber-200/20 text-amber-800 text-[10px] font-bold px-2 py-0.5 rounded-md">
+                                    TAŞERON SAYIM #{doc.id.substring(0, 6).toUpperCase()}
+                                  </span>
+                                  <span className="text-[10px] text-slate-500 font-mono font-bold">{view.tarih}</span>
+                                </div>
+                                <p className="text-xs text-slate-800 font-bold mt-2.5">Firma: {view.firmaAdi}</p>
+                                <p className="text-[10.5px] text-slate-400 mt-1">Gönderen: {view.yapan}</p>
+                                <div className="mt-2 flex flex-wrap gap-1.5 text-[9px] font-bold">
+                                  <span className="px-1.5 py-0.5 rounded bg-sky-50 text-sky-800">
+                                    TC: {view.ozet.tcTamamlanan}
+                                  </span>
+                                  <span className="px-1.5 py-0.5 rounded bg-orange-50 text-orange-800">
+                                    Tel: {view.ozet.telTamamlanan}
+                                  </span>
+                                  <span className="px-1.5 py-0.5 rounded bg-violet-50 text-violet-800">
+                                    MYK: {view.ozet.mykIsaretlenen}
+                                  </span>
+                                  <span className="px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-800">
+                                    İşe giriş: {view.ozet.iseGiris}
+                                  </span>
+                                </div>
+
+                                <div className="mt-2.5 p-2 bg-slate-50 rounded border border-slate-200 space-y-1.5 max-h-36 overflow-y-auto">
+                                  <div className="text-[10px] font-bold text-slate-400 border-b border-slate-200 pb-1">
+                                    Personel güncellemeleri ({view.islemSayisi})
+                                  </div>
+                                  {view.guncellemeler.map((g, idx) => (
+                                    <div key={idx} className="text-[10px] text-slate-600">
+                                      <span className="font-bold text-slate-800">{g.isim}</span>
+                                      <span className="text-slate-400"> — {g.detay}</span>
+                                    </div>
+                                  ))}
+                                  {view.dahaFazla > 0 && (
+                                    <p className="text-[9px] text-slate-400 italic">+{view.dahaFazla} kayıt daha…</p>
+                                  )}
+                                </div>
+                              </div>
+
+                              <div className="flex gap-2 pt-2.5 border-t border-slate-100">
+                                <button
+                                  type="button"
+                                  onClick={() => handleRejectTaseronSayim(doc)}
+                                  className="flex-1 bg-red-950 hover:bg-red-900 border border-red-900/30 text-red-300 py-1.5 px-3 rounded-lg text-[10px] font-black tracking-widest transition flex items-center justify-center space-x-1"
+                                >
+                                  <X size={11} />
+                                  <span>Reddet</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleApproveTaseronSayim(doc)}
+                                  className="flex-1 bg-amber-600 hover:bg-amber-700 active:scale-95 text-white py-1.5 px-3 rounded-lg text-[10px] font-black tracking-widest transition flex items-center justify-center space-x-1"
+                                >
+                                  <Check size={11} />
+                                  <span>Onayla ve Personeli Güncelle</span>
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
                   {/* Kamp Depo Sayımları Grid */}
                   {pendingKampSayimlar.length > 0 && (
                     <div className="space-y-3">

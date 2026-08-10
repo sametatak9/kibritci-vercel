@@ -3,6 +3,7 @@ import {
   AlertTriangle,
   CheckCircle2,
   ClipboardList,
+  Clock,
   FileText,
   Loader2,
   LogOut,
@@ -17,9 +18,19 @@ import {
   KampTaseronSayim,
   KampTaseronSayimIslem,
   KampTaseronSayimIslemTipi,
+  KampTaseronSayimPersonelGuncelleme,
   Personel,
 } from '../types/erp';
 import { db, saveDocument } from '../lib/firebase';
+import {
+  buildIseGirisPatch,
+  buildPersonelPatchFromDraft,
+  buildSessionIslemFromPatch,
+  mergePendingPatches,
+  phoneMatchKey,
+  summarizeTaseronSayimGuncellemeleri,
+  validateTaseronSayimSession,
+} from '../lib/kampTaseronSayimOnayUtils';
 import { validateTC } from '../lib/personelOdemeUtils';
 import { submitPersonelCikisTalebi } from '../lib/personelCikisTalebiUtils';
 import { openTaseronSayimListeRaporu } from '../lib/taseronSayimListeRapor';
@@ -27,10 +38,6 @@ import { firmaEslesir, getTaseronCariKartlar } from '../lib/taseronUtils';
 import { isTaseronPersonel } from '../lib/yoklamaUtils';
 
 const digitsOnly = (raw: string) => String(raw || '').replace(/\D/g, '');
-const phoneMatchKey = (raw: string) => {
-  const d = digitsOnly(raw);
-  return d.length >= 10 ? d.slice(-10) : d;
-};
 
 type DraftRow = {
   tcNo: string;
@@ -61,7 +68,6 @@ function eksikTel(p: Personel) {
 
 export const KampTaseronSayimTab: React.FC<KampTaseronSayimTabProps> = ({
   personeller,
-  setPersoneller,
   cariKartlar = [],
   currentUser,
   addNotification,
@@ -73,10 +79,14 @@ export const KampTaseronSayimTab: React.FC<KampTaseronSayimTabProps> = ({
   const [showOnlyEksik, setShowOnlyEksik] = useState(false);
   const [drafts, setDrafts] = useState<Record<string, DraftRow>>({});
   const [savingId, setSavingId] = useState<string | null>(null);
-  const [sessionId] = useState(() => `sayim_${Date.now()}`);
+  const [sessionId, setSessionId] = useState(() => `sayim_${Date.now()}`);
   const [sessionIslemler, setSessionIslemler] = useState<KampTaseronSayimIslem[]>([]);
+  const [pendingPatches, setPendingPatches] = useState<
+    Record<string, KampTaseronSayimPersonelGuncelleme>
+  >({});
   const [savingSession, setSavingSession] = useState(false);
   const [pendingCikisPersonelIds, setPendingCikisPersonelIds] = useState<Set<string>>(new Set());
+  const [bekleyenSayimlar, setBekleyenSayimlar] = useState<KampTaseronSayim[]>([]);
 
   useEffect(() => {
     const q = query(collection(db, 'personelCikisTalepleri'), where('durum', '==', 'BEKLEMEDE'));
@@ -91,6 +101,19 @@ export const KampTaseronSayimTab: React.FC<KampTaseronSayimTabProps> = ({
         setPendingCikisPersonelIds(ids);
       },
       (err) => console.warn('İşten çıkış talepleri dinlenemedi:', err)
+    );
+  }, []);
+
+  useEffect(() => {
+    const q = query(collection(db, 'kampTaseronSayimlari'), where('durum', '==', 'BEKLEMEDE'));
+    return onSnapshot(
+      q,
+      (snap) => {
+        const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }) as KampTaseronSayim);
+        list.sort((a, b) => String(b.baslangic || '').localeCompare(String(a.baslangic || '')));
+        setBekleyenSayimlar(list);
+      },
+      (err) => console.warn('Taşeron sayım oturumları dinlenemedi:', err)
     );
   }, []);
 
@@ -131,12 +154,21 @@ export const KampTaseronSayimTab: React.FC<KampTaseronSayimTabProps> = ({
       .sort((a, b) => `${a.ad} ${a.soyad}`.localeCompare(`${b.ad} ${b.soyad}`, 'tr'));
   }, [personeller, selectedFirma, searchQuery, showOnlyEksik]);
 
+  const bekleyenFirmaSayimi = useMemo(
+    () =>
+      bekleyenSayimlar.find((s) => firmaEslesir(s.firmaAdi || '', selectedFirma)) || null,
+    [bekleyenSayimlar, selectedFirma]
+  );
+
+  const pendingPatchCount = Object.keys(pendingPatches).length;
+
   const getDraft = (p: Personel): DraftRow => {
     if (drafts[p.id]) return drafts[p.id];
+    const queued = pendingPatches[p.id];
     return {
-      tcNo: digitsOnly(p.tcNo || ''),
-      telefonNo: String(p.telefonNo || '').trim(),
-      mykDurumu: p.mykDurumu || 'BILINMIYOR',
+      tcNo: queued?.tcNo ?? digitsOnly(p.tcNo || ''),
+      telefonNo: queued?.telefonNo ?? String(p.telefonNo || '').trim(),
+      mykDurumu: queued?.mykDurumu ?? p.mykDurumu ?? 'BILINMIYOR',
     };
   };
 
@@ -157,11 +189,11 @@ export const KampTaseronSayimTab: React.FC<KampTaseronSayimTabProps> = ({
     });
   };
 
-  const logIslem = async (
+  const queueLocalIslem = (
     personel: Personel,
     islemTipi: KampTaseronSayimIslemTipi,
     detay: string
-  ): Promise<KampTaseronSayimIslem> => {
+  ) => {
     const islem: KampTaseronSayimIslem = {
       id: `tsayim_islem_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
       sessionId,
@@ -173,67 +205,30 @@ export const KampTaseronSayimTab: React.FC<KampTaseronSayimTabProps> = ({
       tarih: new Date().toISOString(),
       yapan: email,
     };
-    await saveDocument('kampTaseronSayimIslemleri', islem);
     setSessionIslemler((prev) => [...prev, islem]);
     return islem;
   };
 
-  const handleSavePerson = async (personel: Personel) => {
+  const handleSavePerson = (personel: Personel) => {
     const draft = getDraft(personel);
-    const changes: string[] = [];
-
-    if (draft.tcNo && !validateTC(draft.tcNo)) {
-      showStatus?.('error', 'Geçerli 11 haneli TC girin.');
-      return;
-    }
-    if (draft.telefonNo && phoneMatchKey(draft.telefonNo).length > 0 && phoneMatchKey(draft.telefonNo).length < 10) {
-      showStatus?.('error', 'Telefon en az 10 hane olmalı.');
+    const { patch, error } = buildPersonelPatchFromDraft(personel, draft);
+    if (error || !patch) {
+      showStatus?.('error', error || 'Kaydedilecek değişiklik yok.');
       return;
     }
 
-    const next: Personel = { ...personel };
-    if (draft.tcNo && digitsOnly(personel.tcNo || '') !== draft.tcNo) {
-      next.tcNo = draft.tcNo;
-      changes.push('TC güncellendi');
-    }
-    if (draft.telefonNo && phoneMatchKey(personel.telefonNo || '') !== phoneMatchKey(draft.telefonNo)) {
-      next.telefonNo = draft.telefonNo.trim();
-      changes.push('Telefon güncellendi');
-    }
-    if (draft.mykDurumu !== (personel.mykDurumu || 'BILINMIYOR')) {
-      next.mykDurumu = draft.mykDurumu;
-      changes.push(`MYK: ${draft.mykDurumu}`);
-    }
-
-    if (changes.length === 0) {
-      showStatus?.('info', 'Kaydedilecek değişiklik yok.');
-      return;
-    }
-
-    setSavingId(personel.id);
-    try {
-      await saveDocument('personeller', next);
-      setPersoneller?.((prev) => prev.map((p) => (p.id === next.id ? next : p)));
-
-      let tip: KampTaseronSayimIslemTipi = 'GENEL_GUNCELLEME';
-      if (changes.some((c) => c.startsWith('TC'))) tip = 'TC_EKLENDI';
-      else if (changes.some((c) => c.startsWith('Telefon'))) tip = 'TEL_EKLENDI';
-      else if (changes.some((c) => c.startsWith('MYK'))) tip = 'MYK_ISARETLENDI';
-
-      await logIslem(personel, tip, changes.join(' · '));
-      setDrafts((prev) => {
-        const copy = { ...prev };
-        delete copy[personel.id];
-        return copy;
-      });
-      showStatus?.('success', `${personel.ad} ${personel.soyad} kaydedildi.`);
-      addNotification?.(`${personel.ad} ${personel.soyad} — taşeron sayım güncellendi (${changes.join(', ')})`);
-    } catch (err) {
-      console.error(err);
-      showStatus?.('error', 'Kayıt sırasında hata oluştu.');
-    } finally {
-      setSavingId(null);
-    }
+    setPendingPatches((prev) => mergePendingPatches(prev, patch));
+    const islem = buildSessionIslemFromPatch(sessionId, selectedFirma, patch, email);
+    setSessionIslemler((prev) => [...prev, islem]);
+    setDrafts((prev) => {
+      const copy = { ...prev };
+      delete copy[personel.id];
+      return copy;
+    });
+    showStatus?.(
+      'success',
+      `${personel.ad} ${personel.soyad} taslak kaydedildi. Sayım Kaydet ile yöneticiye gönderin.`
+    );
   };
 
   const handleIstenCikis = async (personel: Personel) => {
@@ -265,7 +260,7 @@ export const KampTaseronSayimTab: React.FC<KampTaseronSayimTabProps> = ({
         hedefYoneticiRole: 'YÖNETİCİ',
       });
 
-      await logIslem(personel, 'ISTEN_CIKIS', 'İşten çıkış talebi yönetim onayına gönderildi');
+      queueLocalIslem(personel, 'ISTEN_CIKIS', 'İşten çıkış talebi yönetim onayına gönderildi');
       showStatus?.(
         'success',
         `${personel.ad} ${personel.soyad} — işten çıkış talebi gönderildi. Yönetici onayı bekleniyor.`
@@ -281,29 +276,31 @@ export const KampTaseronSayimTab: React.FC<KampTaseronSayimTabProps> = ({
     }
   };
 
-  const handleIseGiris = async (personel: Personel) => {
-    if (!window.confirm(`${personel.ad} ${personel.soyad} tekrar aktif (işe giriş) yapılsın mı?`)) return;
-
-    setSavingId(personel.id);
-    try {
-      const today = new Date().toISOString().slice(0, 10);
-      const next: Personel = {
-        ...personel,
-        durum: true,
-        istenCikisTarihi: undefined,
-        iseGirisTarihi: personel.iseGirisTarihi || today,
-      };
-      await saveDocument('personeller', next);
-      setPersoneller?.((prev) => prev.map((p) => (p.id === next.id ? next : p)));
-      await logIslem(personel, 'ISE_GIRIS', 'Personel aktif yapıldı');
-      showStatus?.('success', `${personel.ad} ${personel.soyad} aktif yapıldı.`);
-      addNotification?.(`${personel.ad} ${personel.soyad} taşeron sayımda işe alındı / aktif.`);
-    } catch (err) {
-      console.error(err);
-      showStatus?.('error', 'İşe giriş kaydedilemedi.');
-    } finally {
-      setSavingId(null);
+  const handleIseGiris = (personel: Personel) => {
+    if (
+      !window.confirm(
+        `${personel.ad} ${personel.soyad} tekrar aktif (işe giriş) yapılacak.\n\nDeğişiklik yönetici onayından sonra uygulanır. Taslak olarak kaydedilsin mi?`
+      )
+    ) {
+      return;
     }
+
+    const today = new Date().toISOString().slice(0, 10);
+    const patch = buildIseGirisPatch(personel, today);
+    setPendingPatches((prev) => mergePendingPatches(prev, patch));
+    const islem = buildSessionIslemFromPatch(sessionId, selectedFirma, patch, email);
+    setSessionIslemler((prev) => [...prev, islem]);
+    showStatus?.(
+      'success',
+      `${personel.ad} ${personel.soyad} işe giriş taslağı kaydedildi. Sayım Kaydet ile yöneticiye gönderin.`
+    );
+  };
+
+  const resetSession = () => {
+    setSessionId(`sayim_${Date.now()}`);
+    setSessionIslemler([]);
+    setPendingPatches({});
+    setDrafts({});
   };
 
   const handleSaveSession = async () => {
@@ -311,19 +308,30 @@ export const KampTaseronSayimTab: React.FC<KampTaseronSayimTabProps> = ({
       showStatus?.('error', 'Önce taşeron firma seçin.');
       return;
     }
-    if (sessionIslemler.length === 0) {
-      showStatus?.('info', 'Bu oturumda kayıtlı işlem yok.');
+
+    const personelGuncellemeleri = Object.values(pendingPatches) as KampTaseronSayimPersonelGuncelleme[];
+    const validation = validateTaseronSayimSession({
+      firmaAdi: selectedFirma,
+      personelGuncellemeleri,
+      personeller,
+    });
+    if (validation.ok === false) {
+      showStatus?.('error', validation.error);
       return;
     }
-    if (!window.confirm(`${sessionIslemler.length} işlemli sayım oturumu kaydedilsin mi?`)) return;
+
+    if (
+      !window.confirm(
+        `${personelGuncellemeleri.length} personel güncellemesi yönetici onayına gönderilsin mi?\n\nOnaylanana kadar Personel Yönetimi'nde değişiklik yapılmaz.`
+      )
+    ) {
+      return;
+    }
 
     setSavingSession(true);
     try {
-      const tcTam = sessionIslemler.filter((i) => i.islemTipi === 'TC_EKLENDI').length;
-      const telTam = sessionIslemler.filter((i) => i.islemTipi === 'TEL_EKLENDI').length;
-      const mykTam = sessionIslemler.filter((i) => i.islemTipi === 'MYK_ISARETLENDI').length;
+      const counts = summarizeTaseronSayimGuncellemeleri(personelGuncellemeleri);
       const cikis = sessionIslemler.filter((i) => i.islemTipi === 'ISTEN_CIKIS').length;
-      const giris = sessionIslemler.filter((i) => i.islemTipi === 'ISE_GIRIS').length;
 
       const session: KampTaseronSayim = {
         id: sessionId,
@@ -332,23 +340,37 @@ export const KampTaseronSayimTab: React.FC<KampTaseronSayimTabProps> = ({
         baslangic: sessionIslemler[0]?.tarih || new Date().toISOString(),
         bitis: new Date().toISOString(),
         yapan: email,
-        islemSayisi: sessionIslemler.length,
+        islemSayisi: personelGuncellemeleri.length,
+        durum: 'BEKLEMEDE',
+        personelGuncellemeleri,
         ozet: {
           toplamPersonel: firmaPersonelleri.length,
-          tcTamamlanan: tcTam,
-          telTamamlanan: telTam,
-          mykIsaretlenen: mykTam,
+          tcTamamlanan: counts.TC_EKLENDI,
+          telTamamlanan: counts.TEL_EKLENDI,
+          mykIsaretlenen: counts.MYK_ISARETLENDI,
           istenCikis: cikis,
-          iseGiris: giris,
+          iseGiris: counts.ISE_GIRIS,
         },
         islemIds: sessionIslemler.map((i) => i.id),
       };
+
       await saveDocument('kampTaseronSayimlari', session);
-      showStatus?.('success', `Sayım oturumu kaydedildi (${session.islemSayisi} işlem).`);
-      addNotification?.(`${selectedFirma} taşeron sayım oturumu kaydedildi · ${session.islemSayisi} işlem`);
+
+      for (const islem of sessionIslemler) {
+        await saveDocument('kampTaseronSayimIslemleri', { ...islem, sessionId });
+      }
+
+      resetSession();
+      showStatus?.(
+        'success',
+        `Sayım yönetici onayına gönderildi (${personelGuncellemeleri.length} personel güncellemesi).`
+      );
+      addNotification?.(
+        `${selectedFirma} taşeron sayımı yönetici onayına gönderildi · ${personelGuncellemeleri.length} güncelleme`
+      );
     } catch (err) {
       console.error(err);
-      showStatus?.('error', 'Oturum kaydedilemedi.');
+      showStatus?.('error', 'Sayım kaydedilemedi. Lütfen tekrar deneyin.');
     } finally {
       setSavingSession(false);
     }
@@ -395,18 +417,38 @@ export const KampTaseronSayimTab: React.FC<KampTaseronSayimTabProps> = ({
             <button
               type="button"
               onClick={handleSaveSession}
-              disabled={savingSession || sessionIslemler.length === 0}
+              disabled={savingSession || pendingPatchCount === 0}
               className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-900 text-white text-xs font-bold disabled:opacity-40"
             >
               {savingSession ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-              Oturumu Kaydet ({sessionIslemler.length})
+              Sayım Kaydet — Yönetici Onayı ({pendingPatchCount})
             </button>
           </div>
         </div>
 
+        <div className="mb-4 p-3 rounded-xl bg-sky-50 border border-sky-100 text-[10px] text-sky-900 leading-relaxed space-y-1">
+          <p className="font-black uppercase tracking-wide text-sky-800">Kampçı rehberi — adım adım</p>
+          <p>
+            <strong>1.</strong> Doğru <strong>taşeron firmayı</strong> seçin (yanlış firma = yanlış personel listesi).
+          </p>
+          <p>
+            <strong>2.</strong> Eksik TC, telefon ve MYK bilgilerini girin; her kartta <strong>Kaydet</strong> ile
+            taslağa alın.
+          </p>
+          <p>
+            <strong>3.</strong> Sayımda olmayan aktif personel için <strong>Personel İşten Çıkar</strong> (ayrı onay).
+          </p>
+          <p>
+            <strong>4.</strong> Bitince <strong>Sayım Kaydet — Yönetici Onayı</strong> ile gönderin. Onaydan sonra
+            Personel Yönetimi güncellenir.
+          </p>
+        </div>
+
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           <div>
-            <label className="text-[9px] font-extrabold text-slate-500 uppercase block mb-1">Taşeron Firma</label>
+            <label className="text-[9px] font-extrabold text-slate-500 uppercase block mb-1">
+              Taşeron Firma <span className="text-red-600">*</span>
+            </label>
             <select
               value={selectedFirma}
               onChange={(e) => setSelectedFirma(e.target.value)}
@@ -447,22 +489,35 @@ export const KampTaseronSayimTab: React.FC<KampTaseronSayimTabProps> = ({
 
         {selectedFirma && (
           <div className="mt-4 space-y-3">
+            {bekleyenFirmaSayimi && (
+              <p className="text-[10px] font-bold text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 flex items-center gap-2">
+                <Clock size={12} />
+                Bu firma için yönetici onayı bekleyen sayım var ({bekleyenFirmaSayimi.islemSayisi} güncelleme). Yeni
+                sayım gönderebilirsiniz; yönetici sırayla onaylar.
+              </p>
+            )}
             <p className="text-[10px] font-bold text-amber-800 bg-amber-50 border border-amber-100 rounded-xl px-3 py-2 leading-relaxed">
-              Sayımda tespit edilmeyen aktif personel için <strong>Personel İşten Çıkar</strong> ile yönetime talep gönderin. Personel, yönetici onayından sonra pasife alınır.
+              Sayımda tespit edilmeyen aktif personel için <strong>Personel İşten Çıkar</strong> ile yönetime talep
+              gönderin. Personel, yönetici onayından sonra pasife alınır.
             </p>
             <div className="flex flex-wrap gap-3 text-[10px] font-bold">
-            <span className="px-2 py-1 rounded-lg bg-slate-100 text-slate-700">
-              <Users size={12} className="inline mr-1" />
-              {firmaPersonelleri.length} personel
-            </span>
-            <span className="px-2 py-1 rounded-lg bg-amber-50 text-amber-800">
-              <AlertTriangle size={12} className="inline mr-1" />
-              {eksikSayisi} eksik evrak
-            </span>
-            <span className="px-2 py-1 rounded-lg bg-emerald-50 text-emerald-800">
-              <CheckCircle2 size={12} className="inline mr-1" />
-              {sessionIslemler.length} işlem bu oturumda
-            </span>
+              <span className="px-2 py-1 rounded-lg bg-slate-100 text-slate-700">
+                <Users size={12} className="inline mr-1" />
+                {firmaPersonelleri.length} personel
+              </span>
+              <span className="px-2 py-1 rounded-lg bg-amber-50 text-amber-800">
+                <AlertTriangle size={12} className="inline mr-1" />
+                {eksikSayisi} eksik evrak
+              </span>
+              <span className="px-2 py-1 rounded-lg bg-emerald-50 text-emerald-800">
+                <CheckCircle2 size={12} className="inline mr-1" />
+                {pendingPatchCount} taslak güncelleme
+              </span>
+              {sessionIslemler.filter((i) => i.islemTipi === 'ISTEN_CIKIS').length > 0 && (
+                <span className="px-2 py-1 rounded-lg bg-red-50 text-red-800">
+                  {sessionIslemler.filter((i) => i.islemTipi === 'ISTEN_CIKIS').length} çıkış talebi (ayrı onay)
+                </span>
+              )}
             </div>
           </div>
         )}
@@ -486,6 +541,7 @@ export const KampTaseronSayimTab: React.FC<KampTaseronSayimTabProps> = ({
             const aktif = personelAktif(p);
             const busy = savingId === p.id;
             const cikisOnayBekliyor = pendingCikisPersonelIds.has(p.id);
+            const taslakVar = Boolean(pendingPatches[p.id]);
 
             return (
               <div
@@ -505,6 +561,11 @@ export const KampTaseronSayimTab: React.FC<KampTaseronSayimTabProps> = ({
                       >
                         {aktif ? 'AKTİF' : 'PASİF'}
                       </span>
+                      {taslakVar && (
+                        <span className="ml-2 text-[10px] font-black px-2 py-0.5 rounded-full bg-sky-100 text-sky-800">
+                          TASLAK
+                        </span>
+                      )}
                       {cikisOnayBekliyor && (
                         <span className="ml-2 text-[10px] font-black px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">
                           ÇIKIŞ ONAY BEKLİYOR
@@ -512,6 +573,9 @@ export const KampTaseronSayimTab: React.FC<KampTaseronSayimTabProps> = ({
                       )}
                     </div>
                     <div className="text-[10px] text-slate-500 mt-0.5">{p.gorev || 'Görev belirtilmedi'}</div>
+                    {taslakVar && pendingPatches[p.id]?.detay && (
+                      <p className="text-[9px] text-sky-700 mt-1 font-bold">{pendingPatches[p.id].detay}</p>
+                    )}
                     {(tcEksik || telEksik || mykEksik) && (
                       <div className="flex flex-wrap gap-1 mt-2">
                         {tcEksik && (
@@ -604,7 +668,7 @@ export const KampTaseronSayimTab: React.FC<KampTaseronSayimTabProps> = ({
                       onClick={() => handleIseGiris(p)}
                       className="w-full sm:flex-1 inline-flex items-center justify-center gap-2 min-h-[44px] px-4 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black border border-emerald-500 disabled:opacity-50 shadow-sm"
                     >
-                      <UserCheck size={15} /> İşe Al / Aktif
+                      <UserCheck size={15} /> İşe Al / Aktif (Taslak)
                     </button>
                   )}
                   <button
@@ -614,7 +678,7 @@ export const KampTaseronSayimTab: React.FC<KampTaseronSayimTabProps> = ({
                     className="w-full sm:flex-1 inline-flex items-center justify-center gap-2 min-h-[44px] px-4 py-3 rounded-xl bg-sky-700 hover:bg-sky-800 text-white text-xs font-black disabled:opacity-50 shadow-sm"
                   >
                     {busy ? <Loader2 size={15} className="animate-spin" /> : <Save size={15} />}
-                    Kaydet
+                    Taslağa Kaydet
                   </button>
                 </div>
               </div>

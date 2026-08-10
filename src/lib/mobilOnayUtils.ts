@@ -80,6 +80,32 @@ export function normalizeKampFaaliyetForDisplay(doc: Record<string, unknown>) {
   };
 }
 
+export function normalizeKampTaseronSayimForDisplay(doc: Record<string, unknown>) {
+  const ozet = (doc.ozet as Record<string, number>) || {};
+  const guncellemeler =
+    (doc.personelGuncellemeleri as Array<{ personelIsim?: string; detay?: string; islemTipi?: string }>) ||
+    [];
+  return {
+    firmaAdi: String(doc.firmaAdi || '—'),
+    yapan: String(doc.yapan || '-'),
+    tarih: String(doc.tarih || '-'),
+    islemSayisi: Number(doc.islemSayisi || guncellemeler.length || 0),
+    ozet: {
+      tcTamamlanan: Number(ozet.tcTamamlanan || 0),
+      telTamamlanan: Number(ozet.telTamamlanan || 0),
+      mykIsaretlenen: Number(ozet.mykIsaretlenen || 0),
+      iseGiris: Number(ozet.iseGiris || 0),
+      istenCikis: Number(ozet.istenCikis || 0),
+      toplamPersonel: Number(ozet.toplamPersonel || 0),
+    },
+    guncellemeler: guncellemeler.slice(0, 8).map((g) => ({
+      isim: String(g.personelIsim || '—'),
+      detay: String(g.detay || g.islemTipi || ''),
+    })),
+    dahaFazla: Math.max(0, guncellemeler.length - 8),
+  };
+}
+
 export function buildWhatsAppUrl(text: string): string {
   return `https://wa.me/?text=${encodeURIComponent(text)}`;
 }

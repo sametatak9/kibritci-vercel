@@ -1070,6 +1070,20 @@ export interface KampTaseronSayimIslem {
   yapan: string;
 }
 
+/** Taşeron sayım oturumunda yönetici onayı bekleyen personel güncellemesi */
+export interface KampTaseronSayimPersonelGuncelleme {
+  personelId: string;
+  personelIsim: string;
+  tcNo?: string;
+  telefonNo?: string;
+  mykDurumu?: 'VAR' | 'YOK' | 'BILINMIYOR';
+  durum?: boolean;
+  istenCikisTarihi?: string | null;
+  iseGirisTarihi?: string;
+  islemTipi: KampTaseronSayimIslemTipi;
+  detay: string;
+}
+
 /** Kampçı taşeron sayım oturumu */
 export interface KampTaseronSayim {
   id: string;
@@ -1088,4 +1102,10 @@ export interface KampTaseronSayim {
     iseGiris: number;
   };
   islemIds: string[];
+  /** Yönetici onay durumu — eski kayıtlarda yoksa ONAYLANDI kabul edilir */
+  durum?: 'BEKLEMEDE' | 'ONAYLANDI' | 'REDDEDİLDİ';
+  personelGuncellemeleri?: KampTaseronSayimPersonelGuncelleme[];
+  onaylayan?: string;
+  onaylayanYetki?: string;
+  onayTarihi?: string;
 }
