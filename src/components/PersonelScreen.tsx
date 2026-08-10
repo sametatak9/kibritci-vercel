@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Users, UserPlus, Trash2, CreditCard as Edit3, Camera, Search, ShieldCheck, Mail, Phone, MapPin, Tent, DollarSign, UserX, FileText, CloudUpload as UploadCloud, CircleCheck as CheckCircle2, CircleAlert as AlertCircle, Loader as Loader2, Building2, History, Download } from 'lucide-react';
+import { Users, UserPlus, Trash2, CreditCard as Edit3, Camera, Search, ShieldCheck, Mail, Phone, MapPin, Tent, DollarSign, UserX, FileText, CloudUpload as UploadCloud, CircleCheck as CheckCircle2, CircleAlert as AlertCircle, Loader as Loader2, Building2, History, Download, RefreshCw, ListPlus } from 'lucide-react';
 import { CariKart, CariKartIslem, KampKaydi, KampOdasi, Personel, SahaFaaliyeti } from '../types/erp';
 import { fetchApiJson } from '../lib/apiClient';
 import { compressImage } from '../lib/imageCompress';
@@ -14,7 +14,7 @@ import {
   personelNameKey,
   resolveAkvizyonGorev,
 } from '../lib/guvenlikHelpers';
-import { CANONICAL_ANA_FIRMA_ADI, isTaseronPersonel } from '../lib/yoklamaUtils';
+import { CANONICAL_ANA_FIRMA_ADI, isKibritciCompany, isTaseronPersonel } from '../lib/yoklamaUtils';
 import { getPersonelMissingDocs, getPersonellerWithMissingTcIban } from '../lib/personelMissingDocs';
 import { listOdemeEngelleri, validateIBAN, validateTC } from '../lib/personelOdemeUtils';
 import {
@@ -137,7 +137,9 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [historyPersonel, setHistoryPersonel] = useState<Personel | null>(null);
   const [showOnlyActive, setShowOnlyActive] = useState(false);
+  const [showOnlyMissingTcIban, setShowOnlyMissingTcIban] = useState(false);
   const [sortMode, setSortMode] = useState<'NAME_ASC' | 'NAME_DESC' | 'DATE_NEWEST' | 'DATE_OLDEST'>('NAME_ASC');
+  const [repairingKampTaseron, setRepairingKampTaseron] = useState(false);
 
   // SGK PDF parsing states
   const [regMethod, setRegMethod] = useState<'manual' | 'sgk_pdf'>('manual');
@@ -883,14 +885,23 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
   const firmaFilterOptions = useMemo(() => {
     const map = new Map<string, string>();
     personeller.forEach((p) => {
-      if (p.firmaTipi === 'TASERON' || isAkvizyonFirmaAdi(p.firmaAdi)) {
+      if (p.firmaTipi === 'TASERON' || isTaseronPersonel(p) || isAkvizyonFirmaAdi(p.firmaAdi)) {
         const ad = (p.firmaAdi || 'Taşeron').trim();
         if (ad) map.set(ad, ad);
       } else {
         map.set('ANA_FIRMA', `${CANONICAL_ANA_FIRMA_ADI} (Ana Firma)`);
       }
     });
-    // Ana firma her zaman listede olsun (henüz personel yoksa bile seçilebilsin)
+    // Kamp kaydındaki taşeron firmaları da filtrede göster
+    kampKayitlari.forEach((k) => {
+      const ad = String(k.calistigiFirma || '').trim();
+      if (!ad || isKibritciCompany(ad)) return;
+      if (k.firmaTipi === 'TASERON' || !isKibritciCompany(ad)) map.set(ad, ad);
+    });
+    cariKartlar.filter(isTaseronCariKart).forEach((c) => {
+      const ad = String(c.unvan || '').trim();
+      if (ad) map.set(ad, ad);
+    });
     if (!map.has('ANA_FIRMA')) {
       map.set('ANA_FIRMA', `${CANONICAL_ANA_FIRMA_ADI} (Ana Firma)`);
     }
@@ -899,13 +910,13 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
       if (b[0] === 'ANA_FIRMA') return 1;
       return a[1].localeCompare(b[1], 'tr', { sensitivity: 'base' });
     });
-  }, [personeller]);
+  }, [personeller, kampKayitlari, cariKartlar]);
 
   const matchesFirmaFilter = (p: Personel, filters: string[]) => {
     if (!filters.length) return true;
     return filters.some((key) => {
       if (key === 'ANA_FIRMA') {
-        return p.firmaTipi !== 'TASERON' && !isAkvizyonFirmaAdi(p.firmaAdi);
+        return !isTaseronPersonel(p) && !isAkvizyonFirmaAdi(p.firmaAdi);
       }
       return (p.firmaAdi || '').trim() === key;
     });
@@ -929,6 +940,93 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
   const odemeEngelIds = useMemo(() => {
     return new Set(listOdemeEngelleri(personeller).map((e) => e.personel.id));
   }, [personeller]);
+
+  const missingTcIbanIds = useMemo(() => {
+    return new Set(getPersonellerWithMissingTcIban(personeller).map((r) => r.personel.id));
+  }, [personeller]);
+
+  /** Kampçı "KAMP PERSONEL" diye kaydetmiş ama kamp/cari taşeron olanlar */
+  const misclassifiedKampTaseron = useMemo(() => {
+    const byId = new Map<string, Personel>(personeller.map((p) => [p.id, p]));
+    const out: Array<{ personel: Personel; firmaAdi: string }> = [];
+    const seen = new Set<string>();
+
+    const push = (p: Personel, firmaAdi: string) => {
+      if (!p?.id || seen.has(p.id)) return;
+      const firma = String(firmaAdi || '').trim();
+      if (!firma || isKibritciCompany(firma)) return;
+      const gorev = String(p.gorev || '');
+      const sameFirma =
+        normalizeCardName(p.firmaAdi || '') === normalizeCardName(firma);
+      const needsRepair =
+        p.firmaTipi !== 'TASERON' ||
+        isKibritciCompany(p.firmaAdi || '') ||
+        /KAMP\s*PERSONEL/i.test(gorev) ||
+        (p.kaynak === 'KAMPCI' && p.onayDurumu === 'ONAY BEKLİYOR') ||
+        !sameFirma;
+      if (!needsRepair) return;
+      seen.add(p.id);
+      out.push({ personel: p, firmaAdi: firma });
+    };
+
+    kampKayitlari.forEach((k) => {
+      const firma = String(k.calistigiFirma || '').trim();
+      if (!firma || isKibritciCompany(firma)) return;
+      if (k.firmaTipi === 'ANA_FIRMA') return;
+      const p = k.personelId ? byId.get(String(k.personelId)) : undefined;
+      if (p) push(p, firma);
+    });
+
+    personeller.forEach((p) => {
+      const firma = String(p.firmaAdi || '').trim();
+      if (!firma || isKibritciCompany(firma)) return;
+      const gorev = String(p.gorev || '').toLocaleUpperCase('tr-TR');
+      if (gorev.includes('KAMP PERSONEL') || (p.kaynak === 'KAMPCI' && p.firmaTipi !== 'TASERON')) {
+        push(p, firma);
+      }
+    });
+
+    return out;
+  }, [personeller, kampKayitlari]);
+
+  const handleRepairKampTaseron = async () => {
+    if (misclassifiedKampTaseron.length === 0) return;
+    if (
+      !window.confirm(
+        `${misclassifiedKampTaseron.length} personel kampçı kaynaklı yanlış sınıflı görünüyor (ör. KAMP PERSONEL / ana firma).\n\nBunları taşeron kadroya (SERAMİK EKİBİ vb.) düzeltmek istiyor musunuz?\n\nPersonel Yönetimi + kamp yoklama listesi düzelir.`
+      )
+    ) {
+      return;
+    }
+    setRepairingKampTaseron(true);
+    try {
+      const patchedList: Personel[] = [];
+      for (const { personel, firmaAdi } of misclassifiedKampTaseron) {
+        const patched: Personel = {
+          ...personel,
+          firmaTipi: 'TASERON',
+          firmaAdi,
+          departman: 'TAŞERON',
+          gorev: /KAMP/i.test(String(personel.gorev || ''))
+            ? 'TAŞERON PERSONEL'
+            : personel.gorev || 'TAŞERON PERSONEL',
+          onayDurumu: 'ONAYLANDI',
+          sgkDurumu: personel.sgkDurumu || 'Sigortasız',
+        };
+        await saveDocument('personeller', leanPersonelForFirestore(patched, personel));
+        patchedList.push(patched);
+      }
+      setPersoneller((prev) =>
+        prev.map((p) => patchedList.find((x) => x.id === p.id) || p)
+      );
+      alert(`${patchedList.length} personel taşeron kadroya düzeltildi.`);
+    } catch (err) {
+      console.error(err);
+      alert('Düzeltme sırasında hata oluştu.');
+    } finally {
+      setRepairingKampTaseron(false);
+    }
+  };
 
   const personelSahaTagData = useMemo(() => {
     const byId = new Set<string>();
@@ -1805,6 +1903,42 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
                   title="Sadece aktif personel göster"
                 >
                   {showOnlyActive ? 'Sadece Aktifler' : 'Tümü Göster'}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setShowOnlyMissingTcIban((prev) => !prev)}
+                  className={`text-[10px] font-bold px-3 py-2 rounded-xl border cursor-pointer ${
+                    showOnlyMissingTcIban
+                      ? 'bg-rose-600 text-white border-rose-700'
+                      : 'bg-white text-rose-700 border-rose-200 hover:bg-rose-50'
+                  }`}
+                  title={`TC veya IBAN bilgisi eksik/hatalı ${missingTcIbanIds.size} personeli göster`}
+                >
+                  Eksik TC/IBAN{missingTcIbanIds.size > 0 ? ` (${missingTcIbanIds.size})` : ''}
+                </button>
+
+                {misclassifiedKampTaseron.length > 0 && (
+                  <button
+                    type="button"
+                    disabled={repairingKampTaseron}
+                    onClick={() => void handleRepairKampTaseron()}
+                    className="text-[10px] font-bold px-3 py-2 rounded-xl border cursor-pointer bg-amber-500 text-slate-950 border-amber-600 hover:bg-amber-400 disabled:opacity-60"
+                    title="Kampçının KAMP PERSONEL diye kaydettiği taşeronları (SERAMİK EKİBİ vb.) düzelt"
+                  >
+                    {repairingKampTaseron
+                      ? 'Düzeltiliyor…'
+                      : `Kamp→Taşeron Düzelt (${misclassifiedKampTaseron.length})`}
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => setListeModalOpen(true)}
+                  className="text-[10px] font-bold px-3 py-2 rounded-xl border cursor-pointer bg-orange-600 text-white border-orange-700 hover:bg-orange-500"
+                  title="Haftalık taşeron kadro listesi güncelle"
+                >
+                  Taşeron Liste Güncelle
                 </button>
 
                 <select
