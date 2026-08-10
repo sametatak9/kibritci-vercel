@@ -1,4 +1,4 @@
-import type { CariKart, KampKaydi, Personel } from '../types/erp';
+import type { CariKart, KampKaydi, Personel, AylikYoklamaMap } from '../types/erp';
 import {
   applyCariDedupPlan,
   applyCariDedupPlansInMemory,
@@ -19,6 +19,11 @@ import {
   TASERON_PERSONEL_DEPARTMAN,
   withTaseronPersonelGorev,
 } from './taseronUtils';
+import {
+  applyPersonelDuplicateMerge,
+  planPersonelDuplicateMerge,
+  type PersonelDuplicateMergePlan,
+} from './personelDuplicateMerge';
 
 export type TaseronEnvanterTemizlikPlan = {
   dedupPlans: CariDedupPlan[];
@@ -27,6 +32,7 @@ export type TaseronEnvanterTemizlikPlan = {
   deletePersonelIds: string[];
   personelPatches: Array<{ id: string; patch: Partial<Personel> }>;
   kampPatches: Array<{ id: string; patch: Partial<KampKaydi> }>;
+  personelMergePlans: PersonelDuplicateMergePlan[];
   summary: string[];
 };
 
@@ -151,7 +157,8 @@ function inferFirmaFromKamp(personelId: string, kampKayitlari: KampKaydi[]): str
 export function planTaseronEnvanterTemizlik(
   cariKartlar: CariKart[],
   personeller: Personel[],
-  kampKayitlari: KampKaydi[] = []
+  kampKayitlari: KampKaydi[] = [],
+  yoklamalar?: AylikYoklamaMap
 ): TaseronEnvanterTemizlikPlan {
   const summary: string[] = [];
   const dedupPlans = planCariKartDedup(cariKartlar, personeller);
@@ -298,6 +305,16 @@ export function planTaseronEnvanterTemizlik(
     summary.push(`${kampPatches.length} kamp yerleşim firması düzeltilecek`);
   }
 
+  const personelMergePlans = planPersonelDuplicateMerge(personeller, yoklamalar, kampKayitlari);
+  if (personelMergePlans.length > 0) {
+    summary.push(
+      `${personelMergePlans.length} mükerrer personel birleştirilecek (${personelMergePlans
+        .map((p) => p.label)
+        .slice(0, 5)
+        .join(', ')}${personelMergePlans.length > 5 ? '…' : ''})`
+    );
+  }
+
   return {
     dedupPlans,
     fuzzyMergePlans,
@@ -305,6 +322,7 @@ export function planTaseronEnvanterTemizlik(
     deletePersonelIds,
     personelPatches,
     kampPatches,
+    personelMergePlans,
     summary,
   };
 }
@@ -313,15 +331,18 @@ export type TaseronEnvanterTemizlikResult = {
   cariKartlar: CariKart[];
   personeller: Personel[];
   kampKayitlari: KampKaydi[];
+  yoklamalar?: AylikYoklamaMap;
   deletedCariIds: string[];
   deletedPersonelIds: string[];
+  mergedPersonelCount: number;
 };
 
 export async function applyTaseronEnvanterTemizlik(
   cariKartlar: CariKart[],
   personeller: Personel[],
   kampKayitlari: KampKaydi[],
-  plan: TaseronEnvanterTemizlikPlan
+  plan: TaseronEnvanterTemizlikPlan,
+  yoklamalar: AylikYoklamaMap = {}
 ): Promise<TaseronEnvanterTemizlikResult> {
   let nextCariler = [...cariKartlar];
   const deletedCariIds: string[] = [];
@@ -365,19 +386,42 @@ export async function applyTaseronEnvanterTemizlik(
     nextKamp = nextKamp.map((k) => (k.id === id ? merged : k));
   }
 
+  let mergedPersonelCount = 0;
+  let nextYoklamalar = yoklamalar;
+  if (plan.personelMergePlans.length > 0) {
+    const mergeResult = await applyPersonelDuplicateMerge(
+      nextPersoneller,
+      plan.personelMergePlans,
+      yoklamalar,
+      nextKamp
+    );
+    nextPersoneller = mergeResult.personeller;
+    nextYoklamalar = mergeResult.yoklamalar;
+    deletedPersonelIds.push(...plan.personelMergePlans.flatMap((p) => p.deleteIds));
+    mergedPersonelCount = mergeResult.mergedCount;
+    for (const mp of plan.personelMergePlans) {
+      nextKamp = nextKamp.map((k) =>
+        mp.deleteIds.includes(k.personelId || '') ? { ...k, personelId: mp.keepId } : k
+      );
+    }
+  }
+
   return {
     cariKartlar: nextCariler,
     personeller: nextPersoneller,
     kampKayitlari: nextKamp,
+    yoklamalar: nextYoklamalar,
     deletedCariIds,
     deletedPersonelIds,
+    mergedPersonelCount,
   };
 }
 
 export function previewTaseronEnvanterTemizlik(
   cariKartlar: CariKart[],
   personeller: Personel[],
-  kampKayitlari: KampKaydi[] = []
+  kampKayitlari: KampKaydi[] = [],
+  yoklamalar?: AylikYoklamaMap
 ): TaseronEnvanterTemizlikPlan {
-  return planTaseronEnvanterTemizlik(cariKartlar, personeller, kampKayitlari);
+  return planTaseronEnvanterTemizlik(cariKartlar, personeller, kampKayitlari, yoklamalar);
 }

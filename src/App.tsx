@@ -3633,6 +3633,7 @@ export default function App() {
                   setPersoneller={setPersonellerWithSync}
                   onPersonelDeleted={handlePersonelDeleted}
                   yoklamalar={yoklamalar}
+                  saveYoklamalarNow={saveYoklamalarNow}
                   cariKartlar={cariKartlar}
                   setCariKartlar={setCariKartlarWithSync}
                   setCariIslemGecmisi={setCariIslemGecmisiWithSync}
@@ -3768,6 +3769,8 @@ export default function App() {
                   setPersoneller={setPersonellerWithSync}
                   kampKayitlari={kampKayitlari}
                   setKampKayitlari={setKampKayitlariWithSync}
+                  yoklamalar={yoklamalar}
+                  saveYoklamalarNow={saveYoklamalarNow}
                   kampOdalari={kampOdalari}
                   operatorFaaliyetleri={operatorFaaliyetleri}
                   setOperatorFaaliyetleri={setOperatorFaaliyetleriWithSync}

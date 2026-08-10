@@ -31,7 +31,11 @@ import {
   exportSeciliPersonelExcel,
   openPersonelListeRaporu,
 } from '../lib/taseronPersonelExcelExport';
-import { findPersonelMatches, loadPersonellerForDedup, pickBestPersonelMatch } from '../lib/personelMatchUtils';
+import { findPersonelMatches, loadPersonellerForDedup, pickBestPersonelMatch, upsertPersonelAvoidDuplicate, AUTO_MERGE_SCORE_MAX } from '../lib/personelMatchUtils';
+import {
+  applyPersonelDuplicateMerge,
+  planPersonelDuplicateMerge,
+} from '../lib/personelDuplicateMerge';
 import {
   buildPersonelKaliteIndex,
   formatPersonelKaliteOzet,
@@ -81,6 +85,7 @@ interface PersonelScreenProps {
   setPersoneller: React.Dispatch<React.SetStateAction<Personel[]>>;
   onPersonelDeleted?: (deleted: Personel[]) => void;
   yoklamalar?: AylikYoklamaMap;
+  saveYoklamalarNow?: (next: AylikYoklamaMap) => Promise<void>;
   cariKartlar?: CariKart[];
   setCariKartlar?: React.Dispatch<React.SetStateAction<CariKart[]>>;
   setCariIslemGecmisi?: React.Dispatch<React.SetStateAction<CariKartIslem[]>>;
@@ -151,6 +156,7 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
   setPersoneller,
   onPersonelDeleted,
   yoklamalar = {},
+  saveYoklamalarNow,
   cariKartlar = [],
   setCariKartlar,
   setCariIslemGecmisi,
@@ -174,6 +180,7 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
   const [gorevGrupFilters, setGorevGrupFilters] = useState<PersonelGorevGrup[]>([]);
   const [sortMode, setSortMode] = useState<'NAME_ASC' | 'NAME_DESC' | 'DATE_NEWEST' | 'DATE_OLDEST'>('NAME_ASC');
   const [repairingKampTaseron, setRepairingKampTaseron] = useState(false);
+  const [repairingDuplicates, setRepairingDuplicates] = useState(false);
   const [exportingListe, setExportingListe] = useState<'excel' | 'html' | null>(null);
   const [screenView, setScreenView] = useState<PersonelScreenView>('liste');
 
@@ -620,13 +627,25 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
         id: `p_${Date.now()}`,
       };
     }
-    const savingAsEdit = Boolean(resolvedEditId);
+    let savingAsEdit = Boolean(resolvedEditId);
 
     try {
-      // Doğrudan Firestore’a yaz — büyük görselleri tekrar gönderme (timeout/rollback engeli)
       const prev = savingAsEdit ? personeller.find((p) => p.id === savedPersonel.id) : undefined;
-      const lean = leanPersonelForFirestore(savedPersonel, prev);
-      await saveDocument('personeller', lean as Personel);
+      if (savingAsEdit) {
+        const lean = leanPersonelForFirestore(savedPersonel, prev);
+        await saveDocument('personeller', lean as Personel);
+      } else {
+        const dedupList = await loadPersonellerForDedup(personeller);
+        const result = await upsertPersonelAvoidDuplicate(dedupList, savedPersonel, {
+          rawName: `${savedPersonel.ad} ${savedPersonel.soyad}`.trim(),
+          tcNo: savedPersonel.tcNo,
+          telefonNo: savedPersonel.telefonNo,
+          firmaAdi: savedPersonel.firmaAdi,
+          firmaTipi: savedPersonel.firmaTipi === 'TASERON' ? 'TASERON' : 'ANA_FIRMA',
+        });
+        savedPersonel = result.personel;
+        savingAsEdit = result.merged;
+      }
     } catch (err: any) {
       console.error(err);
       alert(
@@ -656,7 +675,13 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
       }
       return [savedPersonel, ...prev];
     });
-    alert(savingAsEdit ? 'Personel bilgileri başarıyla güncellendi.' : 'Yeni personel başarıyla kaydedildi.');
+    alert(
+      savingAsEdit && resolvedEditId
+        ? 'Personel bilgileri başarıyla güncellendi.'
+        : savingAsEdit
+          ? 'Mevcut personel kaydı güncellendi (mükerrer oluşturulmadı).'
+          : 'Yeni personel başarıyla kaydedildi.'
+    );
 
     if (savedPersonel.firmaTipi === 'TASERON' && taseronCariId) {
       appendTaseronCariHistory(taseronCariId, savedPersonel, savingAsEdit ? 'edit' : 'create', historyNote);
@@ -926,9 +951,25 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
           firmaTipi: 'TASERON',
         })
       );
-      if (nameFirmaMatch && nameFirmaMatch.score <= 2) {
+      if (nameFirmaMatch && nameFirmaMatch.score <= AUTO_MERGE_SCORE_MAX) {
         alert(
-          `Bu isim ve firma zaten kayıtlı: ${nameFirmaMatch.personel.ad} ${nameFirmaMatch.personel.soyad} (${nameFirmaMatch.personel.firmaAdi || 'Taşeron'}). Mevcut kaydı düzenleyin.`
+          `Bu personel zaten kayıtlı: ${nameFirmaMatch.personel.ad} ${nameFirmaMatch.personel.soyad} (${nameFirmaMatch.personel.firmaAdi || 'Taşeron'}). Mevcut kaydı düzenleyin — yeni kayıt açılmaz.`
+        );
+        return;
+      }
+    }
+
+    if (!isEdit && !isTaseronForm && normalizedTc) {
+      const exactNameMatch = pickBestPersonelMatch(
+        findPersonelMatches(dedupList, {
+          rawName: `${formData.ad} ${formData.soyad}`.trim(),
+          tcNo: normalizedTc,
+          firmaTipi: 'ANA_FIRMA',
+        })
+      );
+      if (exactNameMatch && exactNameMatch.score <= 2) {
+        alert(
+          `Bu isim zaten kayıtlı: ${exactNameMatch.personel.ad} ${exactNameMatch.personel.soyad}. Mevcut kaydı düzenleyin.`
         );
         return;
       }
@@ -1277,6 +1318,50 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
       prev.includes(grup) ? prev.filter((g) => g !== grup) : [...prev, grup]
     );
   };
+
+  const handleRepairDuplicatePersonel = async () => {
+    const plans = planPersonelDuplicateMerge(personeller, yoklamalar, kampKayitlari);
+    if (plans.length === 0) {
+      alert('Birleştirilecek mükerrer personel bulunamadı.');
+      return;
+    }
+    const totalDelete = plans.reduce((n, p) => n + p.deleteIds.length, 0);
+    if (
+      !window.confirm(
+        `${plans.length} mükerrer grup birleştirilecek (${totalDelete} fazla kayıt silinecek).\n\n${plans
+          .slice(0, 8)
+          .map((p) => `• ${p.label}`)
+          .join('\n')}${plans.length > 8 ? '\n…' : ''}\n\nYoklama ve kamp bağlantıları korunan kayda taşınır. Devam?`
+      )
+    ) {
+      return;
+    }
+    setRepairingDuplicates(true);
+    try {
+      const result = await applyPersonelDuplicateMerge(
+        personeller,
+        plans,
+        yoklamalar,
+        kampKayitlari
+      );
+      setPersoneller(result.personeller);
+      if (saveYoklamalarNow && result.yoklamalar !== yoklamalar) {
+        await saveYoklamalarNow(result.yoklamalar);
+      }
+      alert(
+        `${result.mergedCount} personel birleştirildi, ${result.deletedCount} mükerrer kayıt silindi.`
+      );
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Mükerrer birleştirme başarısız.');
+    } finally {
+      setRepairingDuplicates(false);
+    }
+  };
+
+  const duplicateMergePlanCount = useMemo(
+    () => planPersonelDuplicateMerge(personeller, yoklamalar, kampKayitlari).length,
+    [personeller, yoklamalar, kampKayitlari]
+  );
 
   const filteredPersonel = useMemo(
     () =>
@@ -2417,7 +2502,8 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
           </div>
 
         {(personelKalite.problematicIds.size > 0 ||
-          personelKalite.duplicateNameGroups.length > 0) && (
+          personelKalite.duplicateNameGroups.length > 0 ||
+          duplicateMergePlanCount > 0) && (
           <div className="mx-4 mt-0 mb-0 rounded-xl border border-rose-200 bg-rose-50/80 px-4 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
             <div className="flex items-start gap-2 text-rose-900">
               <AlertCircle size={16} className="shrink-0 mt-0.5" />
@@ -2456,17 +2542,31 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
                 </p>
               </div>
             </div>
-            <button
-              type="button"
-              onClick={toggleProblematicFilter}
-              className={`shrink-0 text-[10px] font-bold px-3 py-2 rounded-xl border cursor-pointer ${
-                showOnlyProblematic
-                  ? 'bg-rose-700 text-white border-rose-800'
-                  : 'bg-white text-rose-800 border-rose-300 hover:bg-rose-100'
-              }`}
-            >
-              {showOnlyProblematic ? 'Normal listeye dön' : 'Gerçek sorunluları göster'}
-            </button>
+            <div className="flex flex-wrap gap-2 shrink-0">
+              {duplicateMergePlanCount > 0 && (
+                <button
+                  type="button"
+                  disabled={repairingDuplicates}
+                  onClick={() => void handleRepairDuplicatePersonel()}
+                  className="text-[10px] font-bold px-3 py-2 rounded-xl border cursor-pointer bg-sky-600 text-white border-sky-700 hover:bg-sky-500 disabled:opacity-60"
+                >
+                  {repairingDuplicates
+                    ? 'Birleştiriliyor…'
+                    : `Mükerrerleri Birleştir (${duplicateMergePlanCount})`}
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={toggleProblematicFilter}
+                className={`text-[10px] font-bold px-3 py-2 rounded-xl border cursor-pointer ${
+                  showOnlyProblematic
+                    ? 'bg-rose-700 text-white border-rose-800'
+                    : 'bg-white text-rose-800 border-rose-300 hover:bg-rose-100'
+                }`}
+              >
+                {showOnlyProblematic ? 'Normal listeye dön' : 'Gerçek sorunluları göster'}
+              </button>
+            </div>
           </div>
         )}
 
@@ -2533,9 +2633,16 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
                           {is_aktif_status(p.durum) ? "Aktif" : "Pasif"}
                         </span>
                         {(p.firmaTipi === 'TASERON' || isTaseronPersonel(p)) && (
-                          <span className="text-[10px] bg-amber-50 text-amber-700 border border-amber-100 px-2 py-0.5 rounded-full font-bold">
-                            {p.firmaAdi || 'Taşeron'} · Yoklama/maaş yok
-                          </span>
+                          <>
+                            <span className="text-[10px] bg-amber-50 text-amber-800 border border-amber-200 px-2 py-0.5 rounded-full font-bold">
+                              TAŞERON YOKLAMA ALINMAZ
+                            </span>
+                            {p.firmaAdi && (
+                              <span className="text-[10px] bg-orange-50 text-orange-800 border border-orange-100 px-2 py-0.5 rounded-full font-bold truncate max-w-[180px]">
+                                {p.firmaAdi}
+                              </span>
+                            )}
+                          </>
                         )}
                         {p.onayDurumu === 'ONAY BEKLİYOR' && p.kaynak === 'KAMPCI' && (
                           <span className="text-[10px] bg-violet-50 text-violet-800 border border-violet-200 px-2 py-0.5 rounded-full font-bold">

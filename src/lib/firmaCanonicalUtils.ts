@@ -4,6 +4,34 @@ import { CANONICAL_ANA_FIRMA_ADI, isKibritciCompany, isTaseronPersonel } from '.
 import type { Personel } from '../types/erp';
 
 export const CANONICAL_AKVIZYON_FIRMA_ADI = 'AKVİZYON';
+export const CANONICAL_VIRADOOR_FIRMA_ADI = 'VİRADOOR MOBİLYA';
+
+/** Bilinen alias → tek kanonik unvan (REHA → VİRADOOR vb.) */
+const FIRMA_ALIAS_CANONICAL: Record<string, string> = {
+  reha: CANONICAL_VIRADOOR_FIRMA_ADI,
+  'reha mobilya': CANONICAL_VIRADOOR_FIRMA_ADI,
+  'reha mobilya insaat': CANONICAL_VIRADOOR_FIRMA_ADI,
+  'reha insaat': CANONICAL_VIRADOOR_FIRMA_ADI,
+};
+
+/** Silinecek geçersiz / mükerrer cari unvanları (firmaAnahtar) */
+const JUNK_CARI_NAME_KEYS = new Set([
+  'demirkan',
+  'ema mermer',
+  'firat pen',
+  'pttme yemekhane',
+  'sutek',
+  'zer yapi',
+  'zer',
+]);
+
+export function resolveFirmaAliasCanonical(name?: string | null): string | null {
+  const key = firmaAnahtar(String(name || '').trim());
+  if (!key) return null;
+  if (FIRMA_ALIAS_CANONICAL[key]) return FIRMA_ALIAS_CANONICAL[key];
+  if (key.startsWith('reha')) return CANONICAL_VIRADOOR_FIRMA_ADI;
+  return null;
+}
 
 /** Aynı firma sayılması için gruplama anahtarı */
 export function firmaDedupKey(name?: string | null): string {
@@ -12,6 +40,8 @@ export function firmaDedupKey(name?: string | null): string {
   const upper = raw.toLocaleUpperCase('tr-TR');
   if (upper === 'ANA FİRMA' || upper === 'ANA FIRMA') return 'ANA_FIRMA';
   if (isAkvizyonFirmaAdi(raw)) return 'akvizyon';
+  const alias = resolveFirmaAliasCanonical(raw);
+  if (alias) return firmaAnahtar(alias) || alias.toLocaleLowerCase('tr-TR');
   return firmaAnahtar(raw) || upper.toLocaleLowerCase('tr-TR');
 }
 
@@ -23,6 +53,8 @@ export function canonicalFirmaUnvan(name?: string | null): string {
   const upper = raw.toLocaleUpperCase('tr-TR');
   if (upper === 'ANA FİRMA' || upper === 'ANA FIRMA') return CANONICAL_ANA_FIRMA_ADI;
   if (isAkvizyonFirmaAdi(raw)) return CANONICAL_AKVIZYON_FIRMA_ADI;
+  const alias = resolveFirmaAliasCanonical(raw);
+  if (alias) return alias;
   return upper;
 }
 
@@ -36,6 +68,7 @@ export function isJunkCariUnvan(unvan?: string | null): boolean {
     return true;
   }
   const key = firmaAnahtar(u);
+  if (JUNK_CARI_NAME_KEYS.has(key)) return true;
   if (key.length <= 2) return true;
   if (/^[a]+$/i.test(key.replace(/\s/g, ''))) return true;
   return false;

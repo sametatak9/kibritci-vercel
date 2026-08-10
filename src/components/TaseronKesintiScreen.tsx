@@ -88,6 +88,8 @@ interface TaseronKesintiScreenProps {
   setPersoneller?: React.Dispatch<React.SetStateAction<Personel[]>>;
   kampKayitlari?: KampKaydi[];
   setKampKayitlari?: React.Dispatch<React.SetStateAction<KampKaydi[]>>;
+  yoklamalar?: import('../types/erp').AylikYoklamaMap;
+  saveYoklamalarNow?: (next: import('../types/erp').AylikYoklamaMap) => Promise<void>;
   kampOdalari?: KampOdasi[];
   operatorFaaliyetleri: OperatorFaaliyet[];
   setOperatorFaaliyetleri?: React.Dispatch<React.SetStateAction<OperatorFaaliyet[]>>;
@@ -110,6 +112,8 @@ export const TaseronKesintiScreen: React.FC<TaseronKesintiScreenProps> = ({
   setPersoneller,
   kampKayitlari = [],
   setKampKayitlari,
+  yoklamalar = {},
+  saveYoklamalarNow,
   kampOdalari = [],
   operatorFaaliyetleri,
   setOperatorFaaliyetleri,
@@ -166,14 +170,15 @@ export const TaseronKesintiScreen: React.FC<TaseronKesintiScreenProps> = ({
   const [repairingEnvanter, setRepairingEnvanter] = useState(false);
 
   const handleRepairEnvanter = async () => {
-    const preview = previewTaseronEnvanterTemizlik(cariKartlar, personeller, kampKayitlari);
+    const preview = previewTaseronEnvanterTemizlik(cariKartlar, personeller, kampKayitlari, yoklamalar);
     const hasWork =
       preview.dedupPlans.length > 0 ||
       preview.fuzzyMergePlans.length > 0 ||
       preview.createCariler.length > 0 ||
       preview.personelPatches.length > 0 ||
       preview.deletePersonelIds.length > 0 ||
-      preview.kampPatches.length > 0;
+      preview.kampPatches.length > 0 ||
+      preview.personelMergePlans.length > 0;
 
     if (!hasWork) {
       alert('Düzeltilecek taşeron envanter kaydı bulunamadı.');
@@ -196,16 +201,20 @@ export const TaseronKesintiScreen: React.FC<TaseronKesintiScreenProps> = ({
         cariKartlar,
         personeller,
         kampKayitlari,
-        preview
+        preview,
+        yoklamalar
       );
       setCariKartlar?.(result.cariKartlar);
       setPersoneller?.(result.personeller);
       setKampKayitlari?.(result.kampKayitlari);
+      if (saveYoklamalarNow && result.yoklamalar && result.yoklamalar !== yoklamalar) {
+        await saveYoklamalarNow(result.yoklamalar);
+      }
       addNotification?.(
-        `Taşeron envanter düzeltildi: ${result.deletedCariIds.length} cari silindi, ${preview.createCariler.length} cari oluşturuldu, ${preview.personelPatches.length} personel güncellendi.`
+        `Taşeron envanter düzeltildi: ${result.deletedCariIds.length} cari silindi, ${preview.createCariler.length} cari oluşturuldu, ${preview.personelPatches.length} personel güncellendi, ${result.mergedPersonelCount} mükerrer birleştirildi.`
       );
       alert(
-        `Envanter düzenlendi.\nSilinen cari: ${result.deletedCariIds.length}\nYeni cari: ${preview.createCariler.length}\nPersonel güncelleme: ${preview.personelPatches.length}\nPersonel silme: ${result.deletedPersonelIds.length}`
+        `Envanter düzenlendi.\nSilinen cari: ${result.deletedCariIds.length}\nYeni cari: ${preview.createCariler.length}\nPersonel güncelleme: ${preview.personelPatches.length}\nMükerrer birleştirme: ${result.mergedPersonelCount}\nPersonel silme: ${result.deletedPersonelIds.length}`
       );
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Envanter düzeltmesi başarısız.');
