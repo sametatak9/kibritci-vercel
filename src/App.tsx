@@ -81,6 +81,7 @@ import {
   fetchCollection,
   ensureFirestoreAuth,
 } from './lib/firebase';
+import { withTaseronPersonelGorev } from './lib/taseronUtils';
 import {
   isPlaceholderPersonelName,
   personelNameKey,
@@ -861,7 +862,7 @@ export default function App() {
             }
             for (const p of kuterMerged.toSave) {
               try {
-                await saveDocument('personeller', p);
+                await saveDocument('personeller', withTaseronPersonelGorev(p));
               } catch (e) {
                 console.warn('Kuter personel kaydı atlandı:', p.tcNo, e);
               }
@@ -871,7 +872,7 @@ export default function App() {
             }
             for (const p of deltaMerged.toSave) {
               try {
-                await saveDocument('personeller', p);
+                await saveDocument('personeller', withTaseronPersonelGorev(p));
               } catch (e) {
                 console.warn('DELTA KAPI personel kaydı atlandı:', p.tcNo, e);
               }
@@ -881,7 +882,7 @@ export default function App() {
             }
             for (const p of yeditepeMerged.toSave) {
               try {
-                await saveDocument('personeller', p);
+                await saveDocument('personeller', withTaseronPersonelGorev(p));
               } catch (e) {
                 console.warn('YEDİTEPE personel kaydı atlandı:', p.tcNo, e);
               }
@@ -1353,7 +1354,7 @@ export default function App() {
           void (async () => {
             for (const p of toSave) {
               try {
-                await saveDocument('personeller', p);
+                await saveDocument('personeller', withTaseronPersonelGorev(p));
               } catch (e) {
                 console.warn('Kuter personel snapshot senkronu atlandı:', p.tcNo, e);
               }
@@ -1372,7 +1373,7 @@ export default function App() {
           void (async () => {
             for (const p of toSave) {
               try {
-                await saveDocument('personeller', p);
+                await saveDocument('personeller', withTaseronPersonelGorev(p));
               } catch (e) {
                 console.warn('DELTA KAPI personel snapshot senkronu atlandı:', p.tcNo, e);
               }
@@ -1391,7 +1392,7 @@ export default function App() {
           void (async () => {
             for (const p of toSave) {
               try {
-                await saveDocument('personeller', p);
+                await saveDocument('personeller', withTaseronPersonelGorev(p));
               } catch (e) {
                 console.warn('YEDİTEPE personel snapshot senkronu atlandı:', p.tcNo, e);
               }

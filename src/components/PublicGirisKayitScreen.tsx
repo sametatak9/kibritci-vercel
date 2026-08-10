@@ -9,6 +9,7 @@ import {
 import { Personel } from '../types/erp';
 import { fetchCollection, saveDocument, ensureFirestoreAuth } from '../lib/firebase';
 import { resolvePersonelForGirisOnay } from '../lib/personelMatchUtils';
+import { resolveTaseronPersonelGorev, withTaseronPersonelGorev } from '../lib/taseronUtils';
 import { doc, updateDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { fetchApiJson } from '../lib/apiClient';
@@ -260,16 +261,20 @@ const PublicGirisKayitForm: React.FC<PublicGirisKayitScreenProps> = ({
       });
 
       const personelId = existing?.id || talep.personelId || `p_${Date.now()}`;
-      const newPersonel: Personel = {
+      const resolvedGorev =
+        form.firmaTipi === 'TASERON'
+          ? resolveTaseronPersonelGorev({ firmaAdi: form.firmaAdi, firmaTipi: 'TASERON' })
+          : form.gorev.trim();
+      const newPersonel = withTaseronPersonelGorev({
         ...(existing || form),
         ...form,
         id: personelId,
         ad: form.ad.trim(),
         soyad: form.soyad.trim(),
-        gorev: form.gorev.trim(),
+        gorev: resolvedGorev,
         fotografUrl: kimlikOnUrl || form.fotografUrl,
         durum: true,
-      };
+      } as Personel);
       await saveDocument('personeller', newPersonel);
       await updateDoc(doc(db, 'personelGirisTalepleri', talep.id), {
         durum: 'KAYIT_TAMAMLANDI',

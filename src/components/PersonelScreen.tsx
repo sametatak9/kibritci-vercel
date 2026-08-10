@@ -22,6 +22,7 @@ import {
   syncTaseronPersonelListe,
   type TaseronListeSyncResult,
 } from '../lib/taseronPersonelListeGuncelle';
+import { resolveTaseronPersonelGorev, withTaseronPersonelGorev, isTaseronPersonelRecord } from '../lib/taseronUtils';
 import {
   exportSeciliPersonelExcel,
   openPersonelListeRaporu,
@@ -382,6 +383,37 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
     });
   }, [personeller, setPersoneller]);
 
+  const taseronGorevFixDone = useRef(false);
+  useEffect(() => {
+    if (taseronGorevFixDone.current) return;
+    const toFix = personeller.filter(
+      (p) =>
+        isTaseronPersonelRecord(p) &&
+        p.gorev !== resolveTaseronPersonelGorev({ firmaAdi: p.firmaAdi, firmaTipi: p.firmaTipi })
+    );
+    if (toFix.length === 0) return;
+    taseronGorevFixDone.current = true;
+    setPersoneller((prev) =>
+      prev.map((p) => {
+        if (!isTaseronPersonelRecord(p)) return p;
+        const gorev = resolveTaseronPersonelGorev({ firmaAdi: p.firmaAdi, firmaTipi: p.firmaTipi });
+        if (p.gorev === gorev) return p;
+        return withTaseronPersonelGorev({ ...p, gorev });
+      })
+    );
+    toFix.forEach((p) => {
+      void saveDocument(
+        'personeller',
+        withTaseronPersonelGorev({
+          id: p.id,
+          gorev: resolveTaseronPersonelGorev({ firmaAdi: p.firmaAdi, firmaTipi: p.firmaTipi }),
+          firmaTipi: 'TASERON',
+          departman: p.departman || 'TAŞERON',
+        } as Personel)
+      );
+    });
+  }, [personeller, setPersoneller]);
+
   const handleCheckboxChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, checked } = e.target;
     setFormData(prev => ({
@@ -503,15 +535,21 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
     historyNote?: string,
     editingId?: string
   ) => {
-    const withRules = {
+    const withRules = withTaseronPersonelGorev({
       ...normalizedPayload,
-      gorev: normalizePersonelGorev(
-        resolveAkvizyonGorev(normalizedPayload.firmaAdi, normalizedPayload.gorev)
-      ),
+      gorev:
+        normalizedPayload.firmaTipi === 'TASERON' || isAkvizyonFirmaAdi(normalizedPayload.firmaAdi)
+          ? resolveTaseronPersonelGorev({
+              firmaAdi: normalizedPayload.firmaAdi,
+              firmaTipi: normalizedPayload.firmaTipi,
+            })
+          : normalizePersonelGorev(
+              resolveAkvizyonGorev(normalizedPayload.firmaAdi, normalizedPayload.gorev)
+            ),
       firmaTipi: isAkvizyonFirmaAdi(normalizedPayload.firmaAdi)
         ? ('TASERON' as const)
         : normalizedPayload.firmaTipi,
-    };
+    } as Personel);
 
     const resolvedEditId =
       (editingId && String(editingId).trim()) ||
@@ -815,9 +853,12 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
           id: editingId,
           tcNo: normalizedTc,
           ibanNo: finalIban,
-          gorev: normalizePersonelGorev(
-            resolveAkvizyonGorev(firmaFields.firmaAdi, (formData as any).gorev)
-          ),
+          gorev:
+            firmaFields.firmaTipi === 'TASERON'
+              ? resolveTaseronPersonelGorev({ firmaAdi: firmaFields.firmaAdi, firmaTipi: 'TASERON' })
+              : normalizePersonelGorev(
+                  resolveAkvizyonGorev(firmaFields.firmaAdi, (formData as any).gorev)
+                ),
           firmaTipi: firmaFields.firmaTipi,
           firmaAdi: firmaFields.firmaAdi,
         }
@@ -825,9 +866,12 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
           ...formData,
           tcNo: normalizedTc,
           ibanNo: finalIban,
-          gorev: normalizePersonelGorev(
-            resolveAkvizyonGorev(firmaFields.firmaAdi, (formData as any).gorev)
-          ),
+          gorev:
+            firmaFields.firmaTipi === 'TASERON'
+              ? resolveTaseronPersonelGorev({ firmaAdi: firmaFields.firmaAdi, firmaTipi: 'TASERON' })
+              : normalizePersonelGorev(
+                  resolveAkvizyonGorev(firmaFields.firmaAdi, (formData as any).gorev)
+                ),
           firmaTipi: firmaFields.firmaTipi,
           firmaAdi: firmaFields.firmaAdi,
         };
@@ -1007,17 +1051,15 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
     try {
       const patchedList: Personel[] = [];
       for (const { personel, firmaAdi } of misclassifiedKampTaseron) {
-        const patched: Personel = {
+        const patched = withTaseronPersonelGorev({
           ...personel,
           firmaTipi: 'TASERON',
           firmaAdi,
           departman: 'TAŞERON',
-          gorev: /KAMP/i.test(String(personel.gorev || ''))
-            ? 'TAŞERON PERSONEL'
-            : personel.gorev || 'TAŞERON PERSONEL',
+          gorev: resolveTaseronPersonelGorev({ firmaAdi, firmaTipi: 'TASERON' }),
           onayDurumu: 'ONAYLANDI',
           sgkDurumu: personel.sgkDurumu || 'Sigortasız',
-        };
+        });
         await saveDocument('personeller', leanPersonelForFirestore(patched, personel));
         patchedList.push(patched);
       }

@@ -1,4 +1,5 @@
 import type { Personel } from '../types/erp';
+import { resolveTaseronPersonelGorev, withTaseronPersonelGorev } from './taseronUtils';
 import { isTaseronPersonel } from './yoklamaUtils';
 
 /** Haftalık taşeron kadro satırı — ad/soyad zorunlu, TC opsiyonel */
@@ -210,7 +211,7 @@ function makeTaseronPersonel(opts: {
     il: '',
     ilce: '',
     departman: 'TAŞERON',
-    gorev: opts.row.gorev || 'TAŞERON PERSONEL',
+    gorev: resolveTaseronPersonelGorev({ firmaAdi: opts.firmaAdi, firmaTipi: 'TASERON' }),
     iseGirisTarihi: opts.iseGirisTarihi,
     cinsiyet: 'Belirtilmedi',
     maas: 0,
@@ -302,7 +303,8 @@ export function syncTaseronPersonelListe(options: {
     const needsName =
       (match.ad || '') !== row.ad || (match.soyad || '') !== row.soyad;
     const needsTc = Boolean(tc) && digits(match.tcNo) !== tc;
-    const needsGorev = Boolean(row.gorev) && match.gorev !== row.gorev;
+    const targetGorev = resolveTaseronPersonelGorev({ firmaAdi, firmaTipi: 'TASERON' });
+    const needsGorev = match.gorev !== targetGorev;
     const needsActivate = !wasAktif;
 
     if (!needsFirma && !needsName && !needsTc && !needsGorev && !needsActivate) {
@@ -310,14 +312,14 @@ export function syncTaseronPersonelListe(options: {
       continue;
     }
 
-    const patched: Personel = {
+    const patched: Personel = withTaseronPersonelGorev({
       ...match,
       ad: row.ad,
       soyad: row.soyad,
       tcNo: tc || match.tcNo || '',
       firmaTipi: 'TASERON',
       firmaAdi,
-      gorev: row.gorev || match.gorev || 'TAŞERON PERSONEL',
+      gorev: targetGorev,
       departman: match.departman || 'TAŞERON',
       durum: true,
       istenCikisTarihi: '',
@@ -330,7 +332,7 @@ export function syncTaseronPersonelListe(options: {
       // Taşeron: maaş/IBAN zorunlu değil — mevcut boşsa boş kalsın
       maas: Number(match.maas) || 0,
       ibanNo: match.ibanNo || '',
-    };
+    });
 
     const idx = list.findIndex((p) => p.id === match.id);
     if (idx >= 0) list[idx] = patched;

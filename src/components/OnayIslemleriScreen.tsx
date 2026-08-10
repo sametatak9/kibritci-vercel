@@ -73,6 +73,7 @@ import {
   validateTaseronSayimSession,
 } from '../lib/kampTaseronSayimOnayUtils';
 import { resolvePersonelForGirisOnay } from '../lib/personelMatchUtils';
+import { resolveTaseronPersonelGorev, withTaseronPersonelGorev } from '../lib/taseronUtils';
 
 interface OnayIslemleriScreenProps {
   satinAlmaTalepleri: SatinAlmaTalebi[];
@@ -3821,30 +3822,46 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
 
                                           const existing = resolvePersonelForGirisOnay(allPersoneller, item);
                                           const personelId = existing?.id || item.personelId || `p_${Date.now()}`;
+                                          const firmaTipi = item.firmaTipi || existing?.firmaTipi;
+                                          const firmaAdi = item.firmaAdi || existing?.firmaAdi;
+                                          const resolvedGorev =
+                                            firmaTipi === 'TASERON'
+                                              ? resolveTaseronPersonelGorev({ firmaAdi, firmaTipi: 'TASERON' })
+                                              : item.gorev || existing?.gorev || 'İŞÇİ';
 
                                           if (existing) {
-                                            await saveDocument('personeller', {
-                                              ...existing,
-                                              ad: item.ad || existing.ad,
-                                              soyad: item.soyad || existing.soyad,
-                                              gorev: item.gorev || existing.gorev || 'İŞÇİ',
-                                              tcNo: item.tcNo || existing.tcNo || '',
-                                              telefonNo: item.telefonNo || existing.telefonNo || '',
-                                              durum: true,
-                                              iseGirisTarihi: (item.tarih || new Date().toISOString()).slice(0, 10),
-                                            });
+                                            await saveDocument(
+                                              'personeller',
+                                              withTaseronPersonelGorev({
+                                                ...existing,
+                                                ad: item.ad || existing.ad,
+                                                soyad: item.soyad || existing.soyad,
+                                                gorev: resolvedGorev,
+                                                tcNo: item.tcNo || existing.tcNo || '',
+                                                telefonNo: item.telefonNo || existing.telefonNo || '',
+                                                firmaTipi: firmaTipi || existing.firmaTipi,
+                                                firmaAdi: firmaAdi || existing.firmaAdi,
+                                                durum: true,
+                                                iseGirisTarihi: (item.tarih || new Date().toISOString()).slice(0, 10),
+                                              } as Personel)
+                                            );
                                           } else {
-                                            await saveDocument('personeller', {
-                                              id: personelId,
-                                              ad: item.ad,
-                                              soyad: item.soyad,
-                                              gorev: item.gorev || 'İŞÇİ',
-                                              iseGirisTarihi: (item.tarih || new Date().toISOString()).slice(0, 10),
-                                              durum: true,
-                                              tcNo: item.tcNo || '',
-                                              telefonNo: item.telefonNo || '',
-                                              netMaas: 0,
-                                            });
+                                            await saveDocument(
+                                              'personeller',
+                                              withTaseronPersonelGorev({
+                                                id: personelId,
+                                                ad: item.ad,
+                                                soyad: item.soyad,
+                                                gorev: resolvedGorev,
+                                                iseGirisTarihi: (item.tarih || new Date().toISOString()).slice(0, 10),
+                                                durum: true,
+                                                tcNo: item.tcNo || '',
+                                                telefonNo: item.telefonNo || '',
+                                                netMaas: 0,
+                                                firmaTipi,
+                                                firmaAdi,
+                                              } as unknown as Personel)
+                                            );
                                           }
 
                                           await updateDoc(doc(db, 'personelGirisTalepleri', item.id), {

@@ -8,6 +8,7 @@ import {
 } from '../types/erp';
 import { db, saveDocument } from './firebase';
 import { validateTC } from './personelOdemeUtils';
+import { withTaseronPersonelGorev } from './taseronUtils';
 
 const digitsOnly = (raw: string) => String(raw || '').replace(/\D/g, '');
 
@@ -181,8 +182,8 @@ export async function applyTaseronSayimOnApproval(
     }
     if (g.iseGirisTarihi !== undefined) payload.iseGirisTarihi = g.iseGirisTarihi;
 
-    await saveDocument('personeller', payload as Personel);
-    nextPersoneller[idx] = payload as Personel;
+    await saveDocument('personeller', withTaseronPersonelGorev(payload as Personel));
+    nextPersoneller[idx] = withTaseronPersonelGorev(payload as Personel);
     updatedIds.add(g.personelId);
   }
 
