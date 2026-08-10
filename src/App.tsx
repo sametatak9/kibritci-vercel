@@ -23,7 +23,6 @@ const DashboardScreen = lazy(() => import('./components/DashboardScreen').then(m
 const PersonelScreen = lazy(() => import('./components/PersonelScreen').then(m => ({ default: m.PersonelScreen })));
 const YoklamaScreen = lazy(() => import('./components/YoklamaScreen').then(m => ({ default: m.YoklamaScreen })));
 const FaaliyetPersonelScreen = lazy(() => import('./components/FaaliyetPersonelScreen').then(m => ({ default: m.FaaliyetPersonelScreen })));
-const SahaIsPlanKontrolScreen = lazy(() => import('./components/SahaIsPlanKontrolScreen').then(m => ({ default: m.SahaIsPlanKontrolScreen })));
 const MaasMerkeziScreen = lazy(() => import('./components/MaasMerkeziScreen').then(m => ({ default: m.MaasMerkeziScreen })));
 const PersonelIzinScreen = lazy(() => import('./components/PersonelIzinScreen').then(m => ({ default: m.PersonelIzinScreen })));
 const SatinAlmaScreen = lazy(() => import('./components/SatinAlmaScreen').then(m => ({ default: m.SatinAlmaScreen })));
@@ -3617,13 +3616,6 @@ export default function App() {
                 />
               )}
 
-              {activeTab === "saha_is_plan" && (
-                <SahaIsPlanKontrolScreen
-                  personeller={personeller}
-                  yoklamalar={yoklamalar}
-                  currentUser={currentUser}
-                />
-              )}
 
               {activeTab === "maas" && (
                 <MaasMerkeziScreen
