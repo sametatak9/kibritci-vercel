@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { Calendar, Trash2, ShieldAlert, CheckCircle, FileText, ChevronRight, RefreshCw, Database, Undo2, Redo2, Camera } from 'lucide-react';
 import { Personel, AylikYoklamaMap, YoklamaDurum, SahaFaaliyeti, KampFaaliyet } from '../types/erp';
-import { normalizeDateKey } from '../lib/dateKeyUtils';
+import { normalizeDateKey, formatDateLabelTr } from '../lib/dateKeyUtils';
 import {
   formatMesaiFaaliyetLabel,
   getFaaliyetFotolar,
@@ -27,6 +27,12 @@ import {
 } from '../lib/yoklamaPersistence';
 import type { YoklamaSaveSource } from '../lib/yoklamaPersistence';
 import { countYoklamaFilledDays, countYoklamaPersons } from '../lib/yoklamaGuard';
+import {
+  buildGunlukYoklamaOzet,
+  buildGunlukYoklamaRaporHtml,
+  buildGunlukYoklamaSatirlari,
+  openGunlukYoklamaRaporHtml,
+} from '../lib/yoklamaGunRaporu';
 import { db } from '../lib/firebase';
 import { collection, onSnapshot } from 'firebase/firestore';
 
@@ -88,7 +94,10 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
   
   // Custom Overtime state variables
   const [overtimeStaffId, setOvertimeStaffId] = useState<string>("ALL");
-  const [overtimeDay, setOvertimeDay] = useState<number>(1);
+  const [overtimeDay, setOvertimeDay] = useState<number>(() => {
+    const now = new Date();
+    return now.getDate();
+  });
   const [overtimeHours, setOvertimeHours] = useState<number>(2);
 
   // AI Daily Yoklama state variables
@@ -132,6 +141,15 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
     });
     return () => unsub();
   }, []);
+
+  useEffect(() => {
+    const now = new Date();
+    if (selectedYear === now.getFullYear() && selectedMonth === now.getMonth() + 1) {
+      setOvertimeDay(now.getDate());
+    } else {
+      setOvertimeDay(1);
+    }
+  }, [selectedYear, selectedMonth]);
 
   const handlePersonDoubleClick = (p: Personel) => {
     setSahaPreviewPerson(p);
@@ -718,7 +736,39 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
     }
   };
 
-  const [printModal, setPrintModal] = useState<'NONE' | 'MAAS_RAPORU'>('NONE');
+  const [printModal, setPrintModal] = useState<'NONE' | 'MAAS_RAPORU' | 'GUN_RAPORU'>('NONE');
+
+  const gunRaporSatirlari = useMemo(
+    () =>
+      buildGunlukYoklamaSatirlari(
+        personeller,
+        draftYoklamalar,
+        selectedYear,
+        selectedMonth,
+        overtimeDay
+      ),
+    [personeller, draftYoklamalar, selectedYear, selectedMonth, overtimeDay]
+  );
+
+  const gunRaporOzet = useMemo(() => buildGunlukYoklamaOzet(gunRaporSatirlari), [gunRaporSatirlari]);
+
+  const gunRaporDateKey = useMemo(
+    () =>
+      `${selectedYear}-${String(selectedMonth).padStart(2, '0')}-${String(overtimeDay).padStart(2, '0')}`,
+    [selectedYear, selectedMonth, overtimeDay]
+  );
+
+  const gunRaporLabel = useMemo(() => formatDateLabelTr(gunRaporDateKey), [gunRaporDateKey]);
+
+  const handleOpenGunRapor = () => {
+    if (gunRaporSatirlari.length === 0) {
+      alert(
+        `${gunRaporLabel} için yoklama kaydı bulunamadı.\n\nMesai panelindeki gün numarasını kontrol edin veya önce yoklama girin.`
+      );
+      return;
+    }
+    setPrintModal('GUN_RAPORU');
+  };
 
   const filteredPersonel = useMemo(() => {
     const term = searchTerm.toLowerCase();
@@ -1012,6 +1062,15 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
             >
               <FileText size={13} className="text-white" />
               <span>Puantaj Raporu</span>
+            </button>
+            <button
+              type="button"
+              onClick={handleOpenGunRapor}
+              className="text-[11px] bg-amber-600 hover:bg-amber-700 text-white rounded-lg px-3 py-1.5 font-bold cursor-pointer transition flex items-center space-x-1 shadow-sm"
+              title={`Mesai panelindeki ${overtimeDay}. günün yoklama kayıtlarını listeler (${gunRaporLabel}).`}
+            >
+              <Calendar size={13} className="text-white" />
+              <span>Günü Raporla ({String(overtimeDay).padStart(2, '0')})</span>
             </button>
 
 
@@ -1371,6 +1430,15 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
               className="bg-amber-500 hover:bg-amber-600 active:scale-95 text-white font-bold text-[10px] px-3.5 py-1 rounded transition duration-100 shadow-sm cursor-pointer"
             >
               ⏱️ Mesai Kaydet
+            </button>
+            <button
+              type="button"
+              onClick={handleOpenGunRapor}
+              className="bg-slate-800 hover:bg-slate-900 text-white font-bold text-[10px] px-3.5 py-1 rounded transition duration-100 shadow-sm cursor-pointer inline-flex items-center gap-1"
+              title={`${gunRaporLabel} — yoklaması alınmış personel listesi`}
+            >
+              <Calendar size={12} />
+              Günü Raporla
             </button>
           </div>
         </div>
@@ -1905,6 +1973,155 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
                 </div>
               </div>
 
+              </CorporateReportLayout>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {printModal === 'GUN_RAPORU' && (
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/80 flex items-start justify-center p-6 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl w-full max-w-4xl shadow-2xl flex flex-col overflow-hidden my-4">
+            <div className="bg-amber-600 text-white p-4 flex flex-wrap justify-between items-center gap-3 px-6 shrink-0 print:hidden">
+              <div className="flex flex-wrap items-center gap-2">
+                <Calendar size={18} />
+                <div>
+                  <h3 className="font-display font-bold text-sm">Günlük Yoklama Raporu</h3>
+                  <p className="text-[10px] text-amber-100 font-semibold">{gunRaporLabel}</p>
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="flex items-center gap-1 bg-white/15 rounded-lg px-2 py-1">
+                  <span className="text-[10px] font-bold">Gün:</span>
+                  <input
+                    type="number"
+                    min={1}
+                    max={daysInMonth}
+                    value={overtimeDay}
+                    onChange={(e) =>
+                      setOvertimeDay(
+                        Math.max(1, Math.min(daysInMonth, parseInt(e.target.value, 10) || 1))
+                      )
+                    }
+                    className="w-12 text-center text-[11px] font-bold bg-white text-slate-900 border-0 rounded p-1"
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const html = buildGunlukYoklamaRaporHtml(
+                      gunRaporSatirlari,
+                      gunRaporOzet,
+                      selectedYear,
+                      selectedMonth,
+                      overtimeDay
+                    );
+                    void import('../lib/reportEmail').then(({ openReportEmailComposer }) => {
+                      openReportEmailComposer({
+                        subject: `Kibritçi — Günlük Yoklama (${gunRaporLabel})`,
+                        body: `${gunRaporLabel} günlük yoklama listesi ekte.`,
+                        html,
+                        fileName: `Kibritci_Yoklama_${gunRaporDateKey}.html`,
+                      });
+                    });
+                  }}
+                  className="bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs px-4 py-2 rounded-xl transition shadow cursor-pointer"
+                >
+                  E-posta
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const html = buildGunlukYoklamaRaporHtml(
+                      gunRaporSatirlari,
+                      gunRaporOzet,
+                      selectedYear,
+                      selectedMonth,
+                      overtimeDay
+                    );
+                    openGunlukYoklamaRaporHtml(html, `Günlük Yoklama — ${gunRaporLabel}`);
+                  }}
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-4 py-2 rounded-xl transition shadow cursor-pointer"
+                >
+                  Yazdır / PDF
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPrintModal('NONE')}
+                  className="bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs px-4 py-2 rounded-xl transition cursor-pointer"
+                >
+                  Kapat
+                </button>
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-auto bg-white p-4 sm:p-6 text-slate-900 printable-document font-sans">
+              <CorporateReportLayout orientation="portrait" docCode={`KBR-YOK-${gunRaporDateKey}`}>
+                <div className="mb-4 pb-3 border-b border-slate-200">
+                  <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">
+                    ŞANTİYE PUANTAJ — GÜNLÜK YOKLAMA
+                  </p>
+                  <p className="text-sm font-black text-slate-900 mt-1">{gunRaporLabel}</p>
+                  <p className="text-[10px] text-slate-500 mt-1">
+                    {gunRaporOzet.toplam} kayıt · {gunRaporOzet.geldi} geldi · {gunRaporOzet.yok} yok ·{' '}
+                    {gunRaporOzet.mesaiToplam} saat mesai
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-3 sm:grid-cols-7 gap-2 mb-4">
+                  {[
+                    { label: 'Geldi', value: gunRaporOzet.geldi, cls: 'text-emerald-700 bg-emerald-50 border-emerald-200' },
+                    { label: 'Yok', value: gunRaporOzet.yok, cls: 'text-rose-700 bg-rose-50 border-rose-200' },
+                    { label: 'İzinli', value: gunRaporOzet.izinli, cls: 'text-sky-700 bg-sky-50 border-sky-200' },
+                    { label: 'Raporlu', value: gunRaporOzet.raporlu, cls: 'text-amber-700 bg-amber-50 border-amber-200' },
+                    { label: 'Pazar', value: gunRaporOzet.pazar, cls: 'text-orange-700 bg-orange-50 border-orange-200' },
+                    { label: 'Tatil', value: gunRaporOzet.tatil, cls: 'text-violet-700 bg-violet-50 border-violet-200' },
+                    { label: 'Mesai', value: `${gunRaporOzet.mesaiToplam}s`, cls: 'text-slate-800 bg-slate-50 border-slate-200' },
+                  ].map((item) => (
+                    <div
+                      key={item.label}
+                      className={`rounded-xl border px-2 py-2 text-center ${item.cls}`}
+                    >
+                      <div className="text-lg font-black">{item.value}</div>
+                      <div className="text-[9px] font-bold uppercase">{item.label}</div>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="border border-slate-200 rounded-xl overflow-hidden">
+                  <table className="w-full text-[11px] border-collapse">
+                    <thead>
+                      <tr className="bg-slate-100 text-slate-700">
+                        <th className="p-2 text-left border-b border-slate-200 w-8">#</th>
+                        <th className="p-2 text-left border-b border-slate-200">Ad Soyad</th>
+                        <th className="p-2 text-left border-b border-slate-200">Görev</th>
+                        <th className="p-2 text-left border-b border-slate-200 hidden sm:table-cell">Departman</th>
+                        <th className="p-2 text-center border-b border-slate-200 w-24">Durum</th>
+                        <th className="p-2 text-center border-b border-slate-200 w-16">Mesai</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {gunRaporSatirlari.map((row, idx) => (
+                        <tr key={row.personelId} className="border-b border-slate-100 hover:bg-slate-50/80">
+                          <td className="p-2 text-slate-400 font-mono">{idx + 1}</td>
+                          <td className="p-2 font-bold text-slate-900">{row.adSoyad}</td>
+                          <td className="p-2 text-slate-600">{row.gorev}</td>
+                          <td className="p-2 text-slate-500 hidden sm:table-cell">{row.departman}</td>
+                          <td className="p-2 text-center">
+                            <span
+                              className={`inline-block text-[10px] font-black uppercase px-2 py-0.5 rounded-full border ${getStatusColor(row.durum)}`}
+                            >
+                              {getStatusAbbreviation(row.durum)}
+                            </span>
+                          </td>
+                          <td className="p-2 text-center font-bold font-mono text-slate-700">
+                            {row.mesaiSaati > 0 ? row.mesaiSaati : '—'}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </CorporateReportLayout>
             </div>
           </div>
