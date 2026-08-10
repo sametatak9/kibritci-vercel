@@ -44,7 +44,12 @@ import { submitPersonelCikisTalebi } from '../lib/personelCikisTalebiUtils';
 import { openTaseronSayimListeRaporu } from '../lib/taseronSayimListeRapor';
 import { exportMykYoklamaExcel, openMykYoklamaReport } from '../lib/mykYoklamaRapor';
 import { firmaEslesir, getTaseronCariKartlar } from '../lib/taseronUtils';
-import { CANONICAL_ANA_FIRMA_ADI, isKibritciCompany, isTaseronPersonel } from '../lib/yoklamaUtils';
+import {
+  CANONICAL_ANA_FIRMA_ADI,
+  canonicalizeAnaFirmaAdi,
+  isAnaFirmaFirmaAdi,
+  isTaseronPersonel,
+} from '../lib/yoklamaUtils';
 import type { YoklamaSaveSource } from '../lib/yoklamaPersistence';
 
 const digitsOnly = (raw: string) => String(raw || '').replace(/\D/g, '');
@@ -93,6 +98,19 @@ function isAnaFirmaPersonel(p: Personel) {
   return !isTaseronPersonel(p);
 }
 
+function isAnaFirmaFirmaSecimi(firma: string): boolean {
+  return canonicalizeAnaFirmaAdi(firma) === CANONICAL_ANA_FIRMA_ADI;
+}
+
+function normalizeFirmaOptionLabel(firma: string): string {
+  return isAnaFirmaFirmaSecimi(firma) ? CANONICAL_ANA_FIRMA_ADI : firma;
+}
+
+function resolveSessionFirmaAdi(firma: string): string {
+  const raw = String(firma || '').trim();
+  return isAnaFirmaFirmaSecimi(raw) ? CANONICAL_ANA_FIRMA_ADI : raw;
+}
+
 function eksikTel(p: Personel) {
   return phoneMatchKey(p.telefonNo || '').length < 10;
 }
@@ -125,6 +143,12 @@ export const KampTaseronSayimTab: React.FC<KampTaseronSayimTabProps> = ({
   const [bekleyenSayimlar, setBekleyenSayimlar] = useState<KampTaseronSayim[]>([]);
   const [selectedPersonelIds, setSelectedPersonelIds] = useState<Set<string>>(new Set());
   const [exportingMyk, setExportingMyk] = useState(false);
+
+  useEffect(() => {
+    if (selectedFirma && isAnaFirmaFirmaSecimi(selectedFirma) && selectedFirma !== CANONICAL_ANA_FIRMA_ADI) {
+      setSelectedFirma(CANONICAL_ANA_FIRMA_ADI);
+    }
+  }, [selectedFirma]);
 
   useEffect(() => {
     const q = query(collection(db, 'personelCikisTalepleri'), where('durum', '==', 'BEKLEMEDE'));
@@ -164,16 +188,17 @@ export const KampTaseronSayimTab: React.FC<KampTaseronSayimTabProps> = ({
       .map((p) => String(p.firmaAdi || '').trim())
       .filter(Boolean);
     const merged =
-      panelView === 'eksik_myk'
+      panelView === 'eksik_myk' || panelView === 'taseron'
         ? [CANONICAL_ANA_FIRMA_ADI, ...fromCari, ...fromPersonel]
         : [...fromCari, ...fromPersonel];
     const seen = new Set<string>();
     const out: string[] = [];
     merged.forEach((f) => {
-      const key = f.toLocaleLowerCase('tr-TR');
+      const label = normalizeFirmaOptionLabel(f);
+      const key = label.toLocaleLowerCase('tr-TR');
       if (seen.has(key)) return;
       seen.add(key);
-      out.push(f);
+      out.push(label);
     });
     return out.sort((a, b) => a.localeCompare(b, 'tr'));
   }, [taseronCariler, personeller, panelView]);
@@ -211,7 +236,7 @@ export const KampTaseronSayimTab: React.FC<KampTaseronSayimTabProps> = ({
         .filter((p) => personHasEksik(p))
         .filter((p) => {
           if (!selectedFirma) return isTaseronPersonel(p) || isAnaFirmaPersonel(p);
-          if (isKibritciCompany(selectedFirma)) return isAnaFirmaPersonel(p);
+          if (isAnaFirmaFirmaSecimi(selectedFirma)) return isAnaFirmaPersonel(p);
           return isTaseronPersonel(p) && firmaEslesir(p.firmaAdi || '', selectedFirma);
         })
         .filter(matchSearch)
@@ -219,6 +244,16 @@ export const KampTaseronSayimTab: React.FC<KampTaseronSayimTabProps> = ({
     }
 
     if (!selectedFirma) return [];
+    if (isAnaFirmaFirmaSecimi(selectedFirma)) {
+      return personeller
+        .filter(isAnaFirmaPersonel)
+        .filter(matchSearch)
+        .filter((p) => {
+          if (!showOnlyEksik) return true;
+          return personHasEksik(p);
+        })
+        .sort((a, b) => `${a.ad} ${a.soyad}`.localeCompare(`${b.ad} ${b.soyad}`, 'tr'));
+    }
     return personeller
       .filter((p) => isTaseronPersonel(p) && firmaEslesir(p.firmaAdi || '', selectedFirma))
       .filter(matchSearch)
@@ -231,7 +266,12 @@ export const KampTaseronSayimTab: React.FC<KampTaseronSayimTabProps> = ({
 
   const bekleyenFirmaSayimi = useMemo(
     () =>
-      bekleyenSayimlar.find((s) => firmaEslesir(s.firmaAdi || '', selectedFirma)) || null,
+      bekleyenSayimlar.find((s) => {
+        if (isAnaFirmaFirmaSecimi(selectedFirma)) {
+          return isAnaFirmaFirmaAdi(s.firmaAdi || '');
+        }
+        return firmaEslesir(s.firmaAdi || '', selectedFirma);
+      }) || null,
     [bekleyenSayimlar, selectedFirma]
   );
 
@@ -263,10 +303,12 @@ export const KampTaseronSayimTab: React.FC<KampTaseronSayimTabProps> = ({
     setSelectedPersonelIds(new Set(visiblePersonelList.map((p) => p.id)));
   };
 
-  const resolveBulkFirmaAdi = (personel: Personel) =>
-    panelView === 'ana_firma'
-      ? CANONICAL_ANA_FIRMA_ADI
-      : selectedFirma.trim() || String(personel.firmaAdi || '').trim() || '';
+  const resolveBulkFirmaAdi = (personel: Personel) => {
+    if (panelView === 'ana_firma' || isAnaFirmaFirmaSecimi(selectedFirma)) {
+      return CANONICAL_ANA_FIRMA_ADI;
+    }
+    return selectedFirma.trim() || String(personel.firmaAdi || '').trim() || '';
+  };
 
   const applyBulkMykAndSave = (mykDurumu: 'VAR' | 'YOK') => {
     const targets = visiblePersonelList.filter((p) => selectedPersonelIds.has(p.id));
@@ -373,7 +415,7 @@ export const KampTaseronSayimTab: React.FC<KampTaseronSayimTabProps> = ({
       sessionId,
       personelId: personel.id,
       personelIsim: `${personel.ad} ${personel.soyad}`,
-      firmaAdi: selectedFirma,
+      firmaAdi: resolveSessionFirmaAdi(selectedFirma),
       islemTipi,
       detay,
       tarih: new Date().toISOString(),
@@ -417,7 +459,7 @@ export const KampTaseronSayimTab: React.FC<KampTaseronSayimTabProps> = ({
     }
 
     setPendingPatches((prev) => mergePendingPatches(prev, patch));
-    const firma = selectedFirma || String(personel.firmaAdi || '').trim();
+    const firma = resolveSessionFirmaAdi(selectedFirma || String(personel.firmaAdi || '').trim());
     const islem = buildSessionIslemFromPatch(sessionId, firma, patch, email);
     setSessionIslemler((prev) => [...prev, islem]);
     setDrafts((prev) => {
@@ -454,7 +496,7 @@ export const KampTaseronSayimTab: React.FC<KampTaseronSayimTabProps> = ({
         personelGorev: personel.gorev || '',
         personelMaas: personel.maas ?? 0,
         cikisTarihi: today,
-        cikisNedeni: `Taşeron sayım — ${selectedFirma}; sayımda tespit edilmedi; kampçı işten çıkış talebi.`,
+        cikisNedeni: `Taşeron sayım — ${resolveSessionFirmaAdi(selectedFirma)}; sayımda tespit edilmedi; kampçı işten çıkış talebi.`,
         gonderen: email,
         kaynak: 'KAMPCI_TASERON_SAYIM',
         hedefYoneticiRole: 'YÖNETİCİ',
@@ -488,7 +530,7 @@ export const KampTaseronSayimTab: React.FC<KampTaseronSayimTabProps> = ({
     const today = new Date().toISOString().slice(0, 10);
     const patch = buildIseGirisPatch(personel, today);
     setPendingPatches((prev) => mergePendingPatches(prev, patch));
-    const firma = selectedFirma || String(personel.firmaAdi || '').trim();
+    const firma = resolveSessionFirmaAdi(selectedFirma || String(personel.firmaAdi || '').trim());
     const islem = buildSessionIslemFromPatch(sessionId, firma, patch, email);
     setSessionIslemler((prev) => [...prev, islem]);
     showStatus?.(
@@ -508,9 +550,9 @@ export const KampTaseronSayimTab: React.FC<KampTaseronSayimTabProps> = ({
     const personelGuncellemeleri = Object.values(pendingPatches) as KampTaseronSayimPersonelGuncelleme[];
     const firstPerson = personeller.find((p) => p.id === personelGuncellemeleri[0]?.personelId);
     const effectiveFirma =
-      panelView === 'ana_firma'
+      panelView === 'ana_firma' || isAnaFirmaFirmaSecimi(selectedFirma)
         ? CANONICAL_ANA_FIRMA_ADI
-        : selectedFirma.trim() || String(firstPerson?.firmaAdi || '').trim() || '';
+        : resolveSessionFirmaAdi(selectedFirma.trim() || String(firstPerson?.firmaAdi || '').trim());
 
     if (!effectiveFirma) {
       showStatus?.('error', 'Önce taşeron firma seçin veya en az bir taslak kayıt oluşturun.');
@@ -914,7 +956,7 @@ export const KampTaseronSayimTab: React.FC<KampTaseronSayimTabProps> = ({
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           <div>
             <label className="text-[9px] font-extrabold text-slate-500 uppercase block mb-1">
-              Taşeron Firma {panelView === 'taseron' && <span className="text-red-600">*</span>}
+              Firma {panelView === 'taseron' && <span className="text-red-600">*</span>}
             </label>
             <select
               value={selectedFirma}
