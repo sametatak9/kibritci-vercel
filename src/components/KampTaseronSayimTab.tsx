@@ -51,6 +51,7 @@ import { submitPersonelCikisTalebi } from '../lib/personelCikisTalebiUtils';
 import { openTaseronSayimListeRaporu } from '../lib/taseronSayimListeRapor';
 import { exportMykYoklamaExcel, openMykYoklamaReport } from '../lib/mykYoklamaRapor';
 import { firmaEslesir, getTaseronCariKartlar } from '../lib/taseronUtils';
+import { canonicalFirmaUnvan, firmaDedupKey } from '../lib/firmaCanonicalUtils';
 import {
   CANONICAL_ANA_FIRMA_ADI,
   canonicalizeAnaFirmaAdi,
@@ -110,7 +111,8 @@ function isAnaFirmaFirmaSecimi(firma: string): boolean {
 }
 
 function normalizeFirmaOptionLabel(firma: string): string {
-  return isAnaFirmaFirmaSecimi(firma) ? CANONICAL_ANA_FIRMA_ADI : firma;
+  if (isAnaFirmaFirmaSecimi(firma)) return CANONICAL_ANA_FIRMA_ADI;
+  return canonicalFirmaUnvan(firma);
 }
 
 function resolveSessionFirmaAdi(firma: string): string {
@@ -202,7 +204,7 @@ export const KampTaseronSayimTab: React.FC<KampTaseronSayimTabProps> = ({
     const out: string[] = [];
     merged.forEach((f) => {
       const label = normalizeFirmaOptionLabel(f);
-      const key = label.toLocaleLowerCase('tr-TR');
+      const key = firmaDedupKey(label);
       if (seen.has(key)) return;
       seen.add(key);
       out.push(label);

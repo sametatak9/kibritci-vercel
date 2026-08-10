@@ -15,6 +15,10 @@ import {
   resolveAkvizyonGorev,
 } from '../lib/guvenlikHelpers';
 import { CANONICAL_ANA_FIRMA_ADI, isKibritciCompany, isTaseronPersonel } from '../lib/yoklamaUtils';
+import {
+  buildDedupedFirmaOptions,
+  personelMatchesFirmaFilterKey,
+} from '../lib/firmaCanonicalUtils';
 import { getPersonelMissingDocs, getPersonellerWithMissingTcIban } from '../lib/personelMissingDocs';
 import { listOdemeEngelleri, validateIBAN, validateTC } from '../lib/personelOdemeUtils';
 import {
@@ -955,42 +959,28 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
   }, [firmaFilterOpen]);
 
   const firmaFilterOptions = useMemo(() => {
-    const map = new Map<string, string>();
+    const names: string[] = [];
     personeller.forEach((p) => {
       if (p.firmaTipi === 'TASERON' || isTaseronPersonel(p) || isAkvizyonFirmaAdi(p.firmaAdi)) {
-        const ad = (p.firmaAdi || 'Taşeron').trim();
-        if (ad) map.set(ad, ad);
-      } else {
-        map.set('ANA_FIRMA', `${CANONICAL_ANA_FIRMA_ADI} (Ana Firma)`);
+        names.push((p.firmaAdi || 'Taşeron').trim());
       }
     });
-    // Kamp kaydındaki taşeron firmaları da filtrede göster
     kampKayitlari.forEach((k) => {
       const ad = String(k.calistigiFirma || '').trim();
-      if (!ad || isKibritciCompany(ad)) return;
-      if (k.firmaTipi === 'TASERON' || !isKibritciCompany(ad)) map.set(ad, ad);
+      if (ad && !isKibritciCompany(ad)) names.push(ad);
     });
     cariKartlar.filter(isTaseronCariKart).forEach((c) => {
       const ad = String(c.unvan || '').trim();
-      if (ad) map.set(ad, ad);
+      if (ad) names.push(ad);
     });
-    if (!map.has('ANA_FIRMA')) {
-      map.set('ANA_FIRMA', `${CANONICAL_ANA_FIRMA_ADI} (Ana Firma)`);
-    }
-    return Array.from(map.entries()).sort((a, b) => {
-      if (a[0] === 'ANA_FIRMA') return -1;
-      if (b[0] === 'ANA_FIRMA') return 1;
-      return a[1].localeCompare(b[1], 'tr', { sensitivity: 'base' });
-    });
+    return buildDedupedFirmaOptions(names);
   }, [personeller, kampKayitlari, cariKartlar]);
 
   const matchesFirmaFilter = (p: Personel, filters: string[]) => {
     if (!filters.length) return true;
     return filters.some((key) => {
-      if (key === 'ANA_FIRMA') {
-        return !isTaseronPersonel(p) && !isAkvizyonFirmaAdi(p.firmaAdi);
-      }
-      return (p.firmaAdi || '').trim() === key;
+      const hit = firmaFilterOptions.find((o) => o.key === key);
+      return personelMatchesFirmaFilterKey(p, key, hit?.label || key);
     });
   };
 
@@ -1003,8 +993,8 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
   const firmaFilterSummary = useMemo(() => {
     if (firmaFilters.length === 0) return 'Tüm Firmalar';
     if (firmaFilters.length === 1) {
-      const hit = firmaFilterOptions.find(([k]) => k === firmaFilters[0]);
-      return hit?.[1] || firmaFilters[0];
+      const hit = firmaFilterOptions.find((o) => o.key === firmaFilters[0]);
+      return hit?.label || firmaFilters[0];
     }
     return `${firmaFilters.length} firma seçili`;
   }, [firmaFilters, firmaFilterOptions]);
@@ -1984,7 +1974,7 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
                         </div>
                       </div>
                       <div className="overflow-y-auto p-2 space-y-0.5">
-                        {firmaFilterOptions.map(([key, label]) => {
+                        {firmaFilterOptions.map(({ key, label }) => {
                           const checked = firmaFilters.includes(key);
                           return (
                             <label

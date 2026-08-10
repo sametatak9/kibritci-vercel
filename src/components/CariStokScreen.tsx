@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Building2, Package, Plus, Search, Trash2, Pencil, Download,
-  ClipboardList, X, RefreshCw, FileText, Truck, Receipt, Home, User, Users, Eye, UserX, Upload, Archive, Printer
+  ClipboardList, X, RefreshCw, FileText, Truck, Receipt, Home, User, Users, Eye, UserX, Upload, Archive, Printer, GitMerge
 } from 'lucide-react';
 import { collection, deleteField, doc, getDoc, getDocs, updateDoc } from 'firebase/firestore';
 import { CariKart, Fatura, Irsaliye, Personel, SatinAlmaTalebi, StokKart, StokKartIslem, CariKartIslem } from '../types/erp';
@@ -9,6 +9,7 @@ import { db, removeDocument } from '../lib/firebase';
 import { warnIfDuplicateCari, warnIfDuplicateStok } from '../lib/duplicateNameUtils';
 import { exportHistoryReport } from '../lib/reportExport';
 import { firmaEslesir, personelForCariKart } from '../lib/taseronUtils';
+import { findDuplicateCariler, mergeDuplicateCarilerFor } from '../lib/cariKartDedupUtils';
 import { displayPersonelGorev, isPersonelActiveOnDate } from '../lib/guvenlikHelpers';
 import { formatDateLabelTr, normalizeDateKey, todayDateKey } from '../lib/dateKeyUtils';
 import { EvrakDetayModal, EvrakDetayPayload } from './EvrakDetayModal';
@@ -139,6 +140,7 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
   const [selectedStokId, setSelectedStokId] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [deletingCari, setDeletingCari] = useState(false);
+  const [mergingCari, setMergingCari] = useState(false);
   const [deletingStok, setDeletingStok] = useState(false);
   const [dismissingPersonel, setDismissingPersonel] = useState<Personel | null>(null);
   const [dismissDateStr, setDismissDateStr] = useState(() => todayDateKey());
@@ -226,6 +228,40 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
     if (!selectedCari) return [];
     return personelForCariKart(personeller, selectedCari);
   }, [personeller, selectedCari]);
+
+  const selectedCariDuplicates = useMemo(() => {
+    if (!selectedCari) return [];
+    return findDuplicateCariler(selectedCari, cariKartlar);
+  }, [selectedCari, cariKartlar]);
+
+  const handleMergeCari = async (cari: CariKart) => {
+    const dupes = findDuplicateCariler(cari, cariKartlar);
+    if (dupes.length === 0) return;
+    if (
+      !window.confirm(
+        `"${cari.unvan}" için ${dupes.length} mükerrer kart birleştirilecek.\nPersonel kayıtları firma adıyla eşleşmeye devam eder.\n\nDevam?`
+      )
+    ) {
+      return;
+    }
+    setMergingCari(true);
+    try {
+      const result = await mergeDuplicateCarilerFor(cari, cariKartlar, personeller);
+      if (!result) return;
+      setCariKartlar((prev) =>
+        prev
+          .filter((c) => !result.deletedIds.includes(c.id))
+          .map((c) => (c.id === result.keep.id ? result.keep : c))
+      );
+      setSelectedCariId(result.keep.id);
+      alert(`Birleştirildi: ${result.keep.unvan} (${result.deletedIds.length} kopya silindi)`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'bilinmeyen hata';
+      alert(`Birleştirme başarısız: ${msg}`);
+    } finally {
+      setMergingCari(false);
+    }
+  };
 
   const cariBagliStoklar = useMemo(() => {
     if (!selectedCari) return [];
@@ -1420,6 +1456,7 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
             {csTab === 'cari'
               ? filteredCariKartlar.map((cr) => {
                   const active = cr.id === selectedCariId;
+                  const dupeCount = findDuplicateCariler(cr, cariKartlar).length;
                   return (
                     <button
                       key={cr.id}
@@ -1436,6 +1473,9 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
                           <p className="text-[10px] font-mono font-bold text-slate-500">{cr.kod}</p>
                           <p className="text-xs font-black text-slate-900 truncate mt-0.5">{cr.unvan}</p>
                           <p className="text-[10px] text-amber-800 font-bold mt-0.5">{cr.kartTipi}</p>
+                          {dupeCount > 0 && (
+                            <p className="text-[9px] font-black text-rose-700 mt-1">×{dupeCount + 1} mükerrer</p>
+                          )}
                         </div>
                         <span
                           className={`shrink-0 text-[9px] font-black px-2 py-0.5 rounded-full h-fit ${
@@ -1562,6 +1602,16 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
                   >
                     <Pencil size={12} /> Düzenle
                   </button>
+                  {selectedCariDuplicates.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => void handleMergeCari(selectedCari)}
+                      disabled={mergingCari || deletingCari}
+                      className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-[11px] font-bold bg-violet-50 text-violet-900 border border-violet-200 cursor-pointer disabled:opacity-50"
+                    >
+                      <GitMerge size={12} /> {mergingCari ? 'Birleştiriliyor…' : `Birleştir (${selectedCariDuplicates.length + 1})`}
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={() => void handleDeleteCari(selectedCari)}
