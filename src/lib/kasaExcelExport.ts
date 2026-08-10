@@ -3,7 +3,7 @@ import type { KasaHareketi, KasaOdemeDurumu, Personel } from '../types/erp';
 import { createExcelWorkbook } from './exceljsLoader';
 import { KIBRITCI_COMPANY, loadKibritciReportAssets } from './kibritciBrand';
 import { resolvePersonelUnvan } from './personelUnvanUtils';
-import { resolveKasaOdemeDurumu, isSoforKaynakliKasaHareketi } from './yolHarcamaUtils';
+import { resolveKasaOdemeDurumu, isKasaninHarcamasiKalemi } from './yolHarcamaUtils';
 import { ensureKasaFisFotoPersisted } from './sahaFaaliyetFotoStorage';
 import {
   buildFisKayitEtiketi,
@@ -393,29 +393,29 @@ export async function exportKasaExcel(
   ozet.getCell(row, 1).font = { size: 9, italic: true, color: { argb: 'FF475569' } };
   row += 2;
 
-  // Şoför / Kasa kaynak özeti
-  let soforSum = 0;
-  let kasaDigerSum = 0;
-  let soforN = 0;
-  let kasaN = 0;
+  // Diğer harcamalar / Kasanın harcaması özeti
+  let digerSum = 0;
+  let kasaninSum = 0;
+  let digerN = 0;
+  let kasaninN = 0;
   for (const kh of cikislar) {
     const t = Number(kh.tutar) || 0;
-    if (isSoforKaynakliKasaHareketi(kh)) {
-      soforSum += t;
-      soforN += 1;
+    if (isKasaninHarcamasiKalemi(kh)) {
+      kasaninSum += t;
+      kasaninN += 1;
     } else {
-      kasaDigerSum += t;
-      kasaN += 1;
+      digerSum += t;
+      digerN += 1;
     }
   }
   ozet.mergeCells(row, 1, row, 7);
-  ozet.getCell(row, 1).value = 'KAYNAK ÖZETİ — Şoför / Kasa ayrı + toplam';
+  ozet.getCell(row, 1).value = 'KAYNAK ÖZETİ — Diğer harcamalar / Kasanın harcaması + toplam';
   ozet.getCell(row, 1).font = { bold: true, size: 10, color: { argb: KASA_EXCEL_ARGB.accentText } };
   row += 1;
   const kaynakRows: Array<[string, number, number]> = [
-    ['ŞOFÖR HARCAMALARI', soforN, soforSum],
-    ['KASA HARCAMALARI (diğer)', kasaN, kasaDigerSum],
-    ['GENEL TOPLAM', soforN + kasaN, soforSum + kasaDigerSum],
+    ['DİĞER HARCAMALAR (borç + personel ödedi)', digerN, digerSum],
+    ['KASANIN HARCAMASI (kasa ödedi)', kasaninN, kasaninSum],
+    ['GENEL TOPLAM', digerN + kasaninN, digerSum + kasaninSum],
   ];
   for (const [label, n, sum] of kaynakRows) {
     ozet.mergeCells(row, 1, row, 5);
