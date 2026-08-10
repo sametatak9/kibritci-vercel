@@ -32,6 +32,8 @@ export interface Personel {
   onayDurumu?: 'ONAY BEKLİYOR' | 'ONAYLANDI' | 'REDDEDILDI';
   /** Kaydı oluşturan kaynak (ör. KAMPCI) */
   kaynak?: string;
+  /** Mesleki Yeterlilik Belgesi (MYK) durumu — taşeron sayım ekranından işaretlenir */
+  mykDurumu?: 'VAR' | 'YOK' | 'BILINMIYOR';
 }
 
 export type YoklamaDurum = 'Geldi' | 'Yok' | 'İzinli' | 'Raporlu' | 'Pazar' | 'Tatil' | 'Girilmedi';
@@ -1045,4 +1047,45 @@ export interface OnayliAnalizRaporu {
   saId?: string;
   faturaNo?: string;
   irsaliyeNos?: string[];
+}
+
+/** Kampçı taşeron sayım — tekil işlem kaydı */
+export type KampTaseronSayimIslemTipi =
+  | 'TC_EKLENDI'
+  | 'TEL_EKLENDI'
+  | 'MYK_ISARETLENDI'
+  | 'ISTEN_CIKIS'
+  | 'ISE_GIRIS'
+  | 'GENEL_GUNCELLEME';
+
+export interface KampTaseronSayimIslem {
+  id: string;
+  sessionId?: string;
+  personelId: string;
+  personelIsim: string;
+  firmaAdi: string;
+  islemTipi: KampTaseronSayimIslemTipi;
+  detay: string;
+  tarih: string;
+  yapan: string;
+}
+
+/** Kampçı taşeron sayım oturumu */
+export interface KampTaseronSayim {
+  id: string;
+  firmaAdi: string;
+  tarih: string;
+  baslangic: string;
+  bitis?: string;
+  yapan: string;
+  islemSayisi: number;
+  ozet: {
+    toplamPersonel: number;
+    tcTamamlanan: number;
+    telTamamlanan: number;
+    mykIsaretlenen: number;
+    istenCikis: number;
+    iseGiris: number;
+  };
+  islemIds: string[];
 }

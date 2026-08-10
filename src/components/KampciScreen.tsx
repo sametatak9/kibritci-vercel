@@ -14,6 +14,7 @@ import { buildWhatsAppUrl } from '../lib/mobilOnayUtils';
 import { KampHaftalikYoklamaTab } from './KampHaftalikYoklamaTab';
 import { KampGunlukYoklamaTab } from './KampGunlukYoklamaTab';
 import { KampVidanjorTab } from './KampVidanjorTab';
+import { KampTaseronSayimTab } from './KampTaseronSayimTab';
 import { AylikPuantajMobilPanel } from './AylikPuantajMobilPanel';
 import { collection, onSnapshot, doc, updateDoc, setDoc, query, orderBy } from 'firebase/firestore';
 import {
@@ -89,7 +90,7 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
   addNotification
 }) => {
   // Tabs: 'rooms' | 'placement' | 'warehouse' | 'activities' | 'haftalik_yoklama' | 'yoklama' | 'aylik_puantaj' | 'vidanjor' | ...
-  const [activeSubTab, setActiveSubTab] = useState<'rooms' | 'placement' | 'warehouse' | 'activities' | 'gunluk_akis' | 'personel_giris' | 'haftalik_yoklama' | 'yoklama' | 'aylik_puantaj' | 'vidanjor'>('placement');
+  const [activeSubTab, setActiveSubTab] = useState<'rooms' | 'placement' | 'warehouse' | 'activities' | 'gunluk_akis' | 'personel_giris' | 'taseron_sayim' | 'haftalik_yoklama' | 'yoklama' | 'aylik_puantaj' | 'vidanjor'>('placement');
 
   const filterKampciPersonel = React.useCallback(
     (p: Personel) => {
@@ -1917,6 +1918,18 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
         </button>
 
         <button
+          onClick={() => setActiveSubTab('taseron_sayim')}
+          className={`px-4 py-2.5 rounded-xl font-bold text-xs transition flex items-center space-x-2 border cursor-pointer ${
+            activeSubTab === 'taseron_sayim'
+              ? 'bg-amber-600 border-amber-500 text-white shadow-md shadow-amber-500/20'
+              : 'bg-white border-slate-200/80 text-slate-500 hover:bg-slate-50'
+          }`}
+        >
+          <ClipboardList size={14} />
+          <span>📋 Taşeron Sayım</span>
+        </button>
+
+        <button
           onClick={() => setActiveSubTab('rooms')}
           className={`px-4 py-2.5 rounded-xl font-bold text-xs transition flex items-center space-x-2 border cursor-pointer ${
             activeSubTab === 'rooms' 
@@ -3088,6 +3101,17 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
             )}
           </div>
         </div>
+      )}
+
+      {activeSubTab === 'taseron_sayim' && (
+        <KampTaseronSayimTab
+          personeller={personeller}
+          setPersoneller={setPersoneller}
+          cariKartlar={cariKartlar}
+          currentUser={currentUser}
+          addNotification={addNotification}
+          showStatus={showStatus}
+        />
       )}
 
       {activeSubTab === 'haftalik_yoklama' && setYoklamalar && (
