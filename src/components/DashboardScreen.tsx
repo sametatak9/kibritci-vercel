@@ -1,8 +1,8 @@
 import React, { useEffect, useMemo, useState, startTransition } from 'react';
 import {
-  Users, Wallet, ShoppingCart, Truck, FileText, ArrowRight,
-  ClipboardList, Briefcase, CalendarCheck2, ChevronRight, AlertTriangle, Tent,
-  MapPin, Activity, CreditCard, Link2, Plus, Sparkles, Bell, StickyNote,
+  Users, Wallet, ShoppingCart, Truck,
+  ClipboardList, CalendarCheck2, Tent,
+  MapPin, Plus, Sparkles, Bell,
   Download, Search, HardHat, Building2, ShieldCheck,
 } from 'lucide-react';
 import {
@@ -11,15 +11,13 @@ import {
 } from '../types/erp';
 import { KibritciLogo } from './KibritciLogo';
 import { KIBRITCI_COMPANY } from '../lib/kibritciBrand';
-import { listOdemeEngelleri } from '../lib/personelOdemeUtils';
 import { DashboardPeriodSummary } from './DashboardPeriodSummary';
 import { DashboardFavoriteTabsStrip } from './DashboardFavoriteTabsStrip';
 import { DashboardSonIslemlerFeed } from './DashboardSonIslemlerFeed';
+import { DashboardKampKroki3D } from './DashboardKampKroki3D';
 import { isPersonelActiveOnDate } from '../lib/guvenlikHelpers';
 import { getYoklamaDay, isTaseronPersonel } from '../lib/yoklamaUtils';
 import { buildOperasyonOzeti } from '../lib/operasyonUyarilari';
-import { EKSIK_HALKA_LABEL, listEksikHalka, summarizeEksikHalka } from '../lib/eksikHalkaUtils';
-import { summarizeTaseronKadro } from '../lib/taseronMevcudiyetUtils';
 import { downloadPersonelTraceReport } from '../lib/dashboardPersonelReportHtml';
 
 interface DashboardScreenProps {
@@ -75,16 +73,6 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
   bildirimler = [],
   dataReady = false,
 }) => {
-  const [stickyNotes, setStickyNotes] = useState<string>(() =>
-    localStorage.getItem('kibritci_dashboard_notes') ||
-    '📌 Günlük hatırlatmalar:\n• Sabah saha girişinde İSG ekipman kontrolü\n• Beton döküm saatlerini mühendisle eşleştir\n• Taşeron haftalık listelerini güncelle'
-  );
-
-  const handleNotesChange = (val: string) => {
-    setStickyNotes(val);
-    localStorage.setItem('kibritci_dashboard_notes', val);
-  };
-
   const totalRooms = kampOdalari.length;
   const totalBeds = kampOdalari.reduce((sum, r) => sum + r.kapasite, 0);
   const occupiedBeds = kampKayitlari.filter((cr) => cr.durum === 'AKTIF').length;
@@ -138,27 +126,15 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
     return totalCheckedDays > 0 ? Math.round((totalPresentDays / totalCheckedDays) * 100) : 0;
   }, [yoklamalar]);
 
-  const pendingStokKartCount = (stokKartlar || []).filter((s: any) => s.durum === 'ONAY BEKLİYOR').length;
   const operasyonOzeti = useMemo(
     () =>
       panelsReady
         ? buildOperasyonOzeti({ satinAlmaTalepleri, irsaliyeler, faturalar, stokKartlar, kampOdalari, kampKayitlari })
-        : { bekleyenOnay: 0, gecikenOnay: 0, bekleyenSatinAlma: 0, kampUyarilari: [], faturasizIrsaliye: 0, faturasizEski: 0 },
+        : { bekleyenOnay: 0, gecikenOnay: 0 },
     [panelsReady, satinAlmaTalepleri, irsaliyeler, faturalar, stokKartlar, kampOdalari, kampKayitlari]
   );
 
-  const eksikHalkaRows = useMemo(
-    () => (panelsReady ? listEksikHalka({ satinAlmaTalepleri, irsaliyeler, faturalar, limit: 40 }) : []),
-    [panelsReady, satinAlmaTalepleri, irsaliyeler, faturalar]
-  );
-  const eksikHalkaOzet = useMemo(() => summarizeEksikHalka(eksikHalkaRows), [eksikHalkaRows]);
-  const taseronKadro = useMemo(
-    () => (panelsReady ? summarizeTaseronKadro(personeller, bugun) : { aktifKadro: 0, firmaSayisi: 0, byFirma: [] }),
-    [panelsReady, personeller, bugun]
-  );
-
   const dataStillHydrating = !dataReady;
-  const odemeEngelleri = useMemo(() => listOdemeEngelleri(personeller), [personeller]);
   const unreadNotifs = useMemo(() => (bildirimler || []).filter((n) => !n.okundu).length, [bildirimler]);
 
   const [selectedPersonelId, setSelectedPersonelId] = useState('');
@@ -335,148 +311,24 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
           </div>
         </section>
 
-        {/* ── Operasyon + Son işlemler ── */}
-        <div className="grid grid-cols-1 xl:grid-cols-5 gap-5">
-          <section className="xl:col-span-3 rounded-2xl bg-white border border-slate-100 p-5 shadow-sm space-y-4">
-            <div className="flex items-center gap-3">
-              <div className="p-2 rounded-xl bg-orange-100 text-orange-600">
-                <Activity size={18} />
-              </div>
-              <div>
-                <h3 className="font-display font-bold text-slate-900">Operasyon Durumu</h3>
-                <p className="text-[11px] text-slate-500">Tıklayarak ilgili modüle gidin</p>
-              </div>
-            </div>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-              {[
-                { label: 'Bekleyen onay', value: operasyonOzeti.bekleyenOnay, extra: operasyonOzeti.gecikenOnay > 0 ? `${operasyonOzeti.gecikenOnay} gecikmiş` : '', tab: 'onay_islemleri', warn: operasyonOzeti.gecikenOnay > 0 },
-                { label: 'Faturasız irs.', value: operasyonOzeti.faturasizIrsaliye, extra: operasyonOzeti.faturasizEski > 0 ? `${operasyonOzeti.faturasizEski} eski` : '', tab: 'irsaliye_giris', warn: operasyonOzeti.faturasizEski > 0 },
-                { label: 'Kamp uyarı', value: operasyonOzeti.kampUyarilari.length, extra: 'doluluk', tab: 'kamp', warn: operasyonOzeti.kampUyarilari.some((u) => u.seviye === 'critical') },
-                { label: 'Bekleyen SA', value: operasyonOzeti.bekleyenSatinAlma, extra: pendingStokKartCount > 0 ? `${pendingStokKartCount} stok` : '', tab: 'satin_alma', warn: false },
-              ].map((item) => (
-                <button
-                  key={item.label}
-                  type="button"
-                  onClick={() => onNavigate(item.tab)}
-                  className={`text-left rounded-xl border p-3 transition hover:shadow-sm cursor-pointer ${item.warn ? 'border-amber-200 bg-amber-50/50 hover:bg-amber-50' : 'border-slate-100 bg-slate-50/50 hover:bg-orange-50/30'}`}
-                >
-                  <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400 block">{item.label}</span>
-                  <span className="text-xl font-black tabular-nums text-slate-900">{item.value}</span>
-                  {item.extra && <span className="text-[10px] text-slate-500 block mt-0.5">{item.extra}</span>}
-                </button>
-              ))}
-            </div>
-            {operasyonOzeti.kampUyarilari.length > 0 && (
-              <div className="flex flex-wrap gap-1.5">
-                {operasyonOzeti.kampUyarilari.slice(0, 4).map((u, i) => (
-                  <span key={`${u.tip}_${i}`} className={`text-[10px] font-bold px-2 py-1 rounded-lg border ${u.seviye === 'critical' ? 'bg-rose-50 text-rose-800 border-rose-200' : u.seviye === 'warn' ? 'bg-amber-50 text-amber-800 border-amber-200' : 'bg-slate-50 text-slate-600 border-slate-200'}`}>
-                    {u.baslik}
-                  </span>
-                ))}
-              </div>
-            )}
-          </section>
+        {/* ── Kamp kroki 3D ── */}
+        <DashboardKampKroki3D
+          kampOdalari={kampOdalari}
+          kampKayitlari={kampKayitlari}
+          personeller={personeller}
+          onNavigate={onNavigate}
+        />
 
-          <div className="xl:col-span-2">
-            <DashboardSonIslemlerFeed
-              kasaHareketleri={kasaHareketleri}
-              satinAlmaTalepleri={satinAlmaTalepleri}
-              bildirimler={bildirimler}
-              onNavigate={onNavigate}
-            />
-          </div>
-        </div>
+        <DashboardSonIslemlerFeed
+          kasaHareketleri={kasaHareketleri}
+          satinAlmaTalepleri={satinAlmaTalepleri}
+          bildirimler={bildirimler}
+          onNavigate={onNavigate}
+        />
 
-        {/* ── Eksik halka + Ödeme engeli ── */}
+        {/* ── Personel sorgu + Aktif kadro ── */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
           <section className="rounded-2xl bg-white border border-slate-100 p-5 shadow-sm space-y-3">
-            <div className="flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                <div className="p-2 rounded-xl bg-violet-100 text-violet-700"><Link2 size={16} /></div>
-                <div>
-                  <h3 className="font-display font-bold text-sm text-slate-900">Evrak Eksik Halka</h3>
-                  <p className="text-[10px] text-slate-500">SA → irsaliye → fatura zinciri</p>
-                </div>
-              </div>
-              <span className="text-[10px] font-bold bg-slate-100 text-slate-600 px-2 py-1 rounded-full">{eksikHalkaOzet.toplam} kayıt</span>
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              {([['SA_IRSALIYESIZ', 'satin_alma'], ['IRSALIYE_SA_SIZ', 'irsaliye_giris'], ['IRSALIYE_FATURASIZ', 'irsaliye_giris'], ['FATURA_IRSALIYESIZ', 'fatura_giris']] as const).map(([tip, tab]) => (
-                <button key={tip} type="button" onClick={() => onNavigate(tab)} className="text-left rounded-xl border border-slate-100 bg-slate-50/80 hover:bg-violet-50/50 p-2.5 cursor-pointer transition">
-                  <span className="text-[9px] font-bold uppercase text-slate-400 block">{EKSIK_HALKA_LABEL[tip]}</span>
-                  <span className="text-lg font-black text-slate-900 tabular-nums">{eksikHalkaOzet[tip]}</span>
-                </button>
-              ))}
-            </div>
-            {eksikHalkaRows.length === 0 ? (
-              <p className="text-[11px] text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-xl px-3 py-2">Zincir tutarlı görünüyor ✓</p>
-            ) : (
-              <div className="max-h-40 overflow-y-auto rounded-xl border border-slate-100 text-[11px]">
-                {eksikHalkaRows.slice(0, 8).map((r) => (
-                  <button key={`${r.tip}_${r.id}`} type="button" onClick={() => onNavigate(r.navigateTab)} className="w-full text-left px-3 py-2 border-b border-slate-50 hover:bg-violet-50/40 flex justify-between gap-2 cursor-pointer">
-                    <span className="font-semibold text-violet-800 truncate">{r.kod}</span>
-                    <span className="text-slate-500 shrink-0">{r.firma}</span>
-                  </button>
-                ))}
-              </div>
-            )}
-          </section>
-
-          <section className="rounded-2xl bg-white border border-slate-100 p-5 shadow-sm space-y-3">
-            <div className="flex items-center justify-between gap-2 flex-wrap">
-              <div className="flex items-center gap-2">
-                <div className="p-2 rounded-xl bg-rose-100 text-rose-600"><CreditCard size={16} /></div>
-                <div>
-                  <h3 className="font-display font-bold text-sm text-slate-900">Ödeme Engeli</h3>
-                  <p className="text-[10px] text-slate-500">Eksik TC / IBAN / SGK</p>
-                </div>
-              </div>
-              <div className="flex gap-2">
-                <button type="button" onClick={() => onNavigate('personel')} className="text-[10px] font-bold px-3 py-1.5 rounded-xl bg-slate-800 text-white hover:bg-slate-700 cursor-pointer">Personel</button>
-                <button type="button" onClick={() => onNavigate('maas_odeme')} className="text-[10px] font-bold px-3 py-1.5 rounded-xl bg-orange-500 text-white hover:bg-orange-600 cursor-pointer">Maaş</button>
-              </div>
-            </div>
-            {odemeEngelleri.length === 0 ? (
-              <p className="text-[11px] text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-xl px-3 py-2">Ödeme için engel yok ✓</p>
-            ) : (
-              <div className="max-h-44 overflow-y-auto space-y-1.5">
-                {odemeEngelleri.slice(0, 12).map(({ personel, engeller }) => (
-                  <div key={personel.id} className="flex items-center justify-between gap-2 bg-rose-50/60 border border-rose-100 rounded-xl px-3 py-2 text-[11px]">
-                    <span className="font-bold text-slate-800 truncate">{personel.ad} {personel.soyad}</span>
-                    <div className="flex gap-1 shrink-0">
-                      {engeller.map((e) => (
-                        <span key={e} className="text-[8px] font-bold uppercase px-1.5 py-0.5 rounded bg-white border border-rose-200 text-rose-700">{e}</span>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </section>
-        </div>
-
-        {/* ── Taşeron kadro ── */}
-        <section className="rounded-2xl bg-gradient-to-r from-amber-50/80 to-orange-50/50 border border-orange-100 px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div className="flex items-center gap-3 min-w-0">
-            <div className="p-2 rounded-xl bg-white border border-orange-100 text-orange-700"><Briefcase size={16} /></div>
-            <div className="min-w-0">
-              <h3 className="text-[11px] font-bold text-slate-900 uppercase tracking-wide">Taşeron Kadro</h3>
-              <p className="text-[11px] text-slate-600">
-                <strong className="tabular-nums">{taseronKadro.aktifKadro}</strong> kişi · <strong className="tabular-nums">{taseronKadro.firmaSayisi}</strong> firma
-                {taseronKadro.byFirma.length > 0 && (
-                  <span className="text-slate-400 hidden md:inline"> — {taseronKadro.byFirma.slice(0, 5).map((f) => `${f.firma} (${f.aktifKadro})`).join(' · ')}</span>
-                )}
-              </p>
-            </div>
-          </div>
-          <button type="button" onClick={() => onNavigate('personel')} className="text-[10px] font-bold px-4 py-2 rounded-xl bg-orange-600 text-white hover:bg-orange-700 cursor-pointer shrink-0">
-            Liste Güncelle
-          </button>
-        </section>
-
-        {/* ── Personel sorgu + Not defteri + Aktif kadro ── */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-          <section className="lg:col-span-1 rounded-2xl bg-white border border-slate-100 p-5 shadow-sm space-y-3">
             <div className="flex items-center gap-2">
               <Search size={16} className="text-orange-500" />
               <h3 className="font-display font-bold text-sm text-slate-900">Personel Sorgula</h3>
@@ -517,23 +369,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
             )}
           </section>
 
-          <section className="lg:col-span-1 rounded-2xl bg-amber-50/40 border border-amber-100/80 p-5 shadow-sm flex flex-col space-y-3">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <StickyNote size={16} className="text-amber-600" />
-                <h3 className="font-display font-bold text-sm text-slate-900">Not Defteri</h3>
-              </div>
-              <span className="text-[9px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-100">Otomatik kayıt</span>
-            </div>
-            <textarea
-              className="flex-1 min-h-[160px] w-full p-3 text-xs text-slate-700 bg-white/80 border border-amber-200/60 rounded-xl outline-none focus:border-orange-300 resize-none leading-relaxed"
-              placeholder="Şantiye notlarınız…"
-              value={stickyNotes}
-              onChange={(e) => handleNotesChange(e.target.value)}
-            />
-          </section>
-
-          <section className="lg:col-span-1 rounded-2xl bg-white border border-slate-100 p-5 shadow-sm space-y-3">
+          <section className="rounded-2xl bg-white border border-slate-100 p-5 shadow-sm space-y-3">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Users size={16} className="text-orange-500" />
