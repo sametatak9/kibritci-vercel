@@ -42,6 +42,7 @@ import {
 } from '../lib/kampTaseronSayimOnayUtils';
 import {
   ANA_FIRMA_MYK_GOREV_ETIKETI,
+  buildAnaFirmaMykYoklamaPatch,
   isAnaFirmaMykSayimPersoneli,
   isAnaFirmaMykSayimSession,
 } from '../lib/anaFirmaMykSayimUtils';
@@ -325,14 +326,17 @@ export const KampTaseronSayimTab: React.FC<KampTaseronSayimTabProps> = ({
     let applied = 0;
     let nextPatches = { ...pendingPatches };
     const nextIslemler = [...sessionIslemler];
+    const anaFirmaYoklama = panelView === 'ana_firma';
 
     for (const personel of targets) {
-      const draft: DraftRow = {
-        ...getDraft(personel),
-        mykDurumu,
-      };
-      const { patch, error } = buildPersonelPatchFromDraft(personel, draft);
-      if (error || !patch) continue;
+      const patch = anaFirmaYoklama
+        ? buildAnaFirmaMykYoklamaPatch(personel, mykDurumu)
+        : (() => {
+            const draft: DraftRow = { ...getDraft(personel), mykDurumu };
+            const built = buildPersonelPatchFromDraft(personel, draft);
+            return built.error ? null : built.patch;
+          })();
+      if (!patch) continue;
       nextPatches = mergePendingPatches(nextPatches, patch);
       const firma = resolveBulkFirmaAdi(personel);
       nextIslemler.push(buildSessionIslemFromPatch(sessionId, firma, patch, email));
@@ -356,7 +360,9 @@ export const KampTaseronSayimTab: React.FC<KampTaseronSayimTabProps> = ({
     setSelectedPersonelIds(new Set());
     showStatus?.(
       'success',
-      `${applied} personele MYK ${mykDurumu} uygulandı ve taslağa kaydedildi. Onaya Gönder ile yöneticiye iletin.`
+      `${applied} personele MYK ${mykDurumu} yoklaması taslağa eklendi.${
+        anaFirmaYoklama ? ' MYK Onaya Gönder ile yöneticiye iletin.' : ' Sayım Kaydet ile yöneticiye iletin.'
+      }`
     );
   };
 
@@ -431,27 +437,14 @@ export const KampTaseronSayimTab: React.FC<KampTaseronSayimTabProps> = ({
   };
 
   const handleAnaFirmaMykChange = (personel: Personel, mykDurumu: 'VAR' | 'YOK' | 'BILINMIYOR') => {
-    if (mykDurumu === (personel.mykDurumu || 'BILINMIYOR')) {
-      showStatus?.('info', 'MYK durumu zaten aynı.');
-      return;
-    }
-
-    const { patch, error } = buildPersonelPatchFromDraft(personel, {
-      tcNo: digitsOnly(personel.tcNo || ''),
-      telefonNo: String(personel.telefonNo || '').trim(),
-      mykDurumu,
-    });
-    if (error || !patch) {
-      showStatus?.('error', error || 'MYK güncellenemedi.');
-      return;
-    }
+    const patch = buildAnaFirmaMykYoklamaPatch(personel, mykDurumu);
 
     setPendingPatches((prev) => mergePendingPatches(prev, patch));
     const islem = buildSessionIslemFromPatch(sessionId, CANONICAL_ANA_FIRMA_ADI, patch, email);
     setSessionIslemler((prev) => [...prev, islem]);
     showStatus?.(
       'success',
-      `${personel.ad} ${personel.soyad} MYK (${mykDurumu}) taslağa eklendi. Onaya Gönder ile yöneticiye iletin.`
+      `${personel.ad} ${personel.soyad} MYK (${mykDurumu}) taslağa eklendi. MYK Onaya Gönder ile yöneticiye iletin.`
     );
   };
 
