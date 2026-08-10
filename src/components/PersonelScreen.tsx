@@ -19,8 +19,8 @@ import {
   buildDedupedFirmaOptions,
   personelMatchesFirmaFilterKey,
 } from '../lib/firmaCanonicalUtils';
-import { getPersonelMissingDocs, getPersonellerWithMissingTcIban } from '../lib/personelMissingDocs';
-import { listOdemeEngelleri, validateIBAN, validateTC } from '../lib/personelOdemeUtils';
+import { getPersonelMissingDocs } from '../lib/personelMissingDocs';
+import { validateIBAN, validateTC } from '../lib/personelOdemeUtils';
 import {
   parseTaseronListeText,
   syncTaseronPersonelListe,
@@ -37,6 +37,7 @@ import { SmartCatalogField } from './SmartCatalogField';
 const MAX_PERSONEL_INLINE_MEDIA = 120_000;
 
 type PersonelScreenView = 'liste' | 'kayit';
+type KadroMode = 'ana_firma' | 'taseron';
 
 /** Büyük foto/PDF’leri merge yazımında tekrar gönderme — timeout + rollback engeli */
 function leanPersonelForFirestore(personel: Personel, prev?: Personel): Personel {
@@ -139,18 +140,18 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
   sahaFaaliyetleri = [],
 }) => {
   const [searchTerm, setSearchTerm] = useState("");
-  /** Boş = tüm firmalar; 'ANA_FIRMA' veya taşeron firma adı */
-  const [firmaFilters, setFirmaFilters] = useState<string[]>([]);
+  /** Ana firma modunda varsayılan ANA_FIRMA; taşeron modunda firma çoklu seçim */
+  const [firmaFilters, setFirmaFilters] = useState<string[]>(['ANA_FIRMA']);
   const [firmaFilterOpen, setFirmaFilterOpen] = useState(false);
   const firmaFilterRef = useRef<HTMLDivElement | null>(null);
-  const [odemeFilter, setOdemeFilter] = useState<'ALL' | 'TC' | 'IBAN' | 'ENGEL'>('ALL');
+  const [kadroMode, setKadroMode] = useState<KadroMode>('ana_firma');
   const [selectedPersonel, setSelectedPersonel] = useState<Personel | null>(null);
   const [dismissingPersonel, setDismissingPersonel] = useState<Personel | null>(null);
   const [dismissDateStr, setDismissDateStr] = useState<string>("");
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [historyPersonel, setHistoryPersonel] = useState<Personel | null>(null);
-  const [showOnlyActive, setShowOnlyActive] = useState(false);
-  const [showOnlyMissingTcIban, setShowOnlyMissingTcIban] = useState(false);
+  const [showOnlyActive, setShowOnlyActive] = useState(true);
+  const [showOnlyDuplicateNames, setShowOnlyDuplicateNames] = useState(false);
   const [sortMode, setSortMode] = useState<'NAME_ASC' | 'NAME_DESC' | 'DATE_NEWEST' | 'DATE_OLDEST'>('NAME_ASC');
   const [repairingKampTaseron, setRepairingKampTaseron] = useState(false);
   const [exportingListe, setExportingListe] = useState<'excel' | 'html' | null>(null);
@@ -1057,21 +1058,27 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
   };
 
   const firmaFilterSummary = useMemo(() => {
-    if (firmaFilters.length === 0) return 'Tüm Firmalar';
+    if (kadroMode === 'ana_firma') return CANONICAL_ANA_FIRMA_ADI;
+    if (firmaFilters.length === 0) return 'Tüm Taşeron Firmalar';
     if (firmaFilters.length === 1) {
       const hit = firmaFilterOptions.find((o) => o.key === firmaFilters[0]);
       return hit?.label || firmaFilters[0];
     }
-    return `${firmaFilters.length} firma seçili`;
-  }, [firmaFilters, firmaFilterOptions]);
+    return `${firmaFilters.length} taşeron seçili`;
+  }, [firmaFilters, firmaFilterOptions, kadroMode]);
 
-  const odemeEngelIds = useMemo(() => {
-    return new Set(listOdemeEngelleri(personeller).map((e) => e.personel.id));
-  }, [personeller]);
-
-  const missingTcIbanIds = useMemo(() => {
-    return new Set(getPersonellerWithMissingTcIban(personeller).map((r) => r.personel.id));
-  }, [personeller]);
+  const switchKadroMode = (mode: KadroMode) => {
+    setKadroMode(mode);
+    setFirmaFilterOpen(false);
+    setShowOnlyDuplicateNames(false);
+    if (mode === 'ana_firma') {
+      setFirmaFilters(['ANA_FIRMA']);
+      setShowOnlyActive(true);
+    } else {
+      setFirmaFilters([]);
+      setShowOnlyActive(true);
+    }
+  };
 
   /** Kampçı "KAMP PERSONEL" diye kaydetmiş ama kamp/cari taşeron olanlar */
   const misclassifiedKampTaseron = useMemo(() => {
@@ -1178,32 +1185,68 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
     return { activeCamp, anyCamp };
   }, [kampKayitlari]);
 
-  const filteredPersonel = personeller.filter((p) => {
-    // Ana firma kampçı kayıtları Onay Havuzu'nda kalır.
-    // Taşeron (SERAMİK EKİBİ vb.) kampçı kayıtları Personel Yönetimi'nde görünür.
-    if (
-      p.onayDurumu === 'ONAY BEKLİYOR' &&
-      p.kaynak === 'KAMPCI' &&
-      !isTaseronPersonel(p)
-    ) {
-      return false;
-    }
-    if (showOnlyActive && !is_aktif_status(p.durum)) return false;
-    if (showOnlyMissingTcIban && !missingTcIbanIds.has(p.id)) return false;
-    if (!matchesFirmaFilter(p, firmaFilters)) return false;
-    if (odemeFilter === 'TC' && validateTC(p.tcNo || '')) return false;
-    if (odemeFilter === 'IBAN' && validateIBAN(p.ibanNo || '')) return false;
-    if (odemeFilter === 'ENGEL') {
-      if (isTaseronPersonel(p) || !odemeEngelIds.has(p.id)) return false;
-    }
-    const term = searchTerm.toLowerCase();
-    const fullName = `${p.ad} ${p.soyad}`.toLowerCase();
-    return (
-      fullName.includes(term) ||
-      p.tcNo.includes(term) ||
-      displayPersonelGorev(p).toLowerCase().includes(term)
-    );
-  });
+  /** Aynı ad-soyad ile birden fazla kayıt — düzeltme için tespit */
+  const duplicateNameGroups = useMemo(() => {
+    const groups = new Map<string, Personel[]>();
+    personeller.forEach((p) => {
+      const name = `${p.ad} ${p.soyad}`.trim().toLowerCase();
+      if (!name || name.length < 3) return;
+      const list = groups.get(name) || [];
+      list.push(p);
+      groups.set(name, list);
+    });
+    return [...groups.entries()]
+      .filter(([, list]) => list.length > 1)
+      .sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0], 'tr'));
+  }, [personeller]);
+
+  const duplicateNameIds = useMemo(() => {
+    const ids = new Set<string>();
+    duplicateNameGroups.forEach(([, list]) => list.forEach((p) => ids.add(p.id)));
+    return ids;
+  }, [duplicateNameGroups]);
+
+  const filteredPersonel = useMemo(
+    () =>
+      personeller.filter((p) => {
+        if (
+          p.onayDurumu === 'ONAY BEKLİYOR' &&
+          p.kaynak === 'KAMPCI' &&
+          !isTaseronPersonel(p)
+        ) {
+          return false;
+        }
+
+        if (kadroMode === 'ana_firma') {
+          if (isTaseronPersonel(p)) return false;
+          if (!matchesFirmaFilter(p, firmaFilters.length ? firmaFilters : ['ANA_FIRMA'])) return false;
+        } else {
+          if (!isTaseronPersonel(p)) return false;
+          if (firmaFilters.length > 0 && !matchesFirmaFilter(p, firmaFilters)) return false;
+        }
+
+        if (showOnlyActive && !is_aktif_status(p.durum)) return false;
+        if (showOnlyDuplicateNames && !duplicateNameIds.has(p.id)) return false;
+
+        const term = searchTerm.toLowerCase();
+        const fullName = `${p.ad} ${p.soyad}`.toLowerCase();
+        return (
+          fullName.includes(term) ||
+          p.tcNo.includes(term) ||
+          displayPersonelGorev(p).toLowerCase().includes(term)
+        );
+      }),
+    [
+      personeller,
+      kadroMode,
+      firmaFilters,
+      showOnlyActive,
+      showOnlyDuplicateNames,
+      duplicateNameIds,
+      searchTerm,
+      firmaFilterOptions,
+    ]
+  );
 
   const personelQualityMap = useMemo(() => {
     const tcCount = new Map<string, number>();
@@ -1250,18 +1293,12 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
   }, [filteredPersonel, sortMode]);
 
   const buildListeRaporSubtitle = () => {
-    const parts: string[] = [firmaFilterSummary];
+    const parts: string[] = [
+      kadroMode === 'ana_firma' ? 'Ana Firma' : 'Taşeron',
+      firmaFilterSummary,
+    ];
     if (showOnlyActive) parts.push('Yalnız aktif');
-    if (showOnlyMissingTcIban) parts.push('Eksik TC/IBAN');
-    if (odemeFilter !== 'ALL') {
-      parts.push(
-        odemeFilter === 'TC'
-          ? 'Eksik TC'
-          : odemeFilter === 'IBAN'
-            ? 'Eksik IBAN'
-            : 'Ödeme engeli'
-      );
-    }
+    if (showOnlyDuplicateNames) parts.push('Çift isim');
     if (searchTerm.trim()) parts.push(`Arama: ${searchTerm.trim()}`);
     return parts.join(' · ');
   };
@@ -1353,7 +1390,7 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
     <div className="flex-grow min-h-[calc(100vh-52px)] flex flex-col font-sans select-none bg-gradient-to-b from-[#FFFBF7] via-white to-orange-50/20">
 
       {/* Liste / Kayıt alt sayfa geçişi */}
-      <div className="shrink-0 px-4 sm:px-6 pt-4 pb-3 border-b border-orange-100 bg-white/90 backdrop-blur-sm">
+      <div className="shrink-0 px-4 sm:px-6 pt-4 pb-3 border-b border-orange-100 bg-white/90 backdrop-blur-sm space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex gap-1 p-1 bg-orange-50 rounded-xl border border-orange-100">
             <button
@@ -1402,6 +1439,42 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
             </button>
           )}
         </div>
+
+        {screenView === 'liste' && (
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex gap-1 p-1 bg-slate-100 rounded-xl border border-slate-200">
+              <button
+                type="button"
+                onClick={() => switchKadroMode('ana_firma')}
+                className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold transition cursor-pointer ${
+                  kadroMode === 'ana_firma'
+                    ? 'bg-white text-orange-700 shadow-sm border border-orange-200'
+                    : 'text-slate-600 hover:bg-white/80'
+                }`}
+              >
+                <ShieldCheck size={14} />
+                Ana Firma Kadrosu
+              </button>
+              <button
+                type="button"
+                onClick={() => switchKadroMode('taseron')}
+                className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold transition cursor-pointer ${
+                  kadroMode === 'taseron'
+                    ? 'bg-white text-amber-800 shadow-sm border border-amber-300'
+                    : 'text-slate-600 hover:bg-white/80'
+                }`}
+              >
+                <Building2 size={14} />
+                Taşeron Kadrosu
+              </button>
+            </div>
+            <span className="text-[10px] text-slate-500 font-semibold">
+              {kadroMode === 'ana_firma'
+                ? 'Varsayılan: aktif · ana firma personeli'
+                : 'Taşeron firmalar · yoklama/maaş dışı'}
+            </span>
+          </div>
+        )}
       </div>
 
       <div className="flex-1 overflow-y-auto p-4 sm:p-6">
@@ -2035,16 +2108,23 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
               <Users size={16} className="text-[#f59e0b]" />
               <div>
                 <h4 className="font-display font-bold text-sm text-slate-800 uppercase tracking-widest">
-                  Kayıtlı Personel Kadrosu
+                  {kadroMode === 'ana_firma' ? 'Ana Firma Personel Kadrosu' : 'Taşeron Personel Kadrosu'}
                 </h4>
                 <p className="text-[11px] text-slate-500 mt-1">
-                  Gösterilen: {visiblePersonel.length} / Toplam: {personeller.length} · Sıralama: {sortMode === 'NAME_ASC' ? 'A → Z' : sortMode === 'NAME_DESC' ? 'Z → A' : sortMode === 'DATE_NEWEST' ? 'Yeni → Eski' : 'Eski → Yeni'}
+                  Gösterilen: {visiblePersonel.length} / Toplam: {personeller.length} · {firmaFilterSummary}
+                  {showOnlyActive ? ' · Aktif' : ' · Tüm durumlar'}
+                  {duplicateNameGroups.length > 0 && (
+                    <span className="text-rose-600 font-bold">
+                      {' '}· {duplicateNameGroups.length} çift isim grubu ({duplicateNameIds.size} kayıt)
+                    </span>
+                  )}
                 </p>
               </div>
             </div>
 
             <div className="flex flex-col gap-3 w-full lg:w-auto">
               <div className="flex flex-col gap-3 md:flex-row md:items-center md:gap-2 flex-wrap">
+                {kadroMode === 'taseron' && (
                 <div className="relative" ref={firmaFilterRef}>
                   <button
                     type="button"
@@ -2054,7 +2134,7 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
                         ? 'bg-amber-50 text-amber-900 border-amber-300'
                         : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
                     }`}
-                    title="Firma seç (çoklu)"
+                    title="Taşeron firma seç (çoklu)"
                   >
                     <Building2 size={12} className="shrink-0" />
                     <span className="truncate">{firmaFilterSummary}</span>
@@ -2068,7 +2148,7 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
                     <div className="absolute left-0 top-full mt-1 z-40 w-72 max-h-72 overflow-hidden bg-white border border-slate-200 rounded-xl shadow-lg flex flex-col">
                       <div className="px-3 py-2 border-b border-slate-100 flex items-center justify-between gap-2 bg-slate-50">
                         <span className="text-[10px] font-black uppercase tracking-wide text-slate-600">
-                          Firma seç
+                          Taşeron firma
                         </span>
                         <div className="flex items-center gap-1">
                           <button
@@ -2077,13 +2157,6 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
                             className="text-[9px] font-bold px-2 py-1 rounded-lg bg-white border border-slate-200 text-slate-600 hover:bg-slate-100 cursor-pointer"
                           >
                             Tümü
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setFirmaFilters(['ANA_FIRMA'])}
-                            className="text-[9px] font-bold px-2 py-1 rounded-lg bg-slate-900 text-white hover:bg-black cursor-pointer"
-                          >
-                            Sadece Ana Firma
                           </button>
                         </div>
                       </div>
@@ -2110,24 +2183,19 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
                       </div>
                       {firmaFilters.length > 0 && (
                         <div className="px-3 py-2 border-t border-slate-100 text-[9px] text-slate-500 font-medium">
-                          Seçili firmaların personeli listeleniyor · {filteredPersonel.length} kişi
+                          Seçili taşeron firmalar · {filteredPersonel.length} kişi
                         </div>
                       )}
                     </div>
                   )}
                 </div>
+                )}
 
-                <select
-                  value={odemeFilter}
-                  onChange={(e) => setOdemeFilter(e.target.value as 'ALL' | 'TC' | 'IBAN' | 'ENGEL')}
-                  className="text-[10px] font-bold px-3 py-2 rounded-xl border border-slate-200 bg-white text-slate-700 cursor-pointer"
-                  title="Eksik TC / IBAN / Ödeme engeli"
-                >
-                  <option value="ALL">Ödeme: Tümü</option>
-                  <option value="TC">Eksik TC</option>
-                  <option value="IBAN">Eksik/Geçersiz IBAN</option>
-                  <option value="ENGEL">Ödeme Engeli (Ana Firma)</option>
-                </select>
+                {kadroMode === 'ana_firma' && (
+                  <span className="text-[10px] font-bold px-3 py-2 rounded-xl border border-orange-200 bg-orange-50 text-orange-900">
+                    {CANONICAL_ANA_FIRMA_ADI}
+                  </span>
+                )}
 
                 <button
                   type="button"
@@ -2135,21 +2203,23 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
                   className={`text-[10px] font-bold px-3 py-2 rounded-xl border cursor-pointer ${showOnlyActive ? 'bg-emerald-600 text-white border-emerald-700' : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'}`}
                   title="Sadece aktif personel göster"
                 >
-                  {showOnlyActive ? 'Sadece Aktifler' : 'Tümü Göster'}
+                  {showOnlyActive ? 'Sadece Aktifler' : 'Pasifler Dahil'}
                 </button>
 
-                <button
-                  type="button"
-                  onClick={() => setShowOnlyMissingTcIban((prev) => !prev)}
-                  className={`text-[10px] font-bold px-3 py-2 rounded-xl border cursor-pointer ${
-                    showOnlyMissingTcIban
-                      ? 'bg-rose-600 text-white border-rose-700'
-                      : 'bg-white text-rose-700 border-rose-200 hover:bg-rose-50'
-                  }`}
-                  title={`TC veya IBAN bilgisi eksik/hatalı ${missingTcIbanIds.size} personeli göster`}
-                >
-                  Eksik TC/IBAN{missingTcIbanIds.size > 0 ? ` (${missingTcIbanIds.size})` : ''}
-                </button>
+                {duplicateNameIds.size > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setShowOnlyDuplicateNames((prev) => !prev)}
+                    className={`text-[10px] font-bold px-3 py-2 rounded-xl border cursor-pointer ${
+                      showOnlyDuplicateNames
+                        ? 'bg-rose-600 text-white border-rose-700'
+                        : 'bg-rose-50 text-rose-800 border-rose-200 hover:bg-rose-100'
+                    }`}
+                    title="Aynı ad-soyad ile birden fazla kayıt"
+                  >
+                    Çift İsim ({duplicateNameIds.size})
+                  </button>
+                )}
 
                 {misclassifiedKampTaseron.length > 0 && (
                   <button
@@ -2191,6 +2261,7 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
                   Liste HTML
                 </button>
 
+                {kadroMode === 'taseron' && (
                 <button
                   type="button"
                   onClick={openListeModal}
@@ -2199,6 +2270,7 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
                 >
                   Taşeron Liste Güncelle
                 </button>
+                )}
 
                 <select
                   value={sortMode}
@@ -2227,6 +2299,34 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
               </div>
             </div>
           </div>
+
+        {duplicateNameGroups.length > 0 && (
+          <div className="mx-4 mt-0 mb-0 rounded-xl border border-rose-200 bg-rose-50/80 px-4 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+            <div className="flex items-start gap-2 text-rose-900">
+              <AlertCircle size={16} className="shrink-0 mt-0.5" />
+              <div>
+                <p className="text-xs font-bold">
+                  {duplicateNameGroups.length} ad-soyad için çift kayıt tespit edildi ({duplicateNameIds.size} personel)
+                </p>
+                <p className="text-[10px] text-rose-700/90 mt-0.5">
+                  Örnek: {duplicateNameGroups.slice(0, 3).map(([name, list]) => `${name} (${list.length})`).join(' · ')}
+                  {duplicateNameGroups.length > 3 ? ' …' : ''} — birleştirme/düzeltme sonraki adımda yapılacak.
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowOnlyDuplicateNames((prev) => !prev)}
+              className={`shrink-0 text-[10px] font-bold px-3 py-2 rounded-xl border cursor-pointer ${
+                showOnlyDuplicateNames
+                  ? 'bg-rose-700 text-white border-rose-800'
+                  : 'bg-white text-rose-800 border-rose-300 hover:bg-rose-100'
+              }`}
+            >
+              {showOnlyDuplicateNames ? 'Tüm listeyi göster' : 'Sadece çift isimleri göster'}
+            </button>
+          </div>
+        )}
 
         {/* Scrollable list grid */}
         <div className="flex-1 overflow-y-auto p-4 space-y-3">
@@ -2292,11 +2392,16 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
                             Çift TC
                           </span>
                         )}
-                        {personelQualityMap.nameCount.get(`${p.ad} ${p.soyad}`.trim().toLowerCase())! > 1 && (
-                          <span className="text-[10px] bg-rose-50 text-rose-800 border border-rose-200 px-2 py-0.5 rounded-full font-bold">
-                            Çift İsim
-                          </span>
-                        )}
+                        {(() => {
+                          const nameKey = `${p.ad} ${p.soyad}`.trim().toLowerCase();
+                          const dupCount = personelQualityMap.nameCount.get(nameKey) || 0;
+                          if (dupCount <= 1) return null;
+                          return (
+                            <span className="text-[10px] bg-rose-50 text-rose-800 border border-rose-200 px-2 py-0.5 rounded-full font-bold">
+                              Çift İsim ×{dupCount}
+                            </span>
+                          );
+                        })()}
                         {(personelSahaTagData.byId.has(p.id) || personelSahaTagData.normalizedNames.has(normalizeTurkishName(`${p.ad} ${p.soyad}`))) && (
                           <span className="text-[10px] bg-emerald-50 text-emerald-800 border border-emerald-200 px-2 py-0.5 rounded-full font-bold">
                             Saha Kayıtlı
