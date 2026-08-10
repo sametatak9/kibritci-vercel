@@ -1,7 +1,9 @@
 import { Personel } from '../types/erp';
+import { fetchCollection } from './firebase';
 import { levenshteinDistance, normalizeStockCompareName } from './duplicateNameUtils';
 import { validateTC } from './personelOdemeUtils';
 import { firmaEslesir } from './taseronUtils';
+import { saveDocument } from './firebase';
 
 export type PersonelMatchReason =
   | 'TC'
@@ -174,6 +176,12 @@ export function resolvePersonelForGirisOnay(
     if (byId) return byId;
   }
 
+  const tc = digitsOnly(item.tcNo || '');
+  if (validateTC(tc)) {
+    const byTc = findPersonelByTcInList(personeller, tc);
+    if (byTc) return byTc;
+  }
+
   const matches = findPersonelMatches(personeller, {
     rawName: `${item.ad || ''} ${item.soyad || ''}`.trim(),
     tcNo: item.tcNo,
@@ -183,4 +191,99 @@ export function resolvePersonelForGirisOnay(
   });
 
   return pickBestPersonelMatch(matches)?.personel;
+}
+
+/** Aynı oturumda eşzamanlı personel oluşturmayı sıraya al (Firestore yarışını önler). */
+let dedupUpsertChain: Promise<unknown> = Promise.resolve();
+
+function withDedupLock<T>(fn: () => Promise<T>): Promise<T> {
+  const run = dedupUpsertChain.then(fn, fn);
+  dedupUpsertChain = run.then(
+    () => undefined,
+    () => undefined
+  );
+  return run;
+}
+
+/** Yerel + Firestore personel listesini birleştir (mükerrer kayıt önleme). */
+export async function loadPersonellerForDedup(local: Personel[] = []): Promise<Personel[]> {
+  let remote: Personel[] = [];
+  try {
+    remote = (await fetchCollection<Personel>('personeller')) as Personel[];
+  } catch (err) {
+    console.warn('[personel-dedup] Firestore personel listesi alınamadı, yerel liste kullanılıyor:', err);
+  }
+  const byId = new Map<string, Personel>();
+  for (const p of [...local, ...remote]) {
+    if (!p?.id) continue;
+    byId.set(p.id, p);
+  }
+  return Array.from(byId.values());
+}
+
+/** Yeni personel kaydı açmadan önce birleştirilmiş listede ara; varsa güncelle. */
+export async function upsertPersonelAvoidDuplicate(
+  localPersoneller: Personel[],
+  candidate: Personel,
+  matchOpts: {
+    rawName?: string;
+    tcNo?: string;
+    telefonNo?: string;
+    firmaAdi?: string;
+    firmaTipi?: 'ANA_FIRMA' | 'TASERON';
+  }
+): Promise<{ personel: Personel; created: boolean; merged: boolean }> {
+  return withDedupLock(async () => {
+  const merged = await loadPersonellerForDedup(localPersoneller);
+  const existing =
+    resolvePersonelForGirisOnay(merged, {
+      personelId: candidate.id,
+      ad: candidate.ad,
+      soyad: candidate.soyad,
+      tcNo: matchOpts.tcNo ?? candidate.tcNo,
+      telefonNo: matchOpts.telefonNo ?? candidate.telefonNo,
+      firmaAdi: matchOpts.firmaAdi ?? candidate.firmaAdi,
+      firmaTipi: matchOpts.firmaTipi ?? candidate.firmaTipi,
+    }) ||
+    pickBestPersonelMatch(
+      findPersonelMatches(merged, {
+        rawName: matchOpts.rawName || `${candidate.ad} ${candidate.soyad}`.trim(),
+        tcNo: matchOpts.tcNo ?? candidate.tcNo,
+        telefonNo: matchOpts.telefonNo ?? candidate.telefonNo,
+        firmaAdi: matchOpts.firmaAdi ?? candidate.firmaAdi,
+        firmaTipi: matchOpts.firmaTipi ?? (candidate.firmaTipi === 'TASERON' ? 'TASERON' : 'ANA_FIRMA'),
+      })
+    )?.personel;
+
+  if (existing) {
+    const next: Personel = {
+      ...existing,
+      ...candidate,
+      id: existing.id,
+      ad: candidate.ad || existing.ad,
+      soyad: candidate.soyad || existing.soyad,
+      tcNo: digitsOnly(candidate.tcNo || '') || existing.tcNo,
+      telefonNo: candidate.telefonNo?.trim() || existing.telefonNo,
+      firmaAdi: candidate.firmaAdi || existing.firmaAdi,
+      firmaTipi: candidate.firmaTipi || existing.firmaTipi,
+      gorev: candidate.gorev || existing.gorev,
+      durum: candidate.durum !== undefined ? candidate.durum : existing.durum,
+    };
+    await saveDocument('personeller', next);
+    return { personel: next, created: false, merged: true };
+  }
+
+  const tc = digitsOnly(candidate.tcNo || '');
+  if (validateTC(tc)) {
+    const dupTc = findPersonelByTcInList(merged, tc);
+    if (dupTc) {
+      throw new Error(
+        `Bu TC zaten kayıtlı: ${dupTc.ad} ${dupTc.soyad}. Yeni kayıt açılamaz — mevcut kaydı güncelleyin.`
+      );
+    }
+  }
+
+  await saveDocument('personeller', candidate);
+  return { personel: candidate, created: true, merged: false };
+  });
 }

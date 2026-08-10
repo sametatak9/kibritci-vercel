@@ -8,10 +8,9 @@ import {
   XCircle, MinusCircle, Hash, Download, RefreshCw, Eye, RotateCcw,
 } from 'lucide-react';
 import { Personel, AylikYoklamaMap, AracBakim, KampKaydi, KampOdasi, HazirTutanak, KasaHareketi, SahaFaaliyeti, MaaşOdeme } from '../types/erp';
-import { getYoklamaDay, iterateMonthYoklama, isDayActiveForPersonel, asYoklamaGunMap, parseYoklamaDateKey } from '../lib/yoklamaUtils';
+import { getYoklamaDay, iterateMonthYoklama, isDayActiveForPersonel, asYoklamaGunMap, parseYoklamaDateKey, isTaseronPersonel } from '../lib/yoklamaUtils';
 import { isPersonelActiveOnDate } from '../lib/guvenlikHelpers';
 import { isPersonelAktifDurum } from '../lib/kampPlacementUtils';
-import { isTaseronPersonel } from '../lib/yoklamaUtils';
 import { getPersonKartFaaliyetleri } from '../lib/faaliyetPersonelUtils';
 import { useMobilFaaliyetSnapshots } from '../lib/useMobilFaaliyetSnapshots';
 import { PersonelIdCard } from './PersonelIdCard';

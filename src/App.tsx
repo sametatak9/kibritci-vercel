@@ -147,6 +147,7 @@ const PublicSatinAlmaShareScreen = lazy(() => import('./components/PublicSatinAl
 import { fetchSatinAlmaPublicShare } from './lib/satinAlmaPublicShare';
 import { installReportEmailGlobalBridge } from './lib/reportEmail';
 import { CANONICAL_ANA_FIRMA_ADI, isKibritciCompany, normalizeTurkishName } from './lib/yoklamaUtils';
+import { findPersonelMatches, pickBestPersonelMatch } from './lib/personelMatchUtils';
 import { isActivePortalDurum } from './lib/roleClaims';
 import {
   buildSaIrsaliyeFormPrefill,
@@ -2082,16 +2083,27 @@ export default function App() {
         const nameKeyLower = nameClean.toLocaleLowerCase('tr-TR');
         const nameKeyNorm = normalizeTurkishName(nameClean);
 
+        const kampFirma = (k.calistigiFirma || '').trim();
+        const kampFirmaUpper = kampFirma.toLocaleUpperCase('tr-TR');
+        const isAnaFirma =
+          k.firmaTipi === 'ANA_FIRMA' ||
+          kampFirmaUpper === 'ANA FİRMA' ||
+          kampFirmaUpper === 'ANA FIRMA' ||
+          (Boolean(kampFirma) && isKibritciCompany(kampFirma));
+
+        const combinedPool = [...personeller, ...toCreate];
+
         const existsById = Boolean(
-          k.personelId && personeller.some((p) => p.id === k.personelId)
+          k.personelId && combinedPool.some((p) => p.id === k.personelId)
         );
-        const matchedByName = personeller.find((p) => {
-          const fullName = `${p.ad} ${p.soyad}`.trim();
-          return (
-            fullName.toLocaleLowerCase('tr-TR') === nameKeyLower ||
-            normalizeTurkishName(fullName) === nameKeyNorm
-          );
-        });
+
+        const matchedPerson = pickBestPersonelMatch(
+          findPersonelMatches(combinedPool, {
+            rawName: nameClean,
+            firmaAdi: isAnaFirma ? CANONICAL_ANA_FIRMA_ADI : kampFirmaUpper || kampFirma,
+            firmaTipi: isAnaFirma ? 'ANA_FIRMA' : 'TASERON',
+          })
+        )?.personel;
 
         // Bilinçli silme engeli — yalnızca bunlar tahliye edilir
         if (personelAutoCreateBlocklistRef.current.has(nameKeyLower)) {
@@ -2108,37 +2120,33 @@ export default function App() {
         }
         if (isPlaceholderPersonelName(nameClean)) return;
 
-        // ID yok / kaymış ama isim mevcut → yeniden bağla (tahliye YOK)
-        if (!existsById && matchedByName) {
-          if (k.personelId !== matchedByName.id) {
-            relinkPatches.set(k.id, matchedByName.id);
+        // ID kaymış / isim+firma eşleşmesi → yeniden bağla (yeni personel açma)
+        if (!existsById && matchedPerson) {
+          if (k.personelId !== matchedPerson.id) {
+            relinkPatches.set(k.id, matchedPerson.id);
           }
           return;
         }
 
-        if (existsById || matchedByName) return;
+        if (existsById || matchedPerson) return;
 
-        const alreadyQueued = toCreate.some((p) => {
-          const fullName = `${p.ad} ${p.soyad}`.trim();
-          return (
-            fullName.toLocaleLowerCase('tr-TR') === nameKeyLower ||
-            normalizeTurkishName(fullName) === nameKeyNorm
-          );
-        });
+        const alreadyQueued = toCreate.some((p) =>
+          Boolean(
+            pickBestPersonelMatch(
+              findPersonelMatches([p], {
+                rawName: nameClean,
+                firmaAdi: isAnaFirma ? CANONICAL_ANA_FIRMA_ADI : kampFirmaUpper || kampFirma,
+                firmaTipi: isAnaFirma ? 'ANA_FIRMA' : 'TASERON',
+              })
+            )
+          )
+        );
 
         if (alreadyQueued) return;
 
         const parts = nameClean.split(/\s+/);
         const ad = parts.length > 1 ? parts.slice(0, -1).join(' ') : parts[0];
         const soyad = parts.length > 1 ? parts[parts.length - 1] : '';
-
-        const kampFirma = (k.calistigiFirma || '').trim();
-        const kampFirmaUpper = kampFirma.toLocaleUpperCase('tr-TR');
-        const isAnaFirma =
-          k.firmaTipi === 'ANA_FIRMA' ||
-          kampFirmaUpper === 'ANA FİRMA' ||
-          kampFirmaUpper === 'ANA FIRMA' ||
-          (Boolean(kampFirma) && isKibritciCompany(kampFirma));
 
         const newP: Personel = {
           id: k.personelId || `p_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
