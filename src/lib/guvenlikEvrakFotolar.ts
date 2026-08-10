@@ -1,6 +1,6 @@
-/** Kapı evrakı: 3 yöntemli fotoğraf (görünmeme sorununu çözmek için). */
+/** Kapı evrakı: tek evrak fotoğrafı (+ isteğe bağlı tarama PDF). */
 
-export type GuvenlikFotoMetod = 'KALEM' | 'FIRMA' | 'FATURA';
+export type GuvenlikFotoMetod = 'EVRAK' | 'KALEM' | 'FIRMA' | 'FATURA';
 
 export type GuvenlikFotoSlot = {
   id: string;
@@ -11,32 +11,40 @@ export type GuvenlikFotoSlot = {
 };
 
 export type GuvenlikFotoPaket = {
+  /** Birincil: tek evrak fotoğrafı */
+  evrakFotolar: GuvenlikFotoSlot[];
+  /** Geriye uyum: eski 3 yuvadan kalanlar */
   kalemFotolar: GuvenlikFotoSlot[];
   firmaFotolar: GuvenlikFotoSlot[];
   faturaFotolar: GuvenlikFotoSlot[];
+  /** Fotoğraftan üretilen taranmış PDF (data URL veya http) */
+  scanPdfUrl?: string;
 };
 
 export const GUVENLIK_FOTO_METOD_LABEL: Record<GuvenlikFotoMetod, string> = {
+  EVRAK: 'Evrak fotoğrafı',
   FIRMA: '1. Firma ismi görünen',
   KALEM: '2. Ürünler görünen',
   FATURA: '3. Tam hali',
 };
 
 export const GUVENLIK_FOTO_METOD_HINT: Record<GuvenlikFotoMetod, string> = {
+  EVRAK: 'Belgenin net bir fotoğrafı — tarama PDF otomatik oluşturulur',
   FIRMA: 'Evrakta / antette firma unvanı net görünsün',
   KALEM: 'Ürün adları ve kilolar net görünsün',
   FATURA: 'Evrakın tamamı tek karede net görünsün',
 };
 
 export function emptyFotoPaket(): GuvenlikFotoPaket {
-  return { kalemFotolar: [], firmaFotolar: [], faturaFotolar: [] };
+  return { evrakFotolar: [], kalemFotolar: [], firmaFotolar: [], faturaFotolar: [] };
 }
 
 export function flattenGuvenlikFotolar(paket: Partial<GuvenlikFotoPaket> | null | undefined): GuvenlikFotoSlot[] {
   if (!paket) return [];
   return [
-    ...(paket.kalemFotolar || []),
+    ...(paket.evrakFotolar || []),
     ...(paket.firmaFotolar || []),
+    ...(paket.kalemFotolar || []),
     ...(paket.faturaFotolar || []),
   ];
 }
@@ -54,15 +62,18 @@ export function isLikelyImageUrl(url: string): boolean {
   return false;
 }
 
-/** Geriye uyumlu tek fotoUrl: önce firma, kalem, tam hali. */
+/** Geriye uyumlu tek fotoUrl: önce evrak, firma, kalem, tam hali. */
 export function pickPrimaryFotoUrl(doc: {
   fotoUrl?: string;
   fotoUrls?: string[];
+  scanPdfUrl?: string;
+  evrakFotolar?: GuvenlikFotoSlot[];
   kalemFotolar?: GuvenlikFotoSlot[];
   firmaFotolar?: GuvenlikFotoSlot[];
   faturaFotolar?: GuvenlikFotoSlot[];
 }): string {
   const fromPaket =
+    slotDisplayUrl(doc.evrakFotolar?.[0]) ||
     slotDisplayUrl(doc.firmaFotolar?.[0]) ||
     slotDisplayUrl(doc.kalemFotolar?.[0]) ||
     slotDisplayUrl(doc.faturaFotolar?.[0]) ||
@@ -73,36 +84,55 @@ export function pickPrimaryFotoUrl(doc: {
   return '';
 }
 
+/** Tarama PDF veya birincil foto */
+export function pickEvrakDisplayUrl(doc: {
+  scanPdfUrl?: string;
+  fotoUrl?: string;
+  evrakFotolar?: GuvenlikFotoSlot[];
+  kalemFotolar?: GuvenlikFotoSlot[];
+  firmaFotolar?: GuvenlikFotoSlot[];
+  faturaFotolar?: GuvenlikFotoSlot[];
+}): string {
+  if (String(doc.scanPdfUrl || '').trim()) return String(doc.scanPdfUrl);
+  return pickPrimaryFotoUrl(doc);
+}
+
 export function collectAllFotoUrls(doc: {
   fotoUrl?: string;
   fotoUrls?: string[];
+  scanPdfUrl?: string;
+  evrakFotolar?: GuvenlikFotoSlot[];
   kalemFotolar?: GuvenlikFotoSlot[];
   firmaFotolar?: GuvenlikFotoSlot[];
   faturaFotolar?: GuvenlikFotoSlot[];
 }): string[] {
   const urls = [
+    ...(doc.evrakFotolar || []).map((f) => f.dataUrl),
     ...(doc.firmaFotolar || []).map((f) => f.dataUrl),
     ...(doc.kalemFotolar || []).map((f) => f.dataUrl),
     ...(doc.faturaFotolar || []).map((f) => f.dataUrl),
   ].filter(Boolean);
+  if (doc.scanPdfUrl) urls.unshift(doc.scanPdfUrl);
   if (urls.length) return Array.from(new Set(urls));
   if (Array.isArray(doc.fotoUrls) && doc.fotoUrls.length) return doc.fotoUrls.filter(Boolean);
   if (doc.fotoUrl) return [doc.fotoUrl];
   return [];
 }
 
-export function countPaketFotolar(paket: GuvenlikFotoPaket): number {
+export function countPaketFotolar(paket: Partial<GuvenlikFotoPaket> | null | undefined): number {
   return flattenGuvenlikFotolar(paket).length;
 }
 
-/** Ana firma evrakı: 3 yuvanın her birinde en az 1 foto zorunlu */
-export function hasAnaFirmaUcFotograf(paket: Partial<GuvenlikFotoPaket> | null | undefined): boolean {
+/** En az bir evrak fotoğrafı (yeni tek foto veya eski 3 yuva) */
+export function hasEvrakFotografi(paket: Partial<GuvenlikFotoPaket> | null | undefined): boolean {
   if (!paket) return false;
-  return (
-    (paket.firmaFotolar?.length || 0) >= 1 &&
-    (paket.kalemFotolar?.length || 0) >= 1 &&
-    (paket.faturaFotolar?.length || 0) >= 1
-  );
+  if ((paket.evrakFotolar?.length || 0) >= 1) return true;
+  return flattenGuvenlikFotolar(paket).length >= 1;
+}
+
+/** @deprecated hasEvrakFotografi kullanın */
+export function hasAnaFirmaUcFotograf(paket: Partial<GuvenlikFotoPaket> | null | undefined): boolean {
+  return hasEvrakFotografi(paket);
 }
 
 export type GuvenlikFirmaKaynakTipi = 'ANA_FIRMA' | 'TASERON';
@@ -128,6 +158,7 @@ export type GuvenlikUploadPackage = {
   plaka: string;
   saId: string;
   kalemler: GuvenlikUploadKalem[];
+  scanPdfUrl?: string;
 } & GuvenlikFotoPaket;
 
 export function createEmptyUploadKalem(): GuvenlikUploadKalem {

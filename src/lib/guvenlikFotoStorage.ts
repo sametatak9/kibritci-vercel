@@ -112,28 +112,40 @@ export async function prepareGuvenlikFotoPaketForSave(
   };
 
   let result: GuvenlikFotoPaket = {
+    evrakFotolar: await mapSlots(paket.evrakFotolar || []),
     kalemFotolar: await mapSlots(paket.kalemFotolar || []),
     firmaFotolar: await mapSlots(paket.firmaFotolar || []),
     faturaFotolar: await mapSlots(paket.faturaFotolar || []),
+    scanPdfUrl: paket.scanPdfUrl,
   };
+
+  // Tarama PDF çok büyükse atla (foto yine kalsın)
+  const scanRaw = String(result.scanPdfUrl || '').trim();
+  if (scanRaw.startsWith('data:') && scanRaw.length > MAX_SLOT_CHARS) {
+    result = { ...result, scanPdfUrl: undefined };
+  }
 
   // Toplam hâlâ büyükse yalnızca ilk foto kalsın
   if (sumPaketDataChars(result) > MAX_TOTAL_DATA_CHARS) {
     const first =
-      result.kalemFotolar[0] || result.firmaFotolar[0] || result.faturaFotolar[0] || null;
+      result.evrakFotolar[0] ||
+      result.kalemFotolar[0] ||
+      result.firmaFotolar[0] ||
+      result.faturaFotolar[0] ||
+      null;
     if (!first) {
-      return { kalemFotolar: [], firmaFotolar: [], faturaFotolar: [] };
+      return { evrakFotolar: [], kalemFotolar: [], firmaFotolar: [], faturaFotolar: [] };
     }
     const capped = await capSlotForFirestore(first);
     if (!capped || String(capped.dataUrl || '').length > MAX_SLOT_CHARS) {
-      return { kalemFotolar: [], firmaFotolar: [], faturaFotolar: [] };
+      return { evrakFotolar: [], kalemFotolar: [], firmaFotolar: [], faturaFotolar: [] };
     }
-    result = { kalemFotolar: [capped], firmaFotolar: [], faturaFotolar: [] };
+    result = { evrakFotolar: [capped], kalemFotolar: [], firmaFotolar: [], faturaFotolar: [] };
   }
 
   // Son çare: fotoğrafsız paket (meta kayıt yine gitsin)
   if (sumPaketDataChars(result) > MAX_TOTAL_DATA_CHARS) {
-    return { kalemFotolar: [], firmaFotolar: [], faturaFotolar: [] };
+    return { evrakFotolar: [], kalemFotolar: [], firmaFotolar: [], faturaFotolar: [] };
   }
 
   return result;
@@ -142,12 +154,14 @@ export async function prepareGuvenlikFotoPaketForSave(
 function sumPaketDataChars(paket: GuvenlikFotoPaket): number {
   let n = 0;
   for (const s of [
+    ...(paket.evrakFotolar || []),
     ...(paket.kalemFotolar || []),
     ...(paket.firmaFotolar || []),
     ...(paket.faturaFotolar || []),
   ]) {
     n += String(s.dataUrl || '').length;
   }
+  n += String(paket.scanPdfUrl || '').length;
   return n;
 }
 
@@ -220,9 +234,11 @@ export async function uploadGuvenlikFotoPaket(
   };
 
   return {
+    evrakFotolar: await mapSlots(paket.evrakFotolar || []),
     kalemFotolar: await mapSlots(paket.kalemFotolar || []),
     firmaFotolar: await mapSlots(paket.firmaFotolar || []),
     faturaFotolar: await mapSlots(paket.faturaFotolar || []),
+    scanPdfUrl: paket.scanPdfUrl,
   };
 }
 
@@ -262,6 +278,8 @@ export async function aggressiveCompressPaket(
     kalemFotolar: await Promise.all((paket.kalemFotolar || []).map(compressSlot)),
     firmaFotolar: await Promise.all((paket.firmaFotolar || []).map(compressSlot)),
     faturaFotolar: await Promise.all((paket.faturaFotolar || []).map(compressSlot)),
+    evrakFotolar: await Promise.all((paket.evrakFotolar || []).map(compressSlot)),
+    scanPdfUrl: paket.scanPdfUrl,
   };
 }
 
@@ -270,31 +288,37 @@ export async function aggressiveCompressPaket(
  * fotoUrls yalnızca http(s); inline data URL tekrar edilmez.
  */
 export function buildLeanGuvenlikEvrakFotoFields(paket: GuvenlikFotoPaket): {
+  evrakFotolar: GuvenlikFotoSlot[];
   kalemFotolar: GuvenlikFotoSlot[];
   firmaFotolar: GuvenlikFotoSlot[];
   faturaFotolar: GuvenlikFotoSlot[];
   fotoUrl: string;
   fotoUrls: string[];
+  scanPdfUrl: string;
   storageBackend: string;
 } {
+  const evrakFotolar = paket.evrakFotolar || [];
   const kalemFotolar = paket.kalemFotolar || [];
   const firmaFotolar = paket.firmaFotolar || [];
   const faturaFotolar = paket.faturaFotolar || [];
-  const all = [...kalemFotolar, ...firmaFotolar, ...faturaFotolar];
+  const all = [...evrakFotolar, ...kalemFotolar, ...firmaFotolar, ...faturaFotolar];
   const fotoUrl = all[0]?.dataUrl || '';
   const httpUrls = all.map((s) => s.dataUrl).filter((u) => /^https?:\/\//i.test(String(u || '')));
   const storageBackend = httpUrls.length > 0 ? 'FIREBASE_STORAGE' : 'INLINE_DATA_URL';
   return {
+    evrakFotolar,
     kalemFotolar,
     firmaFotolar,
     faturaFotolar,
     fotoUrl,
     fotoUrls: httpUrls.length ? Array.from(new Set(httpUrls)) : [],
+    scanPdfUrl: String(paket.scanPdfUrl || '').trim(),
     storageBackend,
   };
 }
 
 export function metodLabelShort(metod: GuvenlikFotoMetod): string {
+  if (metod === 'EVRAK') return 'Evrak';
   if (metod === 'KALEM') return 'Kalem';
   if (metod === 'FIRMA') return 'Firma';
   return 'Fatura';
