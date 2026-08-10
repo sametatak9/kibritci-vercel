@@ -761,6 +761,7 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
 
   const gunRaporGrupHeaderClass: Record<GunlukYoklamaRaporGrup, string> = {
     FORMEN: 'bg-violet-700 text-white',
+    USTA: 'bg-fuchsia-700 text-white',
     SENOR: 'bg-teal-700 text-white',
     KAMP: 'bg-amber-700 text-white',
     DUZ_ISCI: 'bg-blue-700 text-white',

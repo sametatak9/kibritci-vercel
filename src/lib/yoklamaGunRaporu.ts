@@ -1,5 +1,5 @@
 import { AylikYoklamaMap, Personel, YoklamaDurum } from '../types/erp';
-import { normalizeGorev } from './gorevUtils';
+import { normalizeGorev, isUstaGorev } from './gorevUtils';
 import {
   buildPersonelListForMonth,
   getYoklamaDay,
@@ -37,10 +37,11 @@ export interface GunlukYoklamaOzet {
 }
 
 /** Günlük yoklama raporu görev grupları */
-export type GunlukYoklamaRaporGrup = 'FORMEN' | 'SENOR' | 'KAMP' | 'DUZ_ISCI' | 'DIGER';
+export type GunlukYoklamaRaporGrup = 'FORMEN' | 'USTA' | 'SENOR' | 'KAMP' | 'DUZ_ISCI' | 'DIGER';
 
 export const GUNLUK_YOKLAMA_RAPOR_GRUP_ORDER: GunlukYoklamaRaporGrup[] = [
   'FORMEN',
+  'USTA',
   'SENOR',
   'KAMP',
   'DUZ_ISCI',
@@ -51,6 +52,8 @@ export function gunlukYoklamaRaporGrupLabel(grup: GunlukYoklamaRaporGrup): strin
   switch (grup) {
     case 'FORMEN':
       return 'FORMEN';
+    case 'USTA':
+      return 'USTA';
     case 'SENOR':
       return 'ŞENÖR';
     case 'KAMP':
@@ -64,6 +67,7 @@ export function gunlukYoklamaRaporGrupLabel(grup: GunlukYoklamaRaporGrup): strin
 
 export function resolveGunlukYoklamaRaporGrup(gorev?: string): GunlukYoklamaRaporGrup {
   if (isFormenGorev(gorev)) return 'FORMEN';
+  if (isUstaGorev(gorev)) return 'USTA';
   if (isSenorGorev(gorev)) return 'SENOR';
   if (isKampciGorev(gorev)) return 'KAMP';
   if (
@@ -86,7 +90,7 @@ export interface GunlukYoklamaGorevGrubu {
   ozet: GunlukYoklamaOzet;
 }
 
-/** Satırları FORMEN / ŞENÖR / KAMP / DÜZ İŞÇİ / DİĞER olarak grupla */
+/** Satırları FORMEN / USTA / ŞENÖR / KAMP / DÜZ İŞÇİ / DİĞER olarak grupla */
 export function groupGunlukYoklamaSatirlariByGorev(
   rows: GunlukYoklamaSatir[]
 ): GunlukYoklamaGorevGrubu[] {
@@ -203,6 +207,7 @@ const DURUM_COLOR: Record<string, string> = {
 
 const GRUP_HEADER_BG: Record<GunlukYoklamaRaporGrup, string> = {
   FORMEN: '#5b21b6',
+  USTA: '#c026d3',
   SENOR: '#0f766e',
   KAMP: '#b45309',
   DUZ_ISCI: '#1d4ed8',
@@ -318,7 +323,7 @@ export function buildGunlukYoklamaRaporHtml(
   </div>
   <div style="margin:0 0 12px;line-height:1.4">${grupOzet}</div>
   ${sections}
-  <p class="meta" style="margin-top:28px">Rapor yalnızca Girilmedi dışındaki yoklama kayıtlarını listeler. FORMEN · ŞENÖR · KAMP · DÜZ İŞÇİ grupları ayrı tablolardır.</p>
+  <p class="meta" style="margin-top:28px">Rapor yalnızca Girilmedi dışındaki yoklama kayıtlarını listeler. FORMEN · USTA · ŞENÖR · KAMP · DÜZ İŞÇİ grupları ayrı tablolardır.</p>
   </body></html>`;
 }
 
