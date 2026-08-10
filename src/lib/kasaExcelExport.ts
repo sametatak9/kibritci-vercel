@@ -280,6 +280,132 @@ async function applyKasaAntet(
   return 8;
 }
 
+/** Yazdırma için kısa antet — daha az dikey alan */
+async function applyKasaAntetCompact(
+  wb: Workbook,
+  ws: Worksheet,
+  opts: { title: string; subtitle: string; colCount: number }
+): Promise<number> {
+  const colCount = opts.colCount;
+  ws.getRow(1).height = 44;
+  ws.getRow(2).height = 14;
+  ws.mergeCells(1, 1, 2, Math.min(3, colCount));
+
+  const assets = await loadKibritciReportAssets();
+  const headerBase64 =
+    assets.headerDataUrl?.replace(/^data:image\/png;base64,/i, '') || null;
+  if (headerBase64) {
+    const headerId = wb.addImage({ base64: headerBase64, extension: 'png' });
+    ws.addImage(headerId, { tl: { col: 0.05, row: 0.02 }, ext: { width: 200, height: 46 } });
+  } else {
+    ws.getCell(1, 1).value = KIBRITCI_COMPANY.shortName;
+    ws.getCell(1, 1).font = { bold: true, size: 11, color: { argb: KASA_EXCEL_ARGB.accentText } };
+  }
+
+  const metaStart = Math.min(4, colCount);
+  ws.mergeCells(1, metaStart, 1, colCount);
+  const titleCell = ws.getCell(1, metaStart);
+  titleCell.value = opts.title;
+  titleCell.font = { bold: true, size: 12, color: { argb: KASA_EXCEL_ARGB.accentText } };
+  titleCell.alignment = { horizontal: 'right', vertical: 'middle' };
+
+  ws.mergeCells(2, metaStart, 2, colCount);
+  const sub = ws.getCell(2, metaStart);
+  sub.value = opts.subtitle;
+  sub.font = { size: 8, color: { argb: KASA_EXCEL_ARGB.muted } };
+  sub.alignment = { horizontal: 'right', vertical: 'middle', wrapText: true };
+
+  ws.mergeCells(3, 1, 3, colCount);
+  ws.getCell(3, 1).fill = {
+    type: 'pattern',
+    pattern: 'solid',
+    fgColor: { argb: KASA_EXCEL_ARGB.accentBar },
+  };
+  ws.getRow(3).height = 3;
+
+  return 5;
+}
+
+/** Yazdırma altı imza alanı */
+function applyKasaSignatureBar(ws: Worksheet, startRow: number, colCount: number): number {
+  const labels = ['HAZIRLAYAN', 'SATIN ALMA MÜDÜRÜ', 'MUHASEBE', 'ŞANTİYE ŞEFİ'];
+  const span = Math.max(1, Math.floor(colCount / 4));
+  let row = startRow + 1;
+
+  ws.mergeCells(row, 1, row, colCount);
+  ws.getCell(row, 1).value = 'ONAY VE İMZA';
+  ws.getCell(row, 1).font = { bold: true, size: 8, color: { argb: KASA_EXCEL_ARGB.accentText } };
+  ws.getCell(row, 1).alignment = { horizontal: 'left', vertical: 'middle' };
+  ws.getRow(row).height = 14;
+  row += 1;
+
+  const labelRow = ws.getRow(row);
+  labelRow.height = 16;
+  for (let i = 0; i < 4; i += 1) {
+    const startCol = i * span + 1;
+    const endCol = i === 3 ? colCount : Math.min(colCount, (i + 1) * span);
+    ws.mergeCells(row, startCol, row, endCol);
+    const cell = ws.getCell(row, startCol);
+    cell.value = labels[i];
+    cell.font = { bold: true, size: 7, color: { argb: KASA_EXCEL_ARGB.tableHeadText } };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: KASA_EXCEL_ARGB.tableHeadBg } };
+    cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+    cell.border = thinBorder();
+  }
+  row += 1;
+
+  const sigRow = ws.getRow(row);
+  sigRow.height = 42;
+  for (let i = 0; i < 4; i += 1) {
+    const startCol = i * span + 1;
+    const endCol = i === 3 ? colCount : Math.min(colCount, (i + 1) * span);
+    ws.mergeCells(row, startCol, row, endCol);
+    const cell = ws.getCell(row, startCol);
+    cell.border = thinBorder();
+    cell.alignment = { vertical: 'bottom', horizontal: 'center' };
+  }
+  row += 1;
+
+  const noteRow = ws.getRow(row);
+  noteRow.height = 12;
+  for (let i = 0; i < 4; i += 1) {
+    const startCol = i * span + 1;
+    const endCol = i === 3 ? colCount : Math.min(colCount, (i + 1) * span);
+    ws.mergeCells(row, startCol, row, endCol);
+    const cell = ws.getCell(row, startCol);
+    cell.value = 'Ad Soyad / İmza / Tarih';
+    cell.font = { italic: true, size: 7, color: { argb: KASA_EXCEL_ARGB.muted } };
+    cell.alignment = { horizontal: 'center', vertical: 'top' };
+    cell.border = thinBorder();
+  }
+  row += 1;
+
+  return row;
+}
+
+function applyPrintPageSetup(ws: Worksheet, headerRow: number, colCount: number, lastRow: number): void {
+  ws.pageSetup = {
+    paperSize: 9,
+    orientation: 'landscape',
+    fitToPage: true,
+    fitToWidth: 1,
+    fitToHeight: 0,
+    margins: {
+      left: 0.25,
+      right: 0.25,
+      top: 0.35,
+      bottom: 0.45,
+      header: 0.15,
+      footer: 0.15,
+    },
+  };
+  ws.pageSetup.printTitlesRow = `${headerRow}:${headerRow}`;
+  if (lastRow >= headerRow) {
+    const lastCol = String.fromCharCode(64 + Math.min(colCount, 26));
+    ws.pageSetup.printArea = `A1:${lastCol}${lastRow}`;
+  }
+}
+
 type KisiBucket = {
   key: string;
   label: string;
@@ -368,8 +494,186 @@ export async function exportKasaExcel(
     }
   }
 
-  // ─── Sayfa 1: Kişi Özeti ───
-  const ozet = workbook.addWorksheet('Kişi Özeti', {
+  const KALEM_COL_COUNT = 8;
+
+  // ─── Sayfa 1: Kalem kalem (yazdırma / imza) ───
+  const kalem = workbook.addWorksheet('Haftalik Kasa', {
+    pageSetup: { paperSize: 9, orientation: 'landscape', fitToPage: true, fitToWidth: 1 },
+  });
+  kalem.columns = [
+    { width: 4 },
+    { width: 11 },
+    { width: 20 },
+    { width: 13 },
+    { width: 10 },
+    { width: 38 },
+    { width: 13 },
+    { width: 9 },
+  ];
+
+  let row = await applyKasaAntetCompact(workbook, kalem, {
+    title: 'HAFTALIK KASA RAPORU — KALEM KALEM',
+    subtitle: `Dönem: ${startDate} — ${endDate} · ${cikislar.length} çıkış · ${girisler.length} giriş · Fiş görselleri: «Fis Fotograflari» sayfası`,
+    colCount: KALEM_COL_COUNT,
+  });
+
+  kalem.mergeCells(row, 1, row, KALEM_COL_COUNT);
+  kalem.getCell(row, 1).value = KASA_REPORT_FORMAT.excel.badge;
+  kalem.getCell(row, 1).font = { bold: true, size: 7, color: { argb: KASA_EXCEL_ARGB.badgeText } };
+  kalem.getCell(row, 1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: KASA_EXCEL_ARGB.badgeBg } };
+  kalem.getCell(row, 1).alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+  kalem.getRow(row).height = 14;
+  row += 1;
+
+  const headerRow = row;
+  const kalemHeaders = ['#', 'TARİH', 'PERSONEL / ŞOFÖR', 'ÖDEME', 'FİŞ NO', 'AÇIKLAMA', 'TUTAR', 'FİŞ'];
+  const khRow = kalem.getRow(row);
+  khRow.height = 16;
+  kalemHeaders.forEach((h, i) => {
+    const cell = khRow.getCell(i + 1);
+    cell.value = h;
+    applyExcelTableHead(cell);
+  });
+  row += 1;
+
+  const pendingOriginalLinks: Array<{
+    hareketId: string;
+    cell: { value: unknown; font?: unknown; alignment?: unknown; border?: unknown };
+    rawUrl: string;
+  }> = [];
+
+  const allCikisSorted = [...cikislar].sort((a, c) => {
+    const dateCmp = String(a.tarih).localeCompare(String(c.tarih));
+    if (dateCmp !== 0) return dateCmp;
+    const la = resolvePersonelUnvan(
+      { personelId: a.personelId, personelAdi: a.personelAdi, surucu: a.surucu },
+      personeller
+    ).label;
+    const lb = resolvePersonelUnvan(
+      { personelId: c.personelId, personelAdi: c.personelAdi, surucu: c.surucu },
+      personeller
+    ).label;
+    return la.localeCompare(lb, 'tr');
+  });
+
+  allCikisSorted.forEach((kh, idx) => {
+    const unvan = resolvePersonelUnvan(
+      { personelId: kh.personelId, personelAdi: kh.personelAdi, surucu: kh.surucu },
+      personeller
+    );
+    const odeme = resolveKasaOdemeDurumu(kh);
+    const r = kalem.getRow(row);
+    r.height = 15;
+    const vals: (string | number)[] = [
+      idx + 1,
+      kh.tarih,
+      unvan.label,
+      odemeLabel(odeme) || 'KASA ÖDEDİ',
+      kh.fisNo || '—',
+      kh.aciklama || '—',
+      Number(kh.tutar) || 0,
+      '',
+    ];
+    vals.forEach((v, i) => {
+      const cell = r.getCell(i + 1);
+      cell.value = v;
+      cell.border = thinBorder();
+      cell.font = { size: 8 };
+      cell.alignment = { vertical: 'middle', wrapText: i === 5 };
+      if (i === 2 || i === 5) cell.alignment = { vertical: 'middle', horizontal: 'left', wrapText: true };
+      if (i === 6) {
+        cell.numFmt = '#,##0.00 "₺"';
+        cell.alignment = { horizontal: 'right', vertical: 'middle' };
+        cell.font = { bold: true, size: 8, color: { argb: KASA_EXCEL_ARGB.amountOut } };
+      }
+      if (i === 0 || i === 3) cell.alignment = { horizontal: 'center', vertical: 'middle' };
+    });
+
+    const fotoUrl = String(kh.fisEvrakUrl || '').trim();
+    const fisCell = r.getCell(8);
+    fisCell.border = thinBorder();
+    if (fotoUrl) {
+      fisCell.value = 'Var';
+      fisCell.font = { bold: true, size: 8, color: { argb: 'FF047857' } };
+      fisCell.alignment = { horizontal: 'center', vertical: 'middle' };
+      pendingOriginalLinks.push({ hareketId: kh.id, cell: fisCell, rawUrl: fotoUrl });
+    } else {
+      fisCell.value = '—';
+      fisCell.font = { italic: true, size: 7, color: { argb: 'FF94A3B8' } };
+      fisCell.alignment = { horizontal: 'center', vertical: 'middle' };
+    }
+    row += 1;
+  });
+
+  if (girisler.length > 0) {
+    kalem.mergeCells(row, 1, row, KALEM_COL_COUNT);
+    const gHead = kalem.getCell(row, 1);
+    gHead.value = `GİRİŞLER (${girisler.length})`;
+    applyExcelGroupHead(gHead, kalem.getRow(row));
+    row += 1;
+    for (const kh of girisler.sort((a, c) => String(a.tarih).localeCompare(String(c.tarih)))) {
+      const r = kalem.getRow(row);
+      r.height = 15;
+      const vals: (string | number)[] = [
+        '',
+        kh.tarih,
+        kh.personelAdi || kh.surucu || '—',
+        'GİRİŞ',
+        kh.fisNo || '—',
+        kh.aciklama || '—',
+        Number(kh.tutar) || 0,
+        '—',
+      ];
+      vals.forEach((v, i) => {
+        const cell = r.getCell(i + 1);
+        cell.value = v;
+        cell.border = thinBorder();
+        cell.font = { size: 8 };
+        if (i === 6) {
+          cell.numFmt = '#,##0.00 "₺"';
+          cell.font = { bold: true, size: 8, color: { argb: KASA_EXCEL_ARGB.amountIn } };
+          cell.alignment = { horizontal: 'right', vertical: 'middle' };
+        }
+      });
+      row += 1;
+    }
+  }
+
+  row += 1;
+  kalem.mergeCells(row, 1, row, KALEM_COL_COUNT);
+  kalem.getCell(row, 1).value = 'ÖZET TOPLAMLAR';
+  kalem.getCell(row, 1).font = { bold: true, size: 8, color: { argb: KASA_EXCEL_ARGB.accentText } };
+  row += 1;
+
+  const summaryLabels = ['BORÇ', 'PERS. ÖDEDİ', 'KASA ÖDEDİ', 'ÇIKIŞ', 'GİRİŞ', 'NET'];
+  const summaryValues = [borc, personelOdedi, kasaOdedi, totalOut, totalIn, totalIn - totalOut];
+  const summaryColors = ['FFB45309', 'FF6D28D9', 'FF1D4ED8', 'FFB91C1C', 'FF047857', 'FF1E4E78'];
+  const sumHead = kalem.getRow(row);
+  sumHead.height = 14;
+  summaryLabels.forEach((label, i) => {
+    const cell = sumHead.getCell(i + 1);
+    cell.value = label;
+    applyExcelTableHead(cell);
+    cell.font = { bold: true, size: 7, color: { argb: KASA_EXCEL_ARGB.tableHeadText } };
+  });
+  row += 1;
+  const sumVal = kalem.getRow(row);
+  sumVal.height = 16;
+  summaryValues.forEach((value, i) => {
+    const cell = sumVal.getCell(i + 1);
+    cell.value = value;
+    cell.numFmt = '#,##0.00 "₺"';
+    cell.font = { bold: true, size: 8, color: { argb: summaryColors[i] } };
+    cell.border = thinBorder();
+    cell.alignment = { horizontal: 'right', vertical: 'middle' };
+  });
+  row += 1;
+
+  row = applyKasaSignatureBar(kalem, row, KALEM_COL_COUNT);
+  applyPrintPageSetup(kalem, headerRow, KALEM_COL_COUNT, row);
+
+  // ─── Sayfa 2: Kişi Özeti ───
+  const ozet = workbook.addWorksheet('Kisi Ozeti', {
     pageSetup: { paperSize: 9, orientation: 'landscape', fitToPage: true, fitToWidth: 1 },
   });
   ozet.columns = [
@@ -381,30 +685,25 @@ export async function exportKasaExcel(
     { width: 16 },
     { width: 16 },
   ];
-  let row = await applyKasaAntet(workbook, ozet, {
-    title: 'HAFTALIK KASA — KİŞİ BAZLI MASRAF ÖZETİ',
-    subtitle: `Dönem: ${startDate} — ${endDate} · Baskı: ${new Date().toLocaleString('tr-TR')}`,
+  row = await applyKasaAntetCompact(workbook, ozet, {
+    title: 'HAFTALIK KASA — KİŞİ BAZLI ÖZET',
+    subtitle: `Dönem: ${startDate} — ${endDate}`,
     colCount: 7,
   });
 
   ozet.mergeCells(row, 1, row, 7);
   ozet.getCell(row, 1).value =
     'Kim ne kadar masraf yapmış — çıkışlar personele / şoföre göre gruplanır';
-  ozet.getCell(row, 1).font = { size: 9, italic: true, color: { argb: 'FF475569' } };
+  ozet.getCell(row, 1).font = { size: 8, italic: true, color: { argb: 'FF475569' } };
   row += 2;
 
-  // Genel toplam özeti
   let genelSum = 0;
   for (const kh of cikislar) {
     genelSum += Number(kh.tutar) || 0;
   }
-  ozet.mergeCells(row, 1, row, 7);
-  ozet.getCell(row, 1).value = 'GENEL TOPLAM (kasa harcaması / çıkış)';
-  ozet.getCell(row, 1).font = { bold: true, size: 10, color: { argb: KASA_EXCEL_ARGB.accentText } };
-  row += 1;
   ozet.mergeCells(row, 1, row, 5);
   ozet.getCell(row, 1).value = `GENEL TOPLAM · ${cikislar.length} kalem`;
-  ozet.getCell(row, 1).font = { bold: true, size: 10 };
+  ozet.getCell(row, 1).font = { bold: true, size: 9 };
   ozet.getCell(row, 7).value = genelSum;
   ozet.getCell(row, 7).numFmt = '#,##0.00 "₺"';
   ozet.getCell(row, 7).font = { bold: true, color: { argb: 'FFB91C1C' } };
@@ -417,7 +716,7 @@ export async function exportKasaExcel(
     cell.value = h;
     applyExcelTableHead(cell);
   });
-  oh.height = 20;
+  oh.height = 18;
   row += 1;
 
   buckets.forEach((b, idx) => {
@@ -432,192 +731,23 @@ export async function exportKasaExcel(
       else bKasa += t;
     }
     const r = ozet.getRow(row);
+    r.height = 15;
     const vals: (string | number)[] = [idx + 1, b.label, b.kalemler.length, bBorc, bPers, bKasa, b.toplam];
     vals.forEach((v, i) => {
       const cell = r.getCell(i + 1);
       cell.value = v;
       cell.border = thinBorder();
+      cell.font = { size: 8 };
       cell.alignment = { vertical: 'middle', horizontal: i === 1 ? 'left' : 'center' };
       if (i >= 3) {
         cell.numFmt = '#,##0.00 "₺"';
         cell.alignment = { horizontal: 'right', vertical: 'middle' };
       }
-      if (i === 1) cell.font = { bold: true, size: 10 };
-      if (i === 6) cell.font = { bold: true, color: { argb: 'FFB91C1C' } };
+      if (i === 1) cell.font = { bold: true, size: 8 };
+      if (i === 6) cell.font = { bold: true, size: 8, color: { argb: 'FFB91C1C' } };
     });
     row += 1;
   });
-
-  row += 1;
-  const totalsBlock: Array<[string, number, string]> = [
-    ['BORÇ TOPLAM', borc, 'FFB45309'],
-    ['PERSONEL ÖDEDİ TOPLAM', personelOdedi, 'FF6D28D9'],
-    ['KASA ÖDEDİ TOPLAM', kasaOdedi, 'FF1D4ED8'],
-    ['TOPLAM ÇIKIŞ', totalOut, 'FFB91C1C'],
-    ['TOPLAM GİRİŞ', totalIn, 'FF047857'],
-    ['NET DURUM', totalIn - totalOut, 'FF1E4E78'],
-  ];
-  for (const [label, value, color] of totalsBlock) {
-    ozet.mergeCells(row, 1, row, 5);
-    ozet.getCell(row, 1).value = label;
-    ozet.getCell(row, 1).font = { bold: true, size: 10, color: { argb: color } };
-    ozet.getCell(row, 1).alignment = { horizontal: 'right', vertical: 'middle' };
-    ozet.getCell(row, 7).value = value;
-    ozet.getCell(row, 7).numFmt = '#,##0.00 "₺"';
-    ozet.getCell(row, 7).font = { bold: true, size: 10, color: { argb: color } };
-    row += 1;
-  }
-
-  // ─── Sayfa 2: Kalem Kalem (kişi gruplu) ───
-  const kalem = workbook.addWorksheet('Kalem Kalem', {
-    pageSetup: { paperSize: 9, orientation: 'landscape', fitToPage: true, fitToWidth: 1 },
-  });
-  kalem.columns = [
-    { width: 14 },
-    { width: 24 },
-    { width: 16 },
-    { width: 12 },
-    { width: 32 },
-    { width: 14 },
-    { width: 38 },
-    { width: 18 },
-    { width: 16 },
-  ];
-  row = await applyKasaAntet(workbook, kalem, {
-    title: 'HAFTALIK KASA — KALEM KALEM HARCAMA DÖKÜMÜ',
-    subtitle: `Dönem: ${startDate} — ${endDate} · Fiş görselleri yüksek çözünürlük · «Fiş Fotograflari» sayfasında büyük boy`,
-    colCount: 9,
-  });
-
-  const kalemHeaders = [
-    'TARİH',
-    'PERSONEL / ŞOFÖR',
-    'ÖDEME DURUMU',
-    'FİŞ NO',
-    'AÇIKLAMA',
-    'TUTAR',
-    'FİŞ KAYDI (HANGİ HAREKET)',
-    'FİŞ ÖNİZLEME',
-    'BÜYÜK FOTO',
-  ];
-  const khRow = kalem.getRow(row);
-  kalemHeaders.forEach((h, i) => {
-    const cell = khRow.getCell(i + 1);
-    cell.value = h;
-    applyExcelTableHead(cell);
-  });
-  row += 1;
-
-  const pendingOriginalLinks: Array<{
-    hareketId: string;
-    cell: { value: unknown; font?: unknown; alignment?: unknown; border?: unknown };
-    rawUrl: string;
-  }> = [];
-
-  let kalemSira = 0;
-
-  for (const b of buckets) {
-    // Grup başlığı
-    kalem.mergeCells(row, 1, row, 9);
-    const groupCell = kalem.getCell(row, 1);
-    groupCell.value = `${b.label}  ·  ${b.kalemler.length} kalem  ·  −${b.toplam.toLocaleString('tr-TR', {
-      minimumFractionDigits: 2,
-    })} ₺`;
-    applyExcelGroupHead(groupCell, kalem.getRow(row));
-    row += 1;
-
-    const sorted = [...b.kalemler].sort((a, c) => String(a.tarih).localeCompare(String(c.tarih)));
-    for (const kh of sorted) {
-      kalemSira += 1;
-      const odeme = resolveKasaOdemeDurumu(kh);
-      const kayitEtiketi = buildFisKayitEtiketi(kh, b.label, kalemSira);
-      const r = kalem.getRow(row);
-      r.height = kh.fisEvrakUrl ? 96 : 18;
-      const vals: (string | number)[] = [
-        kh.tarih,
-        b.label,
-        kh.hareketTipi === 'ÇIKIŞ' ? odemeLabel(odeme) || 'KASA ÖDEDİ' : '—',
-        kh.fisNo || '—',
-        kh.aciklama || '—',
-        Number(kh.tutar) || 0,
-        kayitEtiketi,
-        '',
-        '',
-      ];
-      vals.forEach((v, i) => {
-        const cell = r.getCell(i + 1);
-        cell.value = v;
-        cell.border = thinBorder();
-        cell.alignment = { vertical: 'middle', wrapText: true };
-        if (i === 5) {
-          cell.numFmt = '#,##0.00 "₺"';
-          cell.alignment = { horizontal: 'right', vertical: 'middle' };
-          cell.font = { bold: true, color: { argb: 'FFB91C1C' } };
-        }
-        if (i === 6) {
-          cell.font = { bold: true, size: 9, color: { argb: KASA_EXCEL_ARGB.accentText } };
-          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: KASA_EXCEL_ARGB.labelBg } };
-        }
-      });
-
-      const fotoUrl = String(kh.fisEvrakUrl || '').trim();
-      if (fotoUrl) {
-        const b64 = await loadImageAsJpegBase64(fotoUrl, 640, 0.9);
-        if (b64) {
-          const imageId = workbook.addImage({ base64: b64, extension: 'jpeg' });
-          kalem.addImage(imageId, {
-            tl: { col: 7, row: row - 1 },
-            ext: { width: 150, height: 88 },
-            editAs: 'oneCell',
-          });
-          r.getCell(8).value = '';
-        } else {
-          r.getCell(8).value = 'Önizleme yok';
-          r.getCell(8).font = { italic: true, size: 8, color: { argb: 'FF94A3B8' } };
-        }
-        r.getCell(9).value = '→ Büyük foto';
-        r.getCell(9).border = thinBorder();
-        pendingOriginalLinks.push({ hareketId: kh.id, cell: r.getCell(9), rawUrl: fotoUrl });
-      } else {
-        r.getCell(8).value = 'Yok';
-        r.getCell(8).font = { italic: true, size: 8, color: { argb: 'FF94A3B8' } };
-        r.getCell(9).value = '—';
-        r.getCell(9).border = thinBorder();
-      }
-      row += 1;
-    }
-    row += 1;
-  }
-
-  // Girişler (varsa)
-  if (girisler.length > 0) {
-    kalem.mergeCells(row, 1, row, 9);
-    kalem.getCell(row, 1).value = 'GİRİŞLER';
-    applyExcelGroupHead(kalem.getCell(row, 1), kalem.getRow(row));
-    row += 1;
-    for (const kh of girisler.sort((a, c) => String(a.tarih).localeCompare(String(c.tarih)))) {
-      const r = kalem.getRow(row);
-      [
-        kh.tarih,
-        kh.personelAdi || kh.surucu || '—',
-        'GİRİŞ',
-        kh.fisNo || '—',
-        kh.aciklama || '—',
-        Number(kh.tutar) || 0,
-        '',
-        '',
-      ].forEach((v, i) => {
-        const cell = r.getCell(i + 1);
-        cell.value = v;
-        cell.border = thinBorder();
-        if (i === 5) {
-          cell.numFmt = '#,##0.00 "₺"';
-          cell.font = { bold: true, color: { argb: 'FF047857' } };
-        }
-      });
-      row += 1;
-    }
-  }
 
   // ─── Sayfa 3: Fis Fotograflari (büyük gömülü + çalışan orijinal link) ───
   // Sayfa adı ASCII — Excel iç linkleri Türkçe karakterde bozulabiliyor
@@ -723,7 +853,7 @@ export async function exportKasaExcel(
     }
   }
 
-  // Kalem Kalem «ORİJİNAL FOTO» linklerini şimdi yaz (https HYPERLINK veya sayfa içi)
+  // Haftalik Kasa «FİŞ» linklerini yaz (https veya sayfa içi büyük foto)
   for (const pending of pendingOriginalLinks) {
     setOriginalPhotoHyperlink(pending.cell, {
       httpUrl: httpUrlById.get(pending.hareketId) || '',
