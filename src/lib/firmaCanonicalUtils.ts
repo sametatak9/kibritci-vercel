@@ -12,12 +12,12 @@ const FIRMA_ALIAS_CANONICAL: Record<string, string> = {
   'reha mobilya': CANONICAL_VIRADOOR_FIRMA_ADI,
   'reha mobilya insaat': CANONICAL_VIRADOOR_FIRMA_ADI,
   'reha insaat': CANONICAL_VIRADOOR_FIRMA_ADI,
+  ema: 'EMA MERMER',
 };
 
 /** Silinecek geçersiz / mükerrer cari unvanları (firmaAnahtar) */
 const JUNK_CARI_NAME_KEYS = new Set([
   'demirkan',
-  'ema mermer',
   'firat pen',
   'pttme yemekhane',
   'sutek',

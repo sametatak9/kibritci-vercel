@@ -37,6 +37,10 @@ import {
   printKampFirmaYerlesim,
 } from '../lib/kampFirmaOzet';
 import { exportKampYerlesimExcel } from '../lib/kampYerlesimExcelExport';
+import {
+  applyKampYerlesimFirmaTemizlik,
+  planKampYerlesimFirmaTemizlik,
+} from '../lib/kampYerlesimFirmaTemizlik';
 import { generateKampPersonelPdfHtml } from '../lib/kampPersonelPdfExport';
 import { openKampKrokiPrintWindow, type KampKrokiPageFormat } from '../lib/kampKrokiPrintHtml';
 import { compressImage } from '../lib/imageCompress';
@@ -192,6 +196,7 @@ export const IdariScreen: React.FC<IdariScreenProps> = ({
   const [selectedAracForPdf, setSelectedAracForPdf] = useState<AracBakim | null>(null);
   const [showKampKrokiModal, setShowKampKrokiModal] = useState(false);
   const [exportingKampExcel, setExportingKampExcel] = useState(false);
+  const [repairingKampFirma, setRepairingKampFirma] = useState(false);
   const [fullScreenImage, setFullScreenImage] = useState<string | null>(null);
 
 
@@ -600,6 +605,37 @@ export const IdariScreen: React.FC<IdariScreenProps> = ({
       alert(err instanceof Error ? err.message : 'Kamp yerleşim Excel raporu oluşturulamadı.');
     } finally {
       setExportingKampExcel(false);
+    }
+  };
+
+  const handleRepairKampYerlesimFirma = async () => {
+    const plan = planKampYerlesimFirmaTemizlik(personeller, kampKayitlari);
+    if (plan.kampPatches.length === 0) {
+      alert(plan.summary.join('\n') || 'Düzeltilecek yerleşim firması yok.');
+      return;
+    }
+    const ok = window.confirm(
+      [
+        'Yerleşim firmaları düzeltilecek:',
+        '',
+        ...plan.summary,
+        '',
+        `${plan.kampPatches.length} kamp kaydı güncellenecek.`,
+        'Devam edilsin mi?',
+      ].join('\n')
+    );
+    if (!ok) return;
+
+    setRepairingKampFirma(true);
+    try {
+      const next = await applyKampYerlesimFirmaTemizlik(kampKayitlari, plan);
+      setKampKayitlari(next);
+      alert(`Tamamlandı: ${plan.kampPatches.length} yerleşim firması düzeltildi.`);
+    } catch (err) {
+      console.error(err);
+      alert(err instanceof Error ? err.message : 'Yerleşim firması düzeltilemedi.');
+    } finally {
+      setRepairingKampFirma(false);
     }
   };
 
@@ -3415,6 +3451,15 @@ export const IdariScreen: React.FC<IdariScreenProps> = ({
                       </div>
                     </details>
                   )}
+                  <button
+                    type="button"
+                    onClick={() => void handleRepairKampYerlesimFirma()}
+                    disabled={repairingKampFirma || kampKayitlari.length === 0}
+                    className="w-full bg-amber-600 hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold py-2 px-3 rounded-lg cursor-pointer transition flex items-center justify-center gap-1.5 text-[10px]"
+                    title="AAA, Y, BELİRTİLMEDİ sil; EMA + EMA MERMER birleştir"
+                  >
+                    {repairingKampFirma ? 'Düzeltiliyor…' : 'Yerleşim Firmalarını Düzelt'}
+                  </button>
                   <button
                     type="button"
                     onClick={() =>

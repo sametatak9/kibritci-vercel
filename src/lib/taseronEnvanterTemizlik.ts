@@ -292,6 +292,15 @@ export function planTaseronEnvanterTemizlik(
     }
   }
 
+  for (const k of kampKayitlari) {
+    const raw = String(k.calistigiFirma || '').trim();
+    if (!raw || isJunkFirmaAdi(raw)) continue;
+    const canon = canonicalFirmaUnvan(raw);
+    if (canon !== raw && !kampPatches.some((x) => x.id === k.id)) {
+      kampPatches.push({ id: k.id, patch: { calistigiFirma: canon } });
+    }
+  }
+
   if (createCariler.length > 0 && !summary.some((s) => s.startsWith("Cari'siz"))) {
     summary.push(`${createCariler.length} cari'siz firma için taşeron cari kartı oluşturulacak`);
   }

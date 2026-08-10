@@ -1,5 +1,6 @@
 import { KampKaydi, Personel } from '../types/erp';
 import { wrapCorporateReportHtml } from './corporateReportHtml';
+import { canonicalFirmaUnvan, firmaDedupKey, isJunkFirmaAdi } from './firmaCanonicalUtils';
 import { isPersonelActiveOnDate } from './guvenlikHelpers';
 import { isPersonelAktifDurum } from './kampPlacementUtils';
 import { openHtmlReportWindow } from './reportEmail';
@@ -21,21 +22,28 @@ export type KampFirmaOzetRow = {
   odaSayisi: number;
 };
 
-function normalizeFirmaKey(raw: string, existing: string[]): string {
+function normalizeFirmaLabel(raw: string): string {
   const trimmed = String(raw || '').trim();
-  if (!trimmed) return 'TAŞERON';
+  if (!trimmed || isJunkFirmaAdi(trimmed)) return 'TAŞERON';
   if (isKibritciCompany(trimmed)) return CANONICAL_ANA_FIRMA_ADI;
   const upper = trimmed.toLocaleUpperCase('tr-TR');
   if (upper === 'ANA FİRMA' || upper === 'ANA FIRMA') return CANONICAL_ANA_FIRMA_ADI;
+  return canonicalFirmaUnvan(trimmed);
+}
+
+function normalizeFirmaKey(raw: string, existing: string[]): string {
+  const label = normalizeFirmaLabel(raw);
+  const dedup = firmaDedupKey(label);
   for (const key of existing) {
-    if (firmaEslesir(key, trimmed)) return key;
+    if (firmaDedupKey(key) === dedup) return key;
+    if (firmaEslesir(key, label)) return key;
   }
-  return upper;
+  return label;
 }
 
 function resolvePersonelFirma(p: Personel): string {
   if (!isTaseronPersonel(p)) return CANONICAL_ANA_FIRMA_ADI;
-  return p.firmaAdi?.trim() || 'TAŞERON';
+  return normalizeFirmaLabel(p.firmaAdi || 'TAŞERON');
 }
 
 /**
@@ -46,9 +54,9 @@ export function resolveKampYerlesimFirma(k: KampKaydi, personeller: Personel[]):
   if (k.firmaTipi === 'ANA_FIRMA') return CANONICAL_ANA_FIRMA_ADI;
 
   const fromKamp = String(k.calistigiFirma || '').trim();
-  if (fromKamp) {
+  if (fromKamp && !isJunkFirmaAdi(fromKamp)) {
     if (isKibritciCompany(fromKamp)) return CANONICAL_ANA_FIRMA_ADI;
-    return fromKamp;
+    return normalizeFirmaLabel(fromKamp);
   }
 
   const p = k.personelId ? personeller.find((x) => x.id === k.personelId) : undefined;
