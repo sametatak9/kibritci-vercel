@@ -1,4 +1,5 @@
 import { Personel } from '../types/erp';
+import { isPersonelTcSuppressed, loadSuppressedPersonelTcs, REMOVED_IDARI_PLACEHOLDER_TCS } from '../lib/personelSeedSuppress';
 
 /** İdari kadro — yoklamaya girmez; izin / tutanak / araç tahsis vb. evraklarda seçilebilir */
 type IdariRow = {
@@ -28,10 +29,8 @@ const ROWS: IdariRow[] = [
   { ad: 'EMRAH', soyad: 'AHISHAVİ', tcNo: '30209177616', iseGirisTarihi: trDate('19.08.2024'), gorev: 'Operatör' },
   { ad: 'İBRAHİM', soyad: 'OFLUOĞLU', tcNo: '41527395354', iseGirisTarihi: trDate('05.09.2024'), gorev: 'Formen' },
   { ad: 'ZEHRA', soyad: 'YALÇIN', tcNo: '70297148884', iseGirisTarihi: trDate('13.09.2024'), gorev: 'Mimar', cinsiyet: 'Kadın' },
-  // Listede ad eksik — TC ile kaydedilir, Personel Yönetimi'nden ad güncellenebilir
-  { ad: 'İDARİ', soyad: 'KAYIT-18', tcNo: '23479948444', iseGirisTarihi: trDate('05.11.2024'), gorev: 'Mimar' },
+  // İDARİ KAYIT-18 / KAYIT-22 kaldırıldı — placeholder adlar; silinince seed ile geri geliyordu
   { ad: 'MEHMET', soyad: 'KURNAZ', tcNo: '61624060252', iseGirisTarihi: trDate('09.04.2025'), gorev: 'Nezaretçi / Formen (İnşaat)' },
-  { ad: 'İDARİ', soyad: 'KAYIT-22', tcNo: '14372424838', iseGirisTarihi: trDate('20.05.2025'), gorev: 'Mimar' },
   { ad: 'TOLGA', soyad: 'ALPTEKİN', tcNo: '33745772086', iseGirisTarihi: trDate('22.05.2025'), gorev: 'Şenör' },
   { ad: 'HAMDİYE', soyad: 'SEVİM', tcNo: '43858753698', iseGirisTarihi: trDate('10.06.2025'), gorev: 'Ofis Elemanı', cinsiyet: 'Kadın' },
   { ad: 'SİNAN', soyad: 'GÖK', tcNo: '63202092396', iseGirisTarihi: trDate('16.06.2025'), gorev: 'Harita' },
@@ -82,11 +81,15 @@ export function getIdariPersonelSeed(): Personel[] {
  * - TC yoksa ekler
  * - TC varsa idari alanları (grup/departman/görev/firma) günceller, diğer alanları korur
  */
-export function mergeIdariIntoPersonelList(existing: Personel[]): {
+export function mergeIdariIntoPersonelList(
+  existing: Personel[],
+  options?: { suppressedTcs?: Set<string> }
+): {
   list: Personel[];
   toSave: Personel[];
 } {
   const seed = getIdariPersonelSeed();
+  const suppressed = options?.suppressedTcs ?? loadSuppressedPersonelTcs();
   const byTc = new Map<string, Personel>();
   existing.forEach((p) => {
     const tc = String(p.tcNo || '').trim();
@@ -99,6 +102,8 @@ export function mergeIdariIntoPersonelList(existing: Personel[]): {
   for (const s of seed) {
     const tc = String(s.tcNo || '').trim();
     if (!tc) continue;
+    if (suppressed.has(tc) || isPersonelTcSuppressed(tc)) continue;
+    if (REMOVED_IDARI_PLACEHOLDER_TCS.has(tc)) continue;
     const found = byTc.get(tc);
     if (!found) {
       next.push(s);

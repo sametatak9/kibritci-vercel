@@ -148,6 +148,7 @@ import { fetchSatinAlmaPublicShare } from './lib/satinAlmaPublicShare';
 import { installReportEmailGlobalBridge } from './lib/reportEmail';
 import { CANONICAL_ANA_FIRMA_ADI, isKibritciCompany, normalizeTurkishName } from './lib/yoklamaUtils';
 import { findPersonelMatches, pickBestPersonelMatch } from './lib/personelMatchUtils';
+import { suppressPersonelTcsFromDeleted } from './lib/personelSeedSuppress';
 import { isActivePortalDurum } from './lib/roleClaims';
 import {
   buildSaIrsaliyeFormPrefill,
@@ -1844,6 +1845,8 @@ export default function App() {
         console.warn('[personel-delete] Firestore silme:', id, err)
       );
     });
+
+    suppressPersonelTcsFromDeleted(deleted);
 
     // Önce UI’da kampı boşalt, sonra Firestore tahliye — silinen kişi listelerde kalmasın
     const nameKeys = new Set(
