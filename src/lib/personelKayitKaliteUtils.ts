@@ -382,9 +382,6 @@ export function formatPersonelKaliteOzet(index: PersonelKaliteIndex): string {
   if (index.invalidNameIds.size > 0) parts.push(`${index.invalidNameIds.size} geçersiz isim`);
   if (index.tekKelimeIsimIds.size > 0) parts.push(`${index.tekKelimeIsimIds.size} tek kelime`);
   if (index.invalidTcIds.size > 0) parts.push(`${index.invalidTcIds.size} geçersiz TC`);
-  if (index.legacyImportIds.size > 0) {
-    parts.push(`${index.importKaynakIds.size} import kadro (onaylı)`);
-  }
   if (index.yapayImportIds.size > 0) parts.push(`${index.yapayImportIds.size} eksik import profili`);
   if (index.orphanYoklamaIds.length > 0) {
     parts.push(`${index.orphanYoklamaIds.length} yetim yoklama ID`);
