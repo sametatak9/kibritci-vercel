@@ -1,5 +1,9 @@
 import type { Personel } from '../types/erp';
-import { resolveTaseronPersonelGorev, withTaseronPersonelGorev } from './taseronUtils';
+import {
+  resolveTaseronPersonelGorev,
+  TASERON_PERSONEL_DEPARTMAN,
+  withTaseronPersonelGorev,
+} from './taseronUtils';
 import { isTaseronPersonel } from './yoklamaUtils';
 
 /** Haftalık taşeron kadro satırı — ad/soyad zorunlu, TC opsiyonel */
@@ -210,7 +214,7 @@ function makeTaseronPersonel(opts: {
     adres: '',
     il: '',
     ilce: '',
-    departman: 'TAŞERON',
+    departman: TASERON_PERSONEL_DEPARTMAN,
     gorev: resolveTaseronPersonelGorev({ firmaAdi: opts.firmaAdi, firmaTipi: 'TASERON' }),
     iseGirisTarihi: opts.iseGirisTarihi,
     cinsiyet: 'Belirtilmedi',
@@ -320,7 +324,7 @@ export function syncTaseronPersonelListe(options: {
       firmaTipi: 'TASERON',
       firmaAdi,
       gorev: targetGorev,
-      departman: match.departman || 'TAŞERON',
+      departman: match.departman === 'TAŞERON' || !match.departman ? TASERON_PERSONEL_DEPARTMAN : match.departman,
       durum: true,
       istenCikisTarihi: '',
       iseGirisTarihi: needsActivate

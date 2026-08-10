@@ -33,7 +33,7 @@ import {
   isOperatorGorev,
   isIdariPersonel,
 } from '../lib/yoklamaUtils';
-import { firmaEslesir, resolveTaseronPersonelGorev, withTaseronPersonelGorev } from '../lib/taseronUtils';
+import { firmaEslesir, resolveTaseronPersonelGorev, TASERON_PERSONEL_DEPARTMAN, withTaseronPersonelGorev } from '../lib/taseronUtils';
 import { validateTC } from '../lib/personelOdemeUtils';
 import {
   AUTO_MERGE_SCORE_MAX,
@@ -441,7 +441,7 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
           telefonNo: nextTel || best.telefonNo,
           firmaTipi,
           firmaAdi: nextFirmaAdi,
-          departman: firmaTipi === 'TASERON' ? 'TAŞERON' : best.departman || 'SAHA',
+          departman: firmaTipi === 'TASERON' ? TASERON_PERSONEL_DEPARTMAN : best.departman || 'SAHA',
           gorev: targetGorev,
           onayDurumu: firmaTipi === 'TASERON' ? 'ONAYLANDI' : best.onayDurumu,
           durum: best.durum === false ? true : best.durum,
@@ -492,7 +492,7 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
       adres: 'Kamp Yerleşimi',
       il: '',
       ilce: '',
-      departman: firmaTipi === 'TASERON' ? 'TAŞERON' : 'SAHA',
+      departman: firmaTipi === 'TASERON' ? TASERON_PERSONEL_DEPARTMAN : 'SAHA',
       gorev: firmaTipi === 'TASERON' ? resolveTaseronPersonelGorev({ firmaAdi: normalizedFirma, firmaTipi: 'TASERON' }) : 'KAMP PERSONEL',
       iseGirisTarihi: new Date().toISOString().slice(0, 10),
       cinsiyet: 'Belirtilmedi',
@@ -1102,7 +1102,7 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
             firmaAdi: nextFirmaAdi,
             departman:
               nextFirmaTipi === 'TASERON'
-                ? 'TAŞERON'
+                ? TASERON_PERSONEL_DEPARTMAN
                 : matchedPersonel.departman || 'SAHA',
             gorev:
               nextFirmaTipi === 'TASERON'
@@ -1525,7 +1525,7 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
           firmaTipi,
           firmaAdi,
           gorev: kayitGorev,
-          departman: firmaTipi === 'TASERON' ? 'TAŞERON' : resolved.personel.departman || 'SAHA',
+          departman: firmaTipi === 'TASERON' ? TASERON_PERSONEL_DEPARTMAN : resolved.personel.departman || 'SAHA',
           onayDurumu: firmaTipi === 'TASERON' ? 'ONAYLANDI' : resolved.personel.onayDurumu,
         });
         await saveDocument('personeller', patched);

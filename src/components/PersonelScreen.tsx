@@ -22,7 +22,7 @@ import {
   syncTaseronPersonelListe,
   type TaseronListeSyncResult,
 } from '../lib/taseronPersonelListeGuncelle';
-import { resolveTaseronPersonelGorev, withTaseronPersonelGorev, isTaseronPersonelRecord } from '../lib/taseronUtils';
+import { resolveTaseronPersonelGorev, TASERON_PERSONEL_DEPARTMAN, withTaseronPersonelGorev, isTaseronPersonelRecord } from '../lib/taseronUtils';
 import {
   exportSeciliPersonelExcel,
   openPersonelListeRaporu,
@@ -408,9 +408,32 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
           id: p.id,
           gorev: resolveTaseronPersonelGorev({ firmaAdi: p.firmaAdi, firmaTipi: p.firmaTipi }),
           firmaTipi: 'TASERON',
-          departman: p.departman || 'TAŞERON',
+          departman: TASERON_PERSONEL_DEPARTMAN,
         } as Personel)
       );
+    });
+  }, [personeller, setPersoneller]);
+
+  const taseronDepartmanFixDone = useRef(false);
+  useEffect(() => {
+    if (taseronDepartmanFixDone.current) return;
+    const toFix = personeller.filter(
+      (p) => isTaseronPersonelRecord(p) && p.departman === 'TAŞERON'
+    );
+    if (toFix.length === 0) return;
+    taseronDepartmanFixDone.current = true;
+    setPersoneller((prev) =>
+      prev.map((p) =>
+        isTaseronPersonelRecord(p) && p.departman === 'TAŞERON'
+          ? { ...p, departman: TASERON_PERSONEL_DEPARTMAN }
+          : p
+      )
+    );
+    toFix.forEach((p) => {
+      void saveDocument('personeller', {
+        id: p.id,
+        departman: TASERON_PERSONEL_DEPARTMAN,
+      } as Personel);
     });
   }, [personeller, setPersoneller]);
 
@@ -1055,7 +1078,7 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
           ...personel,
           firmaTipi: 'TASERON',
           firmaAdi,
-          departman: 'TAŞERON',
+          departman: TASERON_PERSONEL_DEPARTMAN,
           gorev: resolveTaseronPersonelGorev({ firmaAdi, firmaTipi: 'TASERON' }),
           onayDurumu: 'ONAYLANDI',
           sgkDurumu: personel.sgkDurumu || 'Sigortasız',

@@ -5,6 +5,9 @@ import { isTaseronPersonel } from './yoklamaUtils';
 /** Taşeron saha personeli standart görev adı */
 export const TASERON_PERSONEL_GOREV = 'TAŞERON PERSONEL';
 
+/** Taşeron personel departmanı — tek etiket: ŞANTİYE (firmaTipi ayrı kalır) */
+export const TASERON_PERSONEL_DEPARTMAN = 'ŞANTİYE';
+
 export function resolveTaseronPersonelGorev(opts: {
   firmaAdi?: string | null;
   firmaTipi?: Personel['firmaTipi'] | string;
@@ -21,14 +24,16 @@ export function isTaseronPersonelRecord(p: Pick<Personel, 'firmaTipi' | 'firmaAd
 export function withTaseronPersonelGorev<T extends Personel>(p: T): T {
   if (!isTaseronPersonelRecord(p)) return p;
   const gorev = resolveTaseronPersonelGorev({ firmaAdi: p.firmaAdi, firmaTipi: p.firmaTipi });
-  if (p.gorev === gorev && p.firmaTipi === 'TASERON' && (p.departman || 'TAŞERON') === p.departman) {
+  const departman =
+    p.departman === 'TAŞERON' || !p.departman ? TASERON_PERSONEL_DEPARTMAN : p.departman;
+  if (p.gorev === gorev && p.firmaTipi === 'TASERON' && departman === p.departman) {
     return p;
   }
   return {
     ...p,
     firmaTipi: 'TASERON',
     gorev,
-    departman: p.departman || 'TAŞERON',
+    departman,
   };
 }
 
