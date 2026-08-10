@@ -259,7 +259,8 @@ export const KampTaseronSayimTab: React.FC<KampTaseronSayimTabProps> = ({
     }
 
     setPendingPatches((prev) => mergePendingPatches(prev, patch));
-    const islem = buildSessionIslemFromPatch(sessionId, selectedFirma, patch, email);
+    const firma = selectedFirma || String(personel.firmaAdi || '').trim();
+    const islem = buildSessionIslemFromPatch(sessionId, firma, patch, email);
     setSessionIslemler((prev) => [...prev, islem]);
     setDrafts((prev) => {
       const copy = { ...prev };
