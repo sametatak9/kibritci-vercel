@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Users, UserPlus, Trash2, CreditCard as Edit3, Camera, Search, ShieldCheck, Mail, Phone, MapPin, Tent, DollarSign, UserX, FileText, CloudUpload as UploadCloud, CircleCheck as CheckCircle2, CircleAlert as AlertCircle, Loader as Loader2, Building2, History, Download, RefreshCw, ListPlus } from 'lucide-react';
+import { Users, UserPlus, Trash2, CreditCard as Edit3, Camera, Search, ShieldCheck, Mail, Phone, MapPin, Tent, DollarSign, UserX, FileText, CloudUpload as UploadCloud, CircleCheck as CheckCircle2, CircleAlert as AlertCircle, Loader as Loader2, Building2, History, Download, RefreshCw, ListPlus, ArrowLeft, ClipboardList } from 'lucide-react';
 import { CariKart, CariKartIslem, KampKaydi, KampOdasi, Personel, SahaFaaliyeti } from '../types/erp';
 import { fetchApiJson } from '../lib/apiClient';
 import { compressImage } from '../lib/imageCompress';
@@ -31,8 +31,11 @@ import {
   exportSeciliPersonelExcel,
   openPersonelListeRaporu,
 } from '../lib/taseronPersonelExcelExport';
+import { SmartCatalogField } from './SmartCatalogField';
 
 const MAX_PERSONEL_INLINE_MEDIA = 120_000;
+
+type PersonelScreenView = 'liste' | 'kayit';
 
 /** Büyük foto/PDF’leri merge yazımında tekrar gönderme — timeout + rollback engeli */
 function leanPersonelForFirestore(personel: Personel, prev?: Personel): Personel {
@@ -150,6 +153,7 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
   const [sortMode, setSortMode] = useState<'NAME_ASC' | 'NAME_DESC' | 'DATE_NEWEST' | 'DATE_OLDEST'>('NAME_ASC');
   const [repairingKampTaseron, setRepairingKampTaseron] = useState(false);
   const [exportingListe, setExportingListe] = useState<'excel' | 'html' | null>(null);
+  const [screenView, setScreenView] = useState<PersonelScreenView>('liste');
 
   // SGK PDF parsing states
   const [regMethod, setRegMethod] = useState<'manual' | 'sgk_pdf'>('manual');
@@ -458,6 +462,7 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
     setSelectedPersonel(corrected);
     setFormData(corrected);
     setRegMethod('manual');
+    setScreenView('kayit');
     if (p.firmaTipi === 'TASERON') {
       const match = taseronCariList.find(
         (c) =>
@@ -637,6 +642,18 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
 
     setTaseronResolveModal(null);
     handleClearForm();
+    setScreenView('liste');
+  };
+
+  const openNewPersonelKayit = () => {
+    handleClearForm();
+    setRegMethod('manual');
+    setScreenView('kayit');
+  };
+
+  const handleGorevChange = (value: string) => {
+    if (isAkvizyonFirmaAdi(formData.firmaAdi)) return;
+    setFormData((prev) => ({ ...prev, gorev: normalizePersonelGorev(value) }));
   };
 
   const resolveTaseronCariOnSave = async (
@@ -995,6 +1012,16 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
     return buildDedupedFirmaOptions(names);
   }, [personeller, kampKayitlari, cariKartlar]);
 
+  /** Mevcut kadrodaki görev/ünvanlar — tekrar eden farklı yazımları önlemek için öneri listesinde */
+  const existingGorevOptions = useMemo(() => {
+    const set = new Set<string>([...GOREV_PRESETS]);
+    personeller.forEach((p) => {
+      const g = normalizePersonelGorev(String(p.gorev || '')).trim();
+      if (g) set.add(g);
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b, 'tr'));
+  }, [personeller]);
+
   const matchesFirmaFilter = (p: Personel, filters: string[]) => {
     if (!filters.length) return true;
     return filters.some((key) => {
@@ -1303,10 +1330,63 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
   const isEditMode = Boolean(selectedPersonel?.id) || ('id' in formData && Boolean((formData as Personel).id));
 
   return (
-    <div className="flex-grow p-6 min-h-[calc(100vh-52px)] overflow-y-auto flex flex-col lg:flex-row font-sans gap-6 select-none bg-slate-50/50">
+    <div className="flex-grow min-h-[calc(100vh-52px)] flex flex-col font-sans select-none bg-gradient-to-b from-[#FFFBF7] via-white to-orange-50/20">
 
-      {/* SOLID 40% LEFT PANEL: Dynamic Drawer for Create/Edit */}
-      <div className="w-[430px] shrink-0 bg-white border border-[#e2e8f0] rounded-2xl flex flex-col overflow-hidden shadow-sm max-h-[calc(100vh-3rem)] lg:sticky lg:top-6 lg:self-start">
+      {/* Liste / Kayıt alt sayfa geçişi */}
+      <div className="shrink-0 px-4 sm:px-6 pt-4 pb-3 border-b border-orange-100 bg-white/90 backdrop-blur-sm">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex gap-1 p-1 bg-orange-50 rounded-xl border border-orange-100">
+            <button
+              type="button"
+              onClick={() => setScreenView('liste')}
+              className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold transition cursor-pointer ${
+                screenView === 'liste'
+                  ? 'bg-orange-500 text-white shadow-sm'
+                  : 'text-slate-600 hover:bg-orange-100'
+              }`}
+            >
+              <Users size={14} />
+              Kadro Listesi
+            </button>
+            <button
+              type="button"
+              onClick={openNewPersonelKayit}
+              className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold transition cursor-pointer ${
+                screenView === 'kayit'
+                  ? 'bg-orange-500 text-white shadow-sm'
+                  : 'text-slate-600 hover:bg-orange-100'
+              }`}
+            >
+              <ClipboardList size={14} />
+              Personel Kayıt
+            </button>
+          </div>
+
+          {screenView === 'liste' ? (
+            <button
+              type="button"
+              onClick={openNewPersonelKayit}
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-slate-900 hover:bg-black text-white text-xs font-bold shadow-sm cursor-pointer"
+            >
+              <UserPlus size={14} />
+              Yeni Personel
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setScreenView('liste')}
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl border border-orange-200 bg-white hover:bg-orange-50 text-orange-900 text-xs font-bold cursor-pointer"
+            >
+              <ArrowLeft size={14} />
+              Listeye Dön
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div className="flex-1 overflow-y-auto p-4 sm:p-6">
+      {screenView === 'kayit' ? (
+      <div className="max-w-4xl mx-auto w-full bg-white border border-orange-100 rounded-2xl flex flex-col overflow-hidden shadow-sm">
 
         {/* Header card indicator */}
         <div className="bg-white border-b border-slate-100 p-5 shrink-0 flex items-center justify-between">
@@ -1733,31 +1813,26 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
                 </select>
               </div>
               <div>
-                <label className="text-[10px] font-bold text-slate-500 uppercase">Görev/Ünvan</label>
-                <input
-                  type="text"
+                <SmartCatalogField
+                  kind="gorev"
                   name="gorev"
-                  list="personel-gorev-presets"
+                  label="Görev/Ünvan"
                   value={formData.gorev}
-                  onChange={handleInputChange}
-                  readOnly={isAkvizyonFirmaAdi(formData.firmaAdi)}
-                  className={`w-full text-xs border border-[#e2e8f0] rounded-lg mt-1 p-2 ${
+                  onChange={handleGorevChange}
+                  extraOptions={existingGorevOptions}
+                  disabled={isAkvizyonFirmaAdi(formData.firmaAdi)}
+                  autoRegisterNew={!isAkvizyonFirmaAdi(formData.firmaAdi)}
+                  inputClassName={`w-full text-xs border border-[#e2e8f0] rounded-lg mt-1 p-2 ${
                     isAkvizyonFirmaAdi(formData.firmaAdi)
                       ? 'bg-indigo-50 text-indigo-900 font-bold'
                       : 'bg-slate-50'
                   }`}
-                  placeholder="Listeden seçin veya elle yazın"
+                  hint={
+                    isAkvizyonFirmaAdi(formData.firmaAdi)
+                      ? 'Akvizyon personeli için görev sabittir: GÜVENLİK'
+                      : `${existingGorevOptions.length} kayıtlı görev — listeden seçin veya benzer yazım uyarısını dikkate alın`
+                  }
                 />
-                <datalist id="personel-gorev-presets">
-                  {GOREV_PRESETS.map((gorev) => (
-                    <option key={gorev} value={gorev} />
-                  ))}
-                </datalist>
-                <p className="text-[8px] text-slate-400 mt-1">
-                  {isAkvizyonFirmaAdi(formData.firmaAdi)
-                    ? 'Akvizyon personeli için görev sabittir: GÜVENLİK'
-                    : 'Önerilen görevler listeden seçilebilir; özel ünvan da yazılabilir.'}
-                </p>
               </div>
             </div>
 
@@ -1930,9 +2005,9 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
           </div>
         )}
       </div>
-
-      {/* SOLID 60% RIGHT PANEL: Quick filter table list */}
-      <div className="flex-1 bg-white border border-[#e2e8f0] rounded-2xl flex flex-col overflow-hidden shadow-sm">
+      ) : (
+      /* ═══ KADRO LİSTESİ — tam genişlik ═══ */
+      <div className="w-full bg-white border border-orange-100 rounded-2xl flex flex-col overflow-hidden shadow-sm min-h-[calc(100vh-10rem)]">
 
         {/* Search header bar */}
 <div className="p-4 border-b border-slate-100 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between bg-slate-550/10">
@@ -2320,6 +2395,8 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
             })
           )}
         </div>
+      </div>
+      )}
       </div>
 
       {/* İŞTEN ÇIKARMA TARİH SEÇİM MODALİ */}
