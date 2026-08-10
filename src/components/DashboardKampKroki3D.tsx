@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Building2, Map, Tent, Users, ChevronRight, Maximize2 } from 'lucide-react';
+import { Building2, Map as MapIcon, Tent, Users, ChevronRight, Maximize2 } from 'lucide-react';
 import type { KampKaydi, KampOdasi, Personel } from '../types/erp';
 import {
   buildKampKrokiModel,
@@ -167,7 +167,7 @@ export const DashboardKampKroki3D: React.FC<Props> = ({
       <div className="px-5 sm:px-6 py-4 border-b border-orange-50 bg-gradient-to-r from-orange-50/80 via-white to-amber-50/40 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-orange-400 to-amber-500 text-white flex items-center justify-center shadow-lg shadow-orange-200/50">
-            <Map size={20} />
+            <MapIcon size={20} />
           </div>
           <div>
             <h2 className="font-display text-lg font-bold text-slate-900">Kamp Kroki — 3D Görünüm</h2>
