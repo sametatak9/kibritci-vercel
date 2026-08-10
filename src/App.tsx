@@ -120,6 +120,11 @@ import {
   repairKullaniciDocIdsIfNeeded,
   saveKullanici,
 } from './lib/kullaniciUtils';
+import {
+  applyCariDedupPlan,
+  applyCariDedupPlansInMemory,
+  planCariKartDedup,
+} from './lib/cariKartDedupUtils';
 import { collection, onSnapshot, doc, getDoc, query, orderBy, limit } from 'firebase/firestore';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { syncAuthClaimsFromServer } from './lib/authClaimsClient';
@@ -367,6 +372,7 @@ export default function App() {
   const deltaKapiCariSeedRef = useRef(false);
   const yeditepePersonelSeedRef = useRef(false);
   const yeditepeCariSeedRef = useRef(false);
+  const cariDedupRanRef = useRef(false);
   const kampRepairInFlightRef = useRef(false);
   const yoklamaJsonSeenRef = useRef<string | null>(null);
   const yoklamaSyncPendingRef = useRef<{
@@ -919,6 +925,21 @@ export default function App() {
             console.warn('YEDİTEPE cari kaydı atlandı:', e)
           );
         }
+        const cariDedupPlans = planCariKartDedup(companyDataWithYeditepe, yeditepeMerged.list);
+        const companyDataDeduped = applyCariDedupPlansInMemory(companyDataWithYeditepe, cariDedupPlans);
+        if (cariDedupPlans.length > 0) {
+          cariDedupRanRef.current = true;
+          void (async () => {
+            for (const plan of cariDedupPlans) {
+              try {
+                await applyCariDedupPlan(plan);
+              } catch (e) {
+                console.warn('Cari mükerrer birleştirme atlandı:', plan.key, e);
+              }
+            }
+            console.log(`Cari mükerrer birleştirme: ${cariDedupPlans.length} grup`);
+          })();
+        }
         setYoklamalar(attData);
         if (hasSubstantialYoklamaData(attData) || kuterMerged.list.length >= 20) {
           markProductionLive();
@@ -966,7 +987,7 @@ export default function App() {
         setSahaFaaliyetleri(reportData);
         setProgramliFaaliyetler(loadedProgramliFaaliyetler);
         setHazirTutanaklar(protocolData);
-        setCariKartlar(companyDataWithYeditepe);
+        setCariKartlar(companyDataDeduped);
         setStokKartlar(stockData);
         setEpostaGonderimleri(emailLogData);
         setKullanicilar(loadedUsers);
@@ -1512,11 +1533,30 @@ export default function App() {
     });
 
     const unsubCari = onSnapshot(collection(db, 'cariKartlar'), (snapshot) => {
-      const list: CariKart[] = [];
+      let list: CariKart[] = [];
       snapshot.forEach((docSnap) => {
         // data.id, Firestore yolunu ezmesin (silme hedefi yanlış id olmasın)
         list.push({ ...docSnap.data(), id: docSnap.id } as CariKart);
       });
+
+      if (!cariDedupRanRef.current) {
+        const plans = planCariKartDedup(list);
+        if (plans.length > 0) {
+          cariDedupRanRef.current = true;
+          list = applyCariDedupPlansInMemory(list, plans);
+          void (async () => {
+            for (const plan of plans) {
+              try {
+                await applyCariDedupPlan(plan);
+              } catch (e) {
+                console.warn('Cari mükerrer birleştirme atlandı:', plan.key, e);
+              }
+            }
+            console.log(`Cari mükerrer birleştirme (snapshot): ${plans.length} grup`);
+          })();
+        }
+      }
+
       setCariKartlar(list);
 
       if (!kuterCariSeedRef.current) {
