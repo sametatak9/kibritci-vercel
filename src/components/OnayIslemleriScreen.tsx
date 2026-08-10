@@ -72,7 +72,7 @@ import {
   markTaseronSayimRejected,
   validateTaseronSayimSession,
 } from '../lib/kampTaseronSayimOnayUtils';
-import { resolvePersonelForGirisOnay } from '../lib/personelMatchUtils';
+import { loadPersonellerForDedup, upsertPersonelAvoidDuplicate } from '../lib/personelMatchUtils';
 
 interface OnayIslemleriScreenProps {
   satinAlmaTalepleri: SatinAlmaTalebi[];
@@ -3810,54 +3810,60 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
                                           return;
                                         }
                                         try {
-                                          let allPersoneller = personeller;
-                                          if (allPersoneller.length === 0) {
-                                            const persSnap = await getDocs(collection(db, 'personeller'));
-                                            allPersoneller = persSnap.docs.map((d) => ({
-                                              id: d.id,
-                                              ...d.data(),
-                                            })) as Personel[];
-                                          }
+                                          const candidate: Personel = {
+                                            id: item.personelId || `p_${Date.now()}`,
+                                            tcNo: item.tcNo || '',
+                                            ad: item.ad || '',
+                                            soyad: item.soyad || '',
+                                            babaAdi: '',
+                                            dogumTarihi: '',
+                                            telefonNo: item.telefonNo || '',
+                                            eposta: '',
+                                            adres: '',
+                                            il: '',
+                                            ilce: '',
+                                            departman: 'ŞANTİYE',
+                                            gorev: item.gorev || 'İŞÇİ',
+                                            iseGirisTarihi: (item.tarih || new Date().toISOString()).slice(0, 10),
+                                            cinsiyet: 'Belirtilmedi',
+                                            maas: 0,
+                                            ucretTipi: 'Aylık',
+                                            sgkDurumu: "SGK'lı",
+                                            bankaAdi: '',
+                                            subeAdi: '',
+                                            ibanNo: '',
+                                            durum: true,
+                                          };
 
-                                          const existing = resolvePersonelForGirisOnay(allPersoneller, item);
-                                          const personelId = existing?.id || item.personelId || `p_${Date.now()}`;
+                                          const { personel: saved, merged } = await upsertPersonelAvoidDuplicate(
+                                            personeller || [],
+                                            candidate,
+                                            {
+                                              rawName: `${item.ad || ''} ${item.soyad || ''}`.trim(),
+                                              tcNo: item.tcNo,
+                                              telefonNo: item.telefonNo,
+                                              firmaAdi: item.firmaAdi,
+                                              firmaTipi: item.firmaTipi === 'TASERON' ? 'TASERON' : 'ANA_FIRMA',
+                                            }
+                                          );
 
-                                          if (existing) {
-                                            await saveDocument('personeller', {
-                                              ...existing,
-                                              ad: item.ad || existing.ad,
-                                              soyad: item.soyad || existing.soyad,
-                                              gorev: item.gorev || existing.gorev || 'İŞÇİ',
-                                              tcNo: item.tcNo || existing.tcNo || '',
-                                              telefonNo: item.telefonNo || existing.telefonNo || '',
-                                              durum: true,
-                                              iseGirisTarihi: (item.tarih || new Date().toISOString()).slice(0, 10),
-                                            });
-                                          } else {
-                                            await saveDocument('personeller', {
-                                              id: personelId,
-                                              ad: item.ad,
-                                              soyad: item.soyad,
-                                              gorev: item.gorev || 'İŞÇİ',
-                                              iseGirisTarihi: (item.tarih || new Date().toISOString()).slice(0, 10),
-                                              durum: true,
-                                              tcNo: item.tcNo || '',
-                                              telefonNo: item.telefonNo || '',
-                                              netMaas: 0,
-                                            });
-                                          }
+                                          setPersoneller?.((prev) =>
+                                            prev.some((p) => p.id === saved.id)
+                                              ? prev.map((p) => (p.id === saved.id ? saved : p))
+                                              : [...prev, saved]
+                                          );
 
                                           await updateDoc(doc(db, 'personelGirisTalepleri', item.id), {
                                             durum: 'ONAYLANDI',
                                             girisEvrakPdfUrl: uploadedPdfBase64,
-                                            personelId,
+                                            personelId: saved.id,
                                             onaylayan: currentUser?.email,
                                             onayTarihi: new Date().toISOString(),
                                           });
                                           setActivePdfUploadId(null);
                                           setUploadedPdfBase64(null);
                                           alert(
-                                            existing
+                                            merged
                                               ? '🎉 Personel giriş talebi onaylandı! Mevcut personel kaydı güncellendi (mükerrer kayıt açılmadı).'
                                               : '🎉 Personel giriş talebi onaylandı! İşe Giriş Bildirgesi başarıyla sisteme yüklendi ve sahaya bildirildi.'
                                           );

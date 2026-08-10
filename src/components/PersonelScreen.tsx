@@ -26,6 +26,7 @@ import {
   exportSeciliPersonelExcel,
   openPersonelListeRaporu,
 } from '../lib/taseronPersonelExcelExport';
+import { findPersonelMatches, loadPersonellerForDedup, pickBestPersonelMatch } from '../lib/personelMatchUtils';
 
 const MAX_PERSONEL_INLINE_MEDIA = 120_000;
 
@@ -774,14 +775,33 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
       ('id' in formData && formData.id ? String(formData.id).trim() : '');
     const isEdit = Boolean(editingId);
 
+    const dedupList = await loadPersonellerForDedup(personeller);
+
     if (normalizedTc) {
-      const duplicateTc = personeller.find((p) => {
+      const duplicateTc = dedupList.find((p) => {
         const existingTc = String(p.tcNo || '').trim();
         if (isEdit && p.id === editingId) return false;
         return existingTc.length > 0 && existingTc === normalizedTc;
       });
       if (duplicateTc) {
         alert(`Bu TC kimlik numarası zaten kayıtlı: ${duplicateTc.ad} ${duplicateTc.soyad}`);
+        return;
+      }
+    }
+
+    if (!isEdit && isTaseronForm) {
+      const nameFirmaMatch = pickBestPersonelMatch(
+        findPersonelMatches(dedupList, {
+          rawName: `${formData.ad} ${formData.soyad}`.trim(),
+          tcNo: normalizedTc,
+          firmaAdi: formData.firmaAdi,
+          firmaTipi: 'TASERON',
+        })
+      );
+      if (nameFirmaMatch && nameFirmaMatch.score <= 2) {
+        alert(
+          `Bu isim ve firma zaten kayıtlı: ${nameFirmaMatch.personel.ad} ${nameFirmaMatch.personel.soyad} (${nameFirmaMatch.personel.firmaAdi || 'Taşeron'}). Mevcut kaydı düzenleyin.`
+        );
         return;
       }
     }

@@ -8,7 +8,7 @@ import {
 } from 'lucide-react';
 import { Personel } from '../types/erp';
 import { fetchCollection, saveDocument, ensureFirestoreAuth } from '../lib/firebase';
-import { resolvePersonelForGirisOnay } from '../lib/personelMatchUtils';
+import { upsertPersonelAvoidDuplicate } from '../lib/personelMatchUtils';
 import { doc, updateDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { fetchApiJson } from '../lib/apiClient';
@@ -248,29 +248,22 @@ const PublicGirisKayitForm: React.FC<PublicGirisKayitScreenProps> = ({
     setSaving(true);
     try {
       await ensureFirestoreAuth({ allowAnonymous: true });
-      const allPersoneller = (await fetchCollection('personeller')) as Personel[];
-      const existing = resolvePersonelForGirisOnay(allPersoneller, {
-        personelId: talep.personelId,
-        ad: form.ad,
-        soyad: form.soyad,
-        tcNo: form.tcNo,
-        telefonNo: form.telefonNo,
-        firmaAdi: form.firmaAdi,
-        firmaTipi: form.firmaTipi,
-      });
-
-      const personelId = existing?.id || talep.personelId || `p_${Date.now()}`;
-      const newPersonel: Personel = {
-        ...(existing || form),
+      const candidate: Personel = {
         ...form,
-        id: personelId,
+        id: talep.personelId || `p_${Date.now()}`,
         ad: form.ad.trim(),
         soyad: form.soyad.trim(),
         gorev: form.gorev.trim(),
         fotografUrl: kimlikOnUrl || form.fotografUrl,
         durum: true,
       };
-      await saveDocument('personeller', newPersonel);
+      const { personel: newPersonel } = await upsertPersonelAvoidDuplicate([], candidate, {
+        rawName: `${form.ad} ${form.soyad}`.trim(),
+        tcNo: form.tcNo,
+        telefonNo: form.telefonNo,
+        firmaAdi: form.firmaAdi,
+        firmaTipi: form.firmaTipi === 'TASERON' ? 'TASERON' : 'ANA_FIRMA',
+      });
       await updateDoc(doc(db, 'personelGirisTalepleri', talep.id), {
         durum: 'KAYIT_TAMAMLANDI',
         personelId: newPersonel.id,

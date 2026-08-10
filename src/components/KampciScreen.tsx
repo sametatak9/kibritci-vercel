@@ -39,9 +39,11 @@ import {
   AUTO_MERGE_SCORE_MAX,
   findPersonelMatches,
   formatPersonelMatchLabel,
+  loadPersonellerForDedup,
   phoneMatchKey,
   pickBestPersonelMatch,
   shouldConfirmPersonelMerge,
+  upsertPersonelAvoidDuplicate,
 } from '../lib/personelMatchUtils';
 import { vibrateVidanjorAlert } from '../lib/vidanjorUtils';
 import { resolveGeldiRolPersonelIds } from '../lib/mobilRolEtiketUtils';
@@ -391,8 +393,9 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
     tcNo: string,
     telefonNo: string
   ): Promise<{ personel: Personel; created: boolean; merged: boolean }> => {
+    const dedupList = await loadPersonellerForDedup(personeller);
     const tc = digitsOnly(tcNo);
-    const matchResults = findPersonelMatches(personeller, {
+    const matchResults = findPersonelMatches(dedupList, {
       rawName,
       tcNo,
       telefonNo,
@@ -451,8 +454,11 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
     }
 
     const created = await createKampPersonel(rawName, firmaAdi, firmaTipi, tcNo, telefonNo);
-    const wasExisting = personeller.some((p) => p.id === created.id);
-    return { personel: created, created: !wasExisting, merged: wasExisting };
+    return {
+      personel: created.personel,
+      created: created.created,
+      merged: created.merged || !created.created,
+    };
   };
 
   const createKampPersonel = async (
@@ -461,14 +467,8 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
     firmaTipi: 'ANA_FIRMA' | 'TASERON',
     tcNo: string,
     telefonNo: string
-  ) => {
+  ): Promise<{ personel: Personel; created: boolean; merged: boolean }> => {
     const tc = digitsOnly(tcNo);
-    const preMatch = pickBestPersonelMatch(
-      findPersonelMatches(personeller, { rawName, tcNo, telefonNo, firmaAdi, firmaTipi })
-    );
-    if (preMatch) {
-      return preMatch.personel;
-    }
 
     const cleaned = sanitizeManualName(rawName);
     const parts = cleaned.split(' ').filter(Boolean);
@@ -503,12 +503,18 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
       durum: true,
       firmaTipi,
       firmaAdi: normalizedFirma,
-      // Ana firma kampçı kayıtları Onay Havuzu'na düşer; taşeron firma kadrosu doğrudan listelenir
       onayDurumu: firmaTipi === 'TASERON' ? 'ONAYLANDI' : 'ONAY BEKLİYOR',
       kaynak: 'KAMPCI',
     };
-    await saveDocument('personeller', personel);
-    return personel;
+
+    const result = await upsertPersonelAvoidDuplicate(personeller, personel, {
+      rawName: `${ad} ${soyad}`.trim(),
+      tcNo: tc,
+      telefonNo,
+      firmaAdi: normalizedFirma,
+      firmaTipi,
+    });
+    return result;
   };
 
   const ensureTaseronCari = async (firmaAdi: string): Promise<CariKart | null> => {
