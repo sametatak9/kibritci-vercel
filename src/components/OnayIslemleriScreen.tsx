@@ -65,6 +65,7 @@ import {
 import type { OperatorFaaliyet } from '../types/erp';
 import { pickPrimaryFotoUrl } from '../lib/guvenlikEvrakFotolar';
 import { toAiParsePayload } from '../lib/guvenlikFotoStorage';
+import { resolvePersonelForGirisOnay } from '../lib/personelMatchUtils';
 
 interface OnayIslemleriScreenProps {
   satinAlmaTalepleri: SatinAlmaTalebi[];
@@ -111,6 +112,7 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
   setStokKartlar,
   setStokIslemGecmisi,
   setPersoneller,
+  personeller = [],
   kampKayitlari = [],
   setKampKayitlari,
   kampOdalari = [],
@@ -3647,17 +3649,43 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
                                           return;
                                         }
                                         try {
-                                          const personelId = `p_${Date.now()}`;
-                                          await saveDocument('personeller', {
-                                            id: personelId,
-                                            ad: item.ad,
-                                            soyad: item.soyad,
-                                            gorev: item.gorev || 'İŞÇİ',
-                                            iseGirisTarihi: (item.tarih || new Date().toISOString()).slice(0, 10),
-                                            durum: true,
-                                            tcNo: item.tcNo || '',
-                                            netMaas: 0,
-                                          });
+                                          let allPersoneller = personeller;
+                                          if (allPersoneller.length === 0) {
+                                            const persSnap = await getDocs(collection(db, 'personeller'));
+                                            allPersoneller = persSnap.docs.map((d) => ({
+                                              id: d.id,
+                                              ...d.data(),
+                                            })) as Personel[];
+                                          }
+
+                                          const existing = resolvePersonelForGirisOnay(allPersoneller, item);
+                                          const personelId = existing?.id || item.personelId || `p_${Date.now()}`;
+
+                                          if (existing) {
+                                            await saveDocument('personeller', {
+                                              ...existing,
+                                              ad: item.ad || existing.ad,
+                                              soyad: item.soyad || existing.soyad,
+                                              gorev: item.gorev || existing.gorev || 'İŞÇİ',
+                                              tcNo: item.tcNo || existing.tcNo || '',
+                                              telefonNo: item.telefonNo || existing.telefonNo || '',
+                                              durum: true,
+                                              iseGirisTarihi: (item.tarih || new Date().toISOString()).slice(0, 10),
+                                            });
+                                          } else {
+                                            await saveDocument('personeller', {
+                                              id: personelId,
+                                              ad: item.ad,
+                                              soyad: item.soyad,
+                                              gorev: item.gorev || 'İŞÇİ',
+                                              iseGirisTarihi: (item.tarih || new Date().toISOString()).slice(0, 10),
+                                              durum: true,
+                                              tcNo: item.tcNo || '',
+                                              telefonNo: item.telefonNo || '',
+                                              netMaas: 0,
+                                            });
+                                          }
+
                                           await updateDoc(doc(db, 'personelGirisTalepleri', item.id), {
                                             durum: 'ONAYLANDI',
                                             girisEvrakPdfUrl: uploadedPdfBase64,
@@ -3667,7 +3695,11 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
                                           });
                                           setActivePdfUploadId(null);
                                           setUploadedPdfBase64(null);
-                                          alert("🎉 Personel giriş talebi onaylandı! İşe Giriş Bildirgesi başarıyla sisteme yüklendi ve sahaya bildirildi.");
+                                          alert(
+                                            existing
+                                              ? '🎉 Personel giriş talebi onaylandı! Mevcut personel kaydı güncellendi (mükerrer kayıt açılmadı).'
+                                              : '🎉 Personel giriş talebi onaylandı! İşe Giriş Bildirgesi başarıyla sisteme yüklendi ve sahaya bildirildi.'
+                                          );
                                         } catch (err) {
                                           console.error(err);
                                           alert("Kaydedilemedi, veritabanı bağlantısını kontrol edin.");
