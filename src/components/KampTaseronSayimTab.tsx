@@ -3,6 +3,7 @@ import {
   AlertTriangle,
   CheckCircle2,
   ClipboardList,
+  FileText,
   Loader2,
   LogOut,
   Save,
@@ -20,6 +21,7 @@ import {
 import { saveDocument } from '../lib/firebase';
 import { validateTC } from '../lib/personelOdemeUtils';
 import { submitPersonelCikisTalebi } from '../lib/personelCikisTalebiUtils';
+import { openTaseronSayimListeRaporu } from '../lib/taseronSayimListeRapor';
 import { firmaEslesir, getTaseronCariKartlar } from '../lib/taseronUtils';
 import { isTaseronPersonel } from '../lib/yoklamaUtils';
 
@@ -344,6 +346,16 @@ export const KampTaseronSayimTab: React.FC<KampTaseronSayimTabProps> = ({
     (p) => eksikTc(p) || eksikTel(p) || !p.mykDurumu || p.mykDurumu === 'BILINMIYOR'
   ).length;
 
+  const handleOpenSayimListesi = () => {
+    try {
+      const count = openTaseronSayimListeRaporu({ personeller });
+      showStatus?.('success', `Taşeron sayım listesi oluşturuldu (${count} personel).`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Liste oluşturulamadı.';
+      showStatus?.('error', msg);
+    }
+  };
+
   return (
     <div className="space-y-4">
       <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
@@ -359,15 +371,25 @@ export const KampTaseronSayimTab: React.FC<KampTaseronSayimTabProps> = ({
               </p>
             </div>
           </div>
-          <button
-            type="button"
-            onClick={handleSaveSession}
-            disabled={savingSession || sessionIslemler.length === 0}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-900 text-white text-xs font-bold disabled:opacity-40"
-          >
-            {savingSession ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-            Oturumu Kaydet ({sessionIslemler.length})
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={handleOpenSayimListesi}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold"
+            >
+              <FileText size={14} />
+              Taşeron Sayım Listesi
+            </button>
+            <button
+              type="button"
+              onClick={handleSaveSession}
+              disabled={savingSession || sessionIslemler.length === 0}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-900 text-white text-xs font-bold disabled:opacity-40"
+            >
+              {savingSession ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+              Oturumu Kaydet ({sessionIslemler.length})
+            </button>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
