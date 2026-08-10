@@ -1,12 +1,15 @@
 import React, { useMemo, useState } from 'react';
-import { Building2, Map as MapIcon, Tent, Users, ChevronRight, Maximize2 } from 'lucide-react';
+import { Building2, Map as MapIcon, Tent, Users, ChevronRight, Maximize2, List, Box } from 'lucide-react';
 import type { KampKaydi, KampOdasi, Personel } from '../types/erp';
 import {
   buildKampKrokiModel,
   firmaKrokiColor,
   type KampKatKroki,
+  type KampOdaKrokiHucre,
   type KampYerleskeKroki,
 } from '../lib/kampKrokiUtils';
+
+type ViewMode = '3d' | 'liste';
 
 type Props = {
   kampOdalari: KampOdasi[];
@@ -104,6 +107,160 @@ const IsoBuilding: React.FC<{ campus: KampYerleskeKroki }> = ({ campus }) => {
   );
 };
 
+function groupSakinlerByFirma(cell: KampOdaKrokiHucre) {
+  const map = new Map<string, string[]>();
+  for (const s of cell.sakinler) {
+    const firma = s.firma || 'TAŞERON';
+    if (!map.has(firma)) map.set(firma, []);
+    map.get(firma)!.push(s.isim);
+  }
+  return Array.from(map.entries())
+    .map(([firma, isimler]) => ({
+      firma,
+      isimler: isimler.sort((a, b) => a.localeCompare(b, 'tr')),
+    }))
+    .sort((a, b) => b.isimler.length - a.isimler.length || a.firma.localeCompare(b.firma, 'tr'));
+}
+
+const OdaSakinKarti: React.FC<{ cell: KampOdaKrokiHucre; kat: string; yerleske: string }> = ({
+  cell,
+  kat,
+  yerleske,
+}) => {
+  const gruplar = groupSakinlerByFirma(cell);
+  const c = cell.dominantFirma ? firmaKrokiColor(cell.dominantFirma) : null;
+
+  return (
+    <div
+      className="rounded-xl border p-3 bg-white shadow-sm"
+      style={{ borderColor: c ? `${c.bg}44` : '#E2E8F0' }}
+    >
+      <div className="flex items-start justify-between gap-2 mb-2">
+        <div className="min-w-0">
+          <p className="text-[11px] font-black text-slate-900">
+            Oda {cell.room.odaNo}
+          </p>
+          <p className="text-[9px] text-slate-500 truncate" title={`${yerleske} · ${kat}`}>
+            {yerleske} · {kat}
+          </p>
+        </div>
+        <span
+          className={`shrink-0 text-[9px] font-extrabold px-2 py-0.5 rounded-lg ${
+            cell.dolu >= cell.kapasite
+              ? 'bg-rose-100 text-rose-700'
+              : 'bg-amber-100 text-amber-800'
+          }`}
+        >
+          {cell.dolu}/{cell.kapasite}
+        </span>
+      </div>
+
+      {cell.dolu === 0 ? (
+        <p className="text-[10px] text-slate-400 italic">Boş oda</p>
+      ) : (
+        <div className="space-y-2">
+          {gruplar.map((g) => {
+            const fc = firmaKrokiColor(g.firma);
+            return (
+              <div key={g.firma}>
+                <div
+                  className="inline-flex items-center gap-1 text-[9px] font-black uppercase tracking-wide px-1.5 py-0.5 rounded-md mb-1"
+                  style={{ background: fc.soft, color: fc.text }}
+                >
+                  <span className="w-1.5 h-1.5 rounded-sm" style={{ background: fc.bg }} />
+                  {g.firma}
+                  <span className="tabular-nums opacity-70">({g.isimler.length})</span>
+                </div>
+                <ul className="space-y-0.5 pl-1">
+                  {g.isimler.map((isim, idx) => (
+                    <li key={`${g.firma}-${isim}-${idx}`} className="text-[10px] font-semibold text-slate-800 leading-snug">
+                      {isim}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+};
+
+const KampOdaListeGorunumu: React.FC<{
+  visible: KampYerleskeKroki[];
+  firmaFilter: string | null;
+}> = ({ visible, firmaFilter }) => {
+  const doluOdalar = useMemo(() => {
+    const rows: Array<{ campus: KampYerleskeKroki; kat: KampKatKroki; cell: KampOdaKrokiHucre }> = [];
+    for (const campus of visible) {
+      for (const kat of campus.katlar) {
+        for (const cell of kat.odalar) {
+          if (cell.dolu === 0) continue;
+          if (firmaFilter && !cell.sakinler.some((s) => s.firma === firmaFilter)) continue;
+          rows.push({ campus, kat, cell });
+        }
+      }
+    }
+    return rows;
+  }, [visible, firmaFilter]);
+
+  if (doluOdalar.length === 0) {
+    return (
+      <div className="px-5 sm:px-6 py-12 text-center text-sm text-slate-500">
+        {firmaFilter
+          ? `"${firmaFilter}" firmasına ait dolu oda bulunamadı.`
+          : 'Seçili blokta dolu oda yok.'}
+      </div>
+    );
+  }
+
+  return (
+    <div className="px-5 sm:px-6 py-4 max-h-[520px] overflow-y-auto space-y-6">
+      {visible.map((campus) => {
+        const campusRows = doluOdalar.filter((r) => r.campus.yerleske === campus.yerleske);
+        if (campusRows.length === 0) return null;
+
+        return (
+          <div key={campus.yerleske}>
+            <div className="flex items-center gap-2 mb-3 sticky top-0 bg-white/95 backdrop-blur py-1 z-10">
+              <Building2 size={14} className="text-orange-500" />
+              <h3 className="font-display font-bold text-sm text-slate-900">{campus.yerleske}</h3>
+              <span className="text-[10px] text-slate-500 font-semibold tabular-nums">
+                {campus.dolu}/{campus.kapasite} yatak
+              </span>
+            </div>
+
+            <div className="space-y-4">
+              {campus.katlar.map((kat) => {
+                const katRows = campusRows.filter((r) => r.kat.kat === kat.kat);
+                if (katRows.length === 0) return null;
+                return (
+                  <div key={`${campus.yerleske}-${kat.kat}`}>
+                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">
+                      {kat.kat} · {kat.dolu}/{kat.kapasite} yatak
+                    </p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2.5">
+                      {katRows.map(({ cell }) => (
+                        <OdaSakinKarti
+                          key={cell.room.id}
+                          cell={cell}
+                          kat={kat.kat}
+                          yerleske={campus.yerleske}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+};
+
 export const DashboardKampKroki3D: React.FC<Props> = ({
   kampOdalari,
   kampKayitlari,
@@ -116,6 +273,8 @@ export const DashboardKampKroki3D: React.FC<Props> = ({
   );
 
   const [selected, setSelected] = useState<string>('HEPSI');
+  const [viewMode, setViewMode] = useState<ViewMode>('liste');
+  const [firmaFilter, setFirmaFilter] = useState<string | null>(null);
 
   const totals = useMemo(() => {
     let dolu = 0;
@@ -135,8 +294,7 @@ export const DashboardKampKroki3D: React.FC<Props> = ({
       firmaSayisi: firmaMap.size,
       firmalar: Array.from(firmaMap.entries())
         .map(([firma, kisi]) => ({ firma, kisi }))
-        .sort((a, b) => b.kisi - a.kisi)
-        .slice(0, 10),
+        .sort((a, b) => b.kisi - a.kisi),
     };
   }, [model]);
 
@@ -170,11 +328,33 @@ export const DashboardKampKroki3D: React.FC<Props> = ({
             <MapIcon size={20} />
           </div>
           <div>
-            <h2 className="font-display text-lg font-bold text-slate-900">Kamp Kroki — 3D Görünüm</h2>
-            <p className="text-[11px] text-slate-500">Blok · kat · oda doluluk haritası (canlı)</p>
+            <h2 className="font-display text-lg font-bold text-slate-900">Kamp Kroki</h2>
+            <p className="text-[11px] text-slate-500">
+              {viewMode === '3d' ? 'Blok · kat · oda doluluk haritası' : 'Oda bazlı firma ve isim listesi'}
+            </p>
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5">
+            <button
+              type="button"
+              onClick={() => setViewMode('liste')}
+              className={`inline-flex items-center gap-1 text-[10px] font-bold px-2.5 py-1 rounded-md cursor-pointer transition ${
+                viewMode === 'liste' ? 'bg-orange-500 text-white' : 'text-slate-600 hover:bg-slate-50'
+              }`}
+            >
+              <List size={12} /> Oda Listesi
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode('3d')}
+              className={`inline-flex items-center gap-1 text-[10px] font-bold px-2.5 py-1 rounded-md cursor-pointer transition ${
+                viewMode === '3d' ? 'bg-orange-500 text-white' : 'text-slate-600 hover:bg-slate-50'
+              }`}
+            >
+              <Box size={12} /> 3D
+            </button>
+          </div>
           <div className="flex gap-2 text-[11px]">
             <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-50 border border-emerald-100 text-emerald-800 font-bold tabular-nums">
               <Users size={12} /> {totals.dolu}
@@ -218,7 +398,8 @@ export const DashboardKampKroki3D: React.FC<Props> = ({
         ))}
       </div>
 
-      {/* 3D Scene */}
+      {/* Content */}
+      {viewMode === '3d' ? (
       <div className="relative px-4 sm:px-6 py-8 sm:py-10 overflow-x-auto">
         {/* Grid floor */}
         <div
@@ -256,24 +437,43 @@ export const DashboardKampKroki3D: React.FC<Props> = ({
           Her kat şeridi = odalar · renk = baskın firma · boş gri
         </p>
       </div>
+      ) : (
+        <KampOdaListeGorunumu visible={visible} firmaFilter={firmaFilter} />
+      )}
 
-      {/* Legend + dolu oda list */}
+      {/* Legend + firma filter */}
       <div className="px-5 sm:px-6 py-4 border-t border-slate-100 bg-slate-50/30 space-y-3">
         {totals.firmalar.length > 0 && (
           <div className="flex flex-wrap items-center gap-1.5">
             <span className="text-[9px] font-black uppercase tracking-widest text-slate-400 mr-1">Firma</span>
+            {viewMode === 'liste' && firmaFilter && (
+              <button
+                type="button"
+                onClick={() => setFirmaFilter(null)}
+                className="text-[9px] font-bold px-2 py-0.5 rounded-md border border-slate-300 bg-white text-slate-600 hover:bg-slate-50 cursor-pointer"
+              >
+                Tümü
+              </button>
+            )}
             {totals.firmalar.map((f) => {
               const c = firmaKrokiColor(f.firma);
+              const active = firmaFilter === f.firma;
+              const Chip = viewMode === 'liste' ? 'button' : 'span';
               return (
-                <span
+                <Chip
                   key={f.firma}
-                  className="inline-flex items-center gap-1 text-[9px] font-bold px-2 py-0.5 rounded-md border"
+                  type={viewMode === 'liste' ? 'button' : undefined}
+                  onClick={viewMode === 'liste' ? () => setFirmaFilter(active ? null : f.firma) : undefined}
+                  className={`inline-flex items-center gap-1 text-[9px] font-bold px-2 py-0.5 rounded-md border ${
+                    viewMode === 'liste' ? 'cursor-pointer hover:brightness-95' : ''
+                  } ${active ? 'ring-2 ring-orange-400 ring-offset-1' : ''}`}
                   style={{ background: c.soft, color: c.text, borderColor: `${c.bg}33` }}
+                  title={viewMode === 'liste' ? `${f.firma} odalarını filtrele` : f.firma}
                 >
                   <span className="w-2 h-2 rounded-sm" style={{ background: c.bg }} />
                   {f.firma.length > 16 ? `${f.firma.slice(0, 14)}…` : f.firma}
                   <span className="tabular-nums opacity-80">{f.kisi}</span>
-                </span>
+                </Chip>
               );
             })}
           </div>
@@ -283,10 +483,23 @@ export const DashboardKampKroki3D: React.FC<Props> = ({
           <span className="inline-flex items-center gap-1.5 text-slate-500">
             <Building2 size={12} className="text-orange-500" />
             {visible.length} blok · {totals.firmaSayisi} firma kampta
+            {viewMode === 'liste' && firmaFilter && (
+              <span className="text-orange-600 font-bold">· Filtre: {firmaFilter}</span>
+            )}
           </span>
-          <span className="text-slate-300">|</span>
-          <span className="text-emerald-700 font-semibold">■ Boş oda</span>
-          <span className="text-slate-400">■ Dolu (firma rengi)</span>
+          {viewMode === '3d' && (
+            <>
+              <span className="text-slate-300">|</span>
+              <span className="text-emerald-700 font-semibold">■ Boş oda</span>
+              <span className="text-slate-400">■ Dolu (firma rengi)</span>
+            </>
+          )}
+          {viewMode === 'liste' && (
+            <>
+              <span className="text-slate-300">|</span>
+              <span className="text-slate-500">Oda kartında firma başlığı altında isimler listelenir</span>
+            </>
+          )}
         </div>
       </div>
     </section>

@@ -184,12 +184,26 @@ const FloorPlanStrip: React.FC<{
                     {empty ? (
                       <span className="text-[8px] text-slate-400 italic">Boş</span>
                     ) : (
-                      cell.firmalar.slice(0, 2).map((f) => (
-                        <div key={f.firma} className="text-[8px] font-bold truncate" style={{ color: c?.text }}>
-                          {f.firma.length > 18 ? `${f.firma.slice(0, 16)}…` : f.firma}
-                          <span className="tabular-nums ml-1 opacity-80">×{f.kisi}</span>
-                        </div>
-                      ))
+                      <>
+                        {cell.firmalar.slice(0, 2).map((f) => (
+                          <div key={f.firma} className="text-[8px] font-bold truncate" style={{ color: c?.text }}>
+                            {f.firma.length > 18 ? `${f.firma.slice(0, 16)}…` : f.firma}
+                            <span className="tabular-nums ml-1 opacity-80">×{f.kisi}</span>
+                          </div>
+                        ))}
+                        {cell.sakinler.length > 0 && (
+                          <div className="mt-1 pt-1 border-t border-slate-200/60 space-y-0.5">
+                            {cell.sakinler.slice(0, 4).map((s, idx) => (
+                              <p key={`${s.id}-${idx}`} className="text-[7px] text-slate-600 leading-tight truncate" title={`${s.isim} (${s.firma})`}>
+                                {s.isim}
+                              </p>
+                            ))}
+                            {cell.sakinler.length > 4 && (
+                              <p className="text-[7px] text-slate-400">+{cell.sakinler.length - 4} kişi</p>
+                            )}
+                          </div>
+                        )}
+                      </>
                     )}
                   </div>
                 </div>
