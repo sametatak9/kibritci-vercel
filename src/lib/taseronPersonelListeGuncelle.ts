@@ -1,5 +1,6 @@
 import type { Personel } from '../types/erp';
 import {
+  firmaEslesir,
   resolveTaseronPersonelGorev,
   TASERON_PERSONEL_DEPARTMAN,
   withTaseronPersonelGorev,
@@ -45,13 +46,9 @@ function nameKey(ad: string, soyad: string): string {
   return normKey(`${ad} ${soyad}`);
 }
 
-function firmaKey(firmaAdi: string): string {
-  return normKey(firmaAdi);
-}
-
 function sameTaseronFirma(p: Personel, firmaAdi: string): boolean {
   if (!isTaseronPersonel(p)) return false;
-  return firmaKey(p.firmaAdi || '') === firmaKey(firmaAdi);
+  return firmaEslesir(p.firmaAdi || '', firmaAdi);
 }
 
 function isAktif(p: Personel): boolean {
@@ -279,8 +276,18 @@ export function syncTaseronPersonelListe(options: {
   const findMatch = (row: TaseronListeRow): Personel | undefined => {
     const tc = digits(row.tcNo || '');
     if (tc) {
-      const byTc = list.find((p) => digits(p.tcNo) === tc);
-      if (byTc) return byTc;
+      const byTcInFirma = firmPool.find(
+        (p) => !usedIds.has(p.id) && digits(p.tcNo) === tc
+      );
+      if (byTcInFirma) return byTcInFirma;
+      // Taşeronlar arası firma değişimi — ana firma personelini asla eşleştirme
+      const byTcTaseron = list.find(
+        (p) =>
+          !usedIds.has(p.id) &&
+          digits(p.tcNo) === tc &&
+          isTaseronPersonel(p)
+      );
+      if (byTcTaseron) return byTcTaseron;
     }
     const nk = nameKey(row.ad, row.soyad);
     return firmPool.find(
@@ -303,7 +310,7 @@ export function syncTaseronPersonelListe(options: {
     const tc = digits(row.tcNo || '') || digits(match.tcNo);
     const wasAktif = isAktif(match);
     const needsFirma =
-      match.firmaTipi !== 'TASERON' || firmaKey(match.firmaAdi || '') !== firmaKey(firmaAdi);
+      match.firmaTipi !== 'TASERON' || !firmaEslesir(match.firmaAdi || '', firmaAdi);
     const needsName =
       (match.ad || '') !== row.ad || (match.soyad || '') !== row.soyad;
     const needsTc = Boolean(tc) && digits(match.tcNo) !== tc;

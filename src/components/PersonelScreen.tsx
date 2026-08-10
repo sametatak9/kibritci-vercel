@@ -26,7 +26,7 @@ import {
   syncTaseronPersonelListe,
   type TaseronListeSyncResult,
 } from '../lib/taseronPersonelListeGuncelle';
-import { resolveTaseronPersonelGorev, TASERON_PERSONEL_DEPARTMAN, withTaseronPersonelGorev, isTaseronPersonelRecord } from '../lib/taseronUtils';
+import { resolveTaseronPersonelGorev, TASERON_PERSONEL_DEPARTMAN, withTaseronPersonelGorev, isTaseronPersonelRecord, firmaEslesir } from '../lib/taseronUtils';
 import {
   exportSeciliPersonelExcel,
   openPersonelListeRaporu,
@@ -746,6 +746,25 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
       return String(listeManuelFirma || '').trim();
     }
     return taseronCariList.find((c) => c.id === listeFirmaCariId)?.unvan?.trim() || '';
+  };
+
+  const openListeModal = () => {
+    const today = new Date().toISOString().slice(0, 10);
+    if (firmaFilters.length === 1) {
+      const hit = firmaFilterOptions.find((o) => o.key === firmaFilters[0]);
+      const label = hit?.label || firmaFilters[0];
+      const cari = taseronCariList.find((c) => firmaEslesir(c.unvan, label));
+      if (cari) {
+        setListeFirmaCariId(cari.id);
+        setListeManuelFirma('');
+      } else {
+        setListeFirmaCariId(TASERON_MANUEL_KEY);
+        setListeManuelFirma(label);
+      }
+    }
+    if (!listeDonemBas) setListeDonemBas(today);
+    if (!listeDonemBit) setListeDonemBit(today);
+    setListeModalOpen(true);
   };
 
   const handleListeOnizle = () => {
@@ -2079,7 +2098,7 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
 
                 <button
                   type="button"
-                  onClick={() => setListeModalOpen(true)}
+                  onClick={openListeModal}
                   className="text-[10px] font-bold px-3 py-2 rounded-xl border cursor-pointer bg-orange-600 text-white border-orange-700 hover:bg-orange-500"
                   title="Haftalık taşeron kadro listesi güncelle"
                 >
