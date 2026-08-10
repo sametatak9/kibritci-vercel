@@ -360,6 +360,88 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
     return personeller.find((p) => phoneMatchKey(p.telefonNo || '') === key);
   };
 
+  /** Kamp kaydı / personel Ana Firma mı? Tahliyede işten çıkış YASAK. */
+  const isAnaFirmaKampKaydi = (reg: KampKaydi): boolean => {
+    if (reg.firmaTipi === 'ANA_FIRMA') return true;
+    if (reg.firmaTipi === 'TASERON') return false;
+    const p = reg.personelId ? personeller.find((x) => x.id === reg.personelId) : undefined;
+    if (p) return !isTaseronPersonel(p);
+    const firma = String(reg.calistigiFirma || '').trim();
+    if (!firma) return true;
+    return isKibritciName(firma);
+  };
+
+  /**
+   * Oda yerleşimi: varsa birleştir (TC / isim+TC / tel / isim), yoksa yeni kur.
+   * Çift kayıt açılmaz.
+   */
+  const resolveOrCreateKampPersonel = async (
+    rawName: string,
+    firmaAdi: string,
+    firmaTipi: 'ANA_FIRMA' | 'TASERON',
+    tcNo: string,
+    telefonNo: string
+  ): Promise<{ personel: Personel; created: boolean; merged: boolean }> => {
+    const tc = digitsOnly(tcNo);
+    const candidates: Personel[] = [];
+    const pushUnique = (p?: Personel) => {
+      if (p && !candidates.some((c) => c.id === p.id)) candidates.push(p);
+    };
+    pushUnique(findPersonelByNameAndTc(rawName, tc));
+    pushUnique(findPersonelByTc(tc));
+    pushUnique(findPersonelByTel(telefonNo));
+    pushUnique(findDbPersonelByRawName(rawName));
+    if (firmaTipi === 'TASERON') {
+      pushUnique(findExistingTaseronPersonel(rawName, firmaAdi));
+    }
+
+    if (candidates.length > 0) {
+      let best = candidates[0];
+      // TC eşleşeni önceliklendir
+      if (validateTC(tc)) {
+        const byTc = candidates.find((p) => digitsOnly(p.tcNo || '') === tc);
+        if (byTc) best = byTc;
+      }
+      const nextTc = (validateTC(tc) ? tc : '') || digitsOnly(best.tcNo || '');
+      const nextTel = telefonNo.trim() || best.telefonNo || '';
+      const nextFirmaAdi =
+        firmaTipi === 'ANA_FIRMA'
+          ? CANONICAL_ANA_FIRMA_ADI
+          : String(firmaAdi || best.firmaAdi || '').trim() || best.firmaAdi || 'Taşeron';
+      const wasKampGorev = /KAMP\s*PERSONEL/i.test(String(best.gorev || ''));
+      const needsPatch =
+        (nextTc && digitsOnly(best.tcNo || '') !== nextTc) ||
+        (nextTel && phoneMatchKey(best.telefonNo || '') !== phoneMatchKey(nextTel)) ||
+        best.firmaTipi !== firmaTipi ||
+        !firmaEslesir(best.firmaAdi || '', nextFirmaAdi) ||
+        (firmaTipi === 'TASERON' && wasKampGorev) ||
+        (firmaTipi === 'TASERON' && best.onayDurumu === 'ONAY BEKLİYOR');
+
+      if (needsPatch) {
+        const patched: Personel = {
+          ...best,
+          tcNo: nextTc || best.tcNo,
+          telefonNo: nextTel || best.telefonNo,
+          firmaTipi,
+          firmaAdi: nextFirmaAdi,
+          departman: firmaTipi === 'TASERON' ? 'TAŞERON' : best.departman || 'SAHA',
+          gorev:
+            firmaTipi === 'TASERON' && wasKampGorev ? 'TAŞERON PERSONEL' : best.gorev,
+          onayDurumu: firmaTipi === 'TASERON' ? 'ONAYLANDI' : best.onayDurumu,
+          durum: best.durum === false ? true : best.durum,
+        };
+        await saveDocument('personeller', patched);
+        return { personel: patched, created: false, merged: true };
+      }
+      return { personel: best, created: false, merged: true };
+    }
+
+    const created = await createKampPersonel(rawName, firmaAdi, firmaTipi, tcNo, telefonNo);
+    // createKampPersonel kendi içinde de eşleşme yapabilir
+    const wasExisting = personeller.some((p) => p.id === created.id);
+    return { personel: created, created: !wasExisting, merged: wasExisting };
+  };
+
   const createKampPersonel = async (
     rawName: string,
     firmaAdi: string,
@@ -374,6 +456,8 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
     if (byTc) return byTc;
     const byTel = findPersonelByTel(telefonNo);
     if (byTel) return byTel;
+    const byName = findDbPersonelByRawName(rawName);
+    if (byName) return byName;
 
     if (firmaTipi === 'TASERON') {
       const existing = findExistingTaseronPersonel(rawName, firmaAdi);
@@ -963,32 +1047,28 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
       }
 
       if (!matchedPersonel && placementType === 'MANUAL') {
-        const byNameAndTc = findPersonelByNameAndTc(personelIsim, placementTcNo);
-        if (byNameAndTc) {
-          matchedPersonel = byNameAndTc;
-          personelId = byNameAndTc.id;
-          personelIsim = `${byNameAndTc.ad} ${byNameAndTc.soyad}`;
-        }
-      }
-
-      if (!matchedPersonel && placementType === 'MANUAL') {
-        const alreadyInList = (id: string) => personeller.some((p) => p.id === id);
-        const created = await createKampPersonel(
+        const resolved = await resolveOrCreateKampPersonel(
           personelIsim,
           resolvedFirma || (placementFirmaTipi === 'ANA_FIRMA' ? CANONICAL_ANA_FIRMA_ADI : 'Taşeron'),
           placementFirmaTipi,
           placementTcNo,
           placementTelefonNo
         );
-        personelId = created.id;
-        personelIsim = `${created.ad} ${created.soyad}`;
-        createdPersonel = !alreadyInList(created.id);
+        personelId = resolved.personel.id;
+        personelIsim = `${resolved.personel.ad} ${resolved.personel.soyad}`;
+        createdPersonel = resolved.created;
         setPersoneller?.((prev) =>
-          prev.some((p) => p.id === created.id)
-            ? prev.map((p) => (p.id === created.id ? created : p))
-            : [...prev, created]
+          prev.some((p) => p.id === resolved.personel.id)
+            ? prev.map((p) => (p.id === resolved.personel.id ? resolved.personel : p))
+            : [...prev, resolved.personel]
         );
-        matchedPersonel = created;
+        matchedPersonel = resolved.personel;
+        if (resolved.merged) {
+          showStatus(
+            'info',
+            `${personelIsim} sistemde vardı — mevcut kayda birleştirildi (yeni personel açılmadı).`
+          );
+        }
       } else if (matchedPersonel) {
         // Seçili personelin TC/tel boşsa kampçı girdikleriyle güncelle; firma seçimini yaz
         const nextTc = digitsOnly(placementTcNo) || digitsOnly(matchedPersonel.tcNo || '');
@@ -1072,7 +1152,14 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
   };
 
   const sendCikisTalebiForKampTahliye = async (reg: KampKaydi, odaNo?: string) => {
+    // Ana firma personeli kamp tahliyesinde ASLA işten çıkarılmaz / çıkış talebi gitmez
+    if (isAnaFirmaKampKaydi(reg)) {
+      throw new Error('ANA_FIRMA_ISTEN_CIKIS_YASAK');
+    }
     const p = personeller.find((x) => x.id === reg.personelId);
+    if (p && !isTaseronPersonel(p)) {
+      throw new Error('ANA_FIRMA_ISTEN_CIKIS_YASAK');
+    }
     const todayStr = new Date().toISOString().slice(0, 10);
     await submitPersonelCikisTalebi({
       personelId: reg.personelId || p?.id,
@@ -1080,7 +1167,7 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
       personelGorev: p?.gorev || '',
       personelMaas: p?.netMaas ?? p?.maas ?? 0,
       cikisTarihi: todayStr,
-      cikisNedeni: `Kamp tahliyesi${odaNo ? ` · Oda ${odaNo}` : ''} — kampçı tarafından odadan çıkarıldı; işten çıkış onayı bekleniyor.`,
+      cikisNedeni: `Kamp tahliyesi${odaNo ? ` · Oda ${odaNo}` : ''} — taşeron personel; kampçı tarafından odadan çıkarıldı; işten çıkış onayı bekleniyor.`,
       gonderen: currentUser?.email || 'kampci',
       kaynak: 'KAMPCI_TAHLIYE',
       hedefYoneticiRole: 'YÖNETİCİ',
@@ -1096,9 +1183,14 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
       return;
     }
 
-    const sendIstenCikis = window.confirm(
-      `${reg.personelIsim} için işten çıkış talebi yönetime gönderilsin mi?\n\nEvet: işten çıkış onay havuzuna düşer.\nHayır: sadece kamp odasından çıkarılır.`
-    );
+    const anaFirma = isAnaFirmaKampKaydi(reg);
+    // Ana firma: sadece odadan çıkar; işten çıkış sorulmaz / gönderilmez
+    let sendIstenCikis = false;
+    if (!anaFirma) {
+      sendIstenCikis = window.confirm(
+        `${reg.personelIsim} (taşeron) için işten çıkış talebi yönetime gönderilsin mi?\n\nEvet: işten çıkış onay havuzuna düşer.\nHayır: sadece kamp odasından çıkarılır.\n\nNot: Ana firma personelinde işten çıkış kamp tahliyesiyle yapılmaz.`
+      );
+    }
 
     try {
       const targetRoom = kampOdalari.find(r => r.id === reg.odaId || r.id === reg.roomId);
@@ -1107,12 +1199,19 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
         try {
           await sendCikisTalebiForKampTahliye(reg, targetRoom?.odaNo);
         } catch (talebiErr) {
-          console.warn('İşten çıkış talebi gönderilemedi:', talebiErr);
-          showStatus(
-            'error',
-            `${reg.personelIsim} odadan çıktı ancak işten çıkış talebi gönderilemedi — Onay Havuzu’nu kontrol edin.`
-          );
-          return;
+          if (String(talebiErr).includes('ANA_FIRMA_ISTEN_CIKIS_YASAK')) {
+            showStatus(
+              'info',
+              `${reg.personelIsim} odadan çıktı. Ana firma personeli için işten çıkış yapılmadı.`
+            );
+          } else {
+            console.warn('İşten çıkış talebi gönderilemedi:', talebiErr);
+            showStatus(
+              'error',
+              `${reg.personelIsim} odadan çıktı ancak işten çıkış talebi gönderilemedi — Onay Havuzu'nu kontrol edin.`
+            );
+            return;
+          }
         }
       }
       if (addNotification) {
@@ -1120,14 +1219,18 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
         addNotification(
           sendIstenCikis
             ? `${reg.personelIsim} ${roomNo} nolu odadan çıkış yaptı · işten çıkış talebi yönetime gönderildi.`
-            : `${reg.personelIsim} ${roomNo} nolu odadan çıkış yaptı (işten çıkış talebi gönderilmedi).`
+            : anaFirma
+              ? `${reg.personelIsim} ${roomNo} nolu odadan çıkış yaptı (ana firma — işten çıkış yok).`
+              : `${reg.personelIsim} ${roomNo} nolu odadan çıkış yaptı (işten çıkış talebi gönderilmedi).`
         );
       }
       showStatus(
         'success',
         sendIstenCikis
           ? `${reg.personelIsim} odadan çıkarıldı; işten çıkış talebi yönetime iletildi.`
-          : `${reg.personelIsim} odadan çıkarıldı (işten çıkış talebi gönderilmedi).`
+          : anaFirma
+            ? `${reg.personelIsim} odadan çıkarıldı. Ana firma personeli işten çıkarılmaz.`
+            : `${reg.personelIsim} odadan çıkarıldı (işten çıkış talebi gönderilmedi).`
       );
     } catch (err) {
       console.error(err);
@@ -1150,18 +1253,23 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
 
     if (
       !window.confirm(
-        `${targetRoom.odaNo} numaralı odadaki TÜM personeller (${occupants.length} kişi) tahliye edilsin mi?\n\nKamp çıkışı yapılacak.`
+        `${targetRoom.odaNo} numaralı odadaki TÜM personeller (${occupants.length} kişi) tahliye edilsin mi?\n\nKamp çıkışı yapılacak.\nAna firma personeli işten çıkarılmaz.`
       )
     ) {
       return;
     }
 
-    const sendIstenCikis = window.confirm(
-      `Tahliye edilen ${occupants.length} personel için işten çıkış talebi yönetime gönderilsin mi?\n\nEvet: her biri için işten çıkış onay havuzuna düşer.\nHayır: sadece kamp odasından çıkarılırlar.`
-    );
+    const taseronOccupants = occupants.filter((r) => !isAnaFirmaKampKaydi(r));
+    let sendIstenCikis = false;
+    if (taseronOccupants.length > 0) {
+      sendIstenCikis = window.confirm(
+        `Tahliyede ${taseronOccupants.length} taşeron personel var.\n\nBunlar için işten çıkış talebi yönetime gönderilsin mi?\n\nAna firma personeli (${occupants.length - taseronOccupants.length} kişi) için işten çıkış ASLA yapılmaz.`
+      );
+    }
 
     try {
       const todayStr = new Date().toISOString().slice(0, 10);
+      let cikisTalebiSayisi = 0;
       for (const reg of occupants) {
         const updatedReg: KampKaydi = {
           ...reg,
@@ -1169,9 +1277,10 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
           cikisTarihi: todayStr
         };
         await saveDocument('kampKayitlari', updatedReg);
-        if (sendIstenCikis) {
+        if (sendIstenCikis && !isAnaFirmaKampKaydi(reg)) {
           try {
             await sendCikisTalebiForKampTahliye(reg, targetRoom.odaNo);
+            cikisTalebiSayisi += 1;
           } catch (talebiErr) {
             console.warn('İşten çıkış talebi atlandı:', reg.personelIsim, talebiErr);
           }
@@ -1179,9 +1288,9 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
       }
       if (addNotification) {
         addNotification(
-          sendIstenCikis
-            ? `${targetRoom.odaNo} nolu odadaki tüm personeller (${occupants.length} kişi) tahliye edildi · işten çıkış talepleri yönetime gönderildi.`
-            : `${targetRoom.odaNo} nolu odadaki tüm personeller (${occupants.length} kişi) tahliye edildi (işten çıkış talebi gönderilmedi).`
+          `${targetRoom.odaNo} nolu oda tahliye edildi (${occupants.length} kişi)${
+            cikisTalebiSayisi > 0 ? ` · ${cikisTalebiSayisi} taşeron işten çıkış talebi` : ''
+          }.`
         );
       }
 
@@ -1193,9 +1302,9 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
 
       showStatus(
         'success',
-        sendIstenCikis
-          ? `${targetRoom.odaNo} tahliye edildi; ${occupants.length} işten çıkış talebi yönetime iletildi.`
-          : `${targetRoom.odaNo} tahliye edildi (işten çıkış talebi gönderilmedi).`
+        `${targetRoom.odaNo} tahliye edildi. Ana firma işten çıkış yok${
+          cikisTalebiSayisi > 0 ? ` · ${cikisTalebiSayisi} taşeron çıkış talebi gönderildi` : ''
+        }.`
       );
     } catch (err) {
       console.error(err);
@@ -1395,21 +1504,20 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
       const email = currentUser?.email || 'kampci';
       let createdPersonelNote = '';
 
-      // İsim + TC eşleşirse mevcut kaydı kullan; fazladan personel açma
+      // İsim + TC / TC / tel / isim eşleşirse mevcut kaydı kullan; fazladan personel açma
       const fullName = `${yeniAd.trim()} ${yeniSoyad.trim()}`;
-      let existing =
-        findPersonelByNameAndTc(fullName, yeniTcNo) || findPersonelByTc(yeniTcNo);
-      if (!existing) {
-        if (firmaTipi === 'TASERON' && firmaAdi) {
-          await ensureTaseronCari(firmaAdi);
-        }
-        const created = await createKampPersonel(
-          `${yeniAd.trim()} ${yeniSoyad.trim()}`,
-          firmaAdi,
-          firmaTipi,
-          yeniTcNo,
-          yeniTelefonNo
-        );
+      const resolved = await resolveOrCreateKampPersonel(
+        fullName,
+        firmaAdi,
+        firmaTipi,
+        yeniTcNo,
+        yeniTelefonNo
+      );
+      if (firmaTipi === 'TASERON' && firmaAdi) {
+        await ensureTaseronCari(firmaAdi);
+      }
+      if (resolved.created) {
+        const created = resolved.personel;
         // görev güncelle
         if (created.gorev !== yeniGorev.trim()) {
           const patched = { ...created, gorev: yeniGorev.trim(), ad: yeniAd.trim().toLocaleUpperCase('tr-TR'), soyad: yeniSoyad.trim().toLocaleUpperCase('tr-TR') };
@@ -1425,17 +1533,23 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
         createdPersonelNote = ' · personel kaydı oluşturuldu';
       } else {
         const patched: Personel = {
-          ...existing,
-          telefonNo: yeniTelefonNo.trim() || existing.telefonNo,
+          ...resolved.personel,
+          ad: yeniAd.trim().toLocaleUpperCase('tr-TR') || resolved.personel.ad,
+          soyad: yeniSoyad.trim().toLocaleUpperCase('tr-TR') || resolved.personel.soyad,
+          telefonNo: yeniTelefonNo.trim() || resolved.personel.telefonNo,
           firmaTipi,
           firmaAdi,
-          gorev: yeniGorev.trim() || existing.gorev,
-          departman: firmaTipi === 'TASERON' ? 'TAŞERON' : existing.departman || 'SAHA',
-          onayDurumu: firmaTipi === 'TASERON' ? 'ONAYLANDI' : existing.onayDurumu,
+          gorev: yeniGorev.trim() || resolved.personel.gorev,
+          departman: firmaTipi === 'TASERON' ? 'TAŞERON' : resolved.personel.departman || 'SAHA',
+          onayDurumu: firmaTipi === 'TASERON' ? 'ONAYLANDI' : resolved.personel.onayDurumu,
         };
         await saveDocument('personeller', patched);
-        setPersoneller?.((prev) => prev.map((p) => (p.id === patched.id ? patched : p)));
-        createdPersonelNote = ' · mevcut personel güncellendi';
+        setPersoneller?.((prev) =>
+          prev.some((p) => p.id === patched.id)
+            ? prev.map((p) => (p.id === patched.id ? patched : p))
+            : [...prev, patched]
+        );
+        createdPersonelNote = ' · mevcut personel birleştirildi / güncellendi';
       }
 
       await setDoc(doc(db, 'personelGirisTalepleri', requestID), {

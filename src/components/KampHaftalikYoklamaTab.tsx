@@ -13,6 +13,7 @@ import {
   evictKampResident 
 } from '../lib/kampPlacementUtils';
 import { submitPersonelCikisTalebi } from '../lib/personelCikisTalebiUtils';
+import { isTaseronPersonel, isKibritciCompany } from '../lib/yoklamaUtils';
 
 interface KampHaftalikYoklamaTabProps {
   kampOdalari: KampOdasi[];
@@ -119,6 +120,14 @@ export const KampHaftalikYoklamaTab: React.FC<KampHaftalikYoklamaTabProps> = ({
     setSelectedRoomId(kampOdalari[0]?.id ?? null);
   };
 
+  const isAnaFirmaKampKaydi = (reg: KampKaydi): boolean => {
+    if (reg.firmaTipi === 'ANA_FIRMA') return true;
+    if (reg.firmaTipi === 'TASERON') return false;
+    const p = reg.personelId ? personeller.find((x) => x.id === reg.personelId) : undefined;
+    if (p) return !isTaseronPersonel(p);
+    return isKibritciCompany(String(reg.calistigiFirma || ''));
+  };
+
   const handleTahliye = async (reg: KampKaydi) => {
     if (
       !window.confirm(
@@ -128,19 +137,23 @@ export const KampHaftalikYoklamaTab: React.FC<KampHaftalikYoklamaTabProps> = ({
       return;
     }
 
-    const sendIstenCikis = window.confirm(
-      `${reg.personelIsim} için işten çıkış talebi yönetime gönderilsin mi?\n\nEvet: işten çıkış onay havuzuna düşer.\nHayır: sadece kamp odasından çıkarılır.`
-    );
+    const anaFirma = isAnaFirmaKampKaydi(reg);
+    let sendIstenCikis = false;
+    if (!anaFirma) {
+      sendIstenCikis = window.confirm(
+        `${reg.personelIsim} (taşeron) için işten çıkış talebi yönetime gönderilsin mi?\n\nEvet: işten çıkış onay havuzuna düşer.\nHayır: sadece kamp odasından çıkarılır.\n\nAna firma personeli kamp tahliyesinde işten çıkarılmaz.`
+      );
+    }
 
     try {
       await evictKampResident(reg, kampOdalari, kampKayitlari);
-      if (sendIstenCikis) {
+      if (sendIstenCikis && !anaFirma) {
         try {
           await submitPersonelCikisTalebi({
             personelId: reg.personelId,
             personelIsim: reg.personelIsim,
             cikisTarihi: new Date().toISOString().slice(0, 10),
-            cikisNedeni: `Kamp tahliyesi · Oda ${reg.odaNo || ''} — haftalık sayım; işten çıkış onayı bekleniyor.`,
+            cikisNedeni: `Kamp tahliyesi · Oda ${reg.odaNo || ''} — taşeron; haftalık sayım; işten çıkış onayı bekleniyor.`,
             gonderen: currentUser?.email || 'kampci',
             kaynak: 'KAMPCI_HAFTALIK_TAHLIYE',
           });
@@ -152,13 +165,17 @@ export const KampHaftalikYoklamaTab: React.FC<KampHaftalikYoklamaTabProps> = ({
         ...prev,
         sendIstenCikis
           ? `${reg.odaNo} nolu odadan ${reg.personelIsim} tahliye edildi · işten çıkış talebi gönderildi.`
-          : `${reg.odaNo} nolu odadan ${reg.personelIsim} tahliye edildi (işten çıkış talebi gönderilmedi).`,
+          : anaFirma
+            ? `${reg.odaNo} nolu odadan ${reg.personelIsim} tahliye edildi (ana firma — işten çıkış yok).`
+            : `${reg.odaNo} nolu odadan ${reg.personelIsim} tahliye edildi (işten çıkış talebi gönderilmedi).`,
       ]);
       if (addNotification) {
         addNotification(
           sendIstenCikis
             ? `${reg.personelIsim} haftalık sayımda ${reg.odaNo} nolu odadan tahliye edildi · işten çıkış talebi yönetime gönderildi.`
-            : `${reg.personelIsim} haftalık sayımda ${reg.odaNo} nolu odadan tahliye edildi (işten çıkış talebi gönderilmedi).`
+            : anaFirma
+              ? `${reg.personelIsim} haftalık sayımda ${reg.odaNo} nolu odadan tahliye edildi (ana firma — işten çıkış yok).`
+              : `${reg.personelIsim} haftalık sayımda ${reg.odaNo} nolu odadan tahliye edildi (işten çıkış talebi gönderilmedi).`
         );
       }
     } catch (err: any) {
