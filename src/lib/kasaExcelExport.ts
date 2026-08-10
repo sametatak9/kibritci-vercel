@@ -3,7 +3,7 @@ import type { KasaHareketi, KasaOdemeDurumu, Personel } from '../types/erp';
 import { createExcelWorkbook } from './exceljsLoader';
 import { KIBRITCI_COMPANY, loadKibritciReportAssets } from './kibritciBrand';
 import { resolvePersonelUnvan } from './personelUnvanUtils';
-import { resolveKasaOdemeDurumu, isKasaninHarcamasiKalemi } from './yolHarcamaUtils';
+import { resolveKasaOdemeDurumu } from './yolHarcamaUtils';
 import { ensureKasaFisFotoPersisted } from './sahaFaaliyetFotoStorage';
 import {
   buildFisKayitEtiketi,
@@ -393,40 +393,22 @@ export async function exportKasaExcel(
   ozet.getCell(row, 1).font = { size: 9, italic: true, color: { argb: 'FF475569' } };
   row += 2;
 
-  // Diğer harcamalar / Kasanın harcaması özeti
-  let digerSum = 0;
-  let kasaninSum = 0;
-  let digerN = 0;
-  let kasaninN = 0;
+  // Genel toplam özeti
+  let genelSum = 0;
   for (const kh of cikislar) {
-    const t = Number(kh.tutar) || 0;
-    if (isKasaninHarcamasiKalemi(kh)) {
-      kasaninSum += t;
-      kasaninN += 1;
-    } else {
-      digerSum += t;
-      digerN += 1;
-    }
+    genelSum += Number(kh.tutar) || 0;
   }
   ozet.mergeCells(row, 1, row, 7);
-  ozet.getCell(row, 1).value = 'KAYNAK ÖZETİ — Diğer harcamalar / Kasanın harcaması + toplam';
+  ozet.getCell(row, 1).value = 'GENEL TOPLAM (kasa harcaması / çıkış)';
   ozet.getCell(row, 1).font = { bold: true, size: 10, color: { argb: KASA_EXCEL_ARGB.accentText } };
   row += 1;
-  const kaynakRows: Array<[string, number, number]> = [
-    ['DİĞER HARCAMALAR (borç + personel ödedi)', digerN, digerSum],
-    ['KASANIN HARCAMASI (kasa ödedi)', kasaninN, kasaninSum],
-    ['GENEL TOPLAM', digerN + kasaninN, digerSum + kasaninSum],
-  ];
-  for (const [label, n, sum] of kaynakRows) {
-    ozet.mergeCells(row, 1, row, 5);
-    ozet.getCell(row, 1).value = `${label} · ${n} kalem`;
-    ozet.getCell(row, 1).font = { bold: true, size: 10 };
-    ozet.getCell(row, 7).value = sum;
-    ozet.getCell(row, 7).numFmt = '#,##0.00 "₺"';
-    ozet.getCell(row, 7).font = { bold: true, color: { argb: 'FFB91C1C' } };
-    row += 1;
-  }
-  row += 1;
+  ozet.mergeCells(row, 1, row, 5);
+  ozet.getCell(row, 1).value = `GENEL TOPLAM · ${cikislar.length} kalem`;
+  ozet.getCell(row, 1).font = { bold: true, size: 10 };
+  ozet.getCell(row, 7).value = genelSum;
+  ozet.getCell(row, 7).numFmt = '#,##0.00 "₺"';
+  ozet.getCell(row, 7).font = { bold: true, color: { argb: 'FFB91C1C' } };
+  row += 2;
 
   const ozetHeaders = ['#', 'PERSONEL / ŞOFÖR', 'KALEM', 'BORÇ', 'PERSONEL ÖDEDİ', 'KASA ÖDEDİ', 'TOPLAM'];
   const oh = ozet.getRow(row);

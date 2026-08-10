@@ -478,8 +478,6 @@ type RaporKalem = {
   personelAdi?: string;
   fotoUrl?: string;
   tipEtiket?: string;
-  /** KASANIN = kasa ödedi; DIGER = borç + personel ödedi */
-  kaynakTipi?: 'KASANIN' | 'DIGER';
   masrafTipi?: SoforMasrafTipi | string;
   odemeDurumu?: KasaOdemeDurumu | null;
 };
@@ -489,72 +487,31 @@ function raporKalemKisiAdi(r: RaporKalem): string {
   if (!name) return 'Personel (adsız)';
   const low = name.toLocaleLowerCase('tr-TR');
   if (low === 'celal@kibritciinsaat.com') return 'CELAL YILMAZ';
-  if (low === 'diğer' || low === 'diger') return 'Kasa harcaması';
   return name;
 }
 
-function raporKalemHarcamaSinifi(r: RaporKalem): 'KASANIN' | 'DIGER' {
-  if (r.kaynakTipi === 'KASANIN' || r.kaynakTipi === 'DIGER') return r.kaynakTipi;
-  return raporKalemOdemeDurumu(r) === 'KASA_ODEDI' ? 'KASANIN' : 'DIGER';
-}
-
-/** Diğer harcamalar / Kasanın harcaması özeti + genel toplam */
+/** Genel toplam özeti — tek rakam (Diğer/Kasa ayrımı yok) */
 function buildKaynakOzetHtml(rows: RaporKalem[]): string {
-  const digerRows = rows.filter((r) => raporKalemHarcamaSinifi(r) === 'DIGER');
-  const kasaninRows = rows.filter((r) => raporKalemHarcamaSinifi(r) === 'KASANIN');
-  const digerToplam = digerRows.reduce((s, r) => s + (Number(r.tutar) || 0), 0);
-  const kasaninToplam = kasaninRows.reduce((s, r) => s + (Number(r.tutar) || 0), 0);
-  const genel = digerToplam + kasaninToplam;
+  const genel = rows.reduce((s, r) => s + (Number(r.tutar) || 0), 0);
 
   return `<section style="margin:14px 0 18px">
-    ${kasaHtmlSectionTitle('Kaynak özeti — Diğer harcamalar / Kasanın harcaması + toplam')}
-    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:12px">
-      <div style="border:1px solid ${KASA_LIGHT.border};background:${KASA_LIGHT.headerBg};border-radius:10px;padding:12px">
-        <div style="font-size:10px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:${KASA_LIGHT.accentDark}">Diğer harcamalar</div>
-        <div style="font-size:18px;font-weight:900;color:${KASA_LIGHT.accent};margin-top:4px">−${digerToplam.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺</div>
-        <div style="font-size:10px;color:${KASA_LIGHT.muted};margin-top:2px">${digerRows.length} kalem · borç + personel ödedi</div>
-      </div>
-      <div style="border:1px solid ${KASA_LIGHT.border};background:${KASA_LIGHT.accentSoft};border-radius:10px;padding:12px">
-        <div style="font-size:10px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:${KASA_LIGHT.accentDark}">Kasanın harcaması</div>
-        <div style="font-size:18px;font-weight:900;color:${KASA_LIGHT.accent};margin-top:4px">−${kasaninToplam.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺</div>
-        <div style="font-size:10px;color:${KASA_LIGHT.muted};margin-top:2px">${kasaninRows.length} kalem · kasa ödedi</div>
-      </div>
-      <div style="border:1px solid ${KASA_LIGHT.headerBorder};background:${KASA_LIGHT.cardBg};border-radius:10px;padding:12px">
-        <div style="font-size:10px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:${KASA_LIGHT.accentDark}">Genel toplam</div>
-        <div style="font-size:18px;font-weight:900;color:#b91c1c;margin-top:4px">−${genel.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺</div>
-        <div style="font-size:10px;color:${KASA_LIGHT.muted};margin-top:2px">${rows.length} kalem</div>
-      </div>
+    ${kasaHtmlSectionTitle('Genel toplam')}
+    <div style="max-width:420px;border:1px solid ${KASA_LIGHT.headerBorder};background:${KASA_LIGHT.cardBg};border-radius:10px;padding:14px 16px">
+      <div style="font-size:10px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:${KASA_LIGHT.accentDark}">Kasa harcama (çıkış) toplamı</div>
+      <div style="font-size:22px;font-weight:900;color:#b91c1c;margin-top:6px">−${genel.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺</div>
+      <div style="font-size:10px;color:${KASA_LIGHT.muted};margin-top:4px">${rows.length} kalem · BORÇ + Personel ödedi + Kasa ödedi</div>
     </div>
   </section>`;
 }
 
-/** Harcama sınıfına göre gruplu tablo: Diğer, sonra Kasanın harcaması */
-function buildKaynakGrupluMasrafHtml(rows: RaporKalem[]): string {
-  const groups: Array<{ key: 'DIGER' | 'KASANIN'; title: string }> = [
-    { key: 'DIGER', title: 'DİĞER HARCAMALAR (borç + personel ödedi)' },
-    { key: 'KASANIN', title: 'KASANIN HARCAMASI (kasa ödedi)' },
-  ];
-
-  const sections = groups
-    .map((g) => {
-      const groupRows = rows.filter((r) => raporKalemHarcamaSinifi(r) === g.key);
-      const grupToplam = groupRows.reduce((s, r) => s + (Number(r.tutar) || 0), 0);
-      const borc = groupRows
-        .filter((r) => raporKalemOdemeDurumu(r) === 'BORC')
-        .reduce((s, r) => s + (Number(r.tutar) || 0), 0);
-      const personel = groupRows
-        .filter((r) => raporKalemOdemeDurumu(r) === 'PERSONEL_ODEDI')
-        .reduce((s, r) => s + (Number(r.tutar) || 0), 0);
-      const kasaOdedi = groupRows
-        .filter((r) => raporKalemOdemeDurumu(r) === 'KASA_ODEDI')
-        .reduce((s, r) => s + (Number(r.tutar) || 0), 0);
-
-      const body = groupRows
-        .map((r, i) => {
-          const durum = raporKalemOdemeDurumu(r);
-          const tipColor =
-            durum === 'KASA_ODEDI' ? '#1d4ed8' : durum === 'BORC' ? '#b45309' : '#6d28d9';
-          return `<tr>
+/** Tüm çıkışlar — tek tablo, ödeme durumu sütunu */
+function buildCikisListeHtml(rows: RaporKalem[]): string {
+  const body = rows
+    .map((r, i) => {
+      const durum = raporKalemOdemeDurumu(r);
+      const tipColor =
+        durum === 'KASA_ODEDI' ? '#1d4ed8' : durum === 'BORC' ? '#b45309' : '#6d28d9';
+      return `<tr>
         <td style="padding:6px 8px;border:1px solid #cbd5e1;text-align:center">${i + 1}</td>
         <td style="padding:6px 8px;border:1px solid #cbd5e1;font-family:ui-monospace,monospace">${escapeHtml(r.tarih)}</td>
         <td style="padding:6px 8px;border:1px solid #cbd5e1;font-weight:700">${escapeHtml(r.fisNo || '—')}</td>
@@ -563,58 +520,51 @@ function buildKaynakGrupluMasrafHtml(rows: RaporKalem[]): string {
         <td style="padding:6px 8px;border:1px solid #cbd5e1">${escapeHtml(raporKalemKisiAdi(r))}</td>
         <td style="padding:6px 8px;border:1px solid #cbd5e1;text-align:right;font-weight:800;color:#b91c1c">−${Number(r.tutar || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺</td>
       </tr>`;
-        })
-        .join('');
-
-      return `<div style="margin:0 0 20px;page-break-inside:avoid">
-      <div style="${kasaHtmlGroupHeadStyle()}">
-        <strong style="font-size:12px;letter-spacing:.04em">${escapeHtml(g.title)}</strong>
-        <span style="font-size:11px;font-weight:800">${groupRows.length} kalem · −${grupToplam.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺</span>
-      </div>
-      <table style="width:100%;border-collapse:collapse;font-size:11px;margin:0;border:1px solid ${KASA_LIGHT.border}">
-        <thead>
-          <tr style="${kasaHtmlTableHeadStyle()}">
-            <th style="padding:6px;border:1px solid ${KASA_LIGHT.border}">#</th>
-            <th style="padding:6px;border:1px solid ${KASA_LIGHT.border};text-align:left">Tarih</th>
-            <th style="padding:6px;border:1px solid ${KASA_LIGHT.border};text-align:left">Fiş No</th>
-            <th style="padding:6px;border:1px solid ${KASA_LIGHT.border};text-align:left">Ödeme durumu</th>
-            <th style="padding:6px;border:1px solid ${KASA_LIGHT.border};text-align:left">Açıklama</th>
-            <th style="padding:6px;border:1px solid ${KASA_LIGHT.border};text-align:left">Personel</th>
-            <th style="padding:6px;border:1px solid ${KASA_LIGHT.border};text-align:right">Çıkış (−)</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${body || '<tr><td colspan="7" style="padding:12px;text-align:center;color:#94a3b8">Bu grupta kayıt yok</td></tr>'}
-        </tbody>
-        <tfoot>
-          <tr style="background:#fffbeb;font-weight:700">
-            <td colspan="6" style="padding:6px 8px;border:1px solid #cbd5e1;text-align:right">BORÇ</td>
-            <td style="padding:6px 8px;border:1px solid #cbd5e1;text-align:right;color:#b45309">−${borc.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺</td>
-          </tr>
-          <tr style="background:#f5f3ff;font-weight:700">
-            <td colspan="6" style="padding:6px 8px;border:1px solid #cbd5e1;text-align:right">PERSONEL ÖDEDİ</td>
-            <td style="padding:6px 8px;border:1px solid #cbd5e1;text-align:right;color:#6d28d9">−${personel.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺</td>
-          </tr>
-          <tr style="background:#eff6ff;font-weight:700">
-            <td colspan="6" style="padding:6px 8px;border:1px solid #cbd5e1;text-align:right">KASA ÖDEDİ</td>
-            <td style="padding:6px 8px;border:1px solid #cbd5e1;text-align:right;color:#1d4ed8">−${kasaOdedi.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺</td>
-          </tr>
-          <tr style="background:#f1f5f9;font-weight:900">
-            <td colspan="6" style="padding:8px;border:1px solid #cbd5e1;text-align:right">${escapeHtml(g.title)} TOPLAM</td>
-            <td style="padding:8px;border:1px solid #cbd5e1;text-align:right;color:#b91c1c">−${grupToplam.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺</td>
-          </tr>
-        </tfoot>
-      </table>
-    </div>`;
     })
     .join('');
 
-  const genel = rows.reduce((s, r) => s + (Number(r.tutar) || 0), 0);
-  return `${sections}
-    <div style="margin-top:8px;padding:12px 14px;background:${KASA_LIGHT.headerBg};color:${KASA_LIGHT.accentDark};border:1px solid ${KASA_LIGHT.headerBorder};border-radius:10px;display:flex;justify-content:space-between;align-items:center;gap:8px">
-      <strong style="font-size:12px;letter-spacing:.05em">GENEL TOPLAM (Diğer + Kasa)</strong>
-      <span style="font-size:16px;font-weight:900;color:#b91c1c">−${genel.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺</span>
-    </div>`;
+  const borc = rows.filter((r) => raporKalemOdemeDurumu(r) === 'BORC').reduce((s, r) => s + (Number(r.tutar) || 0), 0);
+  const personel = rows.filter((r) => raporKalemOdemeDurumu(r) === 'PERSONEL_ODEDI').reduce((s, r) => s + (Number(r.tutar) || 0), 0);
+  const kasaOdedi = rows.filter((r) => raporKalemOdemeDurumu(r) === 'KASA_ODEDI').reduce((s, r) => s + (Number(r.tutar) || 0), 0);
+  const genel = borc + personel + kasaOdedi;
+
+  return `<section style="margin:0 0 20px">
+    ${kasaHtmlSectionTitle('Kasa çıkışları — kalem kalem döküm')}
+    <table style="width:100%;border-collapse:collapse;font-size:11px;margin:0;border:1px solid ${KASA_LIGHT.border}">
+      <thead>
+        <tr style="${kasaHtmlTableHeadStyle()}">
+          <th style="padding:6px;border:1px solid ${KASA_LIGHT.border}">#</th>
+          <th style="padding:6px;border:1px solid ${KASA_LIGHT.border};text-align:left">Tarih</th>
+          <th style="padding:6px;border:1px solid ${KASA_LIGHT.border};text-align:left">Fiş No</th>
+          <th style="padding:6px;border:1px solid ${KASA_LIGHT.border};text-align:left">Ödeme durumu</th>
+          <th style="padding:6px;border:1px solid ${KASA_LIGHT.border};text-align:left">Açıklama</th>
+          <th style="padding:6px;border:1px solid ${KASA_LIGHT.border};text-align:left">Personel</th>
+          <th style="padding:6px;border:1px solid ${KASA_LIGHT.border};text-align:right">Çıkış (−)</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${body || '<tr><td colspan="7" style="padding:12px;text-align:center;color:#94a3b8">Kayıt yok</td></tr>'}
+      </tbody>
+      <tfoot>
+        <tr style="background:#fffbeb;font-weight:700">
+          <td colspan="6" style="padding:6px 8px;border:1px solid #cbd5e1;text-align:right">BORÇ</td>
+          <td style="padding:6px 8px;border:1px solid #cbd5e1;text-align:right;color:#b45309">−${borc.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺</td>
+        </tr>
+        <tr style="background:#f5f3ff;font-weight:700">
+          <td colspan="6" style="padding:6px 8px;border:1px solid #cbd5e1;text-align:right">PERSONEL ÖDEDİ</td>
+          <td style="padding:6px 8px;border:1px solid #cbd5e1;text-align:right;color:#6d28d9">−${personel.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺</td>
+        </tr>
+        <tr style="background:#eff6ff;font-weight:700">
+          <td colspan="6" style="padding:6px 8px;border:1px solid #cbd5e1;text-align:right">KASA ÖDEDİ</td>
+          <td style="padding:6px 8px;border:1px solid #cbd5e1;text-align:right;color:#1d4ed8">−${kasaOdedi.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺</td>
+        </tr>
+        <tr style="background:#f1f5f9;font-weight:900">
+          <td colspan="6" style="padding:8px;border:1px solid #cbd5e1;text-align:right">GENEL TOPLAM</td>
+          <td style="padding:8px;border:1px solid #cbd5e1;text-align:right;color:#b91c1c">−${genel.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺</td>
+        </tr>
+      </tfoot>
+    </table>
+  </section>`;
 }
 
 function raporKalemOdemeDurumu(r: RaporKalem): KasaOdemeDurumu {
@@ -852,7 +802,6 @@ export async function buildKasaHarcamaAralikReportHtml(options: {
     .sort((a, b) => String(a.tarih).localeCompare(String(b.tarih)))
     .map((r) => {
       const odeme = resolveKasaOdemeDurumu(r);
-      const kasanin = odeme === 'KASA_ODEDI';
       return {
         id: r.id,
         tarih: r.tarih,
@@ -860,19 +809,13 @@ export async function buildKasaHarcamaAralikReportHtml(options: {
         aciklama: r.aciklama,
         tutar: Number(r.tutar) || 0,
         surucu: r.surucu,
-        personelAdi: r.personelAdi || r.surucu || (kasanin ? 'Kasa harcaması' : 'Diğer harcama'),
+        personelAdi: r.personelAdi || r.surucu || undefined,
         fotoUrl: r.fisEvrakUrl,
-        tipEtiket: kasanin ? '[Kasa] ' : '[Diğer] ',
-        kaynakTipi: kasanin ? ('KASANIN' as const) : ('DIGER' as const),
-        masrafTipi: resolveKasaRaporMasrafTipi(r) || r.masrafTipi || 'KASA',
+        tipEtiket: '',
         odemeDurumu: odeme,
       };
     });
   const toplam = rows.reduce((s, r) => s + (Number(r.tutar) || 0), 0);
-  const digerToplam = rows
-    .filter((r) => r.kaynakTipi === 'DIGER')
-    .reduce((s, r) => s + (Number(r.tutar) || 0), 0);
-  const kasaninToplam = toplam - digerToplam;
   const title = 'KASA HARCAMA (ÇIKIŞ) RAPORU';
   const subtitle = `${start} — ${end}`;
   const fileName = `${KASA_REPORT_FORMAT.html.filePrefix}_${options.startDate}_${options.endDate}.html`;
@@ -880,13 +823,12 @@ export async function buildKasaHarcamaAralikReportHtml(options: {
 
   const bodyHtml = `${kasaHtmlInfoBox([
     `Çıkış kalemi: <strong>${rows.length}</strong> · Genel toplam: <strong>−${toplam.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺</strong>`,
-    `Diğer harcamalar: <strong>−${digerToplam.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺</strong> · Kasanın harcaması: <strong>−${kasaninToplam.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺</strong>`,
     `Oluşturan: ${escapeHtml(options.olusturan || '—')} · ${new Date().toLocaleString('tr-TR')}`,
     '<em>Excel tablosu için «Kasa Excel» butonunu kullanın — bu dosya HTML raporudur.</em>',
   ])}
     ${buildKaynakOzetHtml(rows)}
     ${buildPersonelHarcamaOzetHtml(rows)}
-    ${buildKaynakGrupluMasrafHtml(rows)}
+    ${buildCikisListeHtml(rows)}
     ${buildFotoGridHtml(rows)}`;
 
   return buildKasaLightReportHtml({
@@ -914,27 +856,23 @@ export function buildKasaCikisMailPlainText(
   let borc = 0;
   let personel = 0;
   let kasa = 0;
-  let digerSum = 0;
-  let kasaninSum = 0;
   const byKisi = new Map<string, number>();
   const lines: string[] = [
     'KASA HARCAMA / ÇIKIŞ DÖKÜMÜ',
     `Tarih aralığı: ${start} — ${end}`,
     `Kalem: ${rows.length}`,
     '',
-    '── KAYNAK ÖZETİ ──',
   ];
 
   rows.forEach((r) => {
     const tutar = Number(r.tutar) || 0;
-    if (isKasaninHarcamasiKalemi(r)) kasaninSum += tutar;
-    else digerSum += tutar;
+    const d = resolveKasaOdemeDurumu(r) || 'KASA_ODEDI';
+    if (d === 'BORC') borc += tutar;
+    else if (d === 'PERSONEL_ODEDI') personel += tutar;
+    else kasa += tutar;
   });
-  lines.push(`Diğer harcamalar: −${digerSum.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺`);
-  lines.push(`Kasanın harcaması: −${kasaninSum.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺`);
-  lines.push(
-    `Genel toplam: −${(digerSum + kasaninSum).toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺`
-  );
+  const genel = borc + personel + kasa;
+  lines.push(`Genel toplam: −${genel.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺`);
   lines.push('', '── KİŞİ BAZLI TOPLAM ──');
 
   rows.forEach((r) => {
@@ -960,10 +898,9 @@ export function buildKasaCikisMailPlainText(
     else kasa += tutar;
 
     const who = String(r.personelAdi || r.surucu || '—').trim();
-    const sinif = isKasaninHarcamasiKalemi(r) ? 'KASA' : 'DİĞER';
     const aciklama = String(r.aciklama || '—').replace(/\s+/g, ' ').trim();
     lines.push(
-      `${i + 1}) ${r.tarih} · ${sinif} · ${kasaOdemeDurumuLabel(durum)} · −${tutar.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺`
+      `${i + 1}) ${r.tarih} · ${kasaOdemeDurumuLabel(durum)} · −${tutar.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺`
     );
     lines.push(`   ${aciklama.slice(0, 160)}${aciklama.length > 160 ? '…' : ''}`);
     lines.push(
