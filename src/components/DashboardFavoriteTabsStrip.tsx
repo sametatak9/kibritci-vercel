@@ -38,7 +38,6 @@ const TAB_META: Record<string, { label: string; icon: React.ElementType }> = {
   yetki_verme: { label: 'Yetki', icon: Settings },
 };
 
-/** Sidebar pin’lerini ana sayfada büyük kısayol şeridi olarak gösterir. */
 export const DashboardFavoriteTabsStrip: React.FC<Props> = ({ onNavigate }) => {
   const [favorites, setFavorites] = useState<string[]>(() => readFavoriteTabs());
 
@@ -52,18 +51,15 @@ export const DashboardFavoriteTabsStrip: React.FC<Props> = ({ onNavigate }) => {
     };
   }, []);
 
-  // Favori yoksa şeridi gizle — paneli şişirmesin
   if (favorites.length === 0) {
     return (
-      <section className="bg-white border border-dashed border-slate-200 rounded-2xl px-4 py-3 flex items-center gap-2 text-[11px] text-slate-500">
-        <Pin size={14} className="text-slate-400 shrink-0" />
-        <span>
-          Favori modül yok. Sol menüde veya Ctrl+K’de pinleyin; burada kısayol olarak görünür.
-        </span>
+      <section className="rounded-2xl border border-dashed border-orange-200/70 bg-orange-50/30 px-4 py-3 flex items-center gap-2 text-[11px] text-slate-600">
+        <Pin size={14} className="text-orange-400 shrink-0" />
+        <span>Favori modül yok — sol menüden pinleyin; burada kısayol olarak görünür.</span>
         <button
           type="button"
           onClick={() => window.dispatchEvent(new CustomEvent('kibritci-open-command-palette'))}
-          className="ml-auto shrink-0 font-bold text-[#0F6C5C] hover:underline cursor-pointer"
+          className="ml-auto shrink-0 font-bold text-orange-600 hover:underline cursor-pointer"
         >
           Ctrl+K
         </button>
@@ -72,19 +68,14 @@ export const DashboardFavoriteTabsStrip: React.FC<Props> = ({ onNavigate }) => {
   }
 
   return (
-    <section className="bg-white border border-slate-200 rounded-2xl p-3 sm:p-4 shadow-sm">
-      <div className="flex items-center gap-2 mb-2.5">
-        <div className="w-8 h-8 rounded-xl bg-[#E3F2EE] text-[#0F6C5C] flex items-center justify-center">
+    <section className="rounded-2xl bg-white border border-orange-100/60 p-4 shadow-sm">
+      <div className="flex items-center gap-2 mb-3">
+        <div className="w-8 h-8 rounded-xl bg-orange-100 text-orange-600 flex items-center justify-center">
           <Pin size={15} />
         </div>
         <div>
-          <h3
-            className="text-base font-extrabold tracking-tight text-slate-900 leading-none"
-            style={{ fontFamily: '"Barlow Condensed", sans-serif' }}
-          >
-            Favori modüller
-          </h3>
-          <p className="text-[10px] text-slate-500 mt-0.5">Pinlediğiniz sekmelere tek tık</p>
+          <h3 className="font-display font-bold text-sm text-slate-900">Favori Modüller</h3>
+          <p className="text-[10px] text-slate-500">Pinlediğiniz sekmelere tek tık</p>
         </div>
       </div>
       <div className="flex flex-wrap gap-2">
@@ -96,9 +87,9 @@ export const DashboardFavoriteTabsStrip: React.FC<Props> = ({ onNavigate }) => {
               key={`${FAVORITES_STORAGE_KEY}-${key}`}
               type="button"
               onClick={() => onNavigate(key)}
-              className="inline-flex items-center gap-1.5 min-h-[40px] px-3 py-2 rounded-xl border border-slate-200 bg-slate-50/80 hover:bg-white hover:border-[#B9DBD2] text-[11px] font-bold text-slate-800 transition cursor-pointer"
+              className="inline-flex items-center gap-1.5 min-h-[38px] px-3 py-2 rounded-xl border border-orange-100 bg-orange-50/40 hover:bg-orange-50 hover:border-orange-200 text-[11px] font-bold text-slate-800 transition cursor-pointer"
             >
-              <Icon size={14} className="text-[#0F6C5C]" />
+              <Icon size={14} className="text-orange-600" />
               {meta.label}
             </button>
           );

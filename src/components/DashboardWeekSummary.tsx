@@ -195,19 +195,14 @@ export const DashboardWeekSummary: React.FC<Props> = ({
   ];
 
   return (
-    <section className="bg-white border border-slate-200 rounded-2xl p-4 sm:p-5 shadow-sm">
+    <section className="rounded-2xl bg-white border border-orange-100/60 p-4 sm:p-5 shadow-sm">
       <div className="flex items-center justify-between gap-3 mb-3">
         <div className="flex items-center gap-2">
-          <div className="w-9 h-9 rounded-xl bg-slate-100 text-slate-600 flex items-center justify-center">
+          <div className="w-9 h-9 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center">
             <TrendingUp size={17} />
           </div>
           <div>
-            <h3
-              className="text-lg font-extrabold tracking-tight text-slate-900 leading-none"
-              style={{ fontFamily: '"Barlow Condensed", sans-serif' }}
-            >
-              Bu hafta
-            </h3>
+            <h3 className="font-display text-lg font-bold tracking-tight text-slate-900 leading-none">Bu Hafta</h3>
             <p className="text-[11px] text-slate-500 mt-1">Son 7 günün kısa özeti</p>
           </div>
         </div>
@@ -215,14 +210,14 @@ export const DashboardWeekSummary: React.FC<Props> = ({
           <button
             type="button"
             onClick={handleWeekPdf}
-            className="text-[11px] font-bold text-slate-600 inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 cursor-pointer"
+            className="text-[11px] font-bold text-orange-700 inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-orange-200 bg-orange-50 hover:bg-orange-100 cursor-pointer"
           >
             <FileDown size={13} /> PDF Al
           </button>
           <button
             type="button"
             onClick={() => onNavigate('onay_islemleri')}
-            className="text-[11px] font-bold text-[#0F6C5C] inline-flex items-center gap-1 hover:underline cursor-pointer"
+            className="text-[11px] font-bold text-orange-600 inline-flex items-center gap-1 hover:underline cursor-pointer"
           >
             Onaylara bak <ChevronRight size={13} />
           </button>
@@ -237,7 +232,7 @@ export const DashboardWeekSummary: React.FC<Props> = ({
               key={c.label}
               type="button"
               onClick={() => onNavigate(c.tab)}
-              className="text-left rounded-xl border border-slate-200 bg-slate-50/80 hover:bg-white hover:border-[#B9DBD2] px-3.5 py-3 transition cursor-pointer"
+              className="text-left rounded-xl border border-orange-100 bg-orange-50/30 hover:bg-orange-50 hover:border-orange-200 px-3.5 py-3 transition cursor-pointer"
             >
               <div className="flex items-center justify-between gap-2">
                 <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
@@ -245,10 +240,7 @@ export const DashboardWeekSummary: React.FC<Props> = ({
                 </span>
                 <Icon size={14} className="text-slate-400" />
               </div>
-              <div
-                className="text-xl font-extrabold text-slate-900 mt-1 tabular-nums leading-none"
-                style={{ fontFamily: '"Barlow Condensed", sans-serif' }}
-              >
+              <div className="font-display text-xl font-bold text-slate-900 mt-1 tabular-nums leading-none">
                 {c.value}
               </div>
               <p className="text-[10px] text-slate-500 mt-1.5">{c.hint}</p>
