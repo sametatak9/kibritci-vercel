@@ -521,9 +521,9 @@ export function buildPersonelListeRaporHtml(options: {
 
       return `
         <section style="break-inside:avoid;margin-top:10px">
-          <div style="display:flex;align-items:center;justify-content:space-between;background:#1e3a5f;color:#fff;border-radius:8px 8px 0 0;padding:7px 10px">
+          <div style="display:flex;align-items:center;justify-content:space-between;background:#eff6ff;color:#1e40af;border:1px solid #bfdbfe;border-radius:8px 8px 0 0;padding:7px 10px">
             <strong style="font-size:12px;letter-spacing:.02em">${esc(firma)}</strong>
-            <span style="font-size:10px;font-weight:800;background:rgba(255,255,255,.16);border-radius:999px;padding:2px 8px">${group.length} kişi</span>
+            <span style="font-size:10px;font-weight:800;background:#dbeafe;color:#1d4ed8;border-radius:999px;padding:2px 8px">${group.length} kişi</span>
           </div>
           <table style="width:100%;border-collapse:collapse;font-size:11px">
             <thead>

@@ -22,6 +22,10 @@ import {
   syncTaseronPersonelListe,
   type TaseronListeSyncResult,
 } from '../lib/taseronPersonelListeGuncelle';
+import {
+  exportSeciliPersonelExcel,
+  openPersonelListeRaporu,
+} from '../lib/taseronPersonelExcelExport';
 
 const MAX_PERSONEL_INLINE_MEDIA = 120_000;
 
@@ -140,6 +144,7 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
   const [showOnlyMissingTcIban, setShowOnlyMissingTcIban] = useState(false);
   const [sortMode, setSortMode] = useState<'NAME_ASC' | 'NAME_DESC' | 'DATE_NEWEST' | 'DATE_OLDEST'>('NAME_ASC');
   const [repairingKampTaseron, setRepairingKampTaseron] = useState(false);
+  const [exportingListe, setExportingListe] = useState<'excel' | 'html' | null>(null);
 
   // SGK PDF parsing states
   const [regMethod, setRegMethod] = useState<'manual' | 'sgk_pdf'>('manual');
@@ -1123,6 +1128,65 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
     }
   }, [filteredPersonel, sortMode]);
 
+  const buildListeRaporSubtitle = () => {
+    const parts: string[] = [firmaFilterSummary];
+    if (showOnlyActive) parts.push('Yalnız aktif');
+    if (showOnlyMissingTcIban) parts.push('Eksik TC/IBAN');
+    if (odemeFilter !== 'ALL') {
+      parts.push(
+        odemeFilter === 'TC'
+          ? 'Eksik TC'
+          : odemeFilter === 'IBAN'
+            ? 'Eksik IBAN'
+            : 'Ödeme engeli'
+      );
+    }
+    if (searchTerm.trim()) parts.push(`Arama: ${searchTerm.trim()}`);
+    return parts.join(' · ');
+  };
+
+  const handleExportListeExcel = async () => {
+    if (visiblePersonel.length === 0) {
+      alert('Dışa aktarılacak personel yok. Filtreleri kontrol edin.');
+      return;
+    }
+    setExportingListe('excel');
+    try {
+      const count = await exportSeciliPersonelExcel({
+        rows: visiblePersonel,
+        title: `${CANONICAL_ANA_FIRMA_ADI} — Personel Listesi`,
+        subtitle: buildListeRaporSubtitle(),
+        fileNamePrefix: 'Personel_Listesi',
+        kampKayitlari,
+        kampOdalari,
+        groupByFirma: true,
+      });
+      alert(`${count} personel Kibritçi antetli Excel olarak indirildi.`);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Excel raporu oluşturulamadı.');
+    } finally {
+      setExportingListe(null);
+    }
+  };
+
+  const handleExportListeHtml = () => {
+    if (visiblePersonel.length === 0) {
+      alert('Rapor oluşturulacak personel yok. Filtreleri kontrol edin.');
+      return;
+    }
+    try {
+      const count = openPersonelListeRaporu({
+        rows: visiblePersonel,
+        title: `${CANONICAL_ANA_FIRMA_ADI} — Personel Listesi`,
+        subtitle: buildListeRaporSubtitle(),
+        onlyActive: showOnlyActive,
+      });
+      alert(`${count} personel için HTML rapor açıldı (yazdır / PDF kaydet).`);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'HTML raporu oluşturulamadı.');
+    }
+  };
+
   const handleShowHistory = (p: Personel) => {
     setHistoryPersonel(p);
     setShowHistoryModal(true);
@@ -1931,6 +1995,32 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
                       : `Kamp→Taşeron Düzelt (${misclassifiedKampTaseron.length})`}
                   </button>
                 )}
+
+                <button
+                  type="button"
+                  onClick={() => void handleExportListeExcel()}
+                  disabled={exportingListe !== null || visiblePersonel.length === 0}
+                  className="inline-flex items-center gap-1.5 text-[10px] font-bold px-3 py-2 rounded-xl border cursor-pointer bg-teal-50 text-teal-800 border-teal-200 hover:bg-teal-100 disabled:opacity-50"
+                  title="Ekrandaki filtrelenmiş listeyi Kibritçi logolu Excel olarak indir"
+                >
+                  {exportingListe === 'excel' ? (
+                    <Loader2 size={12} className="animate-spin" />
+                  ) : (
+                    <Download size={12} />
+                  )}
+                  Liste Excel
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleExportListeHtml}
+                  disabled={exportingListe !== null || visiblePersonel.length === 0}
+                  className="inline-flex items-center gap-1.5 text-[10px] font-bold px-3 py-2 rounded-xl border cursor-pointer bg-sky-50 text-sky-800 border-sky-200 hover:bg-sky-100 disabled:opacity-50"
+                  title="Ekrandaki filtrelenmiş listeyi Kibritçi logolu HTML rapor olarak aç"
+                >
+                  <FileText size={12} />
+                  Liste HTML
+                </button>
 
                 <button
                   type="button"
