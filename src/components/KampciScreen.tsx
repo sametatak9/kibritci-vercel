@@ -429,8 +429,8 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
       durum: true,
       firmaTipi,
       firmaAdi: normalizedFirma,
-      // Kampçı kayıtları yazım hatası riski nedeniyle yönetici onayına düşer
-      onayDurumu: 'ONAY BEKLİYOR',
+      // Ana firma kampçı kayıtları Onay Havuzu'na düşer; taşeron firma kadrosu doğrudan listelenir
+      onayDurumu: firmaTipi === 'TASERON' ? 'ONAYLANDI' : 'ONAY BEKLİYOR',
       kaynak: 'KAMPCI',
     };
     await saveDocument('personeller', personel);
@@ -1004,12 +1004,25 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
           matchedPersonel.firmaTipi !== nextFirmaTipi ||
           !firmaEslesir(matchedPersonel.firmaAdi || '', nextFirmaAdi);
         if (needsUpdate && nextFirmaAdi) {
+          const wasKampGorev = /KAMP\s*PERSONEL/i.test(String(matchedPersonel.gorev || ''));
           const patched: Personel = {
             ...matchedPersonel,
             tcNo: nextTc || matchedPersonel.tcNo,
             telefonNo: nextTel || matchedPersonel.telefonNo,
             firmaTipi: nextFirmaTipi,
             firmaAdi: nextFirmaAdi,
+            departman:
+              nextFirmaTipi === 'TASERON'
+                ? 'TAŞERON'
+                : matchedPersonel.departman || 'SAHA',
+            gorev:
+              nextFirmaTipi === 'TASERON' && wasKampGorev
+                ? 'TAŞERON PERSONEL'
+                : matchedPersonel.gorev,
+            onayDurumu:
+              nextFirmaTipi === 'TASERON'
+                ? 'ONAYLANDI'
+                : matchedPersonel.onayDurumu,
           };
           await saveDocument('personeller', patched);
           setPersoneller?.((prev) => prev.map((p) => (p.id === patched.id ? patched : p)));
@@ -1417,6 +1430,8 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
           firmaTipi,
           firmaAdi,
           gorev: yeniGorev.trim() || existing.gorev,
+          departman: firmaTipi === 'TASERON' ? 'TAŞERON' : existing.departman || 'SAHA',
+          onayDurumu: firmaTipi === 'TASERON' ? 'ONAYLANDI' : existing.onayDurumu,
         };
         await saveDocument('personeller', patched);
         setPersoneller?.((prev) => prev.map((p) => (p.id === patched.id ? patched : p)));

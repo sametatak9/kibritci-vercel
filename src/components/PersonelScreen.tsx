@@ -955,8 +955,15 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
   }, [kampKayitlari]);
 
   const filteredPersonel = personeller.filter((p) => {
-    // Kampçının eklediği, yönetici onayı bekleyen personeller listede görünmez (Onay Havuzu'nda onaylanır)
-    if (p.onayDurumu === 'ONAY BEKLİYOR' && p.kaynak === 'KAMPCI') return false;
+    // Ana firma kampçı kayıtları Onay Havuzu'nda kalır.
+    // Taşeron (SERAMİK EKİBİ vb.) kampçı kayıtları Personel Yönetimi'nde görünür.
+    if (
+      p.onayDurumu === 'ONAY BEKLİYOR' &&
+      p.kaynak === 'KAMPCI' &&
+      !isTaseronPersonel(p)
+    ) {
+      return false;
+    }
     if (showOnlyActive && !is_aktif_status(p.durum)) return false;
     if (showOnlyMissingTcIban && !missingTcIbanIds.has(p.id)) return false;
     if (!matchesFirmaFilter(p, firmaFilters)) return false;
@@ -1870,9 +1877,14 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
                         }`}>
                           {is_aktif_status(p.durum) ? "Aktif" : "Pasif"}
                         </span>
-                        {p.firmaTipi === 'TASERON' && (
+                        {(p.firmaTipi === 'TASERON' || isTaseronPersonel(p)) && (
                           <span className="text-[10px] bg-amber-50 text-amber-700 border border-amber-100 px-2 py-0.5 rounded-full font-bold">
                             {p.firmaAdi || 'Taşeron'} · Yoklama/maaş yok
+                          </span>
+                        )}
+                        {p.onayDurumu === 'ONAY BEKLİYOR' && p.kaynak === 'KAMPCI' && (
+                          <span className="text-[10px] bg-violet-50 text-violet-800 border border-violet-200 px-2 py-0.5 rounded-full font-bold">
+                            Kampçı · Onay bekliyor
                           </span>
                         )}
                       </h4>
@@ -1906,20 +1918,6 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
                             Kamp Geçmiş
                           </span>
                         ) : null}
-                      </div>
-                    </div>
-                    <div className="flex flex-wrap gap-1 mt-2 text-[10px] text-slate-400 font-medium">
-                      {p.istenCikisTarihi && (
-                        <span className="bg-red-50 text-rose-700 border border-rose-100 px-2 py-0.5 rounded-full font-bold">
-                          Ayrılış: {p.istenCikisTarihi}
-                        </span>
-                      )}
-                      {(p.personelGrubu === 'IDARI' || p.departman === 'İDARİ') && (
-                        <span className="bg-sky-50 text-sky-800 border border-sky-100 px-2 py-0.5 rounded-full font-bold">
-                          İdari · Yoklama yok
-                        </span>
-                      )}
-                    </div>
                         {(() => {
                           const eksikler = getPersonelMissingDocs(p);
                           if (eksikler.length === 0) return null;
@@ -1932,9 +1930,19 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
                             </span>
                           );
                         })()}
-                      </h4>
-                      <p className="text-[10px] text-slate-400 font-medium">
-                        TC: {p.tcNo} · Görev: <span className="text-slate-600 font-bold">{displayPersonelGorev(p)}</span>
+                        {p.istenCikisTarihi && (
+                          <span className="bg-red-50 text-rose-700 border border-rose-100 px-2 py-0.5 rounded-full font-bold">
+                            Ayrılış: {p.istenCikisTarihi}
+                          </span>
+                        )}
+                        {(p.personelGrubu === 'IDARI' || p.departman === 'İDARİ') && (
+                          <span className="bg-sky-50 text-sky-800 border border-sky-100 px-2 py-0.5 rounded-full font-bold">
+                            İdari · Yoklama yok
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[10px] text-slate-400 font-medium mt-1">
+                        TC: {p.tcNo || '—'} · Görev: <span className="text-slate-600 font-bold">{displayPersonelGorev(p)}</span>
                       </p>
                       <div className="flex flex-wrap gap-1.5 mt-2">
                         <span className="inline-flex items-center gap-1 bg-emerald-50 border border-emerald-200 text-emerald-800 px-2 py-0.5 rounded font-bold font-mono text-[9px]">
