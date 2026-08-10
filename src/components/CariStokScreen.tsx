@@ -229,6 +229,46 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
     return personelForCariKart(personeller, selectedCari);
   }, [personeller, selectedCari]);
 
+  const selectedCariDuplicates = useMemo(() => {
+    if (!selectedCari) return [];
+    return findDuplicateCariler(selectedCari, cariKartlar);
+  }, [selectedCari, cariKartlar]);
+
+  const handleMergeCari = async (cari: CariKart) => {
+    const dupes = findDuplicateCariler(cari, cariKartlar);
+    if (dupes.length === 0) return;
+    const dupKodlar = dupes.map((d) => d.kod || d.id).join(', ');
+    if (
+      !window.confirm(
+        `"${cari.unvan}" için ${dupes.length} mükerrer kart bulundu (${dupKodlar}).\n\nBirleştirme: en uygun kart korunur, diğerleri silinir. Personel kayıtları firma adıyla eşleşmeye devam eder.\n\nDevam edilsin mi?`
+      )
+    ) {
+      return;
+    }
+    setMergingCari(true);
+    try {
+      const result = await mergeDuplicateCarilerFor(cari, cariKartlar, personeller);
+      if (!result) {
+        alert('Birleştirilecek mükerrer kart bulunamadı.');
+        return;
+      }
+      setCariKartlar((prev) =>
+        prev
+          .filter((c) => !result.deletedIds.includes(c.id))
+          .map((c) => (c.id === result.keep.id ? result.keep : c))
+      );
+      setSelectedCariId(result.keep.id);
+      alert(
+        `"${result.keep.unvan}" birleştirildi.\nKalan kart: ${result.keep.kod || result.keep.id}\nSilinen: ${result.deletedIds.length} kopya`
+      );
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'bilinmeyen hata';
+      alert(`Birleştirme başarısız: ${msg}`);
+    } finally {
+      setMergingCari(false);
+    }
+  };
+
   const cariBagliStoklar = useMemo(() => {
     if (!selectedCari) return [];
     return stoklarForCariKart(selectedCari, stokKartlar);
@@ -893,48 +933,6 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
     setNewStokKategori('Kaba İnşaat İmalatı');
   };
 
-  const selectedCariDuplicates = useMemo(() => {
-    if (!selectedCari) return [];
-    return findDuplicateCariler(selectedCari, cariKartlar);
-  }, [selectedCari, cariKartlar]);
-
-  const handleMergeCari = async (cari: CariKart) => {
-    const dupes = findDuplicateCariler(cari, cariKartlar);
-    if (dupes.length === 0) return;
-
-    const dupKodlar = dupes.map((d) => d.kod || d.id).join(', ');
-    if (
-      !window.confirm(
-        `"${cari.unvan}" için ${dupes.length} mükerrer kart bulundu (${dupKodlar}).\n\nBirleştirme: en uygun kart korunur, diğerleri silinir. Personel kayıtları firma adıyla eşleşmeye devam eder.\n\nDevam edilsin mi?`
-      )
-    ) {
-      return;
-    }
-
-    setMergingCari(true);
-    try {
-      const result = await mergeDuplicateCarilerFor(cari, cariKartlar, personeller);
-      if (!result) {
-        alert('Birleştirilecek mükerrer kart bulunamadı.');
-        return;
-      }
-      setCariKartlar((prev) =>
-        prev
-          .filter((c) => !result.deletedIds.includes(c.id))
-          .map((c) => (c.id === result.keep.id ? result.keep : c))
-      );
-      setSelectedCariId(result.keep.id);
-      alert(
-        `"${result.keep.unvan}" birleştirildi.\nKalan kart: ${result.keep.kod || result.keep.id}\nSilinen: ${result.deletedIds.length} kopya`
-      );
-    } catch (err: any) {
-      console.error('Cari birleştirme hatası:', err);
-      alert(`Birleştirme başarısız: ${err?.message || 'bilinmeyen hata'}`);
-    } finally {
-      setMergingCari(false);
-    }
-  };
-
   const handleDeleteCari = async (cari: CariKart) => {
     const duplicates = cariKartlar.filter(
       (c) => c.id !== cari.id && firmaEslesir(c.unvan, cari.unvan)
@@ -1482,9 +1480,7 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
                           <p className="text-xs font-black text-slate-900 truncate mt-0.5">{cr.unvan}</p>
                           <p className="text-[10px] text-amber-800 font-bold mt-0.5">{cr.kartTipi}</p>
                           {dupeCount > 0 && (
-                            <p className="text-[9px] font-black text-rose-700 mt-1">
-                              ×{dupeCount + 1} mükerrer
-                            </p>
+                            <p className="text-[9px] font-black text-rose-700 mt-1">×{dupeCount + 1} mükerrer</p>
                           )}
                         </div>
                         <span
