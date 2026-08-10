@@ -56,9 +56,10 @@ import {
   openWhatsAppText,
 } from '../lib/guvenlikHelpers';
 import {
-  exportTaseronPersonelExcel,
+  exportSeciliPersonelExcel,
   exportTumFirmalarPersonelExcel,
 } from '../lib/taseronPersonelExcelExport';
+import { CANONICAL_ANA_FIRMA_ADI } from '../lib/yoklamaUtils';
 import {
   buildIsMakinesiIcmal,
   indirIsMakinesiIcmal,
@@ -1766,7 +1767,7 @@ export const TaseronKesintiScreen: React.FC<TaseronKesintiScreenProps> = ({
                           alert(err instanceof Error ? err.message : 'Excel oluşturulamadı.')
                         );
                     }}
-                    className="flex items-center gap-1.5 text-[10px] font-bold px-3 py-2 bg-sky-700 text-white rounded-xl hover:bg-sky-800 cursor-pointer"
+                    className="flex items-center gap-1.5 text-[10px] font-bold px-3 py-2 bg-sky-100 text-sky-900 border border-sky-200 rounded-xl hover:bg-sky-200 cursor-pointer"
                     title="Ana firma dahil tüm firmaların personelini Excel olarak indir"
                   >
                     <Download size={12} /> Tüm Firmalar Excel
@@ -1774,20 +1775,29 @@ export const TaseronKesintiScreen: React.FC<TaseronKesintiScreenProps> = ({
                   <button
                     type="button"
                     onClick={() => {
-                      void exportTaseronPersonelExcel({
-                        personeller,
+                      if (taseronPersonelListesi.length === 0) {
+                        alert('Seçili taşeron firmaya bağlı personel bulunamadı.');
+                        return;
+                      }
+                      void exportSeciliPersonelExcel({
+                        rows: taseronPersonelListesi,
+                        title: `${CANONICAL_ANA_FIRMA_ADI} — ${selectedTaseron.unvan} Personel Listesi`,
+                        subtitle: `${selectedTaseron.unvan} · seçili taşeron personel raporu`,
+                        fileNamePrefix: `${selectedTaseron.unvan}_Personel`,
                         kampKayitlari,
                         kampOdalari,
                       })
-                        .then((count) => alert(`${count} taşeron personeli Excel olarak indirildi.`))
+                        .then((count) =>
+                          alert(`${selectedTaseron.unvan}: ${count} personel Excel olarak indirildi.`)
+                        )
                         .catch((err) =>
                           alert(err instanceof Error ? err.message : 'Excel oluşturulamadı.')
                         );
                     }}
-                    className="flex items-center gap-1.5 text-[10px] font-bold px-3 py-2 bg-amber-600 text-white rounded-xl hover:bg-amber-700 cursor-pointer"
-                    title="Tüm taşeron firmaların personelini Excel olarak indir"
+                    className="flex items-center gap-1.5 text-[10px] font-bold px-3 py-2 bg-amber-100 text-amber-900 border border-amber-200 rounded-xl hover:bg-amber-200 cursor-pointer"
+                    title="Seçili taşeron firmasının personel listesini Excel olarak indir"
                   >
-                    <Download size={12} /> Tüm Taşeron Excel
+                    <Download size={12} /> Seçili Taşeron Excel
                   </button>
                   <span className="text-[10px] font-bold bg-indigo-50 text-indigo-800 border border-indigo-100 px-3 py-1 rounded-full">
                     {taseronPersonelListesi.length} personel

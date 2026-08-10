@@ -1,4 +1,5 @@
 import type { KampKaydi, KampOdasi, Personel } from '../types/erp';
+import type { Workbook, Worksheet } from 'exceljs';
 import {
   flattenGorevGroups,
   groupPersonelByGorev,
@@ -12,12 +13,129 @@ import {
 } from './yoklamaUtils';
 import { formatPersonelMissingDocs } from './personelMissingDocs';
 import { createExcelWorkbook } from './exceljsLoader';
+import { KIBRITCI_COMPANY, loadKibritciLogoDataUrl } from './kibritciBrand';
 import {
   buildKibritciReportHtml,
   openKibritciReportPrint,
 } from './kibritciReportTemplate';
 
 export type PersonelExcelScope = 'taseron' | 'all' | 'ana_firma' | 'custom';
+
+const LIGHT = {
+  title: 'FF0F172A',
+  meta: 'FF64748B',
+  accent: 'FF0F766E',
+  accentBar: 'FF99F6E4',
+  tableHeadBg: 'FFF1F5F9',
+  tableHeadText: 'FF334155',
+  firmaBannerBg: 'FFEFF6FF',
+  firmaBannerText: 'FF1E40AF',
+  gorevBannerBg: 'FFECFDF5',
+  gorevBannerText: 'FF065F46',
+  rowAlt: 'FFF8FAFC',
+  border: 'FFE2E8F0',
+} as const;
+
+function thinBorder() {
+  return {
+    top: { style: 'thin' as const, color: { argb: LIGHT.border } },
+    left: { style: 'thin' as const, color: { argb: LIGHT.border } },
+    bottom: { style: 'thin' as const, color: { argb: LIGHT.border } },
+    right: { style: 'thin' as const, color: { argb: LIGHT.border } },
+  };
+}
+
+function setFill(cell: { fill?: unknown }, argb: string) {
+  cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb } };
+}
+
+function safeFilePrefix(name: string): string {
+  return (
+    String(name || '')
+      .replace(/[^\w.\-ğüşıöçĞÜŞİÖÇ ]+/gi, '_')
+      .replace(/\s+/g, '_')
+      .slice(0, 48) || 'Personel'
+  );
+}
+
+async function applyKibritciPersonelExcelAntet(
+  wb: Workbook,
+  ws: Worksheet,
+  opts: { title: string; subtitle: string; metaLine: string; colCount: number }
+): Promise<number> {
+  const colCount = Math.max(4, opts.colCount);
+  ws.getRow(1).height = 52;
+  ws.getRow(2).height = 16;
+  ws.getRow(3).height = 14;
+  ws.mergeCells(1, 1, 3, Math.min(2, colCount));
+
+  const logoDataUrl = await loadKibritciLogoDataUrl();
+  const logoBase64 = logoDataUrl?.replace(/^data:image\/png;base64,/i, '') || null;
+  if (logoBase64) {
+    const logoId = wb.addImage({ base64: logoBase64, extension: 'png' });
+    ws.addImage(logoId, { tl: { col: 0.05, row: 0.08 }, ext: { width: 150, height: 58 } });
+  } else {
+    const logoCell = ws.getCell(1, 1);
+    logoCell.value = KIBRITCI_COMPANY.shortName;
+    logoCell.font = { bold: true, size: 13, color: { argb: 'FF1E4E78' } };
+    logoCell.alignment = { vertical: 'middle' };
+  }
+
+  const metaStart = Math.min(3, colCount);
+  ws.mergeCells(1, metaStart, 1, colCount);
+  const titleCell = ws.getCell(1, metaStart);
+  titleCell.value = opts.title;
+  titleCell.font = { bold: true, size: 13, color: { argb: LIGHT.title } };
+  titleCell.alignment = { horizontal: 'right', vertical: 'middle' };
+
+  ws.mergeCells(2, metaStart, 2, colCount);
+  const subCell = ws.getCell(2, metaStart);
+  subCell.value = opts.subtitle;
+  subCell.font = { size: 9, color: { argb: LIGHT.meta } };
+  subCell.alignment = { horizontal: 'right', vertical: 'middle' };
+
+  ws.mergeCells(3, metaStart, 3, colCount);
+  const companyCell = ws.getCell(3, metaStart);
+  companyCell.value = `${KIBRITCI_COMPANY.legalName} · ${KIBRITCI_COMPANY.phone}`;
+  companyCell.font = { size: 8, color: { argb: LIGHT.meta } };
+  companyCell.alignment = { horizontal: 'right', vertical: 'middle' };
+
+  ws.mergeCells(4, 1, 4, colCount);
+  setFill(ws.getCell(4, 1), LIGHT.accentBar);
+  ws.getRow(4).height = 4;
+
+  ws.mergeCells(5, 1, 5, colCount);
+  ws.getCell(5, 1).value = KIBRITCI_COMPANY.address;
+  ws.getCell(5, 1).font = { size: 8, italic: true, color: { argb: LIGHT.meta } };
+  ws.getCell(5, 1).alignment = { wrapText: true };
+
+  ws.mergeCells(6, 1, 6, colCount);
+  ws.getCell(6, 1).value = opts.metaLine;
+  ws.getCell(6, 1).font = { size: 9, color: { argb: LIGHT.meta } };
+  ws.getCell(6, 1).alignment = { horizontal: 'center', vertical: 'middle' };
+  setFill(ws.getCell(6, 1), 'FFF8FAFC');
+  ws.getRow(6).height = 20;
+
+  return 8;
+}
+
+function groupRowsByFirma(rows: Personel[]): Array<{ firma: string; personeller: Personel[] }> {
+  const map = new Map<string, Personel[]>();
+  for (const p of rows) {
+    const key = firmaAdiLabel(p);
+    const group = map.get(key) || [];
+    group.push(p);
+    map.set(key, group);
+  }
+  return Array.from(map.entries())
+    .sort(([a], [b]) => a.localeCompare(b, 'tr', { sensitivity: 'base' }))
+    .map(([firma, personeller]) => ({
+      firma,
+      personeller: [...personeller].sort((a, b) =>
+        `${a.ad} ${a.soyad}`.localeCompare(`${b.ad} ${b.soyad}`, 'tr', { sensitivity: 'base' })
+      ),
+    }));
+}
 
 function isAktif(p: Personel): boolean {
   return p.durum === true || String(p.durum).toLowerCase() === 'true';
@@ -91,16 +209,18 @@ export async function exportPersonelExcel(options: {
   /** scope=custom iken doğrudan bu liste kullanılır */
   rows?: Personel[];
   title?: string;
+  subtitle?: string;
   sheetName?: string;
   onlyActive?: boolean;
   kampKayitlari?: KampKaydi[];
   kampOdalari?: KampOdasi[];
   fileNamePrefix?: string;
+  /** all/taseron için firma bazlı bölüm başlıkları */
+  groupByFirma?: boolean;
 }): Promise<number> {
   const scope: PersonelExcelScope = options.scope || 'taseron';
   let rows: Personel[];
   if (scope === 'custom' && options.rows) {
-    // custom scope: çağıranın verdiği sırayı koru (örn. göreve göre sıralama / gruplama)
     rows = [...options.rows];
   } else if (scope === 'all') {
     rows = collectTumFirmalarPersoneller(options.personeller, { onlyActive: options.onlyActive });
@@ -124,7 +244,7 @@ export async function exportPersonelExcel(options: {
 
   const includeKamp = Boolean(options.kampKayitlari?.length || options.kampOdalari?.length);
   const workbook = await createExcelWorkbook();
-  workbook.creator = 'Kibritçi ERP';
+  workbook.creator = KIBRITCI_COMPANY.shortName;
   const sheetName =
     options.sheetName ||
     (scope === 'all'
@@ -132,41 +252,17 @@ export async function exportPersonelExcel(options: {
       : scope === 'ana_firma'
         ? 'Ana Firma'
         : scope === 'custom'
-          ? 'Seçili Personel'
+          ? 'Seçili Taşeron'
           : 'Taşeron Personel');
   const sheet = workbook.addWorksheet(sheetName, {
-    views: [{ state: 'frozen', ySplit: 3 }],
+    views: [{ state: 'frozen', ySplit: 8 }],
   });
 
-  const colCount = (includeKamp ? 13 : 12) + 1;
-  sheet.mergeCells(1, 1, 1, colCount);
-  const title = sheet.getCell(1, 1);
-  title.value =
-    options.title ||
-    (scope === 'all'
-      ? `${CANONICAL_ANA_FIRMA_ADI} — Tüm Firmalar Personel Listesi (Ana Firma Dahil)`
-      : scope === 'ana_firma'
-        ? `${CANONICAL_ANA_FIRMA_ADI} — Ana Firma Personel Listesi (Göreve Göre)`
-        : scope === 'custom'
-          ? `${CANONICAL_ANA_FIRMA_ADI} — Seçili Firma Personel Listesi`
-          : `${CANONICAL_ANA_FIRMA_ADI} — Tüm Taşeron Firma Personeli`);
-  title.font = { name: 'Arial', size: 14, bold: true, color: { argb: 'FFFFFFFF' } };
-  title.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E4E78' } };
-  title.alignment = { horizontal: 'center', vertical: 'middle' };
-  sheet.getRow(1).height = 24;
-
-  sheet.mergeCells(2, 1, 2, colCount);
-  const meta = sheet.getCell(2, 1);
-  const stamp = new Date().toLocaleString('tr-TR');
-  meta.value = `Oluşturma: ${stamp} · Kayıt: ${rows.length}${options.onlyActive ? ' (yalnız aktif)' : ''}`;
-  meta.font = { name: 'Arial', size: 10, italic: true };
-  meta.alignment = { horizontal: 'center', vertical: 'middle' };
-
   const headers = [
+    '#',
     'Firma Adı',
     'Firma Tipi',
-    'Ad',
-    'Soyad',
+    'Ad Soyad',
     'TC No',
     'Görev',
     'Departman',
@@ -178,25 +274,46 @@ export async function exportPersonelExcel(options: {
   ];
   if (includeKamp) headers.push('Kamp Yerleşimi');
   headers.push('Eksik Evrak');
+  const colCount = headers.length;
 
-  const headerRow = sheet.addRow(headers);
-  headerRow.eachCell((cell) => {
-    cell.font = { bold: true, color: { argb: 'FFFFFFFF' }, name: 'Arial', size: 10 };
-    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF8B1E1E' } };
-    cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
-    cell.border = {
-      top: { style: 'thin' },
-      left: { style: 'thin' },
-      bottom: { style: 'thin' },
-      right: { style: 'thin' },
-    };
+  const reportTitle =
+    options.title ||
+    (scope === 'all'
+      ? `${CANONICAL_ANA_FIRMA_ADI} — Tüm Firmalar Personel Listesi`
+      : scope === 'ana_firma'
+        ? `${CANONICAL_ANA_FIRMA_ADI} — Ana Firma Personel Listesi`
+        : scope === 'custom'
+          ? `${CANONICAL_ANA_FIRMA_ADI} — Seçili Taşeron Personel Listesi`
+          : `${CANONICAL_ANA_FIRMA_ADI} — Tüm Taşeron Personel Listesi`);
+
+  const reportSubtitle =
+    options.subtitle ||
+    (scope === 'custom'
+      ? 'Seçili taşeron firma personel raporu'
+      : scope === 'all'
+        ? 'Ana firma dahil tüm firmalar · firma bazlı gruplu'
+        : scope === 'taseron'
+          ? 'Tüm taşeron firmalar · firma bazlı gruplu'
+          : 'Göreve göre gruplu personel raporu');
+
+  const stamp = new Date().toLocaleString('tr-TR');
+  const activeCount = rows.filter(isAktif).length;
+  const metaLine = `Oluşturma: ${stamp} · Toplam: ${rows.length} · Aktif: ${activeCount}${
+    options.onlyActive ? ' · Filtre: yalnız aktif' : ''
+  }`;
+
+  const headerRowIndex = await applyKibritciPersonelExcelAntet(workbook, sheet, {
+    title: reportTitle,
+    subtitle: reportSubtitle,
+    metaLine,
+    colCount,
   });
 
   sheet.columns = [
+    { width: 5 },
     { width: 28 },
     { width: 12 },
-    { width: 14 },
-    { width: 14 },
+    { width: 22 },
     { width: 14 },
     { width: 18 },
     { width: 12 },
@@ -206,15 +323,28 @@ export async function exportPersonelExcel(options: {
     { width: 12 },
     { width: 10 },
     ...(includeKamp ? [{ width: 28 }] : []),
-    { width: 36 },
+    { width: 32 },
   ];
 
+  const headerRow = sheet.getRow(headerRowIndex);
+  headers.forEach((label, index) => {
+    const cell = headerRow.getCell(index + 1);
+    cell.value = label;
+    cell.font = { bold: true, name: 'Arial', size: 10, color: { argb: LIGHT.tableHeadText } };
+    setFill(cell, LIGHT.tableHeadBg);
+    cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+    cell.border = thinBorder();
+  });
+  headerRow.height = 22;
+
+  let rowIndex = 0;
   const writePersonelRow = (p: Personel) => {
+    rowIndex += 1;
     const values: (string | number)[] = [
+      rowIndex,
       firmaAdiLabel(p),
       firmaTipiLabel(p),
-      p.ad || '',
-      p.soyad || '',
+      `${p.ad || ''} ${p.soyad || ''}`.trim(),
       p.tcNo || '',
       displayPersonelGorev(p),
       p.departman || '',
@@ -230,33 +360,81 @@ export async function exportPersonelExcel(options: {
       );
     }
     values.push(formatPersonelMissingDocs(p) || '—');
+
     const row = sheet.addRow(values);
-    row.eachCell((cell) => {
-      cell.font = { name: 'Arial', size: 10 };
-      cell.border = {
-        top: { style: 'thin' },
-        left: { style: 'thin' },
-        bottom: { style: 'thin' },
-        right: { style: 'thin' },
+    const alt = rowIndex % 2 === 0;
+    row.eachCell((cell, colNumber) => {
+      cell.font = {
+        name: 'Arial',
+        size: 10,
+        color: { argb: colNumber === 12 ? (isAktif(p) ? 'FF166534' : 'FF991B1B') : 'FF0F172A' },
+        bold: colNumber === 4,
       };
-      cell.alignment = { vertical: 'middle' };
+      cell.border = thinBorder();
+      cell.alignment = {
+        vertical: 'middle',
+        horizontal: colNumber === 1 || colNumber === 12 ? 'center' : 'left',
+        wrapText: colNumber === headers.length,
+      };
+      if (alt) setFill(cell, LIGHT.rowAlt);
+      if (colNumber === 12) {
+        setFill(cell, isAktif(p) ? 'FFDCFCE7' : 'FFFEE2E2');
+      }
     });
   };
 
+  const writeFirmaBanner = (firma: string, count: number) => {
+    const bannerRow = sheet.addRow([`${firma} — ${count} personel`]);
+    sheet.mergeCells(bannerRow.number, 1, bannerRow.number, colCount);
+    const cell = bannerRow.getCell(1);
+    cell.font = { name: 'Arial', size: 11, bold: true, color: { argb: LIGHT.firmaBannerText } };
+    setFill(cell, LIGHT.firmaBannerBg);
+    cell.alignment = { vertical: 'middle', horizontal: 'left' };
+    cell.border = thinBorder();
+    bannerRow.height = 20;
+  };
+
+  const writeGorevBanner = (gorev: string, count: number) => {
+    const bannerRow = sheet.addRow([`${gorev} — ${count} kişi`]);
+    sheet.mergeCells(bannerRow.number, 1, bannerRow.number, colCount);
+    const cell = bannerRow.getCell(1);
+    cell.font = { name: 'Arial', size: 11, bold: true, color: { argb: LIGHT.gorevBannerText } };
+    setFill(cell, LIGHT.gorevBannerBg);
+    cell.alignment = { vertical: 'middle', horizontal: 'left' };
+    cell.border = thinBorder();
+    bannerRow.height = 20;
+  };
+
+  const groupByFirma =
+    options.groupByFirma ?? (scope === 'all' || scope === 'taseron');
+
   if (scope === 'ana_firma') {
-    const groups = groupPersonelByGorev(rows);
-    for (const g of groups) {
-      const banner = sheet.addRow([`${g.gorev} — ${g.personeller.length} kişi`]);
-      sheet.mergeCells(banner.number, 1, banner.number, colCount);
-      const cell = banner.getCell(1);
-      cell.font = { name: 'Arial', size: 11, bold: true, color: { argb: 'FFFFFFFF' } };
-      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E3A5F' } };
-      cell.alignment = { vertical: 'middle', horizontal: 'left' };
+    for (const g of groupPersonelByGorev(rows)) {
+      writeGorevBanner(g.gorev, g.personeller.length);
       g.personeller.forEach(writePersonelRow);
+    }
+  } else if (groupByFirma && scope !== 'custom') {
+    for (const group of groupRowsByFirma(rows)) {
+      writeFirmaBanner(group.firma, group.personeller.length);
+      group.personeller.forEach(writePersonelRow);
+    }
+  } else if (groupByFirma && scope === 'custom' && groupRowsByFirma(rows).length > 1) {
+    for (const group of groupRowsByFirma(rows)) {
+      writeFirmaBanner(group.firma, group.personeller.length);
+      group.personeller.forEach(writePersonelRow);
     }
   } else {
     rows.forEach(writePersonelRow);
   }
+
+  const footerRow = sheet.addRow([
+    `${KIBRITCI_COMPANY.shortName} · ${KIBRITCI_COMPANY.web} · ${KIBRITCI_COMPANY.email}`,
+  ]);
+  sheet.mergeCells(footerRow.number, 1, footerRow.number, colCount);
+  const footerCell = footerRow.getCell(1);
+  footerCell.font = { size: 8, italic: true, color: { argb: LIGHT.meta } };
+  footerCell.alignment = { horizontal: 'center' };
+  setFill(footerCell, 'FFF8FAFC');
 
   const buffer = await workbook.xlsx.writeBuffer();
   const blob = new Blob([buffer as BlobPart], {
@@ -273,10 +451,10 @@ export async function exportPersonelExcel(options: {
       : scope === 'ana_firma'
         ? 'Ana_Firma_Personel'
         : scope === 'custom'
-          ? 'Secili_Firma_Personel'
+          ? 'Secili_Taseron_Personel'
           : 'Taseron_Firma_Personel');
   const activeSuffix = options.onlyActive ? '_Aktif' : '';
-  a.download = `${prefix}${activeSuffix}_${day}.xlsx`;
+  a.download = `${safeFilePrefix(prefix)}${activeSuffix}_${day}.xlsx`;
   a.click();
   URL.revokeObjectURL(url);
   return rows.length;
@@ -454,19 +632,23 @@ export async function exportAnaFirmaPersonelExcel(options: {
 export async function exportSeciliPersonelExcel(options: {
   rows: Personel[];
   title?: string;
+  subtitle?: string;
   fileNamePrefix?: string;
   onlyActive?: boolean;
   kampKayitlari?: KampKaydi[];
   kampOdalari?: KampOdasi[];
+  groupByFirma?: boolean;
 }): Promise<number> {
   return exportPersonelExcel({
     personeller: options.rows,
     rows: options.rows,
     scope: 'custom',
     title: options.title,
+    subtitle: options.subtitle,
     fileNamePrefix: options.fileNamePrefix,
     onlyActive: options.onlyActive,
     kampKayitlari: options.kampKayitlari,
     kampOdalari: options.kampOdalari,
+    groupByFirma: options.groupByFirma ?? false,
   });
 }
