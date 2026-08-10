@@ -34,11 +34,17 @@ import {
   buildIseGirisPatch,
   buildPersonelPatchFromDraft,
   buildSessionIslemFromPatch,
+  filterSayimGuncellemeleriForSession,
   mergePendingPatches,
   phoneMatchKey,
   summarizeTaseronSayimGuncellemeleri,
   validateTaseronSayimSession,
 } from '../lib/kampTaseronSayimOnayUtils';
+import {
+  ANA_FIRMA_MYK_GOREV_ETIKETI,
+  isAnaFirmaMykSayimPersoneli,
+  isAnaFirmaMykSayimSession,
+} from '../lib/anaFirmaMykSayimUtils';
 import { validateTC } from '../lib/personelOdemeUtils';
 import { submitPersonelCikisTalebi } from '../lib/personelCikisTalebiUtils';
 import { openTaseronSayimListeRaporu } from '../lib/taseronSayimListeRapor';
@@ -212,8 +218,7 @@ export const KampTaseronSayimTab: React.FC<KampTaseronSayimTabProps> = ({
     };
 
     return personeller
-      .filter(isAnaFirmaPersonel)
-      .filter(personelAktif)
+      .filter(isAnaFirmaMykSayimPersoneli)
       .filter(matchSearch)
       .filter((p) => {
         if (!showOnlyEksik) return true;
@@ -235,8 +240,8 @@ export const KampTaseronSayimTab: React.FC<KampTaseronSayimTabProps> = ({
         .filter(personelAktif)
         .filter((p) => personHasEksik(p))
         .filter((p) => {
-          if (!selectedFirma) return isTaseronPersonel(p) || isAnaFirmaPersonel(p);
-          if (isAnaFirmaFirmaSecimi(selectedFirma)) return isAnaFirmaPersonel(p);
+          if (!selectedFirma) return isTaseronPersonel(p) || isAnaFirmaMykSayimPersoneli(p);
+          if (isAnaFirmaFirmaSecimi(selectedFirma)) return isAnaFirmaMykSayimPersoneli(p);
           return isTaseronPersonel(p) && firmaEslesir(p.firmaAdi || '', selectedFirma);
         })
         .filter(matchSearch)
@@ -246,7 +251,7 @@ export const KampTaseronSayimTab: React.FC<KampTaseronSayimTabProps> = ({
     if (!selectedFirma) return [];
     if (isAnaFirmaFirmaSecimi(selectedFirma)) {
       return personeller
-        .filter(isAnaFirmaPersonel)
+        .filter(isAnaFirmaMykSayimPersoneli)
         .filter(matchSearch)
         .filter((p) => {
           if (!showOnlyEksik) return true;
@@ -547,8 +552,8 @@ export const KampTaseronSayimTab: React.FC<KampTaseronSayimTabProps> = ({
   };
 
   const handleSaveSession = async () => {
-    const personelGuncellemeleri = Object.values(pendingPatches) as KampTaseronSayimPersonelGuncelleme[];
-    const firstPerson = personeller.find((p) => p.id === personelGuncellemeleri[0]?.personelId);
+    const rawGuncellemeler = Object.values(pendingPatches) as KampTaseronSayimPersonelGuncelleme[];
+    const firstPerson = personeller.find((p) => p.id === rawGuncellemeler[0]?.personelId);
     const effectiveFirma =
       panelView === 'ana_firma' || isAnaFirmaFirmaSecimi(selectedFirma)
         ? CANONICAL_ANA_FIRMA_ADI
@@ -558,6 +563,21 @@ export const KampTaseronSayimTab: React.FC<KampTaseronSayimTabProps> = ({
       showStatus?.('error', 'Önce taşeron firma seçin veya en az bir taslak kayıt oluşturun.');
       return;
     }
+
+    const personelGuncellemeleri = filterSayimGuncellemeleriForSession(
+      effectiveFirma,
+      rawGuncellemeler,
+      personeller
+    );
+
+    if (isAnaFirmaMykSayimSession(effectiveFirma) && personelGuncellemeleri.length === 0) {
+      showStatus?.(
+        'error',
+        `KİBRİTÇİ MYK sayımına uygun taslak yok. Kapsam: ${ANA_FIRMA_MYK_GOREV_ETIKETI}.`
+      );
+      return;
+    }
+
     const validation = validateTaseronSayimSession({
       firmaAdi: effectiveFirma,
       personelGuncellemeleri,
@@ -604,10 +624,6 @@ export const KampTaseronSayimTab: React.FC<KampTaseronSayimTabProps> = ({
       };
 
       await saveDocument('kampTaseronSayimlari', session);
-
-      for (const islem of sessionIslemler) {
-        await saveDocument('kampTaseronSayimIslemleri', { ...islem, sessionId });
-      }
 
       resetSession();
       showStatus?.(
@@ -754,7 +770,7 @@ export const KampTaseronSayimTab: React.FC<KampTaseronSayimTabProps> = ({
                 <div>
                   <h3 className="font-bold text-slate-800">{CANONICAL_ANA_FIRMA_ADI} — MYK Yoklama</h3>
                   <p className="text-xs text-slate-500">
-                    Yalnızca MYK (Var / Yok / Bilinmiyor) işaretlenir. TC, telefon veya işten çıkarma bu ekranda yapılamaz.
+                    Yalnızca MYK (Var / Yok / Bilinmiyor) işaretlenir. Kapsam: {ANA_FIRMA_MYK_GOREV_ETIKETI}.
                   </p>
                 </div>
               </div>
@@ -923,7 +939,7 @@ export const KampTaseronSayimTab: React.FC<KampTaseronSayimTabProps> = ({
               </h3>
               <p className="text-xs text-slate-500">
                 {panelView === 'eksik_myk'
-                  ? 'Aktif personelde TC · telefon · MYK eksikleri (KİBRİTÇİ İNŞAAT + taşeron)'
+                  ? 'Aktif personelde TC · telefon · MYK eksikleri (KİBRİTÇİ: saha görevleri · taşeron)'
                   : 'Taşeron firma personel listesi · eksik evrak · MYK · işe giriş/çıkış'}
               </p>
             </div>

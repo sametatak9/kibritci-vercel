@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { 
   ShieldCheck, CheckCircle, Clock, Send, Users, AlertCircle, FileText, ShoppingCart, 
   Truck, CreditCard, ChevronRight, PenTool, Check, CheckCircle2, UserCheck, Eye, Trash2,
-  FileUp, ExternalLink, MessageSquare, AlertTriangle, Sparkles, Package, Tent, X, HardHat
+  FileUp, ExternalLink, MessageSquare, AlertTriangle, Sparkles, Package, Tent, X, HardHat, Loader2
 } from 'lucide-react';
 import {
   SatinAlmaTalebi,
@@ -68,6 +68,7 @@ import { pickPrimaryFotoUrl } from '../lib/guvenlikEvrakFotolar';
 import { toAiParsePayload } from '../lib/guvenlikFotoStorage';
 import {
   applyTaseronSayimOnApproval,
+  filterSayimGuncellemeleriForSession,
   markTaseronSayimApproved,
   markTaseronSayimRejected,
   validateTaseronSayimSession,
@@ -152,6 +153,7 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
   const [operatorSahaFaaliyetler, setOperatorSahaFaaliyetler] = useState<any[]>([]);
   const [bekleyenKampPersonelleri, setBekleyenKampPersonelleri] = useState<any[]>([]);
   const [gunlukAkisRaporlari, setGunlukAkisRaporlari] = useState<any[]>([]);
+  const [approvingTaseronSayimId, setApprovingTaseronSayimId] = useState<string | null>(null);
 
   const [aracOnayTalepleri, setAracOnayTalepleri] = useState<any[]>([]);
   const [yolHarcamalari, setYolHarcamalari] = useState<any[]>([]);
@@ -823,6 +825,7 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
   };
 
   const handleApproveTaseronSayim = async (item: any) => {
+    if (approvingTaseronSayimId) return;
     const guncellemeler = item.personelGuncellemeleri || [];
     const validation = validateTaseronSayimSession({
       firmaAdi: item.firmaAdi,
@@ -834,14 +837,20 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
       return;
     }
 
+    const inScopeCount = filterSayimGuncellemeleriForSession(item.firmaAdi, guncellemeler, personeller).length;
+    const kapsamDisi = guncellemeler.length - inScopeCount;
+
     if (
       !window.confirm(
-        `${item.firmaAdi} taşeron sayımını onaylıyor musunuz?\n\n${guncellemeler.length} personel kaydı Personel Yönetimi'nde güncellenecek.`
+        `${item.firmaAdi} sayımını onaylıyor musunuz?\n\n${inScopeCount} personel kaydı güncellenecek.${
+          kapsamDisi > 0 ? `\n(${kapsamDisi} kapsam dışı kayıt atlanacak.)` : ''
+        }`
       )
     ) {
       return;
     }
 
+    setApprovingTaseronSayimId(item.id);
     try {
       const matchedUser = kullanicilar.find((u) => u.email?.toLowerCase() === currentUser?.email?.toLowerCase());
       const role = matchedUser?.yetki || 'YÖNETİCİ';
@@ -850,13 +859,22 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
         return;
       }
 
-      const { updatedPersoneller, appliedCount } = await applyTaseronSayimOnApproval(item, personeller);
+      const { updatedPersoneller, appliedCount, skippedCount } = await applyTaseronSayimOnApproval(
+        item,
+        personeller
+      );
       await markTaseronSayimApproved(item.id, currentUser?.email || 'yonetici', role);
       setPersoneller?.(updatedPersoneller);
-      alert(`Taşeron sayımı onaylandı. ${appliedCount} personel kaydı güncellendi.`);
+      alert(
+        `Sayım onaylandı. ${appliedCount} personel kaydı güncellendi.${
+          skippedCount > 0 ? ` (${skippedCount} kapsam dışı / bulunamayan kayıt atlandı.)` : ''
+        }`
+      );
     } catch (err) {
       console.error(err);
       alert(`Onaylama sırasında hata oluştu: ${formatFirestoreWriteError(err)}`);
+    } finally {
+      setApprovingTaseronSayimId(null);
     }
   };
 
@@ -2865,10 +2883,19 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
                                 <button
                                   type="button"
                                   onClick={() => handleApproveTaseronSayim(doc)}
-                                  className="flex-1 bg-amber-600 hover:bg-amber-700 active:scale-95 text-white py-1.5 px-3 rounded-lg text-[10px] font-black tracking-widest transition flex items-center justify-center space-x-1"
+                                  disabled={approvingTaseronSayimId === doc.id}
+                                  className="flex-1 bg-amber-600 hover:bg-amber-700 active:scale-95 disabled:opacity-50 disabled:cursor-wait text-white py-1.5 px-3 rounded-lg text-[10px] font-black tracking-widest transition flex items-center justify-center space-x-1"
                                 >
-                                  <Check size={11} />
-                                  <span>Onayla ve Personeli Güncelle</span>
+                                  {approvingTaseronSayimId === doc.id ? (
+                                    <Loader2 size={11} className="animate-spin" />
+                                  ) : (
+                                    <Check size={11} />
+                                  )}
+                                  <span>
+                                    {approvingTaseronSayimId === doc.id
+                                      ? 'Onaylanıyor…'
+                                      : 'Onayla ve Personeli Güncelle'}
+                                  </span>
                                 </button>
                               </div>
                             </div>
