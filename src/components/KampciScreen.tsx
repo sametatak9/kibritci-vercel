@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   Tent, Plus, Trash2, Camera, Check, RefreshCw, Eye, 
-  Search, UserPlus, ClipboardList, Package, Layers, MapPin, Sparkles, CheckCircle, Clock, X, ArrowRight, ShieldCheck, DoorOpen, LogOut, Image as ImageIcon, MessageSquare, Calendar, Truck, AlertTriangle
+  Search, UserPlus, ClipboardList, Package, Layers, MapPin, Sparkles, CheckCircle, Clock, X, ArrowRight, ShieldCheck, DoorOpen, LogOut, Image as ImageIcon, MessageSquare, Calendar, Truck, AlertTriangle, Building2
 } from 'lucide-react';
 import { KampOdasi, KampKaydi, Personel, StokKart, KampYerleske, KampKat, CariKart, CariKartIslem, AylikYoklamaMap, Fatura, Irsaliye } from '../types/erp';
 import { db, saveDocument } from '../lib/firebase';
@@ -33,7 +33,7 @@ import {
   isOperatorGorev,
   isIdariPersonel,
 } from '../lib/yoklamaUtils';
-import { firmaEslesir } from '../lib/taseronUtils';
+import { firmaEslesir, resolveTaseronPersonelGorev, TASERON_PERSONEL_DEPARTMAN, withTaseronPersonelGorev } from '../lib/taseronUtils';
 import { validateTC } from '../lib/personelOdemeUtils';
 import {
   AUTO_MERGE_SCORE_MAX,
@@ -425,28 +425,30 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
         firmaTipi === 'ANA_FIRMA'
           ? CANONICAL_ANA_FIRMA_ADI
           : String(firmaAdi || best.firmaAdi || '').trim() || best.firmaAdi || 'Taşeron';
-      const wasKampGorev = /KAMP\s*PERSONEL/i.test(String(best.gorev || ''));
+      const targetGorev =
+        firmaTipi === 'TASERON'
+          ? resolveTaseronPersonelGorev({ firmaAdi: nextFirmaAdi, firmaTipi: 'TASERON' })
+          : best.gorev;
       const needsPatch =
         (nextTc && digitsOnly(best.tcNo || '') !== nextTc) ||
         (nextTel && phoneMatchKey(best.telefonNo || '') !== phoneMatchKey(nextTel)) ||
         best.firmaTipi !== firmaTipi ||
         !firmaEslesir(best.firmaAdi || '', nextFirmaAdi) ||
-        (firmaTipi === 'TASERON' && wasKampGorev) ||
+        (firmaTipi === 'TASERON' && best.gorev !== targetGorev) ||
         (firmaTipi === 'TASERON' && best.onayDurumu === 'ONAY BEKLİYOR');
 
       if (needsPatch) {
-        const patched: Personel = {
+        const patched = withTaseronPersonelGorev({
           ...best,
           tcNo: nextTc || best.tcNo,
           telefonNo: nextTel || best.telefonNo,
           firmaTipi,
           firmaAdi: nextFirmaAdi,
-          departman: firmaTipi === 'TASERON' ? 'TAŞERON' : best.departman || 'SAHA',
-          gorev:
-            firmaTipi === 'TASERON' && wasKampGorev ? 'TAŞERON PERSONEL' : best.gorev,
+          departman: firmaTipi === 'TASERON' ? TASERON_PERSONEL_DEPARTMAN : best.departman || 'SAHA',
+          gorev: targetGorev,
           onayDurumu: firmaTipi === 'TASERON' ? 'ONAYLANDI' : best.onayDurumu,
           durum: best.durum === false ? true : best.durum,
-        };
+        });
         await saveDocument('personeller', patched);
         return { personel: patched, created: false, merged: true };
       }
@@ -478,7 +480,7 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
       firmaTipi === 'ANA_FIRMA'
         ? CANONICAL_ANA_FIRMA_ADI
         : String(firmaAdi || '').trim() || 'Taşeron';
-    const personel: Personel = {
+    const personel = withTaseronPersonelGorev({
       id: `prs_kamp_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
       tcNo: tc,
       ad,
@@ -490,8 +492,8 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
       adres: 'Kamp Yerleşimi',
       il: '',
       ilce: '',
-      departman: firmaTipi === 'TASERON' ? 'TAŞERON' : 'SAHA',
-      gorev: firmaTipi === 'TASERON' ? 'TAŞERON PERSONEL' : 'KAMP PERSONEL',
+      departman: firmaTipi === 'TASERON' ? TASERON_PERSONEL_DEPARTMAN : 'SAHA',
+      gorev: firmaTipi === 'TASERON' ? resolveTaseronPersonelGorev({ firmaAdi: normalizedFirma, firmaTipi: 'TASERON' }) : 'KAMP PERSONEL',
       iseGirisTarihi: new Date().toISOString().slice(0, 10),
       cinsiyet: 'Belirtilmedi',
       maas: 0,
@@ -505,7 +507,7 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
       firmaAdi: normalizedFirma,
       onayDurumu: firmaTipi === 'TASERON' ? 'ONAYLANDI' : 'ONAY BEKLİYOR',
       kaynak: 'KAMPCI',
-    };
+    } as Personel);
 
     const result = await upsertPersonelAvoidDuplicate(personeller, personel, {
       rawName: `${ad} ${soyad}`.trim(),
@@ -1098,8 +1100,7 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
           matchedPersonel.firmaTipi !== nextFirmaTipi ||
           !firmaEslesir(matchedPersonel.firmaAdi || '', nextFirmaAdi);
         if (needsUpdate && nextFirmaAdi) {
-          const wasKampGorev = /KAMP\s*PERSONEL/i.test(String(matchedPersonel.gorev || ''));
-          const patched: Personel = {
+          const patched = withTaseronPersonelGorev({
             ...matchedPersonel,
             tcNo: nextTc || matchedPersonel.tcNo,
             telefonNo: nextTel || matchedPersonel.telefonNo,
@@ -1107,17 +1108,17 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
             firmaAdi: nextFirmaAdi,
             departman:
               nextFirmaTipi === 'TASERON'
-                ? 'TAŞERON'
+                ? TASERON_PERSONEL_DEPARTMAN
                 : matchedPersonel.departman || 'SAHA',
             gorev:
-              nextFirmaTipi === 'TASERON' && wasKampGorev
-                ? 'TAŞERON PERSONEL'
+              nextFirmaTipi === 'TASERON'
+                ? resolveTaseronPersonelGorev({ firmaAdi: nextFirmaAdi, firmaTipi: 'TASERON' })
                 : matchedPersonel.gorev,
             onayDurumu:
               nextFirmaTipi === 'TASERON'
                 ? 'ONAYLANDI'
                 : matchedPersonel.onayDurumu,
-          };
+          });
           await saveDocument('personeller', patched);
           setPersoneller?.((prev) => prev.map((p) => (p.id === patched.id ? patched : p)));
           matchedPersonel = patched;
@@ -1449,7 +1450,8 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
   };
 
   const handleSubmitKampGirisTalebi = async () => {
-    if (!yeniAd.trim() || !yeniSoyad.trim() || !yeniGorev.trim()) {
+    const firmaTipiEarly = girisFirmaTipi;
+    if (!yeniAd.trim() || !yeniSoyad.trim() || (firmaTipiEarly !== 'TASERON' && !yeniGorev.trim())) {
       showStatus('error', 'Ad, soyad ve görev alanlarını doldurunuz.');
       return;
     }
@@ -1474,6 +1476,10 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
       showStatus('error', 'Taşeron personel için firma seçin veya yazın.');
       return;
     }
+    const kayitGorev =
+      firmaTipi === 'TASERON'
+        ? resolveTaseronPersonelGorev({ firmaAdi, firmaTipi: 'TASERON' })
+        : yeniGorev.trim();
     try {
       const requestID = `GIRIS-KAMP-${Date.now()}`;
       const email = currentUser?.email || 'kampci';
@@ -1493,9 +1499,19 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
       }
       if (resolved.created) {
         const created = resolved.personel;
-        // görev güncelle
-        if (created.gorev !== yeniGorev.trim()) {
-          const patched = { ...created, gorev: yeniGorev.trim(), ad: yeniAd.trim().toLocaleUpperCase('tr-TR'), soyad: yeniSoyad.trim().toLocaleUpperCase('tr-TR') };
+        const patched = withTaseronPersonelGorev({
+          ...created,
+          gorev: kayitGorev,
+          ad: yeniAd.trim().toLocaleUpperCase('tr-TR'),
+          soyad: yeniSoyad.trim().toLocaleUpperCase('tr-TR'),
+          firmaTipi,
+          firmaAdi,
+        });
+        if (
+          patched.gorev !== created.gorev ||
+          patched.ad !== created.ad ||
+          patched.soyad !== created.soyad
+        ) {
           await saveDocument('personeller', patched);
           setPersoneller?.((prev) =>
             prev.some((p) => p.id === patched.id)
@@ -1507,17 +1523,17 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
         }
         createdPersonelNote = ' · personel kaydı oluşturuldu';
       } else {
-        const patched: Personel = {
+        const patched = withTaseronPersonelGorev({
           ...resolved.personel,
           ad: yeniAd.trim().toLocaleUpperCase('tr-TR') || resolved.personel.ad,
           soyad: yeniSoyad.trim().toLocaleUpperCase('tr-TR') || resolved.personel.soyad,
           telefonNo: yeniTelefonNo.trim() || resolved.personel.telefonNo,
           firmaTipi,
           firmaAdi,
-          gorev: yeniGorev.trim() || resolved.personel.gorev,
-          departman: firmaTipi === 'TASERON' ? 'TAŞERON' : resolved.personel.departman || 'SAHA',
+          gorev: kayitGorev,
+          departman: firmaTipi === 'TASERON' ? TASERON_PERSONEL_DEPARTMAN : resolved.personel.departman || 'SAHA',
           onayDurumu: firmaTipi === 'TASERON' ? 'ONAYLANDI' : resolved.personel.onayDurumu,
-        };
+        });
         await saveDocument('personeller', patched);
         setPersoneller?.((prev) =>
           prev.some((p) => p.id === patched.id)
@@ -1530,7 +1546,7 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
       await setDoc(doc(db, 'personelGirisTalepleri', requestID), {
         ad: yeniAd.trim(),
         soyad: yeniSoyad.trim(),
-        gorev: yeniGorev.trim(),
+        gorev: kayitGorev,
         tcNo: digitsOnly(yeniTcNo),
         telefonNo: yeniTelefonNo.trim(),
         firmaTipi,
@@ -1543,7 +1559,7 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
         gonderenKampci: email,
         kaynakPanel: 'KAMPÇI',
       });
-      setSonGirisTalebi({ id: requestID, ad: yeniAd.trim(), soyad: yeniSoyad.trim(), gorev: yeniGorev.trim() });
+      setSonGirisTalebi({ id: requestID, ad: yeniAd.trim(), soyad: yeniSoyad.trim(), gorev: kayitGorev });
       setYeniAd('');
       setYeniSoyad('');
       setYeniGorev('');
@@ -2030,8 +2046,8 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
               : 'bg-white border-slate-200/80 text-slate-500 hover:bg-slate-50'
           }`}
         >
-          <ClipboardList size={14} />
-          <span>📋 Personel &amp; Yoklama</span>
+          <Building2 size={14} />
+          <span>📋 Taşeron Sayım</span>
         </button>
 
         <button

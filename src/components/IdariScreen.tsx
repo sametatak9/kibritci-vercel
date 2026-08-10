@@ -3373,6 +3373,48 @@ export const IdariScreen: React.FC<IdariScreenProps> = ({
                       (ham {kampYerlesimAudit.rawAktifKayit} → {kampYerlesimAudit.uniqueYerlesik}).
                     </p>
                   )}
+                  <div
+                    className={`text-[9px] rounded-lg px-2 py-1.5 border ${
+                      kampYerlesimAudit.totalsMatch
+                        ? 'bg-emerald-50 border-emerald-100 text-emerald-800'
+                        : 'bg-rose-50 border-rose-100 text-rose-800'
+                    }`}
+                  >
+                    <p className="font-bold">
+                      {kampYerlesimAudit.totalsMatch ? '✓ Sayılar tutarlı' : '⚠ Sayı uyuşmazlığı'}
+                    </p>
+                    <p className="mt-0.5 leading-snug">
+                      Firma toplamı: <strong>{kampYerlesimAudit.firmaToplam}</strong> ·
+                      Mükerrersiz kişi: <strong>{kampYerlesimAudit.uniqueYerlesik}</strong> ·
+                      Ham aktif kayıt: <strong>{kampYerlesimAudit.rawAktifKayit}</strong>
+                    </p>
+                    <p className="mt-0.5 text-[8px] opacity-80">
+                      Personel kartına bağlanamayan benzersiz yerleşik: {kampYerlesimAudit.personelKartiEslesmeyen}
+                      {kampYerlesimAudit.idsizAktifKayit > 0 &&
+                        ` · IDsiz ham kayıt: ${kampYerlesimAudit.idsizAktifKayit}`}
+                    </p>
+                  </div>
+                  {kampYerlesimAudit.duplicateGroups.length > 0 && (
+                    <details className="rounded-lg border border-amber-200 bg-amber-50/50 text-[9px]">
+                      <summary className="cursor-pointer px-2 py-1.5 font-bold text-amber-900">
+                        Mükerrer kayıtlar ({kampYerlesimAudit.duplicateGroups.length} kişi)
+                      </summary>
+                      <div className="px-2 pb-2 space-y-1.5 max-h-40 overflow-y-auto">
+                        {kampYerlesimAudit.duplicateGroups.map((g) => (
+                          <div key={g.key} className="bg-white rounded border border-amber-100 p-1.5">
+                            <p className="font-bold text-slate-800 truncate" title={g.label}>
+                              {g.label}
+                            </p>
+                            {g.kayitlar.map((k) => (
+                              <p key={k.id} className="text-slate-600 pl-1">
+                                · {k.yerleskeAdi || '—'} / Oda {k.odaNo || '—'} ({k.id.slice(0, 10)}…)
+                              </p>
+                            ))}
+                          </div>
+                        ))}
+                      </div>
+                    </details>
+                  )}
                   <button
                     type="button"
                     onClick={() =>

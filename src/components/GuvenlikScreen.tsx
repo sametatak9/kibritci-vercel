@@ -29,15 +29,12 @@ import {
   countPaketFotolar,
   createEmptyUploadPackage,
   createEmptyUploadKalem,
-  GUVENLIK_FOTO_METOD_HINT,
-  GUVENLIK_FOTO_METOD_LABEL,
-  GuvenlikFotoMetod,
   GuvenlikFotoSlot,
-  hasAnaFirmaUcFotograf,
-  isLikelyImageUrl,
+  hasEvrakFotografi,
   pickPrimaryFotoUrl,
   formatEvrakGonderimLabel,
 } from '../lib/guvenlikEvrakFotolar';
+import { convertImageToScanPdfDataUrl, isPdfDataUrl } from '../lib/imageToScanPdf';
 import { buildCariEvrakHistory } from '../lib/evrakCariStokSync';
 import { getTaseronCariKartlar } from '../lib/taseronUtils';
 import {
@@ -71,6 +68,7 @@ import {
   NobetVardiyaTipi,
 } from '../lib/guvenlikHelpers';
 import { GuvenlikTabDateBar } from './GuvenlikTabDateBar';
+import { GuvenlikEvrakFotoUpload } from './GuvenlikEvrakFotoUpload';
 import {
   GuvenlikDuzenleKind,
   GuvenlikKayitDuzenleModal,
@@ -174,77 +172,87 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
         Number(String(k?.miktar ?? '').replace(',', '.')) > 0
     );
 
-  const handleAddFotosToPackage = (
+  const handleAddEvrakFotoToPackage = (
     packageId: string,
-    metod: GuvenlikFotoMetod,
     e: React.ChangeEvent<HTMLInputElement>
   ) => {
-    if (!e.target.files) return;
-    const files = Array.from(e.target.files) as File[];
+    const file = e.target.files?.[0];
+    if (!file) return;
     void (async () => {
-      const slots: GuvenlikFotoSlot[] = [];
-      for (const file of files) {
-        const rawBase64 = await new Promise<string>((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = () => resolve(reader.result as string);
-          reader.onerror = reject;
-          reader.readAsDataURL(file);
-        });
-        let displayBase64 = rawBase64;
-        if (file.type.startsWith('image/')) {
-          try {
-            displayBase64 = await compressImage(rawBase64, 640, 640, 0.5, 4000);
-          } catch (err) {
-            console.error('Image compression failed, using original', err);
-          }
-        } else if (
-          file.type.includes('pdf') ||
-          rawBase64.startsWith('data:application/pdf')
-        ) {
-          // Büyük PDF kapı kaydını kilitler — reddet, fotoğraf iste
-          if (rawBase64.length > 140_000) {
-            alert(
-              `"${file.name}" PDF’si çok büyük. Lütfen belgeyi fotoğraf olarak çekip yükleyin.`
-            );
-            continue;
-          }
+      const rawBase64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+      let displayBase64 = rawBase64;
+      if (file.type.startsWith('image/')) {
+        try {
+          displayBase64 = await compressImage(rawBase64, 960, 960, 0.55, 4000);
+        } catch (err) {
+          console.error('Image compression failed, using original', err);
         }
-        slots.push({
-          id: `f_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-          dataUrl: displayBase64,
-          fileName: file.name,
-          fileType: file.type,
-          metod,
-        });
+      } else if (
+        file.type.includes('pdf') ||
+        rawBase64.startsWith('data:application/pdf')
+      ) {
+        if (rawBase64.length > 140_000) {
+          alert(
+            `"${file.name}" PDF'si çok büyük. Lütfen belgeyi fotoğraf olarak çekip yükleyin.`
+          );
+          return;
+        }
       }
-      if (!slots.length) return;
+
+      let scanPdfUrl: string | undefined;
+      if (file.type.startsWith('image/') || displayBase64.startsWith('data:image/')) {
+        try {
+          scanPdfUrl = await convertImageToScanPdfDataUrl(displayBase64);
+          if (scanPdfUrl.length > 140_000) scanPdfUrl = undefined;
+        } catch (err) {
+          console.warn('Tarama PDF oluşturulamadı:', err);
+        }
+      } else if (isPdfDataUrl(rawBase64)) {
+        scanPdfUrl = rawBase64;
+      }
+
+      const slot: GuvenlikFotoSlot = {
+        id: `f_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        dataUrl: displayBase64,
+        fileName: file.name,
+        fileType: file.type,
+        metod: 'EVRAK',
+      };
+
       setUploadQueue((prev) =>
         prev.map((pkg) => {
           if (pkg.id !== packageId) return pkg;
-          const next = { ...pkg };
-          if (metod === 'KALEM') next.kalemFotolar = [...(pkg.kalemFotolar || []), ...slots];
-          if (metod === 'FIRMA') next.firmaFotolar = [...(pkg.firmaFotolar || []), ...slots];
-          if (metod === 'FATURA') next.faturaFotolar = [...(pkg.faturaFotolar || []), ...slots];
-          return next;
+          return {
+            ...pkg,
+            evrakFotolar: [slot],
+            kalemFotolar: [],
+            firmaFotolar: [],
+            faturaFotolar: [],
+            scanPdfUrl,
+          };
         })
       );
     })();
     e.target.value = '';
   };
 
-  const handleRemoveFotoFromPackage = (
-    packageId: string,
-    metod: GuvenlikFotoMetod,
-    fotoId: string
-  ) => {
+  const handleRemoveEvrakFotoFromPackage = (packageId: string) => {
     setUploadQueue((prev) =>
       prev.map((pkg) => {
         if (pkg.id !== packageId) return pkg;
-        const next = { ...pkg };
-        if (metod === 'KALEM') next.kalemFotolar = (pkg.kalemFotolar || []).filter((f: GuvenlikFotoSlot) => f.id !== fotoId);
-        if (metod === 'FIRMA') next.firmaFotolar = (pkg.firmaFotolar || []).filter((f: GuvenlikFotoSlot) => f.id !== fotoId);
-        if (metod === 'FATURA') next.faturaFotolar = (pkg.faturaFotolar || []).filter((f: GuvenlikFotoSlot) => f.id !== fotoId);
-        return next;
+        return {
+          ...pkg,
+          evrakFotolar: [],
+          kalemFotolar: [],
+          firmaFotolar: [],
+          faturaFotolar: [],
+          scanPdfUrl: undefined,
+        };
       })
     );
   };
@@ -253,48 +261,54 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
     setUploadQueue((prev) => [...prev, createEmptyUploadPackage()]);
   };
 
-  // Toplu seçim: yeni paket açıp kalem yuvasına koyar (3 yöntemli paketlerle uyumlu)
+  // Toplu seçim: yeni paket açıp tek evrak foto yuvasına koyar
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files?.length) return;
-    const files = Array.from(e.target.files) as File[];
+    const file = e.target.files[0];
     void (async () => {
-      const slots: GuvenlikFotoSlot[] = [];
-      for (const file of files) {
-        const rawBase64 = await new Promise<string>((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = () => resolve(reader.result as string);
-          reader.onerror = reject;
-          reader.readAsDataURL(file);
-        });
-        let displayBase64 = rawBase64;
-        if (file.type.startsWith('image/')) {
-          try {
-            displayBase64 = await compressImage(rawBase64, 640, 640, 0.5, 4000);
-          } catch {
-            /* keep original */
-          }
-        } else if (
-          file.type.includes('pdf') ||
-          rawBase64.startsWith('data:application/pdf')
-        ) {
-          if (rawBase64.length > 140_000) {
-            alert(
-              `"${file.name}" PDF’si çok büyük. Lütfen belgeyi fotoğraf olarak çekip yükleyin.`
-            );
-            continue;
-          }
+      const rawBase64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+      let displayBase64 = rawBase64;
+      if (file.type.startsWith('image/')) {
+        try {
+          displayBase64 = await compressImage(rawBase64, 960, 960, 0.55, 4000);
+        } catch {
+          /* keep original */
         }
-        slots.push({
-          id: `f_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-          dataUrl: displayBase64,
-          fileName: file.name,
-          fileType: file.type,
-          metod: 'KALEM',
-        });
+      } else if (
+        file.type.includes('pdf') ||
+        rawBase64.startsWith('data:application/pdf')
+      ) {
+        if (rawBase64.length > 140_000) {
+          alert(
+            `"${file.name}" PDF'si çok büyük. Lütfen belgeyi fotoğraf olarak çekip yükleyin.`
+          );
+          return;
+        }
       }
+      let scanPdfUrl: string | undefined;
+      if (file.type.startsWith('image/')) {
+        try {
+          scanPdfUrl = await convertImageToScanPdfDataUrl(displayBase64);
+          if (scanPdfUrl.length > 140_000) scanPdfUrl = undefined;
+        } catch {
+          /* skip */
+        }
+      }
+      const slot: GuvenlikFotoSlot = {
+        id: `f_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        dataUrl: displayBase64,
+        fileName: file.name,
+        fileType: file.type,
+        metod: 'EVRAK',
+      };
       setUploadQueue((prev) => [
         ...prev,
-        { ...createEmptyUploadPackage(), kalemFotolar: slots },
+        { ...createEmptyUploadPackage(), evrakFotolar: [slot], scanPdfUrl },
       ]);
     })();
     e.target.value = '';
@@ -934,8 +948,8 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
       return false;
     }
 
-    // ANA_FIRMA — tam bilgi + 3 foto zorunlu
-    if (!hasAnaFirmaUcFotograf(x)) return true;
+    // ANA_FIRMA — tam bilgi + en az 1 evrak fotoğrafı
+    if (!hasEvrakFotografi(x)) return true;
     if (!String(x.aciklama || '').trim()) return true;
     if (!String(x.evrakTuru || '').trim()) return true;
     if (!String(x.firma || '').trim()) return true; // gönderen firma
@@ -969,13 +983,11 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
       return;
     }
 
-    const anaEksikUcFoto = uploadQueue.filter(
-      (item) => item.firmaKaynakTipi === 'ANA_FIRMA' && !hasAnaFirmaUcFotograf(item)
+    const anaEksikFoto = uploadQueue.filter(
+      (item) => item.firmaKaynakTipi === 'ANA_FIRMA' && !hasEvrakFotografi(item)
     );
-    if (anaEksikUcFoto.length > 0) {
-      alert(
-        'Ana Firma (Kibritçi) evraklarında 3 foto zorunlu:\n1) Firma ismi görünen\n2) Ürünler görünen\n3) Tam hali'
-      );
+    if (anaEksikFoto.length > 0) {
+      alert('Ana Firma (Kibritçi) evraklarında en az bir evrak fotoğrafı zorunludur.');
       return;
     }
 
@@ -1000,7 +1012,7 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
     });
     if (anaEksik.length > 0) {
       alert(
-        'Ana Firma evraklarında zorunlu:\n• Evrak türü\n• Gönderen firma ismi\n• Kalemler (ürün adı + kilo)\n• 3 fotoğraf\n• Açıklama\n\nBu evraklar yönetici onayına gider.'
+        'Ana Firma evraklarında zorunlu:\n• Evrak türü\n• Gönderen firma ismi\n• Kalemler (ürün adı + kilo)\n• Evrak fotoğrafı\n• Açıklama\n\nBu evraklar yönetici onayına gider.'
       );
       return;
     }
@@ -1025,7 +1037,7 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
     });
     if (irsaliyeEksik.length > 0) {
       alert(
-        'Ana Firma İRSALİYE paketlerinde zorunlu:\n• İrsaliye / taşıma no\n• Gönderen firma\n• En az bir kalem (ürün + KG)\n• 3 fotoğraf'
+        'Ana Firma İRSALİYE paketlerinde zorunlu:\n• İrsaliye / taşıma no\n• Gönderen firma\n• En az bir kalem (ürün + KG)\n• Evrak fotoğrafı'
       );
       return;
     }
@@ -1112,16 +1124,22 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
         try {
           const prepared = await withTimeout(
             prepareGuvenlikFotoPaketForSave({
+              evrakFotolar: item.evrakFotolar || [],
               kalemFotolar: item.kalemFotolar || [],
               firmaFotolar: item.firmaFotolar || [],
               faturaFotolar: item.faturaFotolar || [],
+              scanPdfUrl: item.scanPdfUrl,
             }),
             8000
           );
 
           const lean = buildLeanGuvenlikEvrakFotoFields(prepared);
           const primarySlot =
-            lean.kalemFotolar[0] || lean.firmaFotolar[0] || lean.faturaFotolar[0] || null;
+            lean.evrakFotolar[0] ||
+            lean.kalemFotolar[0] ||
+            lean.firmaFotolar[0] ||
+            lean.faturaFotolar[0] ||
+            null;
           const fotoEksik =
             countPaketFotolar(prepared) === 0 && countPaketFotolar(item) > 0;
 
@@ -1197,9 +1215,11 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
             saat: new Date().toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' }),
             fotoUrl: lean.fotoUrl || '',
             fotoUrls: lean.fotoUrls || [],
+            evrakFotolar: lean.evrakFotolar,
             kalemFotolar: lean.kalemFotolar,
             firmaFotolar: lean.firmaFotolar,
             faturaFotolar: lean.faturaFotolar,
+            scanPdfUrl: lean.scanPdfUrl || item.scanPdfUrl || '',
             kalemler: isTaseronEvrak ? [] : matchedKalemler,
             fileName: primarySlot?.fileName || 'evrak_paketi',
             fileType: primarySlot?.fileType || 'image/jpeg',
@@ -1214,6 +1234,7 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
                 : `Ana Firma kapı evrakı · ${item.evrakTuru} · gönderen: ${firmaAdi} · yönetici onayı bekliyor`),
             kaydeden: currentUser?.email || 'nobetci_guvenlik',
             fotoMetodOzet: {
+              evrak: lean.evrakFotolar.length,
               kalem: lean.kalemFotolar.length,
               firma: lean.firmaFotolar.length,
               fatura: lean.faturaFotolar.length,
@@ -1300,9 +1321,9 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
                 firmaHint: firmaAdi || undefined,
                 cariKartId: cariKartId || undefined,
                 saId: saIdBound || undefined,
-                kalemFotoUrl: lean.kalemFotolar[0]?.dataUrl,
-                firmaFotoUrl: lean.firmaFotolar[0]?.dataUrl,
-                faturaFotoUrl: lean.faturaFotolar[0]?.dataUrl,
+                kalemFotoUrl: lean.evrakFotolar[0]?.dataUrl || lean.kalemFotolar[0]?.dataUrl,
+                firmaFotoUrl: lean.evrakFotolar[0]?.dataUrl || lean.firmaFotolar[0]?.dataUrl,
+                faturaFotoUrl: lean.scanPdfUrl || lean.evrakFotolar[0]?.dataUrl || lean.faturaFotolar[0]?.dataUrl,
               }
             );
           }
@@ -3360,9 +3381,9 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
                 </span>
                 <p className="text-[10px] text-slate-600 -mt-2 bg-teal-50 border border-teal-200 rounded-xl px-3 py-2 leading-relaxed">
                   <strong>1. adım:</strong> Evrak <strong>Ana Firma (Kibritçi İnşaat)</strong> mı yoksa{' '}
-                  <strong>Taşeron Firma</strong> mı? Taşeron için geliş tarihi + evrak cinsi + foto yeter;
-                  cariye işlenir. Ana Firma için gönderen firma, kalem/kilo ve <strong>3 foto</strong> zorunlu;
-                  yönetici onayına gider.
+                  <strong>Taşeron Firma</strong> mı? Taşeron için taşeron seçimi + evrak cinsi + <strong>tek foto</strong> yeter;
+                  cariye işlenir. Ana Firma için gönderen firma, kalem/kilo, evrak no/tarih ve <strong>tek foto</strong> zorunlu;
+                  tarama PDF otomatik oluşur, yönetici onayına gider.
                 </p>
 
                 <div className="flex flex-wrap gap-2">
@@ -3387,7 +3408,7 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
 
                 {uploadQueue.length === 0 ? (
                   <div className="rounded-2xl border border-dashed border-indigo-200 bg-indigo-50/40 p-6 text-center text-[11px] text-slate-500 font-semibold">
-                    Henüz paket yok. «Yeni evrak paketi» ile 3 yuvayı doldurun veya hızlı yükleme kullanın.
+                    Henüz paket yok. «Yeni evrak paketi» ile firma türünü seçip tek evrak fotoğrafı yükleyin.
                   </div>
                 ) : (
                   <div className="space-y-4 pt-2 border-t border-slate-100">
@@ -3555,82 +3576,23 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
                             <p className="text-[9px] text-teal-800 font-semibold">
                               Kaydıyla seçili taşeron carinin alt işlemlerine işlenir. En az 1 foto yeterlidir.
                             </p>
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                              {([
-                                ['FIRMA', 'firmaFotolar'],
-                                ['KALEM', 'kalemFotolar'],
-                                ['FATURA', 'faturaFotolar'],
-                              ] as const).map(([metod, key]) => {
-                                const list = (item[key] || []) as GuvenlikFotoSlot[];
-                                return (
-                                  <div
-                                    key={metod}
-                                    className="rounded-xl border border-teal-100 bg-white p-2.5 space-y-2"
-                                  >
-                                    <div>
-                                      <p className="text-[9px] font-black uppercase text-teal-800 tracking-wide">
-                                        {GUVENLIK_FOTO_METOD_LABEL[metod]}
-                                      </p>
-                                      <p className="text-[8px] text-slate-400 font-semibold">
-                                        {GUVENLIK_FOTO_METOD_HINT[metod]}
-                                      </p>
-                                    </div>
-                                    <label className="flex flex-col items-center justify-center gap-1 border border-dashed border-teal-200 rounded-lg py-3 cursor-pointer hover:bg-teal-50/50 transition">
-                                      <FileUp size={16} className="text-teal-600" />
-                                      <span className="text-[9px] font-bold text-teal-800">Foto ekle</span>
-                                      <input
-                                        type="file"
-                                        multiple
-                                        accept="image/*,application/pdf"
-                                        className="hidden"
-                                        onChange={(e) => handleAddFotosToPackage(item.id, metod, e)}
-                                      />
-                                    </label>
-                                    {list.length > 0 && (
-                                      <div className="grid grid-cols-3 gap-1">
-                                        {list.map((f) => (
-                                          <div key={f.id} className="relative group">
-                                            {String(f.fileType || '').startsWith('image/') ||
-                                            isLikelyImageUrl(f.dataUrl) ? (
-                                              <img
-                                                src={f.dataUrl}
-                                                alt={f.fileName}
-                                                className="w-full h-14 object-cover rounded-md border border-slate-200"
-                                              />
-                                            ) : (
-                                              <div className="h-14 rounded-md border border-slate-200 bg-slate-50 flex items-center justify-center text-[9px] font-bold text-slate-500">
-                                                PDF
-                                              </div>
-                                            )}
-                                            <button
-                                              type="button"
-                                              onClick={() =>
-                                                handleRemoveFotoFromPackage(item.id, metod, f.id)
-                                              }
-                                              className="absolute -top-1 -right-1 bg-rose-500 text-white rounded-full w-4 h-4 text-[9px] leading-none opacity-90 cursor-pointer"
-                                              title="Kaldır"
-                                            >
-                                              ×
-                                            </button>
-                                          </div>
-                                        ))}
-                                      </div>
-                                    )}
-                                    <p className="text-[8px] text-slate-400 font-bold">{list.length} foto</p>
-                                  </div>
-                                );
-                              })}
-                            </div>
-                            <p className="text-[9px] text-slate-500 font-semibold">
-                              Toplam foto: {countPaketFotolar(item)}
-                              {!countPaketFotolar(item) ? ' — en az bir foto ekleyin' : ''}
-                            </p>
+                            <GuvenlikEvrakFotoUpload
+                              accent="teal"
+                              packageId={item.id}
+                              evrakFotolar={item.evrakFotolar}
+                              kalemFotolar={item.kalemFotolar}
+                              firmaFotolar={item.firmaFotolar}
+                              faturaFotolar={item.faturaFotolar}
+                              scanPdfUrl={item.scanPdfUrl}
+                              onAdd={handleAddEvrakFotoToPackage}
+                              onRemove={handleRemoveEvrakFotoFromPackage}
+                            />
                           </div>
                         ) : (
                           <>
                         <div className="rounded-xl border border-amber-300 bg-amber-50/60 px-3 py-2 text-[9px] text-amber-950 font-semibold leading-relaxed">
-                          <strong>Ana Firma · Kibritçi İnşaat</strong> — Gönderen firma, kalem/kilo ve 3 foto
-                          (firma ismi · ürünler · tam hali) zorunlu. Yönetici onayına gider.
+                          <strong>Ana Firma · Kibritçi İnşaat</strong> — Gönderen firma, evrak tarihi/no, kalem/kilo
+                          ve <strong>tek evrak fotoğrafı</strong> zorunlu (tarama PDF otomatik). Yönetici onayına gider.
                         </div>
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs pr-6">
                           <div className="space-y-1">
@@ -3974,76 +3936,17 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
                           </div>
                         )}
 
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                          {([
-                            ['FIRMA', 'firmaFotolar'],
-                            ['KALEM', 'kalemFotolar'],
-                            ['FATURA', 'faturaFotolar'],
-                          ] as const).map(([metod, key]) => {
-                            const list = (item[key] || []) as GuvenlikFotoSlot[];
-                            return (
-                              <div
-                                key={metod}
-                                className="rounded-xl border border-indigo-100 bg-white p-2.5 space-y-2"
-                              >
-                                <div>
-                                  <p className="text-[9px] font-black uppercase text-indigo-700 tracking-wide">
-                                    {GUVENLIK_FOTO_METOD_LABEL[metod]}
-                                  </p>
-                                  <p className="text-[8px] text-slate-400 font-semibold">
-                                    {GUVENLIK_FOTO_METOD_HINT[metod]}
-                                  </p>
-                                </div>
-                                <label className="flex flex-col items-center justify-center gap-1 border border-dashed border-indigo-200 rounded-lg py-3 cursor-pointer hover:bg-indigo-50/50 transition">
-                                  <FileUp size={16} className="text-indigo-500" />
-                                  <span className="text-[9px] font-bold text-indigo-700">Foto ekle</span>
-                                  <input
-                                    type="file"
-                                    multiple
-                                    accept="image/*,application/pdf"
-                                    className="hidden"
-                                    onChange={(e) => handleAddFotosToPackage(item.id, metod, e)}
-                                  />
-                                </label>
-                                {list.length > 0 && (
-                                  <div className="grid grid-cols-3 gap-1">
-                                    {list.map((f) => (
-                                      <div key={f.id} className="relative group">
-                                        {String(f.fileType || '').startsWith('image/') || isLikelyImageUrl(f.dataUrl) ? (
-                                          <img
-                                            src={f.dataUrl}
-                                            alt={f.fileName}
-                                            className="w-full h-14 object-cover rounded-md border border-slate-200"
-                                          />
-                                        ) : (
-                                          <div className="h-14 rounded-md border border-slate-200 bg-slate-50 flex items-center justify-center text-[9px] font-bold text-slate-500">
-                                            PDF
-                                          </div>
-                                        )}
-                                        <button
-                                          type="button"
-                                          onClick={() => handleRemoveFotoFromPackage(item.id, metod, f.id)}
-                                          className="absolute -top-1 -right-1 bg-rose-500 text-white rounded-full w-4 h-4 text-[9px] leading-none opacity-90 cursor-pointer"
-                                          title="Kaldır"
-                                        >
-                                          ×
-                                        </button>
-                                      </div>
-                                    ))}
-                                  </div>
-                                )}
-                                <p className="text-[8px] text-slate-400 font-bold">{list.length} foto</p>
-                              </div>
-                            );
-                          })}
-                        </div>
-
-                        <p className="text-[9px] text-slate-500 font-semibold">
-                          Toplam foto: {countPaketFotolar(item)}
-                          {!hasAnaFirmaUcFotograf(item)
-                            ? ' — 3 yuvanın her birine en az 1 foto ekleyin'
-                            : ' — 3 foto tamam ✓'}
-                        </p>
+                        <GuvenlikEvrakFotoUpload
+                          accent="indigo"
+                          packageId={item.id}
+                          evrakFotolar={item.evrakFotolar}
+                          kalemFotolar={item.kalemFotolar}
+                          firmaFotolar={item.firmaFotolar}
+                          faturaFotolar={item.faturaFotolar}
+                          scanPdfUrl={item.scanPdfUrl}
+                          onAdd={handleAddEvrakFotoToPackage}
+                          onRemove={handleRemoveEvrakFotoFromPackage}
+                        />
                           </>
                         )}
                       </div>

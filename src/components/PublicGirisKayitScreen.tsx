@@ -9,6 +9,7 @@ import {
 import { Personel } from '../types/erp';
 import { fetchCollection, saveDocument, ensureFirestoreAuth } from '../lib/firebase';
 import { upsertPersonelAvoidDuplicate } from '../lib/personelMatchUtils';
+import { resolveTaseronPersonelGorev, withTaseronPersonelGorev } from '../lib/taseronUtils';
 import { doc, updateDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { fetchApiJson } from '../lib/apiClient';
@@ -248,16 +249,21 @@ const PublicGirisKayitForm: React.FC<PublicGirisKayitScreenProps> = ({
     setSaving(true);
     try {
       await ensureFirestoreAuth({ allowAnonymous: true });
-      const candidate: Personel = {
+      const allPersoneller = (await fetchCollection('personeller')) as Personel[];
+      const resolvedGorev =
+        form.firmaTipi === 'TASERON'
+          ? resolveTaseronPersonelGorev({ firmaAdi: form.firmaAdi, firmaTipi: 'TASERON' })
+          : form.gorev.trim();
+      const candidate = withTaseronPersonelGorev({
         ...form,
         id: talep.personelId || `p_${Date.now()}`,
         ad: form.ad.trim(),
         soyad: form.soyad.trim(),
-        gorev: form.gorev.trim(),
+        gorev: resolvedGorev,
         fotografUrl: kimlikOnUrl || form.fotografUrl,
         durum: true,
-      };
-      const { personel: newPersonel } = await upsertPersonelAvoidDuplicate([], candidate, {
+      } as Personel);
+      const { personel: newPersonel } = await upsertPersonelAvoidDuplicate(allPersoneller, candidate, {
         rawName: `${form.ad} ${form.soyad}`.trim(),
         tcNo: form.tcNo,
         telefonNo: form.telefonNo,

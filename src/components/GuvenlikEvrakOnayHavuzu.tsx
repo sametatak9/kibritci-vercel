@@ -8,6 +8,7 @@ import {
   GUVENLIK_FOTO_METOD_LABEL,
   GuvenlikFotoSlot,
   isLikelyImageUrl,
+  pickEvrakDisplayUrl,
   pickPrimaryFotoUrl,
   formatEvrakGonderimLabel,
 } from '../lib/guvenlikEvrakFotolar';
@@ -238,10 +239,12 @@ export const GuvenlikEvrakOnayHavuzu: React.FC<GuvenlikEvrakOnayHavuzuProps> = (
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
             {pendingGateDocs.map(docItem => {
               const previewUrl = pickPrimaryFotoUrl(docItem);
+              const scanPdfUrl = String(docItem.scanPdfUrl || '').trim();
               const allUrls = collectAllFotoUrls(docItem);
               const imagePreview = isImageUrl(previewUrl);
               const pdfPreview = isPdfUrl(previewUrl, docItem.fileName);
               const fotoGruplari: Array<{ label: string; list: GuvenlikFotoSlot[] }> = [
+                { label: GUVENLIK_FOTO_METOD_LABEL.EVRAK, list: docItem.evrakFotolar || [] },
                 { label: GUVENLIK_FOTO_METOD_LABEL.KALEM, list: docItem.kalemFotolar || [] },
                 { label: GUVENLIK_FOTO_METOD_LABEL.FIRMA, list: docItem.firmaFotolar || [] },
                 { label: GUVENLIK_FOTO_METOD_LABEL.FATURA, list: docItem.faturaFotolar || [] },
@@ -738,13 +741,28 @@ export const GuvenlikEvrakOnayHavuzu: React.FC<GuvenlikEvrakOnayHavuzuProps> = (
                 )}
               </div>
 
-              {(activeGateDoc.kalemFotolar?.length || activeGateDoc.firmaFotolar?.length || activeGateDoc.faturaFotolar?.length) ? (
-                <div className="mb-3 grid grid-cols-3 gap-2">
+              {(activeGateDoc.evrakFotolar?.length ||
+                activeGateDoc.kalemFotolar?.length ||
+                activeGateDoc.firmaFotolar?.length ||
+                activeGateDoc.faturaFotolar?.length ||
+                activeGateDoc.scanPdfUrl) ? (
+                <div className="mb-3 space-y-2">
+                  {activeGateDoc.scanPdfUrl && (
+                    <button
+                      type="button"
+                      onClick={() => openBase64InNewTab(activeGateDoc.scanPdfUrl, 'Tarama PDF')}
+                      className="inline-flex items-center gap-1 text-[10px] font-bold text-teal-800 underline cursor-pointer"
+                    >
+                      <FileText size={12} /> Tarama PDF görüntüle
+                    </button>
+                  )}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                   {([
+                    ['EVRAK', activeGateDoc.evrakFotolar || []],
                     ['KALEM', activeGateDoc.kalemFotolar || []],
                     ['FIRMA', activeGateDoc.firmaFotolar || []],
                     ['FATURA', activeGateDoc.faturaFotolar || []],
-                  ] as const).map(([metod, list]) => (
+                  ] as const).filter(([, list]) => list.length > 0).map(([metod, list]) => (
                     <div key={metod} className="rounded-xl border border-slate-200 bg-white p-2 space-y-1">
                       <p className="text-[8px] font-black uppercase text-slate-500">{GUVENLIK_FOTO_METOD_LABEL[metod]}</p>
                       {list.length === 0 ? (
@@ -768,6 +786,7 @@ export const GuvenlikEvrakOnayHavuzu: React.FC<GuvenlikEvrakOnayHavuzuProps> = (
                       )}
                     </div>
                   ))}
+                  </div>
                 </div>
               ) : null}
               

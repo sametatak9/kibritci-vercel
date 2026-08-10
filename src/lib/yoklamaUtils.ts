@@ -408,11 +408,20 @@ export function canonicalizeAnaFirmaAdi(name?: string | null): string {
   return upper;
 }
 
+export function isAnaFirmaFirmaAdi(name?: string | null): boolean {
+  const raw = String(name || '').trim();
+  if (!raw) return true;
+  const upper = raw.toLocaleUpperCase('tr-TR');
+  if (upper === 'ANA FİRMA' || upper === 'ANA FIRMA') return true;
+  return isKibritciCompany(raw);
+}
+
 export function isTaseronPersonel(p?: Personel): boolean {
   if (!p) return false;
   if (p.firmaTipi === 'TASERON') return true;
   const firmaAdi = String(p.firmaAdi || '').trim();
   if (!firmaAdi) return false;
+  if (isAnaFirmaFirmaAdi(firmaAdi)) return false;
   return !isKibritciCompany(firmaAdi);
 }
 

@@ -1,4 +1,10 @@
 import type { Personel } from '../types/erp';
+import {
+  firmaEslesir,
+  resolveTaseronPersonelGorev,
+  TASERON_PERSONEL_DEPARTMAN,
+  withTaseronPersonelGorev,
+} from './taseronUtils';
 import { isTaseronPersonel } from './yoklamaUtils';
 
 /** Haftalık taşeron kadro satırı — ad/soyad zorunlu, TC opsiyonel */
@@ -40,13 +46,9 @@ function nameKey(ad: string, soyad: string): string {
   return normKey(`${ad} ${soyad}`);
 }
 
-function firmaKey(firmaAdi: string): string {
-  return normKey(firmaAdi);
-}
-
 function sameTaseronFirma(p: Personel, firmaAdi: string): boolean {
   if (!isTaseronPersonel(p)) return false;
-  return firmaKey(p.firmaAdi || '') === firmaKey(firmaAdi);
+  return firmaEslesir(p.firmaAdi || '', firmaAdi);
 }
 
 function isAktif(p: Personel): boolean {
@@ -209,8 +211,8 @@ function makeTaseronPersonel(opts: {
     adres: '',
     il: '',
     ilce: '',
-    departman: 'TAŞERON',
-    gorev: opts.row.gorev || 'TAŞERON PERSONEL',
+    departman: TASERON_PERSONEL_DEPARTMAN,
+    gorev: resolveTaseronPersonelGorev({ firmaAdi: opts.firmaAdi, firmaTipi: 'TASERON' }),
     iseGirisTarihi: opts.iseGirisTarihi,
     cinsiyet: 'Belirtilmedi',
     maas: 0,
@@ -274,8 +276,18 @@ export function syncTaseronPersonelListe(options: {
   const findMatch = (row: TaseronListeRow): Personel | undefined => {
     const tc = digits(row.tcNo || '');
     if (tc) {
-      const byTc = list.find((p) => digits(p.tcNo) === tc);
-      if (byTc) return byTc;
+      const byTcInFirma = firmPool.find(
+        (p) => !usedIds.has(p.id) && digits(p.tcNo) === tc
+      );
+      if (byTcInFirma) return byTcInFirma;
+      // Taşeronlar arası firma değişimi — ana firma personelini asla eşleştirme
+      const byTcTaseron = list.find(
+        (p) =>
+          !usedIds.has(p.id) &&
+          digits(p.tcNo) === tc &&
+          isTaseronPersonel(p)
+      );
+      if (byTcTaseron) return byTcTaseron;
     }
     const nk = nameKey(row.ad, row.soyad);
     return firmPool.find(
@@ -298,11 +310,12 @@ export function syncTaseronPersonelListe(options: {
     const tc = digits(row.tcNo || '') || digits(match.tcNo);
     const wasAktif = isAktif(match);
     const needsFirma =
-      match.firmaTipi !== 'TASERON' || firmaKey(match.firmaAdi || '') !== firmaKey(firmaAdi);
+      match.firmaTipi !== 'TASERON' || !firmaEslesir(match.firmaAdi || '', firmaAdi);
     const needsName =
       (match.ad || '') !== row.ad || (match.soyad || '') !== row.soyad;
     const needsTc = Boolean(tc) && digits(match.tcNo) !== tc;
-    const needsGorev = Boolean(row.gorev) && match.gorev !== row.gorev;
+    const targetGorev = resolveTaseronPersonelGorev({ firmaAdi, firmaTipi: 'TASERON' });
+    const needsGorev = match.gorev !== targetGorev;
     const needsActivate = !wasAktif;
 
     if (!needsFirma && !needsName && !needsTc && !needsGorev && !needsActivate) {
@@ -310,15 +323,15 @@ export function syncTaseronPersonelListe(options: {
       continue;
     }
 
-    const patched: Personel = {
+    const patched: Personel = withTaseronPersonelGorev({
       ...match,
       ad: row.ad,
       soyad: row.soyad,
       tcNo: tc || match.tcNo || '',
       firmaTipi: 'TASERON',
       firmaAdi,
-      gorev: row.gorev || match.gorev || 'TAŞERON PERSONEL',
-      departman: match.departman || 'TAŞERON',
+      gorev: targetGorev,
+      departman: match.departman === 'TAŞERON' || !match.departman ? TASERON_PERSONEL_DEPARTMAN : match.departman,
       durum: true,
       istenCikisTarihi: '',
       iseGirisTarihi: needsActivate
@@ -330,7 +343,7 @@ export function syncTaseronPersonelListe(options: {
       // Taşeron: maaş/IBAN zorunlu değil — mevcut boşsa boş kalsın
       maas: Number(match.maas) || 0,
       ibanNo: match.ibanNo || '',
-    };
+    });
 
     const idx = list.findIndex((p) => p.id === match.id);
     if (idx >= 0) list[idx] = patched;

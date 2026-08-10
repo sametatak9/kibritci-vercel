@@ -1,4 +1,4 @@
-import { doc, getDoc, updateDoc } from 'firebase/firestore';
+import { doc, getDoc, updateDoc, writeBatch } from 'firebase/firestore';
 import {
   KampTaseronSayim,
   KampTaseronSayimIslem,
@@ -6,8 +6,13 @@ import {
   KampTaseronSayimPersonelGuncelleme,
   Personel,
 } from '../types/erp';
-import { db, saveDocument } from './firebase';
+import {
+  isAnaFirmaMykSayimPersoneli,
+  isAnaFirmaMykSayimSession,
+} from './anaFirmaMykSayimUtils';
+import { cleanUndefined, db, saveDocument } from './firebase';
 import { validateTC } from './personelOdemeUtils';
+import { withTaseronPersonelGorev } from './taseronUtils';
 
 const digitsOnly = (raw: string) => String(raw || '').replace(/\D/g, '');
 
@@ -76,6 +81,18 @@ export function buildIseGirisPatch(personel: Personel, today: string): KampTaser
   };
 }
 
+export function filterSayimGuncellemeleriForSession(
+  firmaAdi: string,
+  guncellemeler: KampTaseronSayimPersonelGuncelleme[],
+  personeller: Personel[]
+): KampTaseronSayimPersonelGuncelleme[] {
+  if (!isAnaFirmaMykSayimSession(firmaAdi)) return guncellemeler;
+  return guncellemeler.filter((g) => {
+    const p = personeller.find((x) => x.id === g.personelId);
+    return p != null && isAnaFirmaMykSayimPersoneli(p);
+  });
+}
+
 export function validateTaseronSayimSession(opts: {
   firmaAdi: string;
   personelGuncellemeleri: KampTaseronSayimPersonelGuncelleme[];
@@ -88,11 +105,16 @@ export function validateTaseronSayimSession(opts: {
     return { ok: false, error: 'Gönderilecek personel güncellemesi yok. Önce kartlarda Kaydet ile taslak oluşturun.' };
   }
 
+  const anaFirmaMyk = isAnaFirmaMykSayimSession(opts.firmaAdi);
   const tcSeen = new Set<string>();
   for (const g of opts.personelGuncellemeleri) {
     const personel = opts.personeller.find((p) => p.id === g.personelId);
     if (!personel) {
       return { ok: false, error: `${g.personelIsim} personel kaydı bulunamadı.` };
+    }
+    if (anaFirmaMyk && !isAnaFirmaMykSayimPersoneli(personel)) {
+      // Eski oturumlarda kapsam dışı kayıtlar olabilir — onayda atlanır, kayıt engellenmez
+      continue;
     }
 
     if (g.tcNo) {
@@ -113,6 +135,21 @@ export function validateTaseronSayimSession(opts: {
 
     if (g.telefonNo && phoneMatchKey(g.telefonNo).length > 0 && phoneMatchKey(g.telefonNo).length < 10) {
       return { ok: false, error: `${g.personelIsim}: telefon en az 10 hane olmalı.` };
+    }
+  }
+
+  if (anaFirmaMyk) {
+    const inScope = filterSayimGuncellemeleriForSession(
+      opts.firmaAdi,
+      opts.personelGuncellemeleri,
+      opts.personeller
+    );
+    if (inScope.length === 0) {
+      return {
+        ok: false,
+        error:
+          'KİBRİTÇİ MYK sayımında uygulanacak kayıt yok. Yalnızca aktif DÜZ İŞÇİ / TESİSATÇI / FORMEN / USTA personeli kapsanır.',
+      };
     }
   }
 
@@ -157,36 +194,71 @@ export function buildSessionIslemFromPatch(
   };
 }
 
+function finalizePersonelFromSayimPatch(
+  current: Personel,
+  g: KampTaseronSayimPersonelGuncelleme,
+  anaFirmaMyk: boolean
+): Personel {
+  const payload: Personel = { ...current };
+
+  if (g.tcNo !== undefined) payload.tcNo = g.tcNo;
+  if (g.telefonNo !== undefined) payload.telefonNo = g.telefonNo;
+  if (g.mykDurumu !== undefined) payload.mykDurumu = g.mykDurumu;
+  if (g.durum !== undefined) payload.durum = g.durum;
+  if (g.istenCikisTarihi !== undefined) {
+    payload.istenCikisTarihi = g.istenCikisTarihi || undefined;
+  }
+  if (g.iseGirisTarihi !== undefined) payload.iseGirisTarihi = g.iseGirisTarihi;
+
+  return anaFirmaMyk ? payload : withTaseronPersonelGorev(payload);
+}
+
+async function commitPersonelBatches(updates: Personel[]): Promise<void> {
+  const CHUNK = 400;
+  for (let i = 0; i < updates.length; i += CHUNK) {
+    const batch = writeBatch(db);
+    updates.slice(i, i + CHUNK).forEach((p) => {
+      batch.set(doc(db, 'personeller', p.id), cleanUndefined(p), { merge: true });
+    });
+    await batch.commit();
+  }
+}
+
 export async function applyTaseronSayimOnApproval(
   session: KampTaseronSayim,
   personeller: Personel[]
-): Promise<{ updatedPersoneller: Personel[]; appliedCount: number }> {
+): Promise<{ updatedPersoneller: Personel[]; appliedCount: number; skippedCount: number }> {
   const guncellemeler = session.personelGuncellemeleri || [];
+  const anaFirmaMyk = isAnaFirmaMykSayimSession(session.firmaAdi);
   const updatedIds = new Set<string>();
+  let skippedCount = 0;
   const nextPersoneller = [...personeller];
+  const toPersist: Personel[] = [];
 
   for (const g of guncellemeler) {
     const idx = nextPersoneller.findIndex((p) => p.id === g.personelId);
-    if (idx < 0) continue;
+    if (idx < 0) {
+      skippedCount += 1;
+      continue;
+    }
 
     const current = nextPersoneller[idx];
-    const payload: Partial<Personel> = { ...current };
-
-    if (g.tcNo !== undefined) payload.tcNo = g.tcNo;
-    if (g.telefonNo !== undefined) payload.telefonNo = g.telefonNo;
-    if (g.mykDurumu !== undefined) payload.mykDurumu = g.mykDurumu;
-    if (g.durum !== undefined) payload.durum = g.durum;
-    if (g.istenCikisTarihi !== undefined) {
-      payload.istenCikisTarihi = g.istenCikisTarihi || undefined;
+    if (anaFirmaMyk && !isAnaFirmaMykSayimPersoneli(current)) {
+      skippedCount += 1;
+      continue;
     }
-    if (g.iseGirisTarihi !== undefined) payload.iseGirisTarihi = g.iseGirisTarihi;
 
-    await saveDocument('personeller', payload as Personel);
-    nextPersoneller[idx] = payload as Personel;
+    const merged = finalizePersonelFromSayimPatch(current, g, anaFirmaMyk);
+    nextPersoneller[idx] = merged;
+    toPersist.push(merged);
     updatedIds.add(g.personelId);
   }
 
-  return { updatedPersoneller: nextPersoneller, appliedCount: updatedIds.size };
+  if (toPersist.length > 0) {
+    await commitPersonelBatches(toPersist);
+  }
+
+  return { updatedPersoneller: nextPersoneller, appliedCount: updatedIds.size, skippedCount };
 }
 
 export async function markTaseronSayimApproved(

@@ -23,7 +23,6 @@ const DashboardScreen = lazy(() => import('./components/DashboardScreen').then(m
 const PersonelScreen = lazy(() => import('./components/PersonelScreen').then(m => ({ default: m.PersonelScreen })));
 const YoklamaScreen = lazy(() => import('./components/YoklamaScreen').then(m => ({ default: m.YoklamaScreen })));
 const FaaliyetPersonelScreen = lazy(() => import('./components/FaaliyetPersonelScreen').then(m => ({ default: m.FaaliyetPersonelScreen })));
-const SahaIsPlanKontrolScreen = lazy(() => import('./components/SahaIsPlanKontrolScreen').then(m => ({ default: m.SahaIsPlanKontrolScreen })));
 const MaasMerkeziScreen = lazy(() => import('./components/MaasMerkeziScreen').then(m => ({ default: m.MaasMerkeziScreen })));
 const PersonelIzinScreen = lazy(() => import('./components/PersonelIzinScreen').then(m => ({ default: m.PersonelIzinScreen })));
 const SatinAlmaScreen = lazy(() => import('./components/SatinAlmaScreen').then(m => ({ default: m.SatinAlmaScreen })));
@@ -82,6 +81,7 @@ import {
   fetchCollection,
   ensureFirestoreAuth,
 } from './lib/firebase';
+import { withTaseronPersonelGorev } from './lib/taseronUtils';
 import {
   isPlaceholderPersonelName,
   personelNameKey,
@@ -120,6 +120,11 @@ import {
   repairKullaniciDocIdsIfNeeded,
   saveKullanici,
 } from './lib/kullaniciUtils';
+import {
+  applyCariDedupPlan,
+  applyCariDedupPlansInMemory,
+  planCariKartDedup,
+} from './lib/cariKartDedupUtils';
 import { collection, onSnapshot, doc, getDoc, query, orderBy, limit } from 'firebase/firestore';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { syncAuthClaimsFromServer } from './lib/authClaimsClient';
@@ -368,6 +373,7 @@ export default function App() {
   const deltaKapiCariSeedRef = useRef(false);
   const yeditepePersonelSeedRef = useRef(false);
   const yeditepeCariSeedRef = useRef(false);
+  const cariDedupRanRef = useRef(false);
   const kampRepairInFlightRef = useRef(false);
   const yoklamaJsonSeenRef = useRef<string | null>(null);
   const yoklamaSyncPendingRef = useRef<{
@@ -863,7 +869,7 @@ export default function App() {
             }
             for (const p of kuterMerged.toSave) {
               try {
-                await saveDocument('personeller', p);
+                await saveDocument('personeller', withTaseronPersonelGorev(p));
               } catch (e) {
                 console.warn('Kuter personel kaydı atlandı:', p.tcNo, e);
               }
@@ -873,7 +879,7 @@ export default function App() {
             }
             for (const p of deltaMerged.toSave) {
               try {
-                await saveDocument('personeller', p);
+                await saveDocument('personeller', withTaseronPersonelGorev(p));
               } catch (e) {
                 console.warn('DELTA KAPI personel kaydı atlandı:', p.tcNo, e);
               }
@@ -883,7 +889,7 @@ export default function App() {
             }
             for (const p of yeditepeMerged.toSave) {
               try {
-                await saveDocument('personeller', p);
+                await saveDocument('personeller', withTaseronPersonelGorev(p));
               } catch (e) {
                 console.warn('YEDİTEPE personel kaydı atlandı:', p.tcNo, e);
               }
@@ -919,6 +925,21 @@ export default function App() {
           void saveDocument('cariKartlar', yeditepeCari).catch((e) =>
             console.warn('YEDİTEPE cari kaydı atlandı:', e)
           );
+        }
+        const cariDedupPlans = planCariKartDedup(companyDataWithYeditepe, yeditepeMerged.list);
+        const companyDataDeduped = applyCariDedupPlansInMemory(companyDataWithYeditepe, cariDedupPlans);
+        if (cariDedupPlans.length > 0) {
+          cariDedupRanRef.current = true;
+          void (async () => {
+            for (const plan of cariDedupPlans) {
+              try {
+                await applyCariDedupPlan(plan);
+              } catch (e) {
+                console.warn('Cari mükerrer birleştirme atlandı:', plan.key, e);
+              }
+            }
+            console.log(`Cari mükerrer birleştirme: ${cariDedupPlans.length} grup`);
+          })();
         }
         setYoklamalar(attData);
         if (hasSubstantialYoklamaData(attData) || kuterMerged.list.length >= 20) {
@@ -967,7 +988,7 @@ export default function App() {
         setSahaFaaliyetleri(reportData);
         setProgramliFaaliyetler(loadedProgramliFaaliyetler);
         setHazirTutanaklar(protocolData);
-        setCariKartlar(companyDataWithYeditepe);
+        setCariKartlar(companyDataDeduped);
         setStokKartlar(stockData);
         setEpostaGonderimleri(emailLogData);
         setKullanicilar(loadedUsers);
@@ -1355,7 +1376,7 @@ export default function App() {
           void (async () => {
             for (const p of toSave) {
               try {
-                await saveDocument('personeller', p);
+                await saveDocument('personeller', withTaseronPersonelGorev(p));
               } catch (e) {
                 console.warn('Kuter personel snapshot senkronu atlandı:', p.tcNo, e);
               }
@@ -1374,7 +1395,7 @@ export default function App() {
           void (async () => {
             for (const p of toSave) {
               try {
-                await saveDocument('personeller', p);
+                await saveDocument('personeller', withTaseronPersonelGorev(p));
               } catch (e) {
                 console.warn('DELTA KAPI personel snapshot senkronu atlandı:', p.tcNo, e);
               }
@@ -1393,7 +1414,7 @@ export default function App() {
           void (async () => {
             for (const p of toSave) {
               try {
-                await saveDocument('personeller', p);
+                await saveDocument('personeller', withTaseronPersonelGorev(p));
               } catch (e) {
                 console.warn('YEDİTEPE personel snapshot senkronu atlandı:', p.tcNo, e);
               }
@@ -1513,11 +1534,30 @@ export default function App() {
     });
 
     const unsubCari = onSnapshot(collection(db, 'cariKartlar'), (snapshot) => {
-      const list: CariKart[] = [];
+      let list: CariKart[] = [];
       snapshot.forEach((docSnap) => {
         // data.id, Firestore yolunu ezmesin (silme hedefi yanlış id olmasın)
         list.push({ ...docSnap.data(), id: docSnap.id } as CariKart);
       });
+
+      if (!cariDedupRanRef.current) {
+        const plans = planCariKartDedup(list);
+        if (plans.length > 0) {
+          cariDedupRanRef.current = true;
+          list = applyCariDedupPlansInMemory(list, plans);
+          void (async () => {
+            for (const plan of plans) {
+              try {
+                await applyCariDedupPlan(plan);
+              } catch (e) {
+                console.warn('Cari mükerrer birleştirme atlandı:', plan.key, e);
+              }
+            }
+            console.log(`Cari mükerrer birleştirme (snapshot): ${plans.length} grup`);
+          })();
+        }
+      }
+
       setCariKartlar(list);
 
       if (!kuterCariSeedRef.current) {
@@ -3625,13 +3665,6 @@ export default function App() {
                 />
               )}
 
-              {activeTab === "saha_is_plan" && (
-                <SahaIsPlanKontrolScreen
-                  personeller={personeller}
-                  yoklamalar={yoklamalar}
-                  currentUser={currentUser}
-                />
-              )}
 
               {activeTab === "maas" && (
                 <MaasMerkeziScreen

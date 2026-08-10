@@ -33,6 +33,7 @@ import {
   buildGunlukProgramCetveli,
   buildGunlukProgramOzeti,
   filterSahaFaaliyetleriByDate,
+  sahaFaaliyetHasGunIciIlerleme,
 } from '../lib/geldiHavuzuUtils';
 import { personMatchesFaaliyet } from '../lib/faaliyetPersonelUtils';
 import { FAALIYET_ETIKET_ONSETLERI, normalizeFaaliyetEtiketi } from '../lib/faaliyetEtiketUtils';
@@ -175,6 +176,13 @@ export const GunlukFaaliyetProgramScreen: React.FC<GunlukFaaliyetProgramScreenPr
     [havuzFaaliyetleri, kampFaaliyetleri, selectedDate]
   );
 
+  const sahaKayitIdSet = useMemo(
+    () => new Set(sahaFaaliyetleri.map((f) => f.id)),
+    [sahaFaaliyetleri]
+  );
+
+  const canPatchSahaKayit = (sf: SahaFaaliyeti) => sahaKayitIdSet.has(sf.id);
+
   const cetvel = useMemo(
     () =>
       buildGunlukProgramCetveli(
@@ -315,6 +323,8 @@ export const GunlukFaaliyetProgramScreen: React.FC<GunlukFaaliyetProgramScreenPr
           blok,
           aciklama: aciklama.trim(),
           isEtiketi: isEtiketi || undefined,
+          ilerlemeDurumu: 'BASLAMADI',
+          ilerlemeKayitlari: existing?.ilerlemeKayitlari || [],
           aktifPersonelListesi: draftStaff,
           ustaSayisi: counts.usta,
           isciSayisi: counts.isci,
@@ -340,7 +350,8 @@ export const GunlukFaaliyetProgramScreen: React.FC<GunlukFaaliyetProgramScreenPr
           blok,
           aciklama: aciklama.trim() || `${isNiteligi.trim()} — günlük program`,
           isEtiketi: isEtiketi || undefined,
-          ilerlemeDurumu: isEtiketi ? 'BASLAMADI' : undefined,
+          ilerlemeDurumu: 'BASLAMADI',
+          ilerlemeKayitlari: [],
           aktifPersonelListesi: draftStaff,
           ustaSayisi: counts.usta,
           isciSayisi: counts.isci,
@@ -851,7 +862,7 @@ export const GunlukFaaliyetProgramScreen: React.FC<GunlukFaaliyetProgramScreenPr
                 const fotolar = getFaaliyetTumFotolar(sf);
                 const kaynak = resolveGorevMerkeziKaynak(sf.kaynakEkran);
                 const kaynakLabel = gorevMerkeziKaynakLabel(kaynak);
-                const canEditProgress = editableSahaIds?.has(sf.id) ?? false;
+                const canEditProgress = canPatchSahaKayit(sf) && Boolean(onPatchSahaFaaliyet);
                 const isProgramKayit =
                   sf.kaynakEkran === 'GUNLUK_PROGRAM' || kaynak === 'PROGRAM';
                 return (
@@ -872,6 +883,13 @@ export const GunlukFaaliyetProgramScreen: React.FC<GunlukFaaliyetProgramScreenPr
                               Onay bekliyor
                             </span>
                           )}
+                          {canPatchSahaKayit(sf) &&
+                            !sahaFaaliyetHasGunIciIlerleme(sf) &&
+                            (sf.aktifPersonelListesi?.length || 0) > 0 && (
+                              <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded-full bg-orange-100 text-orange-900 border border-orange-200">
+                                Faaliyetsiz
+                              </span>
+                            )}
                         </div>
                         <h4 className="text-sm font-black text-slate-900 truncate">
                           {sf.isNiteligi || '—'}
@@ -932,14 +950,20 @@ export const GunlukFaaliyetProgramScreen: React.FC<GunlukFaaliyetProgramScreenPr
                       })}
                     </div>
                     {canEditProgress && onPatchSahaFaaliyet && (
-                      <FaaliyetEtiketIlerlemePanel
-                        faaliyet={sf}
-                        currentUserEmail={currentUser?.email}
-                        busy={patchBusyId === sf.id}
-                        compact
-                        onPatch={(patch) => onPatchSahaFaaliyet(sf, patch)}
-                        onOpenFoto={(urls, index) => setLightbox({ urls, index })}
-                      />
+                      <div className="border-t border-amber-100 pt-2 mt-1">
+                        <p className="text-[9px] font-black uppercase text-amber-800 mb-1.5 flex items-center gap-1">
+                          <Camera size={11} />
+                          Gün içi ilerleme — fotoğraf ve açıklama
+                        </p>
+                        <FaaliyetEtiketIlerlemePanel
+                          faaliyet={sf}
+                          currentUserEmail={currentUser?.email}
+                          busy={patchBusyId === sf.id}
+                          compact
+                          onPatch={(patch) => onPatchSahaFaaliyet(sf, patch)}
+                          onOpenFoto={(urls, index) => setLightbox({ urls, index })}
+                        />
+                      </div>
                     )}
                   </article>
                 );
@@ -1005,19 +1029,27 @@ export const GunlukFaaliyetProgramScreen: React.FC<GunlukFaaliyetProgramScreenPr
                         {row.mesaiSaati > 0 ? `${row.mesaiSaati}sa` : '—'}
                       </td>
                       <td className="px-2 py-2 text-center">
-                        {row.faaliyetVar ? (
+                        {!row.atandi ? (
                           <span
-                            className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-emerald-100 text-emerald-700 border border-emerald-200"
-                            title={`${row.faaliyetSayisi} faaliyet · ${row.fotoSayisi} foto`}
+                            className="text-[8px] font-black px-1.5 py-0.5 rounded-full border bg-rose-100 text-rose-800 border-rose-200"
+                            title="Henüz göreve atanmadı"
                           >
-                            <Camera size={13} />
+                            Atanmadı
+                          </span>
+                        ) : row.faaliyetsiz ? (
+                          <span
+                            className="text-[8px] font-black px-1.5 py-0.5 rounded-full border bg-amber-100 text-amber-900 border-amber-200"
+                            title="Göreve atandı; gün içi ilerleme girilmedi"
+                          >
+                            Faaliyetsiz
                           </span>
                         ) : (
                           <span
-                            className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-slate-100 text-slate-300 border border-slate-200"
-                            title="Faaliyet kaydı yok"
+                            className="inline-flex items-center justify-center gap-0.5 min-w-[2rem] h-7 px-1 rounded-full bg-emerald-100 text-emerald-700 border border-emerald-200 text-[8px] font-black"
+                            title={`${row.faaliyetSayisi} görev · ${row.ilerlemeKayitSayisi} ilerleme · ${row.fotoSayisi} foto`}
                           >
-                            <Camera size={13} />
+                            <Camera size={11} />
+                            {row.ilerlemeKayitSayisi > 0 ? row.ilerlemeKayitSayisi : '✓'}
                           </span>
                         )}
                       </td>
@@ -1065,6 +1097,7 @@ export const GunlukFaaliyetProgramScreen: React.FC<GunlukFaaliyetProgramScreenPr
               ) : (
                 detailFaaliyetler.map((sf) => {
                   const fotolar = getFaaliyetTumFotolar(sf);
+                  const canEdit = canPatchSahaKayit(sf) && Boolean(onPatchSahaFaaliyet);
                   return (
                     <article
                       key={sf.id}
@@ -1113,6 +1146,15 @@ export const GunlukFaaliyetProgramScreen: React.FC<GunlukFaaliyetProgramScreenPr
                         </div>
                       ) : (
                         <p className="text-[10px] text-slate-400 italic">Fotoğraf eklenmemiş</p>
+                      )}
+                      {canEdit && onPatchSahaFaaliyet && (
+                        <FaaliyetEtiketIlerlemePanel
+                          faaliyet={sf}
+                          currentUserEmail={currentUser?.email}
+                          busy={patchBusyId === sf.id}
+                          onPatch={(patch) => onPatchSahaFaaliyet(sf, patch)}
+                          onOpenFoto={(urls, index) => setLightbox({ urls, index })}
+                        />
                       )}
                     </article>
                   );

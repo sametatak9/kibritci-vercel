@@ -31,7 +31,9 @@ import {
   buildGunlukYoklamaOzet,
   buildGunlukYoklamaRaporHtml,
   buildGunlukYoklamaSatirlari,
+  groupGunlukYoklamaSatirlariByGorev,
   openGunlukYoklamaRaporHtml,
+  type GunlukYoklamaRaporGrup,
 } from '../lib/yoklamaGunRaporu';
 import { db } from '../lib/firebase';
 import { collection, onSnapshot } from 'firebase/firestore';
@@ -751,6 +753,20 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
   );
 
   const gunRaporOzet = useMemo(() => buildGunlukYoklamaOzet(gunRaporSatirlari), [gunRaporSatirlari]);
+
+  const gunRaporGruplari = useMemo(
+    () => groupGunlukYoklamaSatirlariByGorev(gunRaporSatirlari),
+    [gunRaporSatirlari]
+  );
+
+  const gunRaporGrupHeaderClass: Record<GunlukYoklamaRaporGrup, string> = {
+    FORMEN: 'bg-violet-700 text-white',
+    USTA: 'bg-fuchsia-700 text-white',
+    SENOR: 'bg-teal-700 text-white',
+    KAMP: 'bg-amber-700 text-white',
+    DUZ_ISCI: 'bg-blue-700 text-white',
+    DIGER: 'bg-slate-600 text-white',
+  };
 
   const gunRaporDateKey = useMemo(
     () =>
@@ -2088,39 +2104,62 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
                   ))}
                 </div>
 
-                <div className="border border-slate-200 rounded-xl overflow-hidden">
-                  <table className="w-full text-[11px] border-collapse">
-                    <thead>
-                      <tr className="bg-slate-100 text-slate-700">
-                        <th className="p-2 text-left border-b border-slate-200 w-8">#</th>
-                        <th className="p-2 text-left border-b border-slate-200">Ad Soyad</th>
-                        <th className="p-2 text-left border-b border-slate-200">Görev</th>
-                        <th className="p-2 text-left border-b border-slate-200 hidden sm:table-cell">Departman</th>
-                        <th className="p-2 text-center border-b border-slate-200 w-24">Durum</th>
-                        <th className="p-2 text-center border-b border-slate-200 w-16">Mesai</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {gunRaporSatirlari.map((row, idx) => (
-                        <tr key={row.personelId} className="border-b border-slate-100 hover:bg-slate-50/80">
-                          <td className="p-2 text-slate-400 font-mono">{idx + 1}</td>
-                          <td className="p-2 font-bold text-slate-900">{row.adSoyad}</td>
-                          <td className="p-2 text-slate-600">{row.gorev}</td>
-                          <td className="p-2 text-slate-500 hidden sm:table-cell">{row.departman}</td>
-                          <td className="p-2 text-center">
-                            <span
-                              className={`inline-block text-[10px] font-black uppercase px-2 py-0.5 rounded-full border ${getStatusColor(row.durum)}`}
-                            >
-                              {getStatusAbbreviation(row.durum)}
-                            </span>
-                          </td>
-                          <td className="p-2 text-center font-bold font-mono text-slate-700">
-                            {row.mesaiSaati > 0 ? row.mesaiSaati : '—'}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                <div className="flex flex-wrap gap-2 mb-4">
+                  {gunRaporGruplari.map((g) => (
+                    <span
+                      key={g.grup}
+                      className="text-[10px] font-bold px-2.5 py-1 rounded-full border border-slate-200 bg-slate-50 text-slate-700"
+                    >
+                      {g.label}: {g.satirlar.length}
+                    </span>
+                  ))}
+                </div>
+
+                <div className="space-y-4">
+                  {gunRaporGruplari.map((grup) => (
+                    <div key={grup.grup} className="border border-slate-200 rounded-xl overflow-hidden">
+                      <div
+                        className={`px-3 py-2 flex items-center justify-between ${gunRaporGrupHeaderClass[grup.grup]}`}
+                      >
+                        <span className="text-[11px] font-black uppercase tracking-wide">{grup.label}</span>
+                        <span className="text-[10px] font-bold opacity-90">
+                          {grup.satirlar.length} kişi · {grup.ozet.geldi} geldi · {grup.ozet.mesaiToplam}s mesai
+                        </span>
+                      </div>
+                      <table className="w-full text-[11px] border-collapse">
+                        <thead>
+                          <tr className="bg-slate-100 text-slate-700">
+                            <th className="p-2 text-left border-b border-slate-200 w-8">#</th>
+                            <th className="p-2 text-left border-b border-slate-200">Ad Soyad</th>
+                            <th className="p-2 text-left border-b border-slate-200">Görev</th>
+                            <th className="p-2 text-left border-b border-slate-200 hidden sm:table-cell">Departman</th>
+                            <th className="p-2 text-center border-b border-slate-200 w-24">Durum</th>
+                            <th className="p-2 text-center border-b border-slate-200 w-16">Mesai</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {grup.satirlar.map((row, idx) => (
+                            <tr key={row.personelId} className="border-b border-slate-100 hover:bg-slate-50/80">
+                              <td className="p-2 text-slate-400 font-mono">{idx + 1}</td>
+                              <td className="p-2 font-bold text-slate-900">{row.adSoyad}</td>
+                              <td className="p-2 text-slate-600">{row.gorev}</td>
+                              <td className="p-2 text-slate-500 hidden sm:table-cell">{row.departman}</td>
+                              <td className="p-2 text-center">
+                                <span
+                                  className={`inline-block text-[10px] font-black uppercase px-2 py-0.5 rounded-full border ${getStatusColor(row.durum)}`}
+                                >
+                                  {getStatusAbbreviation(row.durum)}
+                                </span>
+                              </td>
+                              <td className="p-2 text-center font-bold font-mono text-slate-700">
+                                {row.mesaiSaati > 0 ? row.mesaiSaati : '—'}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ))}
                 </div>
               </CorporateReportLayout>
             </div>

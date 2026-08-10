@@ -5,11 +5,16 @@ import {
   FileSpreadsheet, Search, Filter, ChevronDown, ChevronRight,
   Building2, Briefcase, CheckSquare, Square, Printer, BarChart3,
   Banknote, Shield, Star, TrendingUp, AlertCircle, CheckCircle2,
-  XCircle, MinusCircle, Hash, Download, RefreshCw, Eye
+  XCircle, MinusCircle, Hash, Download, RefreshCw, Eye, RotateCcw,
 } from 'lucide-react';
 import { Personel, AylikYoklamaMap, AracBakim, KampKaydi, KampOdasi, HazirTutanak, KasaHareketi, SahaFaaliyeti, MaaşOdeme } from '../types/erp';
-import { getYoklamaDay, iterateMonthYoklama, isDayActiveForPersonel, asYoklamaGunMap, parseYoklamaDateKey, normalizeTurkishName } from '../lib/yoklamaUtils';
+import { getYoklamaDay, iterateMonthYoklama, isDayActiveForPersonel, asYoklamaGunMap, parseYoklamaDateKey, isTaseronPersonel } from '../lib/yoklamaUtils';
+import { isPersonelActiveOnDate } from '../lib/guvenlikHelpers';
+import { isPersonelAktifDurum } from '../lib/kampPlacementUtils';
+import { getPersonKartFaaliyetleri } from '../lib/faaliyetPersonelUtils';
+import { useMobilFaaliyetSnapshots } from '../lib/useMobilFaaliyetSnapshots';
 import { PersonelIdCard } from './PersonelIdCard';
+import { PersonelKartListRow } from './PersonelKartListRow';
 import { db } from '../lib/firebase';
 import { collection, getDocs } from 'firebase/firestore';
 
@@ -58,7 +63,25 @@ const AY_ADLARI = ['', 'Ocak','Şubat','Mart','Nisan','Mayıs','Haziran',
 /* ─────────────────────────────────────────
    YARDIMCI FONKSİYONLAR
 ───────────────────────────────────────── */
-const isPersonelAktif = (p: Personel) => p.durum === true || String(p.durum) === 'true';
+const isPersonelAktif = (p: Personel) => isPersonelAktifDurum(p.durum);
+
+/** Personel Yönetimi ile aynı görünürlük kuralları */
+function isVisibleInKartlar(p: Personel, bugun: string, durumFilter: 'AKTIF' | 'PASIF' | 'HEPSI'): boolean {
+  if (
+    p.onayDurumu === 'ONAY BEKLİYOR' &&
+    p.kaynak === 'KAMPCI' &&
+    !isTaseronPersonel(p)
+  ) {
+    return false;
+  }
+  if (durumFilter === 'AKTIF') {
+    return isPersonelAktifDurum(p.durum) && isPersonelActiveOnDate(p, bugun);
+  }
+  if (durumFilter === 'PASIF') {
+    return !isPersonelAktifDurum(p.durum) || !isPersonelActiveOnDate(p, bugun);
+  }
+  return true;
+}
 const getFirmaLabel = (p: Personel): string =>
   p.firmaTipi === 'TASERON' ? (p.firmaAdi?.trim() || 'Taşeron (Diğer)') : 'Kibritçi İnşaat';
 
@@ -107,6 +130,27 @@ export const PersonelKartlariScreen: React.FC<PersonelKartlariScreenProps> = ({
   const [izinBelgeleri, setIzinBelgeleri] = useState<PersonelIzinBelgesi[]>([]);
   const [izinLoading, setIzinLoading]     = useState(false);
 
+  const bugun = new Date().toISOString().split('T')[0];
+  const needsFaaliyetData =
+    selectedTab === 'ozet' || selectedTab === 'saha' || selectedTab === 'mesai';
+
+  const hasActiveFilters =
+    searchQuery.trim() !== '' ||
+    firmaFilter !== 'HEPSI' ||
+    gorevFilter !== 'HEPSI' ||
+    durumFilter !== 'AKTIF';
+
+  const resetFilters = useCallback(() => {
+    setSearchQuery('');
+    setFirmaFilter('HEPSI');
+    setGorevFilter('HEPSI');
+    setDurumFilter('AKTIF');
+  }, []);
+  const { kampFaaliyetleri, tumSahaFaaliyetleri } = useMobilFaaliyetSnapshots(
+    needsFaaliyetData,
+    sahaFaaliyetleri
+  );
+
   /* ── Firebase Yükle ── */
   useEffect(() => {
     let cancelled = false;
@@ -143,18 +187,30 @@ export const PersonelKartlariScreen: React.FC<PersonelKartlariScreenProps> = ({
   /* ── Filtrelenmiş Personel Listesi ── */
   const filteredPersoneller = useMemo(() => {
     const q = searchQuery.trim().toLocaleLowerCase('tr-TR');
-    return personeller.filter((p) => {
-      if (durumFilter === 'AKTIF' && !isPersonelAktif(p)) return false;
-      if (durumFilter === 'PASIF' && isPersonelAktif(p)) return false;
-      if (firmaFilter !== 'HEPSI' && getFirmaLabel(p) !== firmaFilter) return false;
-      if (gorevFilter !== 'HEPSI' && p.gorev !== gorevFilter) return false;
-      if (q) {
-        const fullName = `${p.ad} ${p.soyad}`.toLocaleLowerCase('tr-TR');
-        if (!fullName.includes(q) && !(p.gorev || '').toLocaleLowerCase('tr-TR').includes(q)) return false;
-      }
-      return true;
-    });
-  }, [personeller, durumFilter, firmaFilter, gorevFilter, searchQuery]);
+    return personeller
+      .filter((p) => {
+        if (!isVisibleInKartlar(p, bugun, durumFilter)) return false;
+        if (firmaFilter !== 'HEPSI' && getFirmaLabel(p) !== firmaFilter) return false;
+        if (gorevFilter !== 'HEPSI' && p.gorev !== gorevFilter) return false;
+        if (q) {
+          const fullName = `${p.ad} ${p.soyad}`.toLocaleLowerCase('tr-TR');
+          if (
+            !fullName.includes(q) &&
+            !(p.gorev || '').toLocaleLowerCase('tr-TR').includes(q) &&
+            !(p.tcNo || '').includes(q)
+          ) {
+            return false;
+          }
+        }
+        return true;
+      })
+      .sort((a, b) => `${a.ad} ${a.soyad}`.localeCompare(`${b.ad} ${b.soyad}`, 'tr'));
+  }, [personeller, durumFilter, firmaFilter, gorevFilter, searchQuery, bugun]);
+
+  const aktifKadroCount = useMemo(
+    () => personeller.filter((p) => isVisibleInKartlar(p, bugun, 'AKTIF')).length,
+    [personeller, bugun]
+  );
 
   /* Seçili personel filtre dışında kalırsa ilke geç */
   useEffect(() => {
@@ -242,9 +298,18 @@ export const PersonelKartlariScreen: React.FC<PersonelKartlariScreenProps> = ({
     ? araclar.find((a) => a.sorumluPersonelId === selectedPersonnel.id)
     : null;
 
-  const activeStay = selectedPersonnel
-    ? kampKayitlari.find((k) => k.personelId === selectedPersonnel.id && k.durum === 'AKTIF')
-    : null;
+  const activeStay = useMemo(() => {
+    if (!selectedPersonnel) return null;
+    const fullName = `${selectedPersonnel.ad} ${selectedPersonnel.soyad}`.trim().toLowerCase();
+    return (
+      kampKayitlari.find(
+        (k) =>
+          k.durum === 'AKTIF' &&
+          ((k.personelId && k.personelId === selectedPersonnel.id) ||
+            k.personelIsim?.trim().toLowerCase() === fullName)
+      ) || null
+    );
+  }, [selectedPersonnel, kampKayitlari]);
   const activeRoom = activeStay
     ? kampOdalari.find((r) => r.id === activeStay.odaId || r.id === activeStay.roomId)
     : null;
@@ -273,17 +338,22 @@ export const PersonelKartlariScreen: React.FC<PersonelKartlariScreenProps> = ({
   }, [izinBelgeleri, selectedPersonnel]);
 
   const personelSahaFaaliyetleri = useMemo(() => {
-    if (!selectedPersonnel) return [] as SahaFaaliyeti[];
-    const normalizedSelectedName = normalizeTurkishName(`${selectedPersonnel.ad} ${selectedPersonnel.soyad}`);
-    return sahaFaaliyetleri
-      .filter((f) => {
-        if (f.personelId === selectedPersonnel.id) return true;
-        return (f.aktifPersonelListesi || []).some(
-          (n) => normalizeTurkishName(String(n)) === normalizedSelectedName
-        );
-      })
-      .sort((a, b) => String(b.tarih || '').localeCompare(String(a.tarih || ''), 'tr'));
-  }, [selectedPersonnel, sahaFaaliyetleri]);
+    if (!selectedPersonnel || !needsFaaliyetData) return [] as SahaFaaliyeti[];
+    return getPersonKartFaaliyetleri(
+      selectedPersonnel,
+      tumSahaFaaliyetleri,
+      personeller,
+      kampFaaliyetleri,
+      yoklamalar
+    );
+  }, [
+    selectedPersonnel,
+    needsFaaliyetData,
+    tumSahaFaaliyetleri,
+    personeller,
+    kampFaaliyetleri,
+    yoklamalar,
+  ]);
 
   const personelTutanaklar = useMemo(() => {
     if (!selectedPersonnel) return [] as HazirTutanak[];
@@ -385,11 +455,13 @@ export const PersonelKartlariScreen: React.FC<PersonelKartlariScreenProps> = ({
 
       addSection('SAHA FAALİYETLERİ');
       addHeader('Tarih', 'İş Niteliği', 'Parsel', 'Blok', 'Açıklama');
-      const pSaha = sahaFaaliyetleri.filter((f) => {
-        if (f.personelId === p.id) return true;
-        const n = `${p.ad} ${p.soyad}`.trim().toLowerCase();
-        return (f.aktifPersonelListesi || []).some((x) => String(x).trim().toLowerCase() === n);
-      });
+      const pSaha = getPersonKartFaaliyetleri(
+        p,
+        tumSahaFaaliyetleri,
+        personeller,
+        kampFaaliyetleri,
+        yoklamalar
+      );
       pSaha.forEach((f) =>
         ws.addRow([f.tarih, f.isNiteligi || '', f.parsel || '', f.blok || '', f.aciklama || ''])
       );
@@ -445,6 +517,8 @@ export const PersonelKartlariScreen: React.FC<PersonelKartlariScreenProps> = ({
     URL.revokeObjectURL(url);
   };
 
+  const handleSelectPerson = useCallback((id: string) => setSelectedPersId(id), []);
+
   /* ── RENDER ── */
   if (personeller.length === 0) {
     return (
@@ -459,46 +533,50 @@ export const PersonelKartlariScreen: React.FC<PersonelKartlariScreenProps> = ({
   }
 
   return (
-    <div className="flex-grow flex h-[calc(100vh-52px)] overflow-hidden font-sans select-none bg-slate-100">
+    <div className="flex-grow flex h-[calc(100vh-52px)] overflow-hidden font-sans select-none bg-gradient-to-b from-[#FFFBF7] via-white to-orange-50/30">
 
       {/* ═══════════════════════════════════════
           SOL PANEL — Personel Listesi
       ═══════════════════════════════════════ */}
-      <div className="w-72 shrink-0 bg-white border-r border-slate-200 flex flex-col shadow-sm">
+      <div className="w-72 shrink-0 bg-white/90 border-r border-orange-100 flex flex-col shadow-sm backdrop-blur-sm">
 
         {/* Başlık */}
-        <div className="p-3 border-b border-slate-100 bg-gradient-to-r from-slate-900 to-slate-800">
+        <div className="p-3 border-b border-orange-100 bg-gradient-to-r from-orange-500 to-amber-500">
           <div className="flex items-center gap-2">
-            <div className="p-1.5 bg-white/10 rounded-lg">
+            <div className="p-1.5 bg-white/20 rounded-lg">
               <Users size={16} className="text-white" />
             </div>
             <div>
-              <p className="text-[9px] font-black tracking-widest text-slate-400 uppercase">Personel Kartları</p>
+              <p className="text-[9px] font-black tracking-widest text-orange-100 uppercase">Personel Kartları</p>
               <p className="text-xs font-bold text-white">Şantiye Kadrosu</p>
             </div>
           </div>
+          <p className="mt-2 text-[9px] text-orange-50/90 flex items-center gap-1">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-300 animate-pulse" />
+            Personel Yönetimi ile canlı senkron · {personeller.length} kayıt
+          </p>
         </div>
 
         {/* Arama */}
-        <div className="p-2 border-b border-slate-100">
+        <div className="p-2 border-b border-orange-50">
           <div className="relative">
             <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
             <input
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="İsim veya görev ara..."
-              className="w-full pl-7 pr-3 py-1.5 text-[11px] bg-slate-50 border border-slate-200 rounded-lg outline-none focus:border-indigo-400 focus:ring-1 focus:ring-indigo-100 placeholder:text-slate-400"
+              placeholder="İsim, görev veya TC ara..."
+              className="w-full pl-7 pr-3 py-1.5 text-[11px] bg-orange-50/50 border border-orange-100 rounded-lg outline-none focus:border-orange-400 focus:ring-1 focus:ring-orange-100 placeholder:text-slate-400"
             />
           </div>
         </div>
 
         {/* Filtreler */}
-        <div className="px-2 py-1.5 border-b border-slate-100 space-y-1.5">
+        <div className="px-2 py-1.5 border-b border-orange-50 space-y-1.5">
           <select
             value={firmaFilter}
             onChange={(e) => setFirmaFilter(e.target.value)}
-            className="w-full text-[10px] font-semibold bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 outline-none"
+            className="w-full text-[10px] font-semibold bg-orange-50/40 border border-orange-100 rounded-lg px-2 py-1.5 outline-none"
           >
             <option value="HEPSI">🏢 Tüm Firmalar</option>
             {firmaOptions.map((f) => <option key={f} value={f}>{f}</option>)}
@@ -506,7 +584,7 @@ export const PersonelKartlariScreen: React.FC<PersonelKartlariScreenProps> = ({
           <select
             value={gorevFilter}
             onChange={(e) => setGorevFilter(e.target.value)}
-            className="w-full text-[10px] font-semibold bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 outline-none"
+            className="w-full text-[10px] font-semibold bg-orange-50/40 border border-orange-100 rounded-lg px-2 py-1.5 outline-none"
           >
             <option value="HEPSI">👷 Tüm Görevler</option>
             {gorevOptions.map((g) => <option key={g} value={g}>{g}</option>)}
@@ -519,34 +597,48 @@ export const PersonelKartlariScreen: React.FC<PersonelKartlariScreenProps> = ({
                 onClick={() => setDurumFilter(d)}
                 className={`flex-1 text-[9px] font-black py-1 rounded-lg transition ${
                   durumFilter === d
-                    ? d === 'AKTIF' ? 'bg-emerald-600 text-white' : d === 'PASIF' ? 'bg-rose-500 text-white' : 'bg-slate-700 text-white'
-                    : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                    ? d === 'AKTIF' ? 'bg-emerald-600 text-white' : d === 'PASIF' ? 'bg-rose-500 text-white' : 'bg-orange-600 text-white'
+                    : 'bg-orange-50 text-slate-500 hover:bg-orange-100'
                 }`}
               >
                 {d === 'AKTIF' ? 'Aktif' : d === 'PASIF' ? 'Pasif' : 'Tümü'}
               </button>
             ))}
           </div>
+          {hasActiveFilters && (
+            <button
+              type="button"
+              onClick={resetFilters}
+              className="w-full flex items-center justify-center gap-1 text-[9px] font-bold text-orange-700 bg-orange-50 border border-orange-200 rounded-lg py-1 hover:bg-orange-100 cursor-pointer"
+            >
+              <RotateCcw size={10} /> Filtreleri sıfırla
+            </button>
+          )}
         </div>
 
         {/* Toplu Seçim Header */}
-        <div className="px-2 py-1 border-b border-slate-100 flex items-center justify-between">
-          <div className="flex items-center gap-1.5">
-            <button type="button" onClick={toggleSelectAll} className="text-slate-500 hover:text-indigo-600 cursor-pointer">
+        <div className="px-2 py-1.5 border-b border-orange-50 flex items-center justify-between gap-1">
+          <div className="flex items-center gap-1.5 min-w-0">
+            <button type="button" onClick={toggleSelectAll} className="text-slate-500 hover:text-orange-600 cursor-pointer shrink-0">
               {selectedIds.size > 0 && selectedIds.size === filteredPersoneller.length
-                ? <CheckSquare size={13} className="text-indigo-600" />
+                ? <CheckSquare size={13} className="text-orange-600" />
                 : <Square size={13} />}
             </button>
-            <span className="text-[9px] text-slate-500 font-semibold">
-              {filteredPersoneller.length} personel
-              {selectedIds.size > 0 && ` · ${selectedIds.size} seçili`}
-            </span>
+            <div className="min-w-0">
+              <span className="text-[9px] text-slate-700 font-bold block">
+                {filteredPersoneller.length} / {personeller.length} listede
+              </span>
+              <span className="text-[8px] text-slate-400 block truncate">
+                Aktif kadro: {aktifKadroCount}
+                {selectedIds.size > 0 && ` · ${selectedIds.size} seçili`}
+              </span>
+            </div>
           </div>
           {selectedIds.size > 0 && (
             <button
               type="button"
               onClick={() => handleExport(Array.from(selectedIds))}
-              className="text-[8px] font-black bg-emerald-600 text-white px-1.5 py-0.5 rounded flex items-center gap-0.5 hover:bg-emerald-700 cursor-pointer"
+              className="text-[8px] font-black bg-emerald-600 text-white px-1.5 py-0.5 rounded flex items-center gap-0.5 hover:bg-emerald-700 cursor-pointer shrink-0"
             >
               <Download size={9} /> Excel
             </button>
@@ -556,57 +648,32 @@ export const PersonelKartlariScreen: React.FC<PersonelKartlariScreenProps> = ({
         {/* Personel Listesi */}
         <div className="flex-1 overflow-y-auto">
           {filteredPersoneller.length === 0 ? (
-            <div className="p-4 text-center text-[10px] text-slate-400 italic">
-              Filtre sonucu boş. Filtreleri değiştirin.
+            <div className="p-4 text-center text-[10px] text-slate-400 italic space-y-2">
+              <p>Filtre sonucu boş.</p>
+              {hasActiveFilters && (
+                <button type="button" onClick={resetFilters} className="text-orange-600 font-bold hover:underline cursor-pointer">
+                  Filtreleri sıfırla
+                </button>
+              )}
             </div>
           ) : (
-            filteredPersoneller.map((p) => {
-              const isSelected = p.id === selectedPersId;
-              const isChecked  = selectedIds.has(p.id);
-              const aktif      = isPersonelAktif(p);
-              return (
-                <div
-                  key={p.id}
-                  onClick={() => setSelectedPersId(p.id)}
-                  className={`flex items-center gap-2 px-2 py-2 cursor-pointer border-b border-slate-50 transition-all ${
-                    isSelected
-                      ? 'bg-indigo-50 border-l-2 border-l-indigo-500'
-                      : 'hover:bg-slate-50 border-l-2 border-l-transparent'
-                  }`}
-                >
-                  <button
-                    type="button"
-                    onClick={(e) => { e.stopPropagation(); toggleSelect(p.id); }}
-                    className="shrink-0 text-slate-400 hover:text-indigo-600 cursor-pointer"
-                  >
-                    {isChecked
-                      ? <CheckSquare size={12} className="text-indigo-600" />
-                      : <Square size={12} />}
-                  </button>
-
-                  {/* Avatar */}
-                  <div className={`shrink-0 w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-black text-white ${
-                    aktif ? 'bg-gradient-to-br from-indigo-500 to-indigo-700' : 'bg-slate-400'
-                  }`}>
-                    {p.ad[0]}{p.soyad[0]}
-                  </div>
-
-                  <div className="flex-1 min-w-0">
-                    <p className={`text-[11px] font-bold truncate ${isSelected ? 'text-indigo-900' : 'text-slate-800'}`}>
-                      {p.ad} {p.soyad}
-                    </p>
-                    <p className="text-[9px] text-slate-500 truncate">{p.gorev || '—'}</p>
-                  </div>
-
-                  <div className={`shrink-0 w-1.5 h-1.5 rounded-full ${aktif ? 'bg-emerald-500' : 'bg-slate-300'}`} />
-                </div>
-              );
-            })
+            filteredPersoneller.map((p) => (
+              <PersonelKartListRow
+                key={p.id}
+                person={p}
+                isSelected={p.id === selectedPersId}
+                isChecked={selectedIds.has(p.id)}
+                firmaLabel={getFirmaLabel(p)}
+                aktif={isPersonelAktif(p)}
+                onSelect={handleSelectPerson}
+                onToggleCheck={toggleSelect}
+              />
+            ))
           )}
         </div>
 
         {/* Alt bar - Ay/Yıl Seçici */}
-        <div className="p-2 border-t border-slate-200 bg-slate-50 flex gap-1">
+        <div className="p-2 border-t border-orange-100 bg-orange-50/40 flex gap-1">
           <select
             value={selectedMonth}
             onChange={(e) => setSelectedMonth(Number(e.target.value))}
@@ -635,9 +702,9 @@ export const PersonelKartlariScreen: React.FC<PersonelKartlariScreenProps> = ({
         <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
 
           {/* ── Personel Header Bar ── */}
-          <div className="bg-white border-b border-slate-200 px-5 py-3 flex items-center justify-between shrink-0">
+          <div className="bg-white/90 border-b border-orange-100 px-5 py-3 flex items-center justify-between shrink-0 backdrop-blur-sm">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-indigo-700 flex items-center justify-center text-sm font-black text-white shadow-sm">
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-orange-400 to-amber-600 flex items-center justify-center text-sm font-black text-white shadow-sm">
                 {selectedPersonnel.ad[0]}{selectedPersonnel.soyad[0]}
               </div>
               <div>
@@ -674,7 +741,7 @@ export const PersonelKartlariScreen: React.FC<PersonelKartlariScreenProps> = ({
           </div>
 
           {/* ── Sekmeler ── */}
-          <div className="bg-white border-b border-slate-200 px-4 flex gap-0.5 shrink-0 overflow-x-auto">
+          <div className="bg-white/90 border-b border-orange-100 px-4 flex gap-0.5 shrink-0 overflow-x-auto backdrop-blur-sm">
             {TABS.map((t) => (
               <button
                 key={t.key}
@@ -682,7 +749,7 @@ export const PersonelKartlariScreen: React.FC<PersonelKartlariScreenProps> = ({
                 onClick={() => setSelectedTab(t.key)}
                 className={`flex items-center gap-1.5 px-3 py-2.5 text-[10px] font-bold whitespace-nowrap border-b-2 transition cursor-pointer ${
                   selectedTab === t.key
-                    ? 'border-indigo-600 text-indigo-700'
+                    ? 'border-orange-500 text-orange-700'
                     : 'border-transparent text-slate-500 hover:text-slate-800'
                 }`}
               >
@@ -693,7 +760,7 @@ export const PersonelKartlariScreen: React.FC<PersonelKartlariScreenProps> = ({
           </div>
 
           {/* ── Tab İçerikleri ── */}
-          <div className="flex-1 overflow-y-auto bg-slate-50">
+          <div className="flex-1 overflow-y-auto bg-gradient-to-b from-orange-50/20 to-white">
 
             {/* ══════ TAB: ÖZET ══════ */}
             {selectedTab === 'ozet' && (
@@ -701,7 +768,7 @@ export const PersonelKartlariScreen: React.FC<PersonelKartlariScreenProps> = ({
                 {/* Kimlik */}
                 <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm space-y-3">
                   <h3 className="text-[9px] font-black tracking-widest text-slate-400 uppercase flex items-center gap-1.5">
-                    <User size={11} className="text-indigo-500" /> Kimlik Bilgileri
+                    <User size={11} className="text-orange-500" /> Kimlik Bilgileri
                   </h3>
                   {[
                     ['TC Kimlik', selectedPersonnel.tcNo || '-'],
@@ -797,7 +864,7 @@ export const PersonelKartlariScreen: React.FC<PersonelKartlariScreenProps> = ({
                 {/* Özet sayaçlar */}
                 <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm">
                   <h3 className="text-[9px] font-black tracking-widest text-slate-400 uppercase flex items-center gap-1.5 mb-3">
-                    <BarChart3 size={11} className="text-indigo-500" /> Bu Ayki Özet
+                    <BarChart3 size={11} className="text-orange-500" /> Bu Ayki Özet
                   </h3>
                   <div className="grid grid-cols-2 gap-2">
                     {[
@@ -813,6 +880,37 @@ export const PersonelKartlariScreen: React.FC<PersonelKartlariScreenProps> = ({
                     ))}
                   </div>
                 </div>
+
+                {/* Son saha faaliyetleri — yalnızca özet sekmesinde */}
+                {personelSahaFaaliyetleri.length > 0 && (
+                  <div className="lg:col-span-2 bg-white rounded-2xl border border-orange-100 p-4 shadow-sm space-y-3">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-[9px] font-black tracking-widest text-slate-400 uppercase flex items-center gap-1.5">
+                        <Activity size={11} className="text-amber-600" /> Son Saha Faaliyetleri
+                      </h3>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedTab('saha')}
+                        className="text-[9px] font-bold text-orange-600 hover:underline cursor-pointer"
+                      >
+                        Tümünü gör ({personelSahaFaaliyetleri.length})
+                      </button>
+                    </div>
+                    <div className="space-y-2">
+                      {personelSahaFaaliyetleri.slice(0, 5).map((f) => (
+                        <div key={f.id} className="border border-orange-50 rounded-xl p-2.5 bg-orange-50/30 text-xs">
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0">
+                              <p className="font-bold text-slate-900 truncate">{f.isNiteligi || 'Saha Faaliyeti'}</p>
+                              <p className="text-[10px] text-slate-500 mt-0.5 truncate">{f.aciklama || f.parsel || '—'}</p>
+                            </div>
+                            <span className="text-[9px] font-mono text-slate-400 shrink-0">{f.tarih}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
@@ -1275,38 +1373,6 @@ export const PersonelKartlariScreen: React.FC<PersonelKartlariScreenProps> = ({
                 </div>
               </div>
             )}
-
-            <div className="bg-white border border-[#e2e8f0] rounded-2xl p-5 shadow-sm space-y-4">
-              <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-1.5">
-                <Activity size={14} className="text-emerald-600" />
-                Saha Faaliyetleri ({personelSahaFaaliyetleri.length})
-              </h4>
-              <div className="space-y-2.5">
-                {personelSahaFaaliyetleri.length === 0 ? (
-                  <div className="h-16 border border-dashed border-slate-100 rounded-xl flex items-center justify-center text-[10px] text-slate-400 font-medium italic">
-                    Bu personel için saha faaliyet kaydı yok.
-                  </div>
-                ) : (
-                  personelSahaFaaliyetleri.slice(0, 8).map((f) => (
-                    <div key={f.id} className="border border-slate-150 rounded-xl p-3 bg-slate-50/70 text-xs">
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <p className="text-slate-900 font-semibold truncate">{f.isNiteligi || 'Saha Faaliyeti'}</p>
-                          <p className="text-[10px] text-slate-500 mt-1">{f.tarih || '-'}</p>
-                          <p className="text-slate-600 text-[11px] mt-2 truncate">{f.aciklama || f.parsel || f.blok || 'Detay yok'}</p>
-                        </div>
-                        {f.personelMesaiSaatleri?.[selectedPersonnel.id] ? (
-                          <span className="text-[10px] font-black text-amber-600">{f.personelMesaiSaatleri[selectedPersonnel.id]}h</span>
-                        ) : null}
-                      </div>
-                      {f.kaynakEkran && (
-                        <p className="text-[9px] text-slate-400 mt-2">Kaynak: {f.kaynakEkran}</p>
-                      )}
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
 
           </div>
           {/* /Tab İçerikleri */}

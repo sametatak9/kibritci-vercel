@@ -1,4 +1,41 @@
 import { CariKart, CariKartIslem, KampKaydi, KampOdasi, OperatorFaaliyet, Personel, TaseronEnerjiKaydi, TaseronKesintiRaporu, TaseronSayacOlcum, TaseronYemekKaydi } from '../types/erp';
+import { AKVIZYON_GOREV, isAkvizyonFirmaAdi } from './guvenlikHelpers';
+import { isTaseronPersonel } from './yoklamaUtils';
+
+/** Taşeron saha personeli standart görev adı */
+export const TASERON_PERSONEL_GOREV = 'TAŞERON PERSONEL';
+
+/** Taşeron personel departmanı — tek etiket: ŞANTİYE (firmaTipi ayrı kalır) */
+export const TASERON_PERSONEL_DEPARTMAN = 'ŞANTİYE';
+
+export function resolveTaseronPersonelGorev(opts: {
+  firmaAdi?: string | null;
+  firmaTipi?: Personel['firmaTipi'] | string;
+}): string {
+  if (isAkvizyonFirmaAdi(opts.firmaAdi)) return AKVIZYON_GOREV;
+  return TASERON_PERSONEL_GOREV;
+}
+
+export function isTaseronPersonelRecord(p: Pick<Personel, 'firmaTipi' | 'firmaAdi'>): boolean {
+  return p.firmaTipi === 'TASERON' || isTaseronPersonel(p as Personel);
+}
+
+/** Taşeron kayıtlarında görev otomatik TAŞERON PERSONEL (Akvizyon → GÜVENLİK). */
+export function withTaseronPersonelGorev<T extends Personel>(p: T): T {
+  if (!isTaseronPersonelRecord(p)) return p;
+  const gorev = resolveTaseronPersonelGorev({ firmaAdi: p.firmaAdi, firmaTipi: p.firmaTipi });
+  const departman =
+    p.departman === 'TAŞERON' || !p.departman ? TASERON_PERSONEL_DEPARTMAN : p.departman;
+  if (p.gorev === gorev && p.firmaTipi === 'TASERON' && departman === p.departman) {
+    return p;
+  }
+  return {
+    ...p,
+    firmaTipi: 'TASERON',
+    gorev,
+    departman,
+  };
+}
 
 export function getTaseronCariKartlar(cariKartlar: CariKart[]): CariKart[] {
   return cariKartlar.filter(

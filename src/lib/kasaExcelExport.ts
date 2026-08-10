@@ -1,10 +1,15 @@
 import type { Worksheet, Workbook } from 'exceljs';
 import type { KasaHareketi, KasaOdemeDurumu, Personel } from '../types/erp';
 import { createExcelWorkbook } from './exceljsLoader';
-import { KIBRITCI_COMPANY, loadKibritciLogoDataUrl } from './kibritciBrand';
+import { KIBRITCI_COMPANY, loadKibritciReportAssets } from './kibritciBrand';
 import { resolvePersonelUnvan } from './personelUnvanUtils';
 import { resolveKasaOdemeDurumu, isSoforKaynakliKasaHareketi } from './yolHarcamaUtils';
 import { ensureKasaFisFotoPersisted } from './sahaFaaliyetFotoStorage';
+import {
+  buildFisKayitEtiketi,
+  KASA_EXCEL_ARGB,
+  KASA_REPORT_FORMAT,
+} from './kasaReportTheme';
 
 function odemeLabel(d: KasaOdemeDurumu | null): string {
   if (d === 'BORC') return 'BORÇ';
@@ -15,10 +20,10 @@ function odemeLabel(d: KasaOdemeDurumu | null): string {
 
 function thinBorder() {
   return {
-    top: { style: 'thin' as const, color: { argb: 'FFCBD5E1' } },
-    left: { style: 'thin' as const, color: { argb: 'FFCBD5E1' } },
-    bottom: { style: 'thin' as const, color: { argb: 'FFCBD5E1' } },
-    right: { style: 'thin' as const, color: { argb: 'FFCBD5E1' } },
+    top: { style: 'thin' as const, color: { argb: KASA_EXCEL_ARGB.border } },
+    left: { style: 'thin' as const, color: { argb: KASA_EXCEL_ARGB.border } },
+    bottom: { style: 'thin' as const, color: { argb: KASA_EXCEL_ARGB.border } },
+    right: { style: 'thin' as const, color: { argb: KASA_EXCEL_ARGB.border } },
   };
 }
 
@@ -110,7 +115,7 @@ function setOriginalPhotoHyperlink(
     // Dahili sayfa linki — gömülü büyük görsele atlar
     cell.value = {
       text: 'Büyüğe git →',
-      hyperlink: `#'Fis Fotograflari'!E${opts.fotoSheetRow}`,
+      hyperlink: `#'Fis Fotograflari'!G${opts.fotoSheetRow}`,
       tooltip: 'Fiş Fotoğrafları sayfasındaki büyük görsele gider',
     };
     cell.font = linkFont;
@@ -123,13 +128,38 @@ function setOriginalPhotoHyperlink(
   cell.alignment = { vertical: 'middle', horizontal: 'center' };
 }
 
-const IMAGE_LOAD_TIMEOUT_MS = 8000;
+const IMAGE_LOAD_TIMEOUT_MS = 12000;
 
-/** Excel'e gömmek için görseli JPEG base64'e çevirir (zaman aşımı ile — takılmayı önler) */
+/** Excel tablo başlığı — açık turuncu */
+function applyExcelTableHead(cell: {
+  value: unknown;
+  font?: unknown;
+  fill?: unknown;
+  alignment?: unknown;
+  border?: unknown;
+}): void {
+  cell.font = { bold: true, color: { argb: KASA_EXCEL_ARGB.tableHeadText }, size: 9 };
+  cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: KASA_EXCEL_ARGB.tableHeadBg } };
+  cell.alignment = { horizontal: 'center', vertical: 'middle' };
+  cell.border = thinBorder();
+}
+
+/** Excel grup başlığı — açık turuncu */
+function applyExcelGroupHead(
+  cell: { value: unknown; font?: unknown; fill?: unknown; alignment?: unknown },
+  row: { height?: number }
+): void {
+  cell.font = { bold: true, color: { argb: KASA_EXCEL_ARGB.groupHeadText }, size: 10 };
+  cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: KASA_EXCEL_ARGB.groupHeadBg } };
+  cell.alignment = { vertical: 'middle', horizontal: 'left' };
+  row.height = 22;
+}
+
+/** Excel'e gömmek için görseli JPEG base64'e çevirir (yüksek çözünürlük, net okuma) */
 async function loadImageAsJpegBase64(
   url: string,
-  maxW = 640,
-  quality = 0.78
+  maxW = 1280,
+  quality = 0.88
 ): Promise<string | null> {
   const raw = String(url || '').trim();
   if (!raw) return null;
@@ -190,54 +220,64 @@ async function applyKasaAntet(
   opts: { title: string; subtitle: string; colCount: number }
 ): Promise<number> {
   const colCount = opts.colCount;
-  ws.getRow(1).height = 52;
+  ws.getRow(1).height = 58;
   ws.getRow(2).height = 16;
   ws.getRow(3).height = 14;
-  ws.mergeCells(1, 1, 3, Math.min(2, colCount));
+  ws.mergeCells(1, 1, 3, Math.min(3, colCount));
 
-  const logoDataUrl = await loadKibritciLogoDataUrl();
-  const logoBase64 = logoDataUrl?.replace(/^data:image\/png;base64,/i, '') || null;
-  if (logoBase64) {
-    const logoId = wb.addImage({ base64: logoBase64, extension: 'png' });
-    ws.addImage(logoId, { tl: { col: 0.05, row: 0.08 }, ext: { width: 150, height: 58 } });
+  const assets = await loadKibritciReportAssets();
+  const headerBase64 =
+    assets.headerDataUrl?.replace(/^data:image\/png;base64,/i, '') || null;
+  if (headerBase64) {
+    const headerId = wb.addImage({ base64: headerBase64, extension: 'png' });
+    ws.addImage(headerId, { tl: { col: 0.05, row: 0.05 }, ext: { width: 280, height: 62 } });
   } else {
     ws.getCell(1, 1).value = KIBRITCI_COMPANY.shortName;
-    ws.getCell(1, 1).font = { bold: true, size: 13, color: { argb: 'FF1E4E78' } };
+    ws.getCell(1, 1).font = { bold: true, size: 13, color: { argb: KASA_EXCEL_ARGB.accentText } };
   }
 
-  const metaStart = Math.min(3, colCount);
+  const metaStart = Math.min(4, colCount);
   ws.mergeCells(1, metaStart, 1, colCount);
   const titleCell = ws.getCell(1, metaStart);
   titleCell.value = opts.title;
-  titleCell.font = { bold: true, size: 14, color: { argb: 'FF0F172A' } };
+  titleCell.font = { bold: true, size: 14, color: { argb: KASA_EXCEL_ARGB.accentText } };
   titleCell.alignment = { horizontal: 'right', vertical: 'middle' };
 
   ws.mergeCells(2, metaStart, 2, colCount);
   const sub = ws.getCell(2, metaStart);
   sub.value = opts.subtitle;
-  sub.font = { size: 9, color: { argb: 'FF475569' } };
+  sub.font = { size: 9, color: { argb: KASA_EXCEL_ARGB.muted } };
   sub.alignment = { horizontal: 'right', vertical: 'middle' };
 
   ws.mergeCells(3, metaStart, 3, colCount);
   const company = ws.getCell(3, metaStart);
   company.value = `${KIBRITCI_COMPANY.legalName} · ${KIBRITCI_COMPANY.phone}`;
-  company.font = { size: 8, color: { argb: 'FF64748B' } };
+  company.font = { size: 8, color: { argb: KASA_EXCEL_ARGB.muted } };
   company.alignment = { horizontal: 'right', vertical: 'middle' };
 
   ws.mergeCells(4, 1, 4, colCount);
   ws.getCell(4, 1).fill = {
     type: 'pattern',
     pattern: 'solid',
-    fgColor: { argb: 'FF1E4E78' },
+    fgColor: { argb: KASA_EXCEL_ARGB.accentBar },
   };
   ws.getRow(4).height = 4;
 
   ws.mergeCells(5, 1, 5, colCount);
   ws.getCell(5, 1).value = KIBRITCI_COMPANY.address;
-  ws.getCell(5, 1).font = { size: 8, italic: true, color: { argb: 'FF64748B' } };
+  ws.getCell(5, 1).font = { size: 8, italic: true, color: { argb: KASA_EXCEL_ARGB.muted } };
   ws.getRow(5).height = 16;
 
-  return 7;
+  // Format rozeti — Excel / HTML karışmasın
+  ws.mergeCells(6, 1, 6, colCount);
+  const badge = ws.getCell(6, 1);
+  badge.value = KASA_REPORT_FORMAT.excel.badge;
+  badge.font = { bold: true, size: 9, color: { argb: KASA_EXCEL_ARGB.badgeText } };
+  badge.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: KASA_EXCEL_ARGB.badgeBg } };
+  badge.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+  ws.getRow(6).height = 22;
+
+  return 8;
 }
 
 type KisiBucket = {
@@ -370,7 +410,7 @@ export async function exportKasaExcel(
   }
   ozet.mergeCells(row, 1, row, 7);
   ozet.getCell(row, 1).value = 'KAYNAK ÖZETİ — Şoför / Kasa ayrı + toplam';
-  ozet.getCell(row, 1).font = { bold: true, size: 10, color: { argb: 'FF1E4E78' } };
+  ozet.getCell(row, 1).font = { bold: true, size: 10, color: { argb: KASA_EXCEL_ARGB.accentText } };
   row += 1;
   const kaynakRows: Array<[string, number, number]> = [
     ['ŞOFÖR HARCAMALARI', soforN, soforSum],
@@ -393,10 +433,7 @@ export async function exportKasaExcel(
   ozetHeaders.forEach((h, i) => {
     const cell = oh.getCell(i + 1);
     cell.value = h;
-    cell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 9 };
-    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0F766E' } };
-    cell.alignment = { horizontal: 'center', vertical: 'middle' };
-    cell.border = thinBorder();
+    applyExcelTableHead(cell);
   });
   oh.height = 20;
   row += 1;
@@ -458,15 +495,16 @@ export async function exportKasaExcel(
     { width: 24 },
     { width: 16 },
     { width: 12 },
-    { width: 42 },
+    { width: 32 },
     { width: 14 },
+    { width: 38 },
     { width: 18 },
     { width: 16 },
   ];
   row = await applyKasaAntet(workbook, kalem, {
     title: 'HAFTALIK KASA — KALEM KALEM HARCAMA DÖKÜMÜ',
-    subtitle: `Dönem: ${startDate} — ${endDate} · Kim yaptıysa ayrı satır · «Orijinali aç» ile tam boyut fotoğraf`,
-    colCount: 8,
+    subtitle: `Dönem: ${startDate} — ${endDate} · Fiş görselleri yüksek çözünürlük · «Fiş Fotograflari» sayfasında büyük boy`,
+    colCount: 9,
   });
 
   const kalemHeaders = [
@@ -476,17 +514,15 @@ export async function exportKasaExcel(
     'FİŞ NO',
     'AÇIKLAMA',
     'TUTAR',
-    'FİŞ GÖRSELİ',
-    'ORİJİNAL FOTO',
+    'FİŞ KAYDI (HANGİ HAREKET)',
+    'FİŞ ÖNİZLEME',
+    'BÜYÜK FOTO',
   ];
   const khRow = kalem.getRow(row);
   kalemHeaders.forEach((h, i) => {
     const cell = khRow.getCell(i + 1);
     cell.value = h;
-    cell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 9 };
-    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF8B1E1E' } };
-    cell.alignment = { horizontal: 'center', vertical: 'middle' };
-    cell.border = thinBorder();
+    applyExcelTableHead(cell);
   });
   row += 1;
 
@@ -496,24 +532,25 @@ export async function exportKasaExcel(
     rawUrl: string;
   }> = [];
 
+  let kalemSira = 0;
+
   for (const b of buckets) {
     // Grup başlığı
-    kalem.mergeCells(row, 1, row, 8);
+    kalem.mergeCells(row, 1, row, 9);
     const groupCell = kalem.getCell(row, 1);
     groupCell.value = `${b.label}  ·  ${b.kalemler.length} kalem  ·  −${b.toplam.toLocaleString('tr-TR', {
       minimumFractionDigits: 2,
     })} ₺`;
-    groupCell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 10 };
-    groupCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E4E78' } };
-    groupCell.alignment = { vertical: 'middle', horizontal: 'left' };
-    kalem.getRow(row).height = 22;
+    applyExcelGroupHead(groupCell, kalem.getRow(row));
     row += 1;
 
     const sorted = [...b.kalemler].sort((a, c) => String(a.tarih).localeCompare(String(c.tarih)));
     for (const kh of sorted) {
+      kalemSira += 1;
       const odeme = resolveKasaOdemeDurumu(kh);
+      const kayitEtiketi = buildFisKayitEtiketi(kh, b.label, kalemSira);
       const r = kalem.getRow(row);
-      r.height = kh.fisEvrakUrl ? 72 : 18;
+      r.height = kh.fisEvrakUrl ? 96 : 18;
       const vals: (string | number)[] = [
         kh.tarih,
         b.label,
@@ -521,6 +558,7 @@ export async function exportKasaExcel(
         kh.fisNo || '—',
         kh.aciklama || '—',
         Number(kh.tutar) || 0,
+        kayitEtiketi,
         '',
         '',
       ];
@@ -534,32 +572,35 @@ export async function exportKasaExcel(
           cell.alignment = { horizontal: 'right', vertical: 'middle' };
           cell.font = { bold: true, color: { argb: 'FFB91C1C' } };
         }
+        if (i === 6) {
+          cell.font = { bold: true, size: 9, color: { argb: KASA_EXCEL_ARGB.accentText } };
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: KASA_EXCEL_ARGB.labelBg } };
+        }
       });
 
       const fotoUrl = String(kh.fisEvrakUrl || '').trim();
       if (fotoUrl) {
-        const b64 = await loadImageAsJpegBase64(fotoUrl, 280);
+        const b64 = await loadImageAsJpegBase64(fotoUrl, 640, 0.9);
         if (b64) {
           const imageId = workbook.addImage({ base64: b64, extension: 'jpeg' });
           kalem.addImage(imageId, {
-            tl: { col: 6, row: row - 1 },
-            ext: { width: 110, height: 64 },
+            tl: { col: 7, row: row - 1 },
+            ext: { width: 150, height: 88 },
             editAs: 'oneCell',
           });
-          r.getCell(7).value = '';
+          r.getCell(8).value = '';
         } else {
-          r.getCell(7).value = 'Önizleme yok';
-          r.getCell(7).font = { italic: true, size: 8, color: { argb: 'FF94A3B8' } };
+          r.getCell(8).value = 'Önizleme yok';
+          r.getCell(8).font = { italic: true, size: 8, color: { argb: 'FF94A3B8' } };
         }
-        // Link satır no’su foto sayfası yazılınca doldurulacak
-        r.getCell(8).value = '…';
-        r.getCell(8).border = thinBorder();
-        pendingOriginalLinks.push({ hareketId: kh.id, cell: r.getCell(8), rawUrl: fotoUrl });
+        r.getCell(9).value = '→ Büyük foto';
+        r.getCell(9).border = thinBorder();
+        pendingOriginalLinks.push({ hareketId: kh.id, cell: r.getCell(9), rawUrl: fotoUrl });
       } else {
-        r.getCell(7).value = 'Yok';
-        r.getCell(7).font = { italic: true, size: 8, color: { argb: 'FF94A3B8' } };
-        r.getCell(8).value = '—';
-        r.getCell(8).border = thinBorder();
+        r.getCell(8).value = 'Yok';
+        r.getCell(8).font = { italic: true, size: 8, color: { argb: 'FF94A3B8' } };
+        r.getCell(9).value = '—';
+        r.getCell(9).border = thinBorder();
       }
       row += 1;
     }
@@ -568,14 +609,9 @@ export async function exportKasaExcel(
 
   // Girişler (varsa)
   if (girisler.length > 0) {
-    kalem.mergeCells(row, 1, row, 8);
+    kalem.mergeCells(row, 1, row, 9);
     kalem.getCell(row, 1).value = 'GİRİŞLER';
-    kalem.getCell(row, 1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
-    kalem.getCell(row, 1).fill = {
-      type: 'pattern',
-      pattern: 'solid',
-      fgColor: { argb: 'FF047857' },
-    };
+    applyExcelGroupHead(kalem.getCell(row, 1), kalem.getRow(row));
     row += 1;
     for (const kh of girisler.sort((a, c) => String(a.tarih).localeCompare(String(c.tarih)))) {
       const r = kalem.getRow(row);
@@ -610,28 +646,27 @@ export async function exportKasaExcel(
     pageSetup: { paperSize: 9, orientation: 'portrait', fitToPage: true, fitToWidth: 1 },
   });
   fotoSheet.columns = [
+    { width: 6 },
     { width: 14 },
     { width: 26 },
     { width: 14 },
-    { width: 36 },
-    { width: 42 },
-    { width: 20 },
+    { width: 14 },
+    { width: 40 },
+    { width: 48 },
+    { width: 18 },
   ];
   row = await applyKasaAntet(workbook, fotoSheet, {
-    title: 'HAFTALIK KASA — FİŞ / FATURA GÖRSELLERİ',
-    subtitle: `Dönem: ${startDate} — ${endDate} · ${withFoto.length} görsel · «Orijinali aç» tarayıcıda tam boyut`,
-    colCount: 6,
+    title: 'HAFTALIK KASA — FİŞ / FATURA GÖRSELLERİ (BÜYÜK BOY)',
+    subtitle: `Dönem: ${startDate} — ${endDate} · ${withFoto.length} görsel · Her fişin üstünde kayıt etiketi`,
+    colCount: 8,
   });
 
   const fh = fotoSheet.getRow(row);
-  ['TARİH', 'PERSONEL', 'TUTAR', 'AÇIKLAMA', 'FİŞ FOTOĞRAFI (BÜYÜK)', 'ORİJİNAL LİNK'].forEach(
+  ['#', 'TARİH', 'PERSONEL', 'FİŞ NO', 'TUTAR', 'FİŞ KAYDI ETİKETİ', 'BÜYÜK FOTO', 'ORİJİNAL LİNK'].forEach(
     (h, i) => {
       const cell = fh.getCell(i + 1);
       cell.value = h;
-      cell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 9 };
-      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E4E78' } };
-      cell.border = thinBorder();
-      cell.alignment = { horizontal: 'center', vertical: 'middle' };
+      applyExcelTableHead(cell);
     }
   );
   row += 1;
@@ -639,11 +674,13 @@ export async function exportKasaExcel(
   const fotoRowById = new Map<string, number>();
 
   if (withFoto.length === 0) {
-    fotoSheet.mergeCells(row, 1, row, 6);
+    fotoSheet.mergeCells(row, 1, row, 8);
     fotoSheet.getCell(row, 1).value = 'Bu aralıkta fiş görseli olan çıkış kaydı yok.';
     fotoSheet.getCell(row, 1).font = { italic: true, color: { argb: 'FF94A3B8' } };
   } else {
+    let fotoSira = 0;
     for (const kh of withFoto) {
+      fotoSira += 1;
       const unvan = resolvePersonelUnvan(
         {
           personelId: kh.personelId,
@@ -652,13 +689,16 @@ export async function exportKasaExcel(
         },
         personeller
       );
+      const kayitEtiketi = buildFisKayitEtiketi(kh, unvan.label, fotoSira);
       const r = fotoSheet.getRow(row);
-      r.height = 220;
+      r.height = 340;
       [
+        fotoSira,
         kh.tarih,
         unvan.label,
+        kh.fisNo || '—',
         Number(kh.tutar) || 0,
-        kh.aciklama || '—',
+        kayitEtiketi,
         '',
         '',
       ].forEach((v, i) => {
@@ -666,33 +706,36 @@ export async function exportKasaExcel(
         cell.value = v;
         cell.border = thinBorder();
         cell.alignment = { vertical: 'top', wrapText: true };
-        if (i === 2) {
+        if (i === 4) {
           cell.numFmt = '#,##0.00 "₺"';
           cell.font = { bold: true, color: { argb: 'FFB91C1C' } };
+        }
+        if (i === 5) {
+          cell.font = { bold: true, size: 10, color: { argb: KASA_EXCEL_ARGB.accentText } };
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: KASA_EXCEL_ARGB.headerBg } };
         }
       });
 
       const fotoUrl = String(kh.fisEvrakUrl || '').trim();
       const httpUrl = httpUrlById.get(kh.id) || '';
-      // Gömülü görsel — orta boyut (çok büyük gömme dosyayı şişirip indirmeyi bozuyordu)
-      const b64 = await loadImageAsJpegBase64(httpUrl || fotoUrl, 720, 0.72);
+      const b64 = await loadImageAsJpegBase64(httpUrl || fotoUrl, 1400, 0.92);
       if (b64) {
         const imageId = workbook.addImage({ base64: b64, extension: 'jpeg' });
         fotoSheet.addImage(imageId, {
-          tl: { col: 4, row: row - 1 },
-          ext: { width: 320, height: 200 },
+          tl: { col: 6, row: row - 1 },
+          ext: { width: 440, height: 290 },
           editAs: 'oneCell',
         });
       } else {
-        r.getCell(5).value = 'Görsel yüklenemedi';
-        r.getCell(5).font = { italic: true, color: { argb: 'FF94A3B8' }, size: 8 };
+        r.getCell(7).value = 'Görsel yüklenemedi';
+        r.getCell(7).font = { italic: true, color: { argb: 'FF94A3B8' }, size: 8 };
       }
 
-      setOriginalPhotoHyperlink(r.getCell(6), {
+      setOriginalPhotoHyperlink(r.getCell(8), {
         httpUrl,
         fotoSheetRow: row,
       });
-      r.getCell(6).border = thinBorder();
+      r.getCell(8).border = thinBorder();
       fotoRowById.set(kh.id, row);
       row += 1;
     }
@@ -708,5 +751,8 @@ export async function exportKasaExcel(
   }
 
   const buffer = await workbook.xlsx.writeBuffer();
-  downloadBuffer(buffer as ArrayBuffer | Uint8Array, `Kibritci_Haftalik_Kasa_${startDate}_${endDate}.xlsx`);
+  downloadBuffer(
+    buffer as ArrayBuffer | Uint8Array,
+    `${KASA_REPORT_FORMAT.excel.filePrefix}_${startDate}_${endDate}.xlsx`
+  );
 }

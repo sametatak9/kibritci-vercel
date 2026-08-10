@@ -688,7 +688,7 @@ export const LojistikScreen: React.FC<LojistikScreenProps> = ({
       alert('Seçili aralıkta masraf kaydı yok.');
       return;
     }
-    const html = buildSoforMasrafIadeReportHtml({
+    const html = await buildSoforMasrafIadeReportHtml({
       startDate: iadeRaporStart,
       endDate: iadeRaporEnd,
       items,

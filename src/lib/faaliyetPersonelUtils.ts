@@ -1,5 +1,6 @@
 import { AylikYoklamaMap, KampFaaliyet, Personel, SahaFaaliyeti, YoklamaDurum } from '../types/erp';
 import { normalizeDateKey } from './dateKeyUtils';
+import { kampToSahaDisplay } from './gunlukGorevMerkeziUtils';
 import { getFaaliyetFotolar } from './sahaFaaliyetUtils';
 import {
   findPersonelByName,
@@ -93,6 +94,54 @@ function isIstenCikmisPersonel(p: Personel): boolean {
 
 function shouldIncludeFaaliyetPersonel(p: Personel | undefined | null): p is Personel {
   return !!p?.id && isFaaliyetPersonelKapsaminda(p);
+}
+
+/** Personel kartları — taşeron dahil, faaliyete bağlı tüm personel için eşleştirme */
+export function personMatchesFaaliyetKart(
+  p: Personel,
+  f: SahaFaaliyeti | KampFaaliyet | FaaliyetPersonelKaynak,
+  personeller?: Personel[]
+): boolean {
+  const list = f.aktifPersonelListesi || [];
+  const fullName = normalizeTurkishName(`${p.ad} ${p.soyad}`);
+
+  for (const entry of list) {
+    const raw = String(entry || '').trim();
+    if (!raw) continue;
+    if (raw === p.id) return true;
+    if (normalizeTurkishName(raw) === fullName) return true;
+    if (personeller) {
+      const byName = findPersonelByName(personeller, raw);
+      if (byName?.id === p.id) return true;
+    }
+  }
+
+  if (f.personelMesaiSaatleri && Number(f.personelMesaiSaatleri[p.id]) > 0) return true;
+  if (f.personelId === p.id) return true;
+
+  const kaydedenKampci = String((f as FaaliyetPersonelKaynak).kaydedenKampci || '')
+    .trim()
+    .toLowerCase();
+  if (kaydedenKampci && String(p.eposta || '').trim().toLowerCase() === kaydedenKampci) {
+    return true;
+  }
+
+  const kaynak = String((f as FaaliyetPersonelKaynak).kaynakEkran || '');
+  const kaydedenEmail = String((f as FaaliyetPersonelKaynak).kaydeden || '')
+    .trim()
+    .toLowerCase();
+  if (
+    kaydedenEmail &&
+    (kaynak === 'TESISATCI_MOBIL' ||
+      kaynak === 'MERMERCI_MOBIL' ||
+      kaynak === 'SOFOR_MOBIL' ||
+      kaynak === 'OPERATOR_MOBIL') &&
+    String(p.eposta || '').trim().toLowerCase() === kaydedenEmail
+  ) {
+    return true;
+  }
+
+  return false;
 }
 
 export function personMatchesFaaliyet(
@@ -350,6 +399,41 @@ export function getPersonFaaliyetleriInPeriod(
   return filterFaaliyetlerByPeriod(sahaFaaliyetleri, year, month)
     .filter((f) => personMatchesFaaliyet(person, f))
     .sort((a, b) => String(b.tarih || '').localeCompare(String(a.tarih || ''), 'tr'));
+}
+
+/** Personel kartları — saha + kamp + mobil kaynakların birleşik listesi */
+export function getPersonKartFaaliyetleri(
+  person: Personel,
+  tumSahaFaaliyetleri: SahaFaaliyeti[],
+  personeller: Personel[],
+  kampFaaliyetleri: KampFaaliyet[] = [],
+  yoklamalar: AylikYoklamaMap = {}
+): SahaFaaliyeti[] {
+  const saha = (tumSahaFaaliyetleri || []).filter((f) =>
+    personMatchesFaaliyetKart(person, f, personeller)
+  );
+
+  const kamp = (kampFaaliyetleri || [])
+    .filter((f) => {
+      if (personMatchesFaaliyetKart(person, f, personeller)) return true;
+      if (!isKampFaaliyetOnayli(f) || !isKampciGorev(person.gorev)) return false;
+      const dk = normalizeDateKey(f.tarih);
+      if (!dk) return false;
+      const [y, m, d] = dk.split('-').map(Number);
+      const cell = getYoklamaDay(yoklamalar[person.id], y, m, d);
+      return String(cell?.durum || '') === 'Geldi';
+    })
+    .map(kampToSahaDisplay);
+
+  const seen = new Set<string>();
+  const merged: SahaFaaliyeti[] = [];
+  for (const f of [...saha, ...kamp]) {
+    if (seen.has(f.id)) continue;
+    seen.add(f.id);
+    merged.push(f);
+  }
+
+  return merged.sort((a, b) => String(b.tarih || '').localeCompare(String(a.tarih || ''), 'tr'));
 }
 
 export function getPersonKampFaaliyetleriInPeriod(

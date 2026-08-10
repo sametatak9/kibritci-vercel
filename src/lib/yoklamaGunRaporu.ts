@@ -1,8 +1,16 @@
 import { AylikYoklamaMap, Personel, YoklamaDurum } from '../types/erp';
+import { normalizeGorev, isUstaGorev } from './gorevUtils';
 import {
   buildPersonelListForMonth,
   getYoklamaDay,
   isDayActiveForPersonel,
+  isFormenGorev,
+  isKampciGorev,
+  isMermerciGorev,
+  isOperatorGorev,
+  isSenorGorev,
+  isSoforGorev,
+  isTesisatciGorev,
 } from './yoklamaUtils';
 import { resolveStubPersonelFromLegacyId } from './legacyYoklamaImport';
 import { formatDateLabelTr } from './dateKeyUtils';
@@ -26,6 +34,87 @@ export interface GunlukYoklamaOzet {
   pazar: number;
   tatil: number;
   mesaiToplam: number;
+}
+
+/** Günlük yoklama raporu görev grupları */
+export type GunlukYoklamaRaporGrup = 'FORMEN' | 'USTA' | 'SENOR' | 'KAMP' | 'DUZ_ISCI' | 'DIGER';
+
+export const GUNLUK_YOKLAMA_RAPOR_GRUP_ORDER: GunlukYoklamaRaporGrup[] = [
+  'FORMEN',
+  'USTA',
+  'SENOR',
+  'KAMP',
+  'DUZ_ISCI',
+  'DIGER',
+];
+
+export function gunlukYoklamaRaporGrupLabel(grup: GunlukYoklamaRaporGrup): string {
+  switch (grup) {
+    case 'FORMEN':
+      return 'FORMEN';
+    case 'USTA':
+      return 'USTA';
+    case 'SENOR':
+      return 'ŞENÖR';
+    case 'KAMP':
+      return 'KAMP';
+    case 'DUZ_ISCI':
+      return 'DÜZ İŞÇİ';
+    default:
+      return 'DİĞER';
+  }
+}
+
+export function resolveGunlukYoklamaRaporGrup(gorev?: string): GunlukYoklamaRaporGrup {
+  if (isFormenGorev(gorev)) return 'FORMEN';
+  if (isUstaGorev(gorev)) return 'USTA';
+  if (isSenorGorev(gorev)) return 'SENOR';
+  if (isKampciGorev(gorev)) return 'KAMP';
+  if (
+    isTesisatciGorev(gorev) ||
+    isMermerciGorev(gorev) ||
+    isOperatorGorev(gorev) ||
+    isSoforGorev(gorev)
+  ) {
+    return 'DIGER';
+  }
+  const norm = normalizeGorev(gorev);
+  if (norm === 'DÜZ İŞÇİ' || norm === 'İŞÇİ') return 'DUZ_ISCI';
+  return 'DUZ_ISCI';
+}
+
+export interface GunlukYoklamaGorevGrubu {
+  grup: GunlukYoklamaRaporGrup;
+  label: string;
+  satirlar: GunlukYoklamaSatir[];
+  ozet: GunlukYoklamaOzet;
+}
+
+/** Satırları FORMEN / USTA / ŞENÖR / KAMP / DÜZ İŞÇİ / DİĞER olarak grupla */
+export function groupGunlukYoklamaSatirlariByGorev(
+  rows: GunlukYoklamaSatir[]
+): GunlukYoklamaGorevGrubu[] {
+  const buckets = new Map<GunlukYoklamaRaporGrup, GunlukYoklamaSatir[]>();
+  for (const grup of GUNLUK_YOKLAMA_RAPOR_GRUP_ORDER) {
+    buckets.set(grup, []);
+  }
+
+  for (const row of rows) {
+    const grup = resolveGunlukYoklamaRaporGrup(row.gorev);
+    buckets.get(grup)!.push(row);
+  }
+
+  return GUNLUK_YOKLAMA_RAPOR_GRUP_ORDER.map((grup) => {
+    const satirlar = (buckets.get(grup) || [])
+      .slice()
+      .sort((a, b) => a.adSoyad.localeCompare(b.adSoyad, 'tr'));
+    return {
+      grup,
+      label: gunlukYoklamaRaporGrupLabel(grup),
+      satirlar,
+      ozet: buildGunlukYoklamaOzet(satirlar),
+    };
+  }).filter((g) => g.satirlar.length > 0);
 }
 
 function dateKeyFromParts(year: number, month: number, day: number): string {
@@ -116,6 +205,15 @@ const DURUM_COLOR: Record<string, string> = {
   Tatil: '#7c3aed',
 };
 
+const GRUP_HEADER_BG: Record<GunlukYoklamaRaporGrup, string> = {
+  FORMEN: '#5b21b6',
+  USTA: '#c026d3',
+  SENOR: '#0f766e',
+  KAMP: '#b45309',
+  DUZ_ISCI: '#1d4ed8',
+  DIGER: '#475569',
+};
+
 function escapeHtml(s: string): string {
   return s
     .replace(/&/g, '&amp;')
@@ -124,7 +222,51 @@ function escapeHtml(s: string): string {
     .replace(/"/g, '&quot;');
 }
 
-/** Yazdır / e-posta için bağımsız HTML rapor */
+function renderSatirRows(satirlar: GunlukYoklamaSatir[]): string {
+  return satirlar
+    .map(
+      (r, i) => `<tr>
+        <td>${i + 1}</td>
+        <td><strong>${escapeHtml(r.adSoyad)}</strong></td>
+        <td>${escapeHtml(r.gorev)}</td>
+        <td>${escapeHtml(r.departman)}</td>
+        <td style="font-family:monospace;font-size:11px">${escapeHtml(r.tcNo)}</td>
+        <td style="font-weight:800;color:${DURUM_COLOR[r.durum] || '#64748b'}">${escapeHtml(r.durum)}</td>
+        <td style="text-align:center;font-weight:700">${r.mesaiSaati > 0 ? r.mesaiSaati : '—'}</td>
+      </tr>`
+    )
+    .join('');
+}
+
+function renderGrupSection(grup: GunlukYoklamaGorevGrubu, index: number): string {
+  const bg = GRUP_HEADER_BG[grup.grup];
+  const rows = renderSatirRows(grup.satirlar);
+  return `
+    <table style="width:100%;border-collapse:collapse;font-size:12px;margin:${index === 0 ? '0' : '16px'} 0 0">
+      <thead>
+        <tr>
+          <th colspan="7" style="background:${bg};color:#fff;padding:6px 10px;text-align:left;font-size:11px;font-weight:800;letter-spacing:0.04em;text-transform:uppercase;border:1px solid ${bg}">
+            ${escapeHtml(grup.label)}
+            <span style="float:right;font-size:10px;font-weight:700;background:rgba(255,255,255,0.15);padding:2px 8px;border-radius:999px;text-transform:none">
+              ${grup.satirlar.length} kişi · ${grup.ozet.geldi} geldi · ${grup.ozet.mesaiToplam}s mesai
+            </span>
+          </th>
+        </tr>
+        <tr style="background:#f1f5f9">
+          <th style="padding:8px;border-bottom:2px solid #cbd5e1;text-transform:uppercase;font-size:10px;width:32px">#</th>
+          <th style="padding:8px;border-bottom:2px solid #cbd5e1;text-transform:uppercase;font-size:10px">Ad Soyad</th>
+          <th style="padding:8px;border-bottom:2px solid #cbd5e1;text-transform:uppercase;font-size:10px">Görev</th>
+          <th style="padding:8px;border-bottom:2px solid #cbd5e1;text-transform:uppercase;font-size:10px">Departman</th>
+          <th style="padding:8px;border-bottom:2px solid #cbd5e1;text-transform:uppercase;font-size:10px">TC</th>
+          <th style="padding:8px;border-bottom:2px solid #cbd5e1;text-transform:uppercase;font-size:10px">Durum</th>
+          <th style="padding:8px;border-bottom:2px solid #cbd5e1;text-transform:uppercase;font-size:10px;text-align:center">Mesai</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+}
+
+/** Yazdır / e-posta için bağımsız HTML rapor — görev grupları ayrı tablolar */
 export function buildGunlukYoklamaRaporHtml(
   rows: GunlukYoklamaSatir[],
   ozet: GunlukYoklamaOzet,
@@ -139,19 +281,18 @@ export function buildGunlukYoklamaRaporHtml(
     year: 'numeric',
   });
 
-  const trs = rows
+  const gruplar = groupGunlukYoklamaSatirlariByGorev(rows);
+  const grupOzet = gruplar
     .map(
-      (r, i) => `<tr>
-        <td>${i + 1}</td>
-        <td><strong>${escapeHtml(r.adSoyad)}</strong></td>
-        <td>${escapeHtml(r.gorev)}</td>
-        <td>${escapeHtml(r.departman)}</td>
-        <td style="font-family:monospace;font-size:11px">${escapeHtml(r.tcNo)}</td>
-        <td style="font-weight:800;color:${DURUM_COLOR[r.durum] || '#64748b'}">${escapeHtml(r.durum)}</td>
-        <td style="text-align:center;font-weight:700">${r.mesaiSaati > 0 ? r.mesaiSaati : '—'}</td>
-      </tr>`
+      (g) =>
+        `<span style="display:inline-block;margin:2px 6px 2px 0;padding:2px 8px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:6px;font-size:10px"><strong>${escapeHtml(g.label)}</strong>: ${g.satirlar.length}</span>`
     )
     .join('');
+
+  const sections =
+    gruplar.length > 0
+      ? gruplar.map((g, i) => renderGrupSection(g, i)).join('')
+      : '<p style="color:#64748b">Bu gün için yoklama kaydı yok.</p>';
 
   return `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>Günlük Yoklama — ${escapeHtml(dateLabel)}</title>
   <style>
@@ -164,11 +305,13 @@ export function buildGunlukYoklamaRaporHtml(
     .ozet{display:flex;flex-wrap:wrap;gap:10px;margin-bottom:20px}
     .ozet div{min-width:90px;flex:1;background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:12px;text-align:center}
     .ozet strong{display:block;font-size:20px}
+    thead{display:table-header-group}
+    tbody tr{page-break-inside:avoid;break-inside:avoid}
     @media print { body { padding: 16px; } }
   </style></head><body>
   <span class="badge">KİBRİTÇİ İNŞAAT · PUANTAJ</span>
   <h1>Günlük Personel Yoklama Raporu</h1>
-  <p class="meta">${escapeHtml(monthLabel)} · ${escapeHtml(dateLabel)} · ${ozet.toplam} kayıt</p>
+  <p class="meta">${escapeHtml(monthLabel)} · ${escapeHtml(dateLabel)} · ${ozet.toplam} kayıt · görev grupları ayrı listelenir</p>
   <div class="ozet">
     <div><strong style="color:#059669">${ozet.geldi}</strong>Geldi</div>
     <div><strong style="color:#e11d48">${ozet.yok}</strong>Yok</div>
@@ -178,11 +321,9 @@ export function buildGunlukYoklamaRaporHtml(
     <div><strong style="color:#7c3aed">${ozet.tatil}</strong>Tatil</div>
     <div><strong>${ozet.mesaiToplam}</strong>Top. Mesai (saat)</div>
   </div>
-  <table>
-    <thead><tr><th>#</th><th>Ad Soyad</th><th>Görev</th><th>Departman</th><th>TC</th><th>Durum</th><th>Mesai</th></tr></thead>
-    <tbody>${trs || '<tr><td colspan="7">Bu gün için yoklama kaydı yok.</td></tr>'}</tbody>
-  </table>
-  <p class="meta" style="margin-top:28px">Rapor yalnızca Girilmedi dışındaki yoklama kayıtlarını listeler.</p>
+  <div style="margin:0 0 12px;line-height:1.4">${grupOzet}</div>
+  ${sections}
+  <p class="meta" style="margin-top:28px">Rapor yalnızca Girilmedi dışındaki yoklama kayıtlarını listeler. FORMEN · USTA · ŞENÖR · KAMP · DÜZ İŞÇİ grupları ayrı tablolardır.</p>
   </body></html>`;
 }
 

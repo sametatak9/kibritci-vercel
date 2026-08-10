@@ -6,8 +6,11 @@ import { kibritciReportHeaderHtml } from './kibritciBrand';
 import {
   formatMesaiFaaliyetLabel,
   getFaaliyetFotolar,
+  getFaaliyetTumFotolar,
   isMesaiSahaFaaliyet,
 } from './sahaFaaliyetUtils';
+import { buildIlerlemeTimelineHtml } from './faaliyetIlerlemeReportUtils';
+import { ilerlemeDurumuLabel } from './faaliyetEtiketUtils';
 
 /** Excel'e gömmek için görseli JPEG base64'e çevirir (webp/data/http). */
 async function loadImageAsJpegBase64(url: string): Promise<string | null> {
@@ -133,7 +136,8 @@ function renderSahaCard(
   index: number,
   personeller: Personel[]
 ): string {
-  const fotolar = getFaaliyetFotolar(f);
+  const fotolar = getFaaliyetTumFotolar(f);
+  const sabahFotolar = getFaaliyetFotolar(f);
   const ekip = ekipLabel(f, personeller);
   const konum = [f.parsel && `Parsel ${f.parsel}`, f.blok && `Blok ${f.blok}`]
     .filter(Boolean)
@@ -141,6 +145,7 @@ function renderSahaCard(
   const mesai = isMesaiSahaFaaliyet(f)
     ? `<p style="margin:8px 0 0;font-size:11px;color:#92400e;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:8px 10px;">Mesai: ${escapeHtml(formatMesaiFaaliyetLabel(f, personeller) || '—')}</p>`
     : '';
+  const ilerlemeCount = (f.ilerlemeKayitlari || []).length;
 
   return `
     <article style="border:1px solid #e2e8f0;border-radius:12px;padding:16px;margin-bottom:16px;background:#fff;page-break-inside:avoid;">
@@ -150,17 +155,32 @@ function renderSahaCard(
           <div style="font-size:15px;font-weight:800;color:#0f172a;margin-top:4px;">${escapeHtml(f.isNiteligi || 'İş niteliği belirtilmemiş')}</div>
           ${konum ? `<div style="font-size:11px;color:#475569;margin-top:4px;">📍 ${escapeHtml(konum)}</div>` : ''}
         </div>
-        ${
-          isMesaiSahaFaaliyet(f)
-            ? '<span style="font-size:10px;font-weight:800;padding:4px 8px;border-radius:999px;background:#fef3c7;color:#92400e;white-space:nowrap;">Mesai</span>'
-            : ''
-        }
+        <div style="display:flex;flex-direction:column;gap:4px;align-items:flex-end">
+          ${
+            isMesaiSahaFaaliyet(f)
+              ? '<span style="font-size:10px;font-weight:800;padding:4px 8px;border-radius:999px;background:#fef3c7;color:#92400e;white-space:nowrap;">Mesai</span>'
+              : ''
+          }
+          <span style="font-size:9px;font-weight:800;padding:3px 8px;border-radius:999px;background:#f1f5f9;color:#475569;white-space:nowrap">${escapeHtml(ilerlemeDurumuLabel(f.ilerlemeDurumu))}</span>
+        </div>
       </div>
-      <p style="margin:12px 0 0;font-size:13px;line-height:1.6;color:#1e293b;white-space:pre-wrap;">${escapeHtml(f.aciklama || '—')}</p>
+      <p style="margin:12px 0 0;font-size:13px;line-height:1.6;color:#1e293b;white-space:pre-wrap;"><strong>Sabah açıklaması:</strong> ${escapeHtml(f.aciklama || '—')}</p>
       <p style="margin:8px 0 0;font-size:11px;color:#334155;"><strong>Personel:</strong> ${escapeHtml(ekip || '—')}</p>
-      <p style="margin:4px 0 0;font-size:10px;color:#64748b;">Kaydeden: ${escapeHtml(f.kaydedenFormen || f.kaydeden || '—')}</p>
+      <p style="margin:4px 0 0;font-size:10px;color:#64748b;">Kaydeden: ${escapeHtml(f.kaydedenFormen || f.kaydeden || '—')} · İlerleme kaydı: ${ilerlemeCount}</p>
       ${mesai}
-      ${renderFotoBlock(fotolar)}
+      ${
+        sabahFotolar.length > 0
+          ? `<div style="margin-top:10px"><div style="font-size:10px;font-weight:800;color:#64748b;margin-bottom:6px">Sabah fotoğrafları (${sabahFotolar.length})</div>${renderFotoBlock(sabahFotolar)}</div>`
+          : ''
+      }
+      ${buildIlerlemeTimelineHtml(f)}
+      ${
+        fotolar.length > sabahFotolar.length
+          ? `<div style="margin-top:10px"><div style="font-size:10px;font-weight:800;color:#64748b;margin-bottom:6px">Tüm fotoğraflar (${fotolar.length})</div>${renderFotoBlock(fotolar)}</div>`
+          : sabahFotolar.length === 0
+            ? renderFotoBlock(fotolar)
+            : ''
+      }
     </article>`;
 }
 

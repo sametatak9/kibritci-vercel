@@ -16,6 +16,8 @@ import {
   UserCheck,
   Users,
   X,
+  Download,
+  Printer,
 } from 'lucide-react';
 import { collection, onSnapshot, query, where } from 'firebase/firestore';
 import {
@@ -32,17 +34,30 @@ import {
   buildIseGirisPatch,
   buildPersonelPatchFromDraft,
   buildSessionIslemFromPatch,
+  filterSayimGuncellemeleriForSession,
   mergePendingPatches,
   phoneMatchKey,
   summarizeTaseronSayimGuncellemeleri,
   validateTaseronSayimSession,
 } from '../lib/kampTaseronSayimOnayUtils';
+import {
+  ANA_FIRMA_MYK_GOREV_ETIKETI,
+  buildAnaFirmaMykYoklamaPatch,
+  isAnaFirmaMykSayimPersoneli,
+  isAnaFirmaMykSayimSession,
+} from '../lib/anaFirmaMykSayimUtils';
 import { validateTC } from '../lib/personelOdemeUtils';
 import { submitPersonelCikisTalebi } from '../lib/personelCikisTalebiUtils';
 import { openTaseronSayimListeRaporu } from '../lib/taseronSayimListeRapor';
+import { exportMykYoklamaExcel, openMykYoklamaReport } from '../lib/mykYoklamaRapor';
 import { firmaEslesir, getTaseronCariKartlar } from '../lib/taseronUtils';
-import { isTaseronPersonel } from '../lib/yoklamaUtils';
-import { KampGunlukYoklamaTab } from './KampGunlukYoklamaTab';
+import { canonicalFirmaUnvan, firmaDedupKey } from '../lib/firmaCanonicalUtils';
+import {
+  CANONICAL_ANA_FIRMA_ADI,
+  canonicalizeAnaFirmaAdi,
+  isAnaFirmaFirmaAdi,
+  isTaseronPersonel,
+} from '../lib/yoklamaUtils';
 import type { YoklamaSaveSource } from '../lib/yoklamaPersistence';
 
 const digitsOnly = (raw: string) => String(raw || '').replace(/\D/g, '');
@@ -87,6 +102,24 @@ function eksikTc(p: Personel) {
   return !validateTC(p.tcNo || '');
 }
 
+function isAnaFirmaPersonel(p: Personel) {
+  return !isTaseronPersonel(p);
+}
+
+function isAnaFirmaFirmaSecimi(firma: string): boolean {
+  return canonicalizeAnaFirmaAdi(firma) === CANONICAL_ANA_FIRMA_ADI;
+}
+
+function normalizeFirmaOptionLabel(firma: string): string {
+  if (isAnaFirmaFirmaSecimi(firma)) return CANONICAL_ANA_FIRMA_ADI;
+  return canonicalFirmaUnvan(firma);
+}
+
+function resolveSessionFirmaAdi(firma: string): string {
+  const raw = String(firma || '').trim();
+  return isAnaFirmaFirmaSecimi(raw) ? CANONICAL_ANA_FIRMA_ADI : raw;
+}
+
 function eksikTel(p: Personel) {
   return phoneMatchKey(p.telefonNo || '').length < 10;
 }
@@ -117,6 +150,14 @@ export const KampTaseronSayimTab: React.FC<KampTaseronSayimTabProps> = ({
   const [savingSession, setSavingSession] = useState(false);
   const [pendingCikisPersonelIds, setPendingCikisPersonelIds] = useState<Set<string>>(new Set());
   const [bekleyenSayimlar, setBekleyenSayimlar] = useState<KampTaseronSayim[]>([]);
+  const [selectedPersonelIds, setSelectedPersonelIds] = useState<Set<string>>(new Set());
+  const [exportingMyk, setExportingMyk] = useState(false);
+
+  useEffect(() => {
+    if (selectedFirma && isAnaFirmaFirmaSecimi(selectedFirma) && selectedFirma !== CANONICAL_ANA_FIRMA_ADI) {
+      setSelectedFirma(CANONICAL_ANA_FIRMA_ADI);
+    }
+  }, [selectedFirma]);
 
   useEffect(() => {
     const q = query(collection(db, 'personelCikisTalepleri'), where('durum', '==', 'BEKLEMEDE'));
@@ -155,17 +196,39 @@ export const KampTaseronSayimTab: React.FC<KampTaseronSayimTabProps> = ({
       .filter(isTaseronPersonel)
       .map((p) => String(p.firmaAdi || '').trim())
       .filter(Boolean);
-    const merged = [...fromCari, ...fromPersonel];
+    const merged =
+      panelView === 'eksik_myk' || panelView === 'taseron'
+        ? [CANONICAL_ANA_FIRMA_ADI, ...fromCari, ...fromPersonel]
+        : [...fromCari, ...fromPersonel];
     const seen = new Set<string>();
     const out: string[] = [];
     merged.forEach((f) => {
-      const key = f.toLocaleLowerCase('tr-TR');
+      const label = normalizeFirmaOptionLabel(f);
+      const key = firmaDedupKey(label);
       if (seen.has(key)) return;
       seen.add(key);
-      out.push(f);
+      out.push(label);
     });
     return out.sort((a, b) => a.localeCompare(b, 'tr'));
-  }, [taseronCariler, personeller]);
+  }, [taseronCariler, personeller, panelView]);
+
+  const anaFirmaPersonelleri = useMemo(() => {
+    const q = searchQuery.trim().toLocaleLowerCase('tr-TR');
+    const matchSearch = (p: Personel) => {
+      if (!q) return true;
+      const blob = `${p.ad} ${p.soyad} ${p.gorev || ''} ${p.departman || ''} ${p.tcNo || ''}`.toLocaleLowerCase('tr-TR');
+      return blob.includes(q);
+    };
+
+    return personeller
+      .filter(isAnaFirmaMykSayimPersoneli)
+      .filter(matchSearch)
+      .filter((p) => {
+        if (!showOnlyEksik) return true;
+        return eksikMyk(p);
+      })
+      .sort((a, b) => `${a.ad} ${a.soyad}`.localeCompare(`${b.ad} ${b.soyad}`, 'tr'));
+  }, [personeller, searchQuery, showOnlyEksik]);
 
   const firmaPersonelleri = useMemo(() => {
     const q = searchQuery.trim().toLocaleLowerCase('tr-TR');
@@ -177,14 +240,28 @@ export const KampTaseronSayimTab: React.FC<KampTaseronSayimTabProps> = ({
 
     if (panelView === 'eksik_myk') {
       return personeller
-        .filter(isTaseronPersonel)
+        .filter(personelAktif)
         .filter((p) => personHasEksik(p))
-        .filter((p) => !selectedFirma || firmaEslesir(p.firmaAdi || '', selectedFirma))
+        .filter((p) => {
+          if (!selectedFirma) return isTaseronPersonel(p) || isAnaFirmaMykSayimPersoneli(p);
+          if (isAnaFirmaFirmaSecimi(selectedFirma)) return isAnaFirmaMykSayimPersoneli(p);
+          return isTaseronPersonel(p) && firmaEslesir(p.firmaAdi || '', selectedFirma);
+        })
         .filter(matchSearch)
         .sort((a, b) => `${a.ad} ${a.soyad}`.localeCompare(`${b.ad} ${b.soyad}`, 'tr'));
     }
 
     if (!selectedFirma) return [];
+    if (isAnaFirmaFirmaSecimi(selectedFirma)) {
+      return personeller
+        .filter(isAnaFirmaMykSayimPersoneli)
+        .filter(matchSearch)
+        .filter((p) => {
+          if (!showOnlyEksik) return true;
+          return personHasEksik(p);
+        })
+        .sort((a, b) => `${a.ad} ${a.soyad}`.localeCompare(`${b.ad} ${b.soyad}`, 'tr'));
+    }
     return personeller
       .filter((p) => isTaseronPersonel(p) && firmaEslesir(p.firmaAdi || '', selectedFirma))
       .filter(matchSearch)
@@ -197,11 +274,122 @@ export const KampTaseronSayimTab: React.FC<KampTaseronSayimTabProps> = ({
 
   const bekleyenFirmaSayimi = useMemo(
     () =>
-      bekleyenSayimlar.find((s) => firmaEslesir(s.firmaAdi || '', selectedFirma)) || null,
+      bekleyenSayimlar.find((s) => {
+        if (isAnaFirmaFirmaSecimi(selectedFirma)) {
+          return isAnaFirmaFirmaAdi(s.firmaAdi || '');
+        }
+        return firmaEslesir(s.firmaAdi || '', selectedFirma);
+      }) || null,
     [bekleyenSayimlar, selectedFirma]
   );
 
   const pendingPatchCount = Object.keys(pendingPatches).length;
+
+  const visiblePersonelList = useMemo(() => {
+    if (panelView === 'ana_firma') return anaFirmaPersonelleri;
+    return firmaPersonelleri;
+  }, [panelView, anaFirmaPersonelleri, firmaPersonelleri]);
+
+  const allVisibleSelected =
+    visiblePersonelList.length > 0 &&
+    visiblePersonelList.every((p) => selectedPersonelIds.has(p.id));
+
+  const togglePersonelSelection = (personelId: string) => {
+    setSelectedPersonelIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(personelId)) next.delete(personelId);
+      else next.add(personelId);
+      return next;
+    });
+  };
+
+  const toggleSelectAllVisible = () => {
+    if (allVisibleSelected) {
+      setSelectedPersonelIds(new Set());
+      return;
+    }
+    setSelectedPersonelIds(new Set(visiblePersonelList.map((p) => p.id)));
+  };
+
+  const resolveBulkFirmaAdi = (personel: Personel) => {
+    if (panelView === 'ana_firma' || isAnaFirmaFirmaSecimi(selectedFirma)) {
+      return CANONICAL_ANA_FIRMA_ADI;
+    }
+    return selectedFirma.trim() || String(personel.firmaAdi || '').trim() || '';
+  };
+
+  const applyBulkMykAndSave = (mykDurumu: 'VAR' | 'YOK') => {
+    const targets = visiblePersonelList.filter((p) => selectedPersonelIds.has(p.id));
+    if (targets.length === 0) {
+      showStatus?.('error', 'Toplu MYK için en az bir personel seçin.');
+      return;
+    }
+
+    let applied = 0;
+    let nextPatches = { ...pendingPatches };
+    const nextIslemler = [...sessionIslemler];
+    const anaFirmaYoklama = panelView === 'ana_firma';
+
+    for (const personel of targets) {
+      const patch = anaFirmaYoklama
+        ? buildAnaFirmaMykYoklamaPatch(personel, mykDurumu)
+        : (() => {
+            const draft: DraftRow = { ...getDraft(personel), mykDurumu };
+            const built = buildPersonelPatchFromDraft(personel, draft);
+            return built.error ? null : built.patch;
+          })();
+      if (!patch) continue;
+      nextPatches = mergePendingPatches(nextPatches, patch);
+      const firma = resolveBulkFirmaAdi(personel);
+      nextIslemler.push(buildSessionIslemFromPatch(sessionId, firma, patch, email));
+      applied += 1;
+    }
+
+    if (applied === 0) {
+      showStatus?.('info', 'Seçili personelde uygulanacak MYK değişikliği bulunamadı.');
+      return;
+    }
+
+    setPendingPatches(nextPatches);
+    setSessionIslemler(nextIslemler);
+    setDrafts((prev) => {
+      const copy = { ...prev };
+      for (const personel of targets) {
+        delete copy[personel.id];
+      }
+      return copy;
+    });
+    setSelectedPersonelIds(new Set());
+    showStatus?.(
+      'success',
+      `${applied} personele MYK ${mykDurumu} yoklaması taslağa eklendi.${
+        anaFirmaYoklama ? ' MYK Onaya Gönder ile yöneticiye iletin.' : ' Sayım Kaydet ile yöneticiye iletin.'
+      }`
+    );
+  };
+
+  const handleOpenMykReport = () => {
+    try {
+      const count = openMykYoklamaReport({ personeller, onlyActive: true });
+      showStatus?.('success', `MYK yoklama raporu oluşturuldu (${count} personel).`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'MYK raporu oluşturulamadı.';
+      showStatus?.('error', msg);
+    }
+  };
+
+  const handleExportMykExcel = async () => {
+    setExportingMyk(true);
+    try {
+      const count = await exportMykYoklamaExcel({ personeller, onlyActive: true });
+      showStatus?.('success', `MYK Excel raporu indirildi (${count} personel).`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'MYK Excel raporu oluşturulamadı.';
+      showStatus?.('error', msg);
+    } finally {
+      setExportingMyk(false);
+    }
+  };
 
   const getDraft = (p: Personel): DraftRow => {
     if (drafts[p.id]) return drafts[p.id];
@@ -240,7 +428,7 @@ export const KampTaseronSayimTab: React.FC<KampTaseronSayimTabProps> = ({
       sessionId,
       personelId: personel.id,
       personelIsim: `${personel.ad} ${personel.soyad}`,
-      firmaAdi: selectedFirma,
+      firmaAdi: resolveSessionFirmaAdi(selectedFirma),
       islemTipi,
       detay,
       tarih: new Date().toISOString(),
@@ -248,6 +436,18 @@ export const KampTaseronSayimTab: React.FC<KampTaseronSayimTabProps> = ({
     };
     setSessionIslemler((prev) => [...prev, islem]);
     return islem;
+  };
+
+  const handleAnaFirmaMykChange = (personel: Personel, mykDurumu: 'VAR' | 'YOK' | 'BILINMIYOR') => {
+    const patch = buildAnaFirmaMykYoklamaPatch(personel, mykDurumu);
+
+    setPendingPatches((prev) => mergePendingPatches(prev, patch));
+    const islem = buildSessionIslemFromPatch(sessionId, CANONICAL_ANA_FIRMA_ADI, patch, email);
+    setSessionIslemler((prev) => [...prev, islem]);
+    showStatus?.(
+      'success',
+      `${personel.ad} ${personel.soyad} MYK (${mykDurumu}) taslağa eklendi. MYK Onaya Gönder ile yöneticiye iletin.`
+    );
   };
 
   const handleSavePerson = (personel: Personel) => {
@@ -259,7 +459,7 @@ export const KampTaseronSayimTab: React.FC<KampTaseronSayimTabProps> = ({
     }
 
     setPendingPatches((prev) => mergePendingPatches(prev, patch));
-    const firma = selectedFirma || String(personel.firmaAdi || '').trim();
+    const firma = resolveSessionFirmaAdi(selectedFirma || String(personel.firmaAdi || '').trim());
     const islem = buildSessionIslemFromPatch(sessionId, firma, patch, email);
     setSessionIslemler((prev) => [...prev, islem]);
     setDrafts((prev) => {
@@ -296,7 +496,7 @@ export const KampTaseronSayimTab: React.FC<KampTaseronSayimTabProps> = ({
         personelGorev: personel.gorev || '',
         personelMaas: personel.maas ?? 0,
         cikisTarihi: today,
-        cikisNedeni: `Taşeron sayım — ${selectedFirma}; sayımda tespit edilmedi; kampçı işten çıkış talebi.`,
+        cikisNedeni: `Taşeron sayım — ${resolveSessionFirmaAdi(selectedFirma)}; sayımda tespit edilmedi; kampçı işten çıkış talebi.`,
         gonderen: email,
         kaynak: 'KAMPCI_TASERON_SAYIM',
         hedefYoneticiRole: 'YÖNETİCİ',
@@ -330,7 +530,7 @@ export const KampTaseronSayimTab: React.FC<KampTaseronSayimTabProps> = ({
     const today = new Date().toISOString().slice(0, 10);
     const patch = buildIseGirisPatch(personel, today);
     setPendingPatches((prev) => mergePendingPatches(prev, patch));
-    const firma = selectedFirma || String(personel.firmaAdi || '').trim();
+    const firma = resolveSessionFirmaAdi(selectedFirma || String(personel.firmaAdi || '').trim());
     const islem = buildSessionIslemFromPatch(sessionId, firma, patch, email);
     setSessionIslemler((prev) => [...prev, islem]);
     showStatus?.(
@@ -347,15 +547,32 @@ export const KampTaseronSayimTab: React.FC<KampTaseronSayimTabProps> = ({
   };
 
   const handleSaveSession = async () => {
-    const personelGuncellemeleri = Object.values(pendingPatches) as KampTaseronSayimPersonelGuncelleme[];
-    const firstPerson = personeller.find((p) => p.id === personelGuncellemeleri[0]?.personelId);
+    const rawGuncellemeler = Object.values(pendingPatches) as KampTaseronSayimPersonelGuncelleme[];
+    const firstPerson = personeller.find((p) => p.id === rawGuncellemeler[0]?.personelId);
     const effectiveFirma =
-      selectedFirma.trim() || String(firstPerson?.firmaAdi || '').trim() || '';
+      panelView === 'ana_firma' || isAnaFirmaFirmaSecimi(selectedFirma)
+        ? CANONICAL_ANA_FIRMA_ADI
+        : resolveSessionFirmaAdi(selectedFirma.trim() || String(firstPerson?.firmaAdi || '').trim());
 
     if (!effectiveFirma) {
       showStatus?.('error', 'Önce taşeron firma seçin veya en az bir taslak kayıt oluşturun.');
       return;
     }
+
+    const personelGuncellemeleri = filterSayimGuncellemeleriForSession(
+      effectiveFirma,
+      rawGuncellemeler,
+      personeller
+    );
+
+    if (isAnaFirmaMykSayimSession(effectiveFirma) && personelGuncellemeleri.length === 0) {
+      showStatus?.(
+        'error',
+        `KİBRİTÇİ MYK sayımına uygun taslak yok. Kapsam: ${ANA_FIRMA_MYK_GOREV_ETIKETI}.`
+      );
+      return;
+    }
+
     const validation = validateTaseronSayimSession({
       firmaAdi: effectiveFirma,
       personelGuncellemeleri,
@@ -390,7 +607,8 @@ export const KampTaseronSayimTab: React.FC<KampTaseronSayimTabProps> = ({
         durum: 'BEKLEMEDE',
         personelGuncellemeleri,
         ozet: {
-          toplamPersonel: firmaPersonelleri.length,
+          toplamPersonel:
+            panelView === 'ana_firma' ? anaFirmaPersonelleri.length : firmaPersonelleri.length,
           tcTamamlanan: counts.TC_EKLENDI,
           telTamamlanan: counts.TEL_EKLENDI,
           mykIsaretlenen: counts.MYK_ISARETLENDI,
@@ -401,10 +619,6 @@ export const KampTaseronSayimTab: React.FC<KampTaseronSayimTabProps> = ({
       };
 
       await saveDocument('kampTaseronSayimlari', session);
-
-      for (const islem of sessionIslemler) {
-        await saveDocument('kampTaseronSayimIslemleri', { ...islem, sessionId });
-      }
 
       resetSession();
       showStatus?.(
@@ -458,13 +672,20 @@ export const KampTaseronSayimTab: React.FC<KampTaseronSayimTabProps> = ({
           [
             { id: 'taseron' as const, label: 'Taşeron Sayım', icon: Building2 },
             { id: 'eksik_myk' as const, label: 'Eksik Bilgi / MYK', icon: AlertTriangle },
-            { id: 'ana_firma' as const, label: 'Ana Firma Yoklama', icon: Calendar },
+            { id: 'ana_firma' as const, label: 'Ana Firma MYK', icon: Calendar },
           ] as const
         ).map((tab) => (
           <button
             key={tab.id}
             type="button"
             onClick={() => {
+              if (tab.id !== panelView) {
+                resetSession();
+                setSearchQuery('');
+                setShowOnlyEksik(false);
+                setSelectedPersonelIds(new Set());
+                if (tab.id !== 'taseron') setSelectedFirma('');
+              }
               setPanelView(tab.id);
               setEditingId(null);
             }}
@@ -484,21 +705,221 @@ export const KampTaseronSayimTab: React.FC<KampTaseronSayimTabProps> = ({
         ))}
       </div>
 
+      <div className="flex flex-wrap items-center gap-2 bg-white border border-slate-200 rounded-2xl p-3 shadow-sm">
+        <button
+          type="button"
+          onClick={handleOpenMykReport}
+          className="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-sky-50 hover:bg-sky-100 text-sky-800 border border-sky-200 text-xs font-bold"
+        >
+          <Printer size={14} />
+          MYK Raporu (HTML)
+        </button>
+        <button
+          type="button"
+          onClick={handleExportMykExcel}
+          disabled={exportingMyk}
+          className="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 text-xs font-bold disabled:opacity-50"
+        >
+          {exportingMyk ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+          MYK Raporu (Excel)
+        </button>
+        {selectedPersonelIds.size > 0 && (
+          <>
+            <span className="text-[10px] font-bold text-slate-500 px-2">
+              {selectedPersonelIds.size} seçili
+            </span>
+            <button
+              type="button"
+              onClick={() => applyBulkMykAndSave('VAR')}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold"
+            >
+              <CheckCircle2 size={13} />
+              Seçilenlere VAR
+            </button>
+            <button
+              type="button"
+              onClick={() => applyBulkMykAndSave('YOK')}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-700 hover:bg-slate-800 text-white text-xs font-bold"
+            >
+              Seçilenlere YOK
+            </button>
+            <button
+              type="button"
+              onClick={() => setSelectedPersonelIds(new Set())}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white border border-slate-200 text-slate-600 text-xs font-bold"
+            >
+              Seçimi Temizle
+            </button>
+          </>
+        )}
+      </div>
+
       {panelView === 'ana_firma' ? (
-        setYoklamalar && saveYoklamalarNow ? (
-          <KampGunlukYoklamaTab
-            personeller={personeller}
-            yoklamalar={yoklamalar}
-            setYoklamalar={setYoklamalar}
-            saveYoklamalarNow={saveYoklamalarNow}
-            currentUser={currentUser}
-            addNotification={addNotification}
-          />
-        ) : (
-          <div className="text-center p-12 text-slate-500 bg-white border border-slate-200 rounded-2xl">
-            Ana firma yoklama bu oturumda kullanılamıyor (yoklama verisi yüklenmedi).
+        <div className="space-y-4">
+          <div className="bg-white border border-emerald-200 rounded-2xl p-5 shadow-sm">
+            <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 pb-4 mb-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded-xl bg-emerald-100">
+                  <Calendar className="text-emerald-700" size={22} />
+                </div>
+                <div>
+                  <h3 className="font-bold text-slate-800">{CANONICAL_ANA_FIRMA_ADI} — MYK Yoklama</h3>
+                  <p className="text-xs text-slate-500">
+                    Yalnızca MYK (Var / Yok / Bilinmiyor) işaretlenir. Kapsam: {ANA_FIRMA_MYK_GOREV_ETIKETI}.
+                  </p>
+                </div>
+              </div>
+              {pendingPatchCount > 0 && (
+                <button
+                  type="button"
+                  onClick={handleSaveSession}
+                  disabled={savingSession}
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-900 text-white text-xs font-bold disabled:opacity-40"
+                >
+                  {savingSession ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+                  MYK Onaya Gönder ({pendingPatchCount})
+                </button>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <label className="text-[9px] font-extrabold text-slate-500 uppercase block mb-1">Personel Ara</label>
+                <div className="relative">
+                  <Search size={14} className="absolute left-3 top-3 text-slate-400" />
+                  <input
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder="Ad, görev, departman..."
+                    className="w-full bg-slate-50 border border-slate-200 text-xs text-slate-800 pl-9 pr-3 py-2.5 rounded-xl outline-none"
+                  />
+                </div>
+              </div>
+              <div className="flex items-end">
+                <label className="flex items-center gap-2 text-xs font-bold text-slate-600 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={showOnlyEksik}
+                    onChange={(e) => setShowOnlyEksik(e.target.checked)}
+                    className="rounded"
+                  />
+                  Sadece MYK eksik olanlar
+                </label>
+              </div>
+            </div>
+
+            <div className="mt-4 flex flex-wrap gap-3 text-[10px] font-bold">
+              <span className="px-2 py-1 rounded-lg bg-slate-100 text-slate-700">
+                <Users size={12} className="inline mr-1" />
+                {anaFirmaPersonelleri.length} aktif personel
+              </span>
+              <span className="px-2 py-1 rounded-lg bg-violet-50 text-violet-800">
+                <AlertTriangle size={12} className="inline mr-1" />
+                {anaFirmaPersonelleri.filter(eksikMyk).length} MYK eksik
+              </span>
+              <span className="px-2 py-1 rounded-lg bg-emerald-50 text-emerald-800">
+                <CheckCircle2 size={12} className="inline mr-1" />
+                {pendingPatchCount} taslak MYK
+              </span>
+            </div>
           </div>
-        )
+
+          {anaFirmaPersonelleri.length === 0 ? (
+            <div className="text-center p-12 text-slate-500 italic bg-white border border-slate-200 rounded-2xl">
+              Aktif ana firma personeli bulunamadı.
+            </div>
+          ) : (
+            <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-[11px] border-collapse min-w-[640px]">
+                  <thead>
+                    <tr className="bg-emerald-50 text-slate-700">
+                      <th className="p-2 text-center font-black w-10">
+                        <input
+                          type="checkbox"
+                          checked={allVisibleSelected}
+                          onChange={toggleSelectAllVisible}
+                          title="Tümünü seç"
+                          className="rounded"
+                        />
+                      </th>
+                      <th className="p-2 text-left font-black">Ad Soyad</th>
+                      <th className="p-2 text-left font-black">Görev</th>
+                      <th className="p-2 text-left font-black hidden md:table-cell">Departman</th>
+                      <th className="p-2 text-center font-black">Mevcut MYK</th>
+                      <th className="p-2 text-center font-black">MYK İşaretle</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {anaFirmaPersonelleri.map((p) => {
+                      const pendingMyk = pendingPatches[p.id]?.mykDurumu;
+                      const currentMyk = pendingMyk ?? p.mykDurumu ?? 'BILINMIYOR';
+                      const mykE = eksikMyk(p) && !pendingMyk;
+                      const taslakVar = Boolean(pendingPatches[p.id]);
+
+                      return (
+                        <tr
+                          key={p.id}
+                          className={`border-t border-slate-100 hover:bg-slate-50/80 ${mykE ? 'bg-violet-50/30' : ''}`}
+                        >
+                          <td className="p-2 text-center">
+                            <input
+                              type="checkbox"
+                              checked={selectedPersonelIds.has(p.id)}
+                              onChange={() => togglePersonelSelection(p.id)}
+                              className="rounded"
+                            />
+                          </td>
+                          <td className="p-2">
+                            <div className="font-bold text-slate-900">
+                              {p.ad} {p.soyad}
+                            </div>
+                            {taslakVar && (
+                              <span className="text-[9px] font-black text-sky-700">MYK TASLAK</span>
+                            )}
+                          </td>
+                          <td className="p-2 text-slate-600">{p.gorev || '—'}</td>
+                          <td className="p-2 text-slate-500 hidden md:table-cell">{p.departman || '—'}</td>
+                          <td className="p-2 text-center">
+                            <span
+                              className={`text-[9px] font-black px-1.5 py-0.5 rounded ${
+                                currentMyk === 'VAR'
+                                  ? 'bg-emerald-100 text-emerald-800'
+                                  : currentMyk === 'YOK'
+                                    ? 'bg-slate-200 text-slate-700'
+                                    : 'bg-violet-100 text-violet-800'
+                              }`}
+                            >
+                              {currentMyk === 'VAR' ? 'VAR' : currentMyk === 'YOK' ? 'YOK' : '?'}
+                            </span>
+                          </td>
+                          <td className="p-2">
+                            <div className="flex justify-center gap-1">
+                              {(['VAR', 'YOK', 'BILINMIYOR'] as const).map((v) => (
+                                <button
+                                  key={v}
+                                  type="button"
+                                  onClick={() => handleAnaFirmaMykChange(p, v)}
+                                  className={`px-2 py-1 rounded-lg text-[9px] font-black border cursor-pointer ${
+                                    currentMyk === v
+                                      ? 'bg-emerald-700 text-white border-emerald-700'
+                                      : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                                  }`}
+                                >
+                                  {v === 'VAR' ? 'VAR' : v === 'YOK' ? 'YOK' : '?'}
+                                </button>
+                              ))}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
       ) : (
         <>
       <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
@@ -513,7 +934,7 @@ export const KampTaseronSayimTab: React.FC<KampTaseronSayimTabProps> = ({
               </h3>
               <p className="text-xs text-slate-500">
                 {panelView === 'eksik_myk'
-                  ? 'Tüm taşeron firmalarda TC · telefon · MYK eksik personel · arama ve düzenleme'
+                  ? 'Aktif personelde TC · telefon · MYK eksikleri (KİBRİTÇİ: saha görevleri · taşeron)'
                   : 'Taşeron firma personel listesi · eksik evrak · MYK · işe giriş/çıkış'}
               </p>
             </div>
@@ -546,7 +967,7 @@ export const KampTaseronSayimTab: React.FC<KampTaseronSayimTabProps> = ({
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           <div>
             <label className="text-[9px] font-extrabold text-slate-500 uppercase block mb-1">
-              Taşeron Firma {panelView === 'taseron' && <span className="text-red-600">*</span>}
+              Firma {panelView === 'taseron' && <span className="text-red-600">*</span>}
             </label>
             <select
               value={selectedFirma}
@@ -556,7 +977,7 @@ export const KampTaseronSayimTab: React.FC<KampTaseronSayimTabProps> = ({
               }}
               className="w-full bg-slate-50 border border-slate-200 text-xs font-bold text-slate-800 rounded-xl p-3 outline-none"
             >
-              <option value="">{panelView === 'eksik_myk' ? '— Tüm Taşeron Firmalar —' : '— Firma Seçin —'}</option>
+              <option value="">{panelView === 'eksik_myk' ? '— Tüm Firmalar —' : '— Firma Seçin —'}</option>
               {firmaOptions.map((f) => (
                 <option key={f} value={f}>
                   {f}
@@ -591,7 +1012,7 @@ export const KampTaseronSayimTab: React.FC<KampTaseronSayimTabProps> = ({
             {panelView === 'eksik_myk' && (
               <>
                 <span className="text-[10px] font-bold text-violet-800 bg-violet-50 border border-violet-100 rounded-xl px-3 py-2">
-                  MYK, TC veya telefon eksik kayıtlar
+                  Yalnızca aktif · MYK, TC veya telefon eksik
                 </span>
                 {pendingPatchCount > 0 && (
                   <button
@@ -634,9 +1055,9 @@ export const KampTaseronSayimTab: React.FC<KampTaseronSayimTabProps> = ({
           </div>
         )}
 
-        {panelView === 'eksik_myk' && (
+          {panelView === 'eksik_myk' && (
           <p className="mt-4 text-[10px] font-bold text-violet-800 bg-violet-50 border border-violet-100 rounded-xl px-3 py-2">
-            {firmaPersonelleri.length} personel · {firmaPersonelleri.filter(eksikMyk).length} MYK eksik ·{' '}
+            {firmaPersonelleri.length} aktif personel · {firmaPersonelleri.filter(eksikMyk).length} MYK eksik ·{' '}
             {firmaPersonelleri.filter(eksikTc).length} TC eksik · {firmaPersonelleri.filter(eksikTel).length} tel eksik
           </p>
         )}
@@ -699,7 +1120,7 @@ export const KampTaseronSayimTab: React.FC<KampTaseronSayimTabProps> = ({
         </div>
       ) : firmaPersonelleri.length === 0 ? (
         <div className="text-center p-12 text-slate-500 italic bg-white border border-slate-200 rounded-2xl">
-          {panelView === 'eksik_myk' ? 'Eksik bilgili taşeron personel bulunamadı.' : 'Bu firmaya bağlı personel bulunamadı.'}
+          {panelView === 'eksik_myk' ? 'Eksik bilgili aktif personel bulunamadı.' : 'Bu firmaya bağlı personel bulunamadı.'}
         </div>
       ) : (
         <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
@@ -707,6 +1128,15 @@ export const KampTaseronSayimTab: React.FC<KampTaseronSayimTabProps> = ({
             <table className="w-full text-[11px] border-collapse min-w-[720px]">
               <thead>
                 <tr className="bg-slate-100 text-slate-700">
+                  <th className="p-2 text-center font-black w-10">
+                    <input
+                      type="checkbox"
+                      checked={allVisibleSelected}
+                      onChange={toggleSelectAllVisible}
+                      title="Tümünü seç"
+                      className="rounded"
+                    />
+                  </th>
                   <th className="p-2 text-left font-black">Ad Soyad</th>
                   <th className="p-2 text-left font-black hidden md:table-cell">Firma</th>
                   <th className="p-2 text-left font-black">Görev</th>
@@ -737,6 +1167,14 @@ export const KampTaseronSayimTab: React.FC<KampTaseronSayimTabProps> = ({
                           tcE || telE || mykE ? 'bg-amber-50/30' : ''
                         }`}
                       >
+                        <td className="p-2 text-center">
+                          <input
+                            type="checkbox"
+                            checked={selectedPersonelIds.has(p.id)}
+                            onChange={() => togglePersonelSelection(p.id)}
+                            className="rounded"
+                          />
+                        </td>
                         <td className="p-2">
                           <div className="font-bold text-slate-900">{p.ad} {p.soyad}</div>
                           {taslakVar && (
@@ -803,7 +1241,7 @@ export const KampTaseronSayimTab: React.FC<KampTaseronSayimTabProps> = ({
                       </tr>
                       {isEditing && (
                         <tr className="bg-sky-50/50 border-t border-sky-100">
-                          <td colSpan={9} className="p-3">
+                          <td colSpan={10} className="p-3">
                             <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
                               <div>
                                 <label className="text-[9px] font-extrabold text-slate-500 uppercase block mb-1">TC</label>
