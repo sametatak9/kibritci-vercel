@@ -35,6 +35,14 @@ import {
 } from '../lib/yoklamaUtils';
 import { firmaEslesir } from '../lib/taseronUtils';
 import { validateTC } from '../lib/personelOdemeUtils';
+import {
+  AUTO_MERGE_SCORE_MAX,
+  findPersonelMatches,
+  formatPersonelMatchLabel,
+  phoneMatchKey,
+  pickBestPersonelMatch,
+  shouldConfirmPersonelMerge,
+} from '../lib/personelMatchUtils';
 import { vibrateVidanjorAlert } from '../lib/vidanjorUtils';
 import { resolveGeldiRolPersonelIds } from '../lib/mobilRolEtiketUtils';
 interface KampciScreenProps {
@@ -373,7 +381,7 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
   };
 
   /**
-   * Oda yerleşimi: varsa birleştir (TC / isim+TC / tel / isim), yoksa yeni kur.
+   * Oda yerleşimi: varsa birleştir (TC / tel / isim / benzer isim), yoksa yeni kur.
    * Çift kayıt açılmaz.
    */
   const resolveOrCreateKampPersonel = async (
@@ -384,25 +392,30 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
     telefonNo: string
   ): Promise<{ personel: Personel; created: boolean; merged: boolean }> => {
     const tc = digitsOnly(tcNo);
-    const candidates: Personel[] = [];
-    const pushUnique = (p?: Personel) => {
-      if (p && !candidates.some((c) => c.id === p.id)) candidates.push(p);
-    };
-    pushUnique(findPersonelByNameAndTc(rawName, tc));
-    pushUnique(findPersonelByTc(tc));
-    pushUnique(findPersonelByTel(telefonNo));
-    pushUnique(findDbPersonelByRawName(rawName));
-    if (firmaTipi === 'TASERON') {
-      pushUnique(findExistingTaseronPersonel(rawName, firmaAdi));
+    const matchResults = findPersonelMatches(personeller, {
+      rawName,
+      tcNo,
+      telefonNo,
+      firmaAdi,
+      firmaTipi,
+    });
+
+    let bestMatch = pickBestPersonelMatch(matchResults);
+
+    if (bestMatch && shouldConfirmPersonelMerge(bestMatch)) {
+      const label = formatPersonelMatchLabel(bestMatch);
+      const ok = window.confirm(
+        `Sistemde benzer bir personel kaydı var:\n\n${label}\n\nBu kişi mi? (Evet = mevcut kayıt kullanılır, yeni kayıt açılmaz)\n\nHayır seçerseniz yeni kayıt açılamaz — lütfen TC SORGU / TEL SORGU ile doğru kaydı bulun.`
+      );
+      if (!ok) {
+        throw new Error(
+          `Mükerrer kayıt engellendi. "${label}" mevcut — TC veya telefon sorgusu ile doğru kaydı seçin.`
+        );
+      }
     }
 
-    if (candidates.length > 0) {
-      let best = candidates[0];
-      // TC eşleşeni önceliklendir
-      if (validateTC(tc)) {
-        const byTc = candidates.find((p) => digitsOnly(p.tcNo || '') === tc);
-        if (byTc) best = byTc;
-      }
+    if (bestMatch) {
+      const best = bestMatch.personel;
       const nextTc = (validateTC(tc) ? tc : '') || digitsOnly(best.tcNo || '');
       const nextTel = telefonNo.trim() || best.telefonNo || '';
       const nextFirmaAdi =
@@ -438,7 +451,6 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
     }
 
     const created = await createKampPersonel(rawName, firmaAdi, firmaTipi, tcNo, telefonNo);
-    // createKampPersonel kendi içinde de eşleşme yapabilir
     const wasExisting = personeller.some((p) => p.id === created.id);
     return { personel: created, created: !wasExisting, merged: wasExisting };
   };
@@ -451,34 +463,11 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
     telefonNo: string
   ) => {
     const tc = digitsOnly(tcNo);
-    const byNameAndTc = findPersonelByNameAndTc(rawName, tc);
-    if (byNameAndTc) return byNameAndTc;
-    const byTc = findPersonelByTc(tc);
-    if (byTc) return byTc;
-    const byTel = findPersonelByTel(telefonNo);
-    if (byTel) return byTel;
-    const byName = findDbPersonelByRawName(rawName);
-    if (byName) return byName;
-
-    if (firmaTipi === 'TASERON') {
-      const existing = findExistingTaseronPersonel(rawName, firmaAdi);
-      if (existing) {
-        const needsPatch =
-          (tc && digitsOnly(existing.tcNo || '') !== tc) ||
-          (telefonNo && phoneMatchKey(existing.telefonNo || '') !== phoneMatchKey(telefonNo));
-        if (needsPatch) {
-          const patched: Personel = {
-            ...existing,
-            tcNo: tc || existing.tcNo,
-            telefonNo: telefonNo.trim() || existing.telefonNo,
-            firmaTipi: 'TASERON',
-            firmaAdi: String(firmaAdi || existing.firmaAdi || '').trim() || existing.firmaAdi,
-          };
-          await saveDocument('personeller', patched);
-          return patched;
-        }
-        return existing;
-      }
+    const preMatch = pickBestPersonelMatch(
+      findPersonelMatches(personeller, { rawName, tcNo, telefonNo, firmaAdi, firmaTipi })
+    );
+    if (preMatch) {
+      return preMatch.personel;
     }
 
     const cleaned = sanitizeManualName(rawName);
@@ -985,16 +974,34 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
         showStatus('error', 'Lütfen personel adını soyadını yazın!');
         return;
       }
-      const isManualTaseronPair =
-        placementFirmaTipi === 'TASERON' && firmaType === 'MANUAL';
-      if (isManualTaseronPair) {
-        personelIsim = sanitizeManualName(manualPersonelIsim);
+      const found = findDbPersonelByRawName(manualPersonelIsim);
+      if (found) {
+        personelIsim = `${found.ad} ${found.soyad}`;
+        personelId = found.id;
+        matchedPersonel = found;
       } else {
-        const found = findDbPersonelByRawName(manualPersonelIsim);
-        if (found) {
-          personelIsim = `${found.ad} ${found.soyad}`;
-          personelId = found.id;
-          matchedPersonel = found;
+        const nearMatch = pickBestPersonelMatch(
+          findPersonelMatches(personeller, {
+            rawName: manualPersonelIsim,
+            tcNo: placementTcNo,
+            telefonNo: placementTelefonNo,
+            firmaAdi:
+              placementFirmaTipi === 'TASERON'
+                ? firmaType === 'DB'
+                  ? selectedFirma
+                  : manualFirma
+                : CANONICAL_ANA_FIRMA_ADI,
+            firmaTipi: placementFirmaTipi,
+          })
+        );
+        if (nearMatch && nearMatch.score <= AUTO_MERGE_SCORE_MAX) {
+          personelIsim = `${nearMatch.personel.ad} ${nearMatch.personel.soyad}`;
+          personelId = nearMatch.personel.id;
+          matchedPersonel = nearMatch.personel;
+          showStatus(
+            'info',
+            `Benzer kayıt bulundu: ${personelIsim} — mevcut personel kullanılacak.`
+          );
         } else {
           personelIsim = sanitizeManualName(manualPersonelIsim);
         }
@@ -1522,6 +1529,7 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
         telefonNo: yeniTelefonNo.trim(),
         firmaTipi,
         firmaAdi,
+        personelId: resolved.personel.id,
         kimlikFotoUrl: yeniKimlikFoto,
         durum: 'BEKLEMEDE',
         tarih: new Date().toISOString(),
@@ -1542,7 +1550,7 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
       showStatus('success', `Giriş talebi oluşturuldu${createdPersonelNote} — yönetim onay havuzuna iletildi.`);
     } catch (err) {
       console.error(err);
-      showStatus('error', 'Giriş talebi kaydedilemedi.');
+      showStatus('error', err instanceof Error ? err.message : 'Giriş talebi kaydedilemedi.');
     }
   };
 

@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { Personel } from '../types/erp';
 import { fetchCollection, saveDocument, ensureFirestoreAuth } from '../lib/firebase';
+import { resolvePersonelForGirisOnay } from '../lib/personelMatchUtils';
 import { doc, updateDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { fetchApiJson } from '../lib/apiClient';
@@ -23,6 +24,7 @@ export interface PersonelGirisTalebi {
   telefonNo?: string;
   firmaTipi?: 'ANA_FIRMA' | 'TASERON';
   firmaAdi?: string;
+  personelId?: string;
   kimlikFotoUrl?: string;
   kimlikArkaFotoUrl?: string;
   durum?: string;
@@ -246,13 +248,27 @@ const PublicGirisKayitForm: React.FC<PublicGirisKayitScreenProps> = ({
     setSaving(true);
     try {
       await ensureFirestoreAuth({ allowAnonymous: true });
+      const allPersoneller = (await fetchCollection('personeller')) as Personel[];
+      const existing = resolvePersonelForGirisOnay(allPersoneller, {
+        personelId: talep.personelId,
+        ad: form.ad,
+        soyad: form.soyad,
+        tcNo: form.tcNo,
+        telefonNo: form.telefonNo,
+        firmaAdi: form.firmaAdi,
+        firmaTipi: form.firmaTipi,
+      });
+
+      const personelId = existing?.id || talep.personelId || `p_${Date.now()}`;
       const newPersonel: Personel = {
+        ...(existing || form),
         ...form,
-        id: `p_${Date.now()}`,
+        id: personelId,
         ad: form.ad.trim(),
         soyad: form.soyad.trim(),
         gorev: form.gorev.trim(),
         fotografUrl: kimlikOnUrl || form.fotografUrl,
+        durum: true,
       };
       await saveDocument('personeller', newPersonel);
       await updateDoc(doc(db, 'personelGirisTalepleri', talep.id), {
