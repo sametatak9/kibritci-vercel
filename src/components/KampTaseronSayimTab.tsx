@@ -200,6 +200,7 @@ export const KampTaseronSayimTab: React.FC<KampTaseronSayimTabProps> = ({
     if (panelView === 'eksik_myk') {
       return personeller
         .filter(isTaseronPersonel)
+        .filter(personelAktif)
         .filter((p) => personHasEksik(p))
         .filter((p) => !selectedFirma || firmaEslesir(p.firmaAdi || '', selectedFirma))
         .filter(matchSearch)
@@ -703,7 +704,7 @@ export const KampTaseronSayimTab: React.FC<KampTaseronSayimTabProps> = ({
               </h3>
               <p className="text-xs text-slate-500">
                 {panelView === 'eksik_myk'
-                  ? 'Tüm taşeron firmalarda TC · telefon · MYK eksik personel · arama ve düzenleme'
+                  ? 'Aktif taşeron personelde TC · telefon · MYK eksikleri · arama ve düzenleme'
                   : 'Taşeron firma personel listesi · eksik evrak · MYK · işe giriş/çıkış'}
               </p>
             </div>
@@ -781,7 +782,7 @@ export const KampTaseronSayimTab: React.FC<KampTaseronSayimTabProps> = ({
             {panelView === 'eksik_myk' && (
               <>
                 <span className="text-[10px] font-bold text-violet-800 bg-violet-50 border border-violet-100 rounded-xl px-3 py-2">
-                  MYK, TC veya telefon eksik kayıtlar
+                  Yalnızca aktif · MYK, TC veya telefon eksik
                 </span>
                 {pendingPatchCount > 0 && (
                   <button
@@ -824,9 +825,9 @@ export const KampTaseronSayimTab: React.FC<KampTaseronSayimTabProps> = ({
           </div>
         )}
 
-        {panelView === 'eksik_myk' && (
+          {panelView === 'eksik_myk' && (
           <p className="mt-4 text-[10px] font-bold text-violet-800 bg-violet-50 border border-violet-100 rounded-xl px-3 py-2">
-            {firmaPersonelleri.length} personel · {firmaPersonelleri.filter(eksikMyk).length} MYK eksik ·{' '}
+            {firmaPersonelleri.length} aktif personel · {firmaPersonelleri.filter(eksikMyk).length} MYK eksik ·{' '}
             {firmaPersonelleri.filter(eksikTc).length} TC eksik · {firmaPersonelleri.filter(eksikTel).length} tel eksik
           </p>
         )}
@@ -889,7 +890,7 @@ export const KampTaseronSayimTab: React.FC<KampTaseronSayimTabProps> = ({
         </div>
       ) : firmaPersonelleri.length === 0 ? (
         <div className="text-center p-12 text-slate-500 italic bg-white border border-slate-200 rounded-2xl">
-          {panelView === 'eksik_myk' ? 'Eksik bilgili taşeron personel bulunamadı.' : 'Bu firmaya bağlı personel bulunamadı.'}
+          {panelView === 'eksik_myk' ? 'Eksik bilgili aktif taşeron personel bulunamadı.' : 'Bu firmaya bağlı personel bulunamadı.'}
         </div>
       ) : (
         <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
