@@ -14,14 +14,18 @@ export function buildKibritciReportHtml(options: {
   bodyHtml: string;
   meta?: string[];
   assets?: KibritciReportAssets;
+  fileName?: string;
 }): string {
   const metaRows = (options.meta || [])
     .map((m) => `<p style="margin:0;font-size:11px;color:#64748b">${m}</p>`)
     .join('');
 
+  const defaultFileName =
+    `${String(options.title).replace(/[^\w.\-ğüşıöçĞÜŞİÖÇ ]+/gi, '_').slice(0, 60) || 'Kibritci_Rapor'}.html`;
+
   const emailToolbar = getReportEmailToolbarHtml({
     subject: options.subtitle ? `${options.title} — ${options.subtitle}` : options.title,
-    fileName: `${String(options.title).replace(/[^\w.\-ğüşıöçĞÜŞİÖÇ ]+/gi, '_').slice(0, 60) || 'Kibritci_Rapor'}.html`,
+    fileName: options.fileName || defaultFileName,
   });
 
   const watermarkUrl = options.assets?.watermarkDataUrl || getKibritciWatermarkUrl();
