@@ -41,8 +41,7 @@ import { validateTC } from '../lib/personelOdemeUtils';
 import { submitPersonelCikisTalebi } from '../lib/personelCikisTalebiUtils';
 import { openTaseronSayimListeRaporu } from '../lib/taseronSayimListeRapor';
 import { firmaEslesir, getTaseronCariKartlar } from '../lib/taseronUtils';
-import { isTaseronPersonel } from '../lib/yoklamaUtils';
-import { KampGunlukYoklamaTab } from './KampGunlukYoklamaTab';
+import { CANONICAL_ANA_FIRMA_ADI, isTaseronPersonel } from '../lib/yoklamaUtils';
 import type { YoklamaSaveSource } from '../lib/yoklamaPersistence';
 
 const digitsOnly = (raw: string) => String(raw || '').replace(/\D/g, '');
@@ -85,6 +84,10 @@ function personHasEksik(p: Personel) {
 
 function eksikTc(p: Personel) {
   return !validateTC(p.tcNo || '');
+}
+
+function isAnaFirmaPersonel(p: Personel) {
+  return !isTaseronPersonel(p);
 }
 
 function eksikTel(p: Personel) {
@@ -167,6 +170,25 @@ export const KampTaseronSayimTab: React.FC<KampTaseronSayimTabProps> = ({
     return out.sort((a, b) => a.localeCompare(b, 'tr'));
   }, [taseronCariler, personeller]);
 
+  const anaFirmaPersonelleri = useMemo(() => {
+    const q = searchQuery.trim().toLocaleLowerCase('tr-TR');
+    const matchSearch = (p: Personel) => {
+      if (!q) return true;
+      const blob = `${p.ad} ${p.soyad} ${p.gorev || ''} ${p.departman || ''} ${p.tcNo || ''}`.toLocaleLowerCase('tr-TR');
+      return blob.includes(q);
+    };
+
+    return personeller
+      .filter(isAnaFirmaPersonel)
+      .filter(personelAktif)
+      .filter(matchSearch)
+      .filter((p) => {
+        if (!showOnlyEksik) return true;
+        return eksikMyk(p);
+      })
+      .sort((a, b) => `${a.ad} ${a.soyad}`.localeCompare(`${b.ad} ${b.soyad}`, 'tr'));
+  }, [personeller, searchQuery, showOnlyEksik]);
+
   const firmaPersonelleri = useMemo(() => {
     const q = searchQuery.trim().toLocaleLowerCase('tr-TR');
     const matchSearch = (p: Personel) => {
@@ -248,6 +270,31 @@ export const KampTaseronSayimTab: React.FC<KampTaseronSayimTabProps> = ({
     };
     setSessionIslemler((prev) => [...prev, islem]);
     return islem;
+  };
+
+  const handleAnaFirmaMykChange = (personel: Personel, mykDurumu: 'VAR' | 'YOK' | 'BILINMIYOR') => {
+    if (mykDurumu === (personel.mykDurumu || 'BILINMIYOR')) {
+      showStatus?.('info', 'MYK durumu zaten aynı.');
+      return;
+    }
+
+    const { patch, error } = buildPersonelPatchFromDraft(personel, {
+      tcNo: digitsOnly(personel.tcNo || ''),
+      telefonNo: String(personel.telefonNo || '').trim(),
+      mykDurumu,
+    });
+    if (error || !patch) {
+      showStatus?.('error', error || 'MYK güncellenemedi.');
+      return;
+    }
+
+    setPendingPatches((prev) => mergePendingPatches(prev, patch));
+    const islem = buildSessionIslemFromPatch(sessionId, CANONICAL_ANA_FIRMA_ADI, patch, email);
+    setSessionIslemler((prev) => [...prev, islem]);
+    showStatus?.(
+      'success',
+      `${personel.ad} ${personel.soyad} MYK (${mykDurumu}) taslağa eklendi. Onaya Gönder ile yöneticiye iletin.`
+    );
   };
 
   const handleSavePerson = (personel: Personel) => {
@@ -350,7 +397,9 @@ export const KampTaseronSayimTab: React.FC<KampTaseronSayimTabProps> = ({
     const personelGuncellemeleri = Object.values(pendingPatches) as KampTaseronSayimPersonelGuncelleme[];
     const firstPerson = personeller.find((p) => p.id === personelGuncellemeleri[0]?.personelId);
     const effectiveFirma =
-      selectedFirma.trim() || String(firstPerson?.firmaAdi || '').trim() || '';
+      panelView === 'ana_firma'
+        ? CANONICAL_ANA_FIRMA_ADI
+        : selectedFirma.trim() || String(firstPerson?.firmaAdi || '').trim() || '';
 
     if (!effectiveFirma) {
       showStatus?.('error', 'Önce taşeron firma seçin veya en az bir taslak kayıt oluşturun.');
@@ -390,7 +439,8 @@ export const KampTaseronSayimTab: React.FC<KampTaseronSayimTabProps> = ({
         durum: 'BEKLEMEDE',
         personelGuncellemeleri,
         ozet: {
-          toplamPersonel: firmaPersonelleri.length,
+          toplamPersonel:
+            panelView === 'ana_firma' ? anaFirmaPersonelleri.length : firmaPersonelleri.length,
           tcTamamlanan: counts.TC_EKLENDI,
           telTamamlanan: counts.TEL_EKLENDI,
           mykIsaretlenen: counts.MYK_ISARETLENDI,
@@ -458,13 +508,19 @@ export const KampTaseronSayimTab: React.FC<KampTaseronSayimTabProps> = ({
           [
             { id: 'taseron' as const, label: 'Taşeron Sayım', icon: Building2 },
             { id: 'eksik_myk' as const, label: 'Eksik Bilgi / MYK', icon: AlertTriangle },
-            { id: 'ana_firma' as const, label: 'Ana Firma Yoklama', icon: Calendar },
+            { id: 'ana_firma' as const, label: 'Ana Firma MYK', icon: Calendar },
           ] as const
         ).map((tab) => (
           <button
             key={tab.id}
             type="button"
             onClick={() => {
+              if (tab.id !== panelView) {
+                resetSession();
+                setSearchQuery('');
+                setShowOnlyEksik(false);
+                if (tab.id !== 'taseron') setSelectedFirma('');
+              }
               setPanelView(tab.id);
               setEditingId(null);
             }}
@@ -485,20 +541,154 @@ export const KampTaseronSayimTab: React.FC<KampTaseronSayimTabProps> = ({
       </div>
 
       {panelView === 'ana_firma' ? (
-        setYoklamalar && saveYoklamalarNow ? (
-          <KampGunlukYoklamaTab
-            personeller={personeller}
-            yoklamalar={yoklamalar}
-            setYoklamalar={setYoklamalar}
-            saveYoklamalarNow={saveYoklamalarNow}
-            currentUser={currentUser}
-            addNotification={addNotification}
-          />
-        ) : (
-          <div className="text-center p-12 text-slate-500 bg-white border border-slate-200 rounded-2xl">
-            Ana firma yoklama bu oturumda kullanılamıyor (yoklama verisi yüklenmedi).
+        <div className="space-y-4">
+          <div className="bg-white border border-emerald-200 rounded-2xl p-5 shadow-sm">
+            <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 pb-4 mb-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded-xl bg-emerald-100">
+                  <Calendar className="text-emerald-700" size={22} />
+                </div>
+                <div>
+                  <h3 className="font-bold text-slate-800">{CANONICAL_ANA_FIRMA_ADI} — MYK Yoklama</h3>
+                  <p className="text-xs text-slate-500">
+                    Yalnızca MYK (Var / Yok / Bilinmiyor) işaretlenir. TC, telefon veya işten çıkarma bu ekranda yapılamaz.
+                  </p>
+                </div>
+              </div>
+              {pendingPatchCount > 0 && (
+                <button
+                  type="button"
+                  onClick={handleSaveSession}
+                  disabled={savingSession}
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-900 text-white text-xs font-bold disabled:opacity-40"
+                >
+                  {savingSession ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+                  MYK Onaya Gönder ({pendingPatchCount})
+                </button>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <label className="text-[9px] font-extrabold text-slate-500 uppercase block mb-1">Personel Ara</label>
+                <div className="relative">
+                  <Search size={14} className="absolute left-3 top-3 text-slate-400" />
+                  <input
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder="Ad, görev, departman..."
+                    className="w-full bg-slate-50 border border-slate-200 text-xs text-slate-800 pl-9 pr-3 py-2.5 rounded-xl outline-none"
+                  />
+                </div>
+              </div>
+              <div className="flex items-end">
+                <label className="flex items-center gap-2 text-xs font-bold text-slate-600 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={showOnlyEksik}
+                    onChange={(e) => setShowOnlyEksik(e.target.checked)}
+                    className="rounded"
+                  />
+                  Sadece MYK eksik olanlar
+                </label>
+              </div>
+            </div>
+
+            <div className="mt-4 flex flex-wrap gap-3 text-[10px] font-bold">
+              <span className="px-2 py-1 rounded-lg bg-slate-100 text-slate-700">
+                <Users size={12} className="inline mr-1" />
+                {anaFirmaPersonelleri.length} aktif personel
+              </span>
+              <span className="px-2 py-1 rounded-lg bg-violet-50 text-violet-800">
+                <AlertTriangle size={12} className="inline mr-1" />
+                {anaFirmaPersonelleri.filter(eksikMyk).length} MYK eksik
+              </span>
+              <span className="px-2 py-1 rounded-lg bg-emerald-50 text-emerald-800">
+                <CheckCircle2 size={12} className="inline mr-1" />
+                {pendingPatchCount} taslak MYK
+              </span>
+            </div>
           </div>
-        )
+
+          {anaFirmaPersonelleri.length === 0 ? (
+            <div className="text-center p-12 text-slate-500 italic bg-white border border-slate-200 rounded-2xl">
+              Aktif ana firma personeli bulunamadı.
+            </div>
+          ) : (
+            <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-[11px] border-collapse min-w-[640px]">
+                  <thead>
+                    <tr className="bg-emerald-50 text-slate-700">
+                      <th className="p-2 text-left font-black">Ad Soyad</th>
+                      <th className="p-2 text-left font-black">Görev</th>
+                      <th className="p-2 text-left font-black hidden md:table-cell">Departman</th>
+                      <th className="p-2 text-center font-black">Mevcut MYK</th>
+                      <th className="p-2 text-center font-black">MYK İşaretle</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {anaFirmaPersonelleri.map((p) => {
+                      const pendingMyk = pendingPatches[p.id]?.mykDurumu;
+                      const currentMyk = pendingMyk ?? p.mykDurumu ?? 'BILINMIYOR';
+                      const mykE = eksikMyk(p) && !pendingMyk;
+                      const taslakVar = Boolean(pendingPatches[p.id]);
+
+                      return (
+                        <tr
+                          key={p.id}
+                          className={`border-t border-slate-100 hover:bg-slate-50/80 ${mykE ? 'bg-violet-50/30' : ''}`}
+                        >
+                          <td className="p-2">
+                            <div className="font-bold text-slate-900">
+                              {p.ad} {p.soyad}
+                            </div>
+                            {taslakVar && (
+                              <span className="text-[9px] font-black text-sky-700">MYK TASLAK</span>
+                            )}
+                          </td>
+                          <td className="p-2 text-slate-600">{p.gorev || '—'}</td>
+                          <td className="p-2 text-slate-500 hidden md:table-cell">{p.departman || '—'}</td>
+                          <td className="p-2 text-center">
+                            <span
+                              className={`text-[9px] font-black px-1.5 py-0.5 rounded ${
+                                currentMyk === 'VAR'
+                                  ? 'bg-emerald-100 text-emerald-800'
+                                  : currentMyk === 'YOK'
+                                    ? 'bg-slate-200 text-slate-700'
+                                    : 'bg-violet-100 text-violet-800'
+                              }`}
+                            >
+                              {currentMyk === 'VAR' ? 'VAR' : currentMyk === 'YOK' ? 'YOK' : '?'}
+                            </span>
+                          </td>
+                          <td className="p-2">
+                            <div className="flex justify-center gap-1">
+                              {(['VAR', 'YOK', 'BILINMIYOR'] as const).map((v) => (
+                                <button
+                                  key={v}
+                                  type="button"
+                                  onClick={() => handleAnaFirmaMykChange(p, v)}
+                                  className={`px-2 py-1 rounded-lg text-[9px] font-black border cursor-pointer ${
+                                    currentMyk === v
+                                      ? 'bg-emerald-700 text-white border-emerald-700'
+                                      : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                                  }`}
+                                >
+                                  {v === 'VAR' ? 'VAR' : v === 'YOK' ? 'YOK' : '?'}
+                                </button>
+                              ))}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
       ) : (
         <>
       <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
