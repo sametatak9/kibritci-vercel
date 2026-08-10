@@ -1259,7 +1259,7 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
                 })();
               }}
               className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 disabled:cursor-wait border border-emerald-700 text-white text-[11px] font-bold py-2 px-4 rounded-xl flex items-center space-x-1.5 transition cursor-pointer shadow-sm"
-              title="Kibritçi antetli Excel — 3 sayfa · kişi bazlı · fiş foto"
+              title="Kibritçi antetli Excel — özet + kalem + 2'li evrak sayfası"
             >
               <FileText size={12} />
               <span>{exportingKasaExcel ? 'Excel hazırlanıyor…' : 'Kasa Excel'}</span>

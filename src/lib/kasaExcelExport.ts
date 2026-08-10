@@ -4,9 +4,8 @@ import { createExcelWorkbook } from './exceljsLoader';
 import { KIBRITCI_COMPANY, loadKibritciReportAssets } from './kibritciBrand';
 import { resolvePersonelUnvan } from './personelUnvanUtils';
 import { resolveKasaOdemeDurumu } from './yolHarcamaUtils';
-import { ensureKasaFisFotoPersisted } from './sahaFaaliyetFotoStorage';
+import { ensureKasaFisFotoPersisted, isKasaFisPdfUrl } from './sahaFaaliyetFotoStorage';
 import {
-  buildFisKayitEtiketi,
   KASA_EXCEL_ARGB,
   KASA_REPORT_FORMAT,
 } from './kasaReportTheme';
@@ -383,6 +382,93 @@ function applyKasaSignatureBar(ws: Worksheet, startRow: number, colCount: number
   return row;
 }
 
+function applyPrintPageSetupFotoSheet(ws: Worksheet, lastRow: number): void {
+  ws.pageSetup = {
+    paperSize: 9,
+    orientation: 'landscape',
+    fitToPage: true,
+    fitToWidth: 1,
+    fitToHeight: 0,
+    margins: {
+      left: 0.25,
+      right: 0.25,
+      top: 0.35,
+      bottom: 0.45,
+      header: 0.15,
+      footer: 0.15,
+    },
+  };
+  if (lastRow >= 1) {
+    ws.pageSetup.printArea = `A1:H${lastRow}`;
+  }
+}
+
+async function embedKasaEvrakInSheet(
+  workbook: Workbook,
+  ws: Worksheet,
+  kh: KasaHareketi,
+  opts: {
+    startCol: number;
+    endCol: number;
+    metaRow: number;
+    descRow: number;
+    imgRow: number;
+    sira: number;
+    label: string;
+    httpUrlById: Map<string, string>;
+  }
+): Promise<void> {
+  const { startCol, endCol, metaRow, descRow, imgRow, sira, label, httpUrlById } = opts;
+  const odeme = resolveKasaOdemeDurumu(kh);
+  const tutar = Number(kh.tutar) || 0;
+
+  ws.mergeCells(metaRow, startCol, metaRow, endCol);
+  const metaCell = ws.getCell(metaRow, startCol);
+  metaCell.value = `#${sira} · ${kh.tarih} · ${label} · ${odemeLabel(odeme) || 'KASA ÖDEDİ'} · ${kh.fisNo || '—'} · ${tutar}`;
+  metaCell.font = { bold: true, size: 8, color: { argb: KASA_EXCEL_ARGB.accentText } };
+  metaCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: KASA_EXCEL_ARGB.headerBg } };
+  metaCell.alignment = { vertical: 'middle', wrapText: true };
+  metaCell.border = thinBorder();
+
+  ws.mergeCells(descRow, startCol, descRow, endCol);
+  const descCell = ws.getCell(descRow, startCol);
+  descCell.value = String(kh.aciklama || '—');
+  descCell.font = { size: 8 };
+  descCell.alignment = { vertical: 'top', wrapText: true };
+  descCell.border = thinBorder();
+
+  ws.mergeCells(imgRow, startCol, imgRow, endCol);
+  const imgCell = ws.getCell(imgRow, startCol);
+  imgCell.border = thinBorder();
+  imgCell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+
+  const fotoUrl = String(kh.fisEvrakUrl || '').trim();
+  const httpUrl = httpUrlById.get(kh.id) || '';
+  const isPdf = isKasaFisPdfUrl(fotoUrl) || isKasaFisPdfUrl(httpUrl);
+
+  if (isPdf) {
+    setOriginalPhotoHyperlink(imgCell, { httpUrl: httpUrl || fotoUrl, fotoSheetRow: metaRow });
+    return;
+  }
+
+  const b64 = await loadImageAsJpegBase64(httpUrl || fotoUrl, 1280, 0.9);
+  if (b64) {
+    const imageId = workbook.addImage({ base64: b64, extension: 'jpeg' });
+    ws.addImage(imageId, {
+      tl: { col: startCol - 1 + 0.08, row: imgRow - 1 + 0.05 },
+      ext: { width: 360, height: EVRAK_PAIR_IMG_H - 12 },
+      editAs: 'oneCell',
+    });
+  } else {
+    imgCell.value = 'Görsel yüklenemedi';
+    imgCell.font = { italic: true, color: { argb: 'FF94A3B8' }, size: 8 };
+  }
+}
+
+const EVRAK_PAIR_META_H = 32;
+const EVRAK_PAIR_DESC_H = 28;
+const EVRAK_PAIR_IMG_H = 200;
+
 function applyPrintPageSetup(ws: Worksheet, headerRow: number, colCount: number, lastRow: number): void {
   ws.pageSetup = {
     paperSize: 9,
@@ -751,109 +837,90 @@ export async function exportKasaExcel(
 
   applyPrintPageSetup(sheet, headerRow, COL, row);
 
-  // ─── Sayfa 2: Fis Fotograflari (büyük gömülü + çalışan orijinal link) ───
-  // Sayfa adı ASCII — Excel iç linkleri Türkçe karakterde bozulabiliyor
+  // ─── Sayfa 2: Fiş evrakları — açıklama + foto/PDF (2'li sıkışık yazdırma) ───
   const withFoto = withFotoAll
     .slice()
     .sort((a, c) => String(a.tarih).localeCompare(String(c.tarih)));
   const fotoSheet = workbook.addWorksheet('Fis Fotograflari', {
-    pageSetup: { paperSize: 9, orientation: 'portrait', fitToPage: true, fitToWidth: 1 },
+    pageSetup: { paperSize: 9, orientation: 'landscape', fitToPage: true, fitToWidth: 1 },
   });
   fotoSheet.columns = [
-    { width: 6 },
-    { width: 14 },
-    { width: 26 },
-    { width: 14 },
-    { width: 14 },
-    { width: 40 },
-    { width: 48 },
+    { width: 18 },
+    { width: 18 },
+    { width: 18 },
+    { width: 18 },
+    { width: 18 },
+    { width: 18 },
+    { width: 18 },
     { width: 18 },
   ];
-  row = await applyKasaAntet(workbook, fotoSheet, {
-    title: 'HAFTALIK KASA — FİŞ / FATURA GÖRSELLERİ (BÜYÜK BOY)',
-    subtitle: `Dönem: ${startDate} — ${endDate} · ${withFoto.length} görsel · Her fişin üstünde kayıt etiketi`,
+  row = await applyKasaAntetCompact(workbook, fotoSheet, {
+    title: 'HAFTALIK KASA — FİŞ / FATURA EVRAKLARI',
+    subtitle: `Dönem: ${startDate} — ${endDate} · ${withFoto.length} evrak · 2\'li sıkışık (açıklama + görsel)`,
     colCount: 8,
   });
-
-  const fh = fotoSheet.getRow(row);
-  ['#', 'TARİH', 'PERSONEL', 'FİŞ NO', 'TUTAR', 'FİŞ KAYDI ETİKETİ', 'BÜYÜK FOTO', 'ORİJİNAL LİNK'].forEach(
-    (h, i) => {
-      const cell = fh.getCell(i + 1);
-      cell.value = h;
-      applyExcelTableHead(cell);
-    }
-  );
   row += 1;
 
   const fotoRowById = new Map<string, number>();
 
   if (withFoto.length === 0) {
     fotoSheet.mergeCells(row, 1, row, 8);
-    fotoSheet.getCell(row, 1).value = 'Bu aralıkta fiş görseli olan çıkış kaydı yok.';
+    fotoSheet.getCell(row, 1).value = 'Bu aralıkta fiş / fatura evrakı olan çıkış kaydı yok.';
     fotoSheet.getCell(row, 1).font = { italic: true, color: { argb: 'FF94A3B8' } };
   } else {
     let fotoSira = 0;
-    for (const kh of withFoto) {
+    for (let i = 0; i < withFoto.length; i += 2) {
+      const left = withFoto[i];
+      const right = withFoto[i + 1];
+      const metaRow = row;
+      const descRow = row + 1;
+      const imgRow = row + 2;
+
+      fotoSheet.getRow(metaRow).height = EVRAK_PAIR_META_H;
+      fotoSheet.getRow(descRow).height = EVRAK_PAIR_DESC_H;
+      fotoSheet.getRow(imgRow).height = EVRAK_PAIR_IMG_H;
+
       fotoSira += 1;
-      const unvan = resolvePersonelUnvan(
-        {
-          personelId: kh.personelId,
-          personelAdi: kh.personelAdi,
-          surucu: kh.surucu,
-        },
+      const leftUnvan = resolvePersonelUnvan(
+        { personelId: left.personelId, personelAdi: left.personelAdi, surucu: left.surucu },
         personeller
       );
-      const kayitEtiketi = buildFisKayitEtiketi(kh, unvan.label, fotoSira);
-      const r = fotoSheet.getRow(row);
-      r.height = 340;
-      [
-        fotoSira,
-        kh.tarih,
-        unvan.label,
-        kh.fisNo || '—',
-        Number(kh.tutar) || 0,
-        kayitEtiketi,
-        '',
-        '',
-      ].forEach((v, i) => {
-        const cell = r.getCell(i + 1);
-        cell.value = v;
-        cell.border = thinBorder();
-        cell.alignment = { vertical: 'top', wrapText: true };
-        if (i === 4) {
-          cell.numFmt = '#,##0.00 "₺"';
-          cell.font = { bold: true, color: { argb: 'FFB91C1C' } };
-        }
-        if (i === 5) {
-          cell.font = { bold: true, size: 10, color: { argb: KASA_EXCEL_ARGB.accentText } };
-          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: KASA_EXCEL_ARGB.headerBg } };
-        }
+      await embedKasaEvrakInSheet(workbook, fotoSheet, left, {
+        startCol: 1,
+        endCol: 4,
+        metaRow,
+        descRow,
+        imgRow,
+        sira: fotoSira,
+        label: leftUnvan.label,
+        httpUrlById,
       });
+      fotoRowById.set(left.id, metaRow);
 
-      const fotoUrl = String(kh.fisEvrakUrl || '').trim();
-      const httpUrl = httpUrlById.get(kh.id) || '';
-      const b64 = await loadImageAsJpegBase64(httpUrl || fotoUrl, 1400, 0.92);
-      if (b64) {
-        const imageId = workbook.addImage({ base64: b64, extension: 'jpeg' });
-        fotoSheet.addImage(imageId, {
-          tl: { col: 6, row: row - 1 },
-          ext: { width: 440, height: 290 },
-          editAs: 'oneCell',
+      if (right) {
+        fotoSira += 1;
+        const rightUnvan = resolvePersonelUnvan(
+          { personelId: right.personelId, personelAdi: right.personelAdi, surucu: right.surucu },
+          personeller
+        );
+        await embedKasaEvrakInSheet(workbook, fotoSheet, right, {
+          startCol: 5,
+          endCol: 8,
+          metaRow,
+          descRow,
+          imgRow,
+          sira: fotoSira,
+          label: rightUnvan.label,
+          httpUrlById,
         });
-      } else {
-        r.getCell(7).value = 'Görsel yüklenemedi';
-        r.getCell(7).font = { italic: true, color: { argb: 'FF94A3B8' }, size: 8 };
+        fotoRowById.set(right.id, metaRow);
       }
 
-      setOriginalPhotoHyperlink(r.getCell(8), {
-        httpUrl,
-        fotoSheetRow: row,
-      });
-      r.getCell(8).border = thinBorder();
-      fotoRowById.set(kh.id, row);
-      row += 1;
+      row += 3;
     }
   }
+
+  applyPrintPageSetupFotoSheet(fotoSheet, row);
 
   // Haftalik Kasa «FİŞ» linklerini yaz (https veya sayfa içi büyük foto)
   for (const pending of pendingOriginalLinks) {

@@ -13,6 +13,7 @@ import {
   KASA_REPORT_FORMAT,
 } from './kasaReportTheme';
 import { db, saveDocument } from './firebase';
+import { isKasaFisPdfUrl } from './sahaFaaliyetFotoStorage';
 import {
   htmlToPlainText,
   openHtmlReportWindow,
@@ -730,26 +731,107 @@ function buildMasrafTableHtml(rows: RaporKalem[], toplam: number): string {
     </table>`;
 }
 
-function buildFotoGridHtml(rows: RaporKalem[]): string {
-  const photos = rows
-    .filter((r) => r.fotoUrl)
-    .map(
-      (r, idx) => `<figure style="margin:0 0 22px;border:2px solid ${KASA_LIGHT.border};border-radius:12px;overflow:hidden;background:${KASA_LIGHT.cardBg};page-break-inside:avoid;break-inside:avoid">
-      <div style="padding:10px 12px;background:linear-gradient(90deg,${KASA_LIGHT.headerBg},${KASA_LIGHT.labelBg});font-size:12px;font-weight:800;color:${KASA_LIGHT.text};line-height:1.45">
-        <div style="font-size:10px;color:${KASA_LIGHT.muted};margin-bottom:4px">FİŞ KAYDI #${idx + 1}</div>
-        ${escapeHtml(raporKalemKisiAdi(r))} · ${escapeHtml(r.fisNo || r.id)} · ${escapeHtml(r.tarih)} · −${Number(r.tutar || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺
-      </div>
-      <div style="padding:12px;background:${KASA_LIGHT.labelBg};text-align:center">
-        <img src="${escapeHtml(r.fotoUrl!)}" alt="Fiş ${escapeHtml(r.fisNo || r.id)}" style="display:inline-block;max-width:100%;width:auto;height:auto;max-height:720px;object-fit:contain;image-rendering:auto" />
-      </div>
-      <figcaption style="padding:10px 12px;font-size:11px;color:${KASA_LIGHT.muted};line-height:1.5;border-top:1px solid ${KASA_LIGHT.border}">${escapeHtml(r.aciklama || '')}</figcaption>
-    </figure>`
-    )
+function buildKasaEvrakAlbumHtml(rows: RaporKalem[]): string {
+  const withEvrak = rows.filter((r) => String(r.fotoUrl || '').trim());
+  if (withEvrak.length === 0) {
+    return `<section style="margin:16px 0">
+      ${kasaHtmlSectionTitle('Fiş / fatura evrakları')}
+      <p style="color:#94a3b8;font-style:italic;font-size:11px">Bu aralıkta yüklenmiş evrak yok.</p>
+    </section>`;
+  }
+
+  const cards = withEvrak
+    .map((r, idx) => {
+      const url = String(r.fotoUrl || '').trim();
+      const isPdf = isKasaFisPdfUrl(url);
+      const durum = raporKalemOdemeDurumu(r);
+      const tutar = Number(r.tutar || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2 });
+      const media = isPdf
+        ? `<iframe src="${escapeHtml(url)}" title="PDF evrak" style="width:100%;height:250px;border:1px solid ${KASA_LIGHT.border};border-radius:6px;background:#fff"></iframe>
+           <p style="margin:5px 0 0;font-size:9px;text-align:center">
+             <a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" style="color:${KASA_LIGHT.accent};font-weight:800">PDF evrakı aç →</a>
+           </p>`
+        : `<img src="${escapeHtml(url)}" alt="Fiş ${escapeHtml(r.fisNo || r.id)}" loading="lazy"
+            style="width:100%;height:auto;max-height:280px;object-fit:contain;display:block;margin:0 auto;image-rendering:auto" />`;
+
+      return `<article class="kasa-evrak-card">
+        <header class="kasa-evrak-head">
+          <div class="kasa-evrak-meta">#${idx + 1} · ${escapeHtml(r.tarih)} · ${escapeHtml(kasaOdemeDurumuLabel(durum))}</div>
+          <div class="kasa-evrak-title">${escapeHtml(raporKalemKisiAdi(r))} · Fiş ${escapeHtml(r.fisNo || '—')} · −${tutar} ₺</div>
+        </header>
+        <p class="kasa-evrak-desc">${escapeHtml(r.aciklama || '—')}</p>
+        <div class="kasa-evrak-media">${media}</div>
+      </article>`;
+    })
     .join('');
-  return `${kasaHtmlSectionTitle('Fiş görselleri — tam boyut (her biri ilgili kasa kaydına etiketli)')}
-    <div style="display:block">
-      ${photos || '<p style="color:#94a3b8;font-style:italic">Fiş görseli yok</p>'}
-    </div>`;
+
+  return `<section class="kasa-evrak-album">
+    ${kasaHtmlSectionTitle('Fiş / fatura evrakları — kayıt açıklaması ile birlikte (2\'li sıkışık yazdırma)')}
+    <style>
+      .kasa-evrak-album { margin: 18px 0 24px; }
+      .kasa-evrak-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+      }
+      .kasa-evrak-card {
+        border: 1px solid ${KASA_LIGHT.border};
+        border-radius: 10px;
+        overflow: hidden;
+        background: ${KASA_LIGHT.cardBg};
+        display: flex;
+        flex-direction: column;
+        page-break-inside: avoid;
+        break-inside: avoid;
+      }
+      .kasa-evrak-head {
+        padding: 8px 10px;
+        background: ${KASA_LIGHT.headerBg};
+        line-height: 1.35;
+      }
+      .kasa-evrak-meta {
+        font-size: 9px;
+        font-weight: 800;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: ${KASA_LIGHT.muted};
+      }
+      .kasa-evrak-title {
+        font-size: 10px;
+        font-weight: 800;
+        color: ${KASA_LIGHT.accentDark};
+        margin-top: 3px;
+      }
+      .kasa-evrak-desc {
+        margin: 0;
+        padding: 7px 10px;
+        font-size: 10px;
+        color: ${KASA_LIGHT.text};
+        line-height: 1.4;
+        border-bottom: 1px solid ${KASA_LIGHT.border};
+        min-height: 2.6em;
+      }
+      .kasa-evrak-media {
+        padding: 8px;
+        background: ${KASA_LIGHT.labelBg};
+        flex: 1;
+      }
+      @media print {
+        .kasa-evrak-grid { gap: 6px; }
+        .kasa-evrak-card img { max-height: 230px !important; }
+        .kasa-evrak-card iframe { height: 210px !important; }
+        .kasa-evrak-desc { font-size: 9px; padding: 5px 8px; }
+      }
+      @media (max-width: 720px) {
+        .kasa-evrak-grid { grid-template-columns: 1fr; }
+      }
+    </style>
+    <div class="kasa-evrak-grid">${cards}</div>
+    <p style="margin:10px 0 0;font-size:9px;color:${KASA_LIGHT.muted};line-height:1.45">
+      Yazdırma: A4 · görseller kaynak çözünürlükte yüklenir, sayfa düzeni 2 sütun sıkışık yerleşim.
+      PDF evraklar tarayıcıda önizlenir; yazdırmada sorun olursa «PDF evrakı aç» linkini kullanın.
+    </p>
+  </section>`;
 }
 
 /** A4: şoför masraf / iade dökümü — Kibritçi antet + açık tema (HTML, Excel değil) */
@@ -777,7 +859,7 @@ export async function buildSoforMasrafIadeReportHtml(options: {
   ])}
     ${buildPersonelHarcamaOzetHtml(rows)}
     ${buildMasrafTableHtml(rows, toplam)}
-    ${buildFotoGridHtml(rows)}`;
+    ${buildKasaEvrakAlbumHtml(rows)}`;
 
   return buildKasaLightReportHtml({
     title,
@@ -829,7 +911,7 @@ export async function buildKasaHarcamaAralikReportHtml(options: {
     ${buildKaynakOzetHtml(rows)}
     ${buildPersonelHarcamaOzetHtml(rows)}
     ${buildCikisListeHtml(rows)}
-    ${buildFotoGridHtml(rows)}`;
+    ${buildKasaEvrakAlbumHtml(rows)}`;
 
   return buildKasaLightReportHtml({
     title,
