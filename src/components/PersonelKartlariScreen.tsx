@@ -7,11 +7,13 @@ import {
   Banknote, Shield, Star, TrendingUp, AlertCircle, CheckCircle2,
   XCircle, MinusCircle, Hash, Download, RefreshCw, Eye
 } from 'lucide-react';
-import { Personel, AylikYoklamaMap, AracBakim, KampKaydi, KampOdasi, HazirTutanak, KasaHareketi, SahaFaaliyeti, MaaşOdeme } from '../types/erp';
-import { getYoklamaDay, iterateMonthYoklama, isDayActiveForPersonel, asYoklamaGunMap, parseYoklamaDateKey, normalizeTurkishName } from '../lib/yoklamaUtils';
+import { Personel, AylikYoklamaMap, AracBakim, KampKaydi, KampOdasi, HazirTutanak, KasaHareketi, SahaFaaliyeti, MaaşOdeme, KampFaaliyet, TesisatciFaaliyet, MermerciFaaliyet, SoforSahaFaaliyet, OperatorSahaFaaliyet } from '../types/erp';
+import { getYoklamaDay, iterateMonthYoklama, isDayActiveForPersonel, asYoklamaGunMap, parseYoklamaDateKey } from '../lib/yoklamaUtils';
+import { getPersonKartFaaliyetleri } from '../lib/faaliyetPersonelUtils';
+import { mermerciToSaha, operatorToSaha, soforToSaha, tesisatciToSaha } from '../lib/mobilFaaliyetAdapter';
 import { PersonelIdCard } from './PersonelIdCard';
 import { db } from '../lib/firebase';
-import { collection, getDocs } from 'firebase/firestore';
+import { collection, getDocs, onSnapshot } from 'firebase/firestore';
 
 /* ─────────────────────────────────────────
    INTERFACES
@@ -107,6 +109,13 @@ export const PersonelKartlariScreen: React.FC<PersonelKartlariScreenProps> = ({
   const [izinBelgeleri, setIzinBelgeleri] = useState<PersonelIzinBelgesi[]>([]);
   const [izinLoading, setIzinLoading]     = useState(false);
 
+  /* Saha / kamp / mobil faaliyet kaynakları (FaaliyetPersonelScreen ile aynı birleşim) */
+  const [kampFaaliyetleri, setKampFaaliyetleri] = useState<KampFaaliyet[]>([]);
+  const [tesisatciFaaliyetleri, setTesisatciFaaliyetleri] = useState<TesisatciFaaliyet[]>([]);
+  const [mermerciFaaliyetleri, setMermerciFaaliyetleri] = useState<MermerciFaaliyet[]>([]);
+  const [soforSahaFaaliyetleri, setSoforSahaFaaliyetleri] = useState<SoforSahaFaaliyet[]>([]);
+  const [operatorSahaFaaliyetleri, setOperatorSahaFaaliyetleri] = useState<OperatorSahaFaaliyet[]>([]);
+
   /* ── Firebase Yükle ── */
   useEffect(() => {
     let cancelled = false;
@@ -126,6 +135,74 @@ export const PersonelKartlariScreen: React.FC<PersonelKartlariScreenProps> = ({
     })();
     return () => { cancelled = true; };
   }, []);
+
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, 'kampGunlukFaaliyetleri'), (snap) => {
+      const list: KampFaaliyet[] = [];
+      snap.forEach((d) => list.push({ id: d.id, ...(d.data() as Omit<KampFaaliyet, 'id'>) }));
+      setKampFaaliyetleri(list);
+    });
+    return () => unsub();
+  }, []);
+
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, 'tesisatciFaaliyetleri'), (snap) => {
+      const list: TesisatciFaaliyet[] = [];
+      snap.forEach((d) => list.push({ id: d.id, ...(d.data() as Omit<TesisatciFaaliyet, 'id'>) }));
+      setTesisatciFaaliyetleri(list);
+    });
+    return () => unsub();
+  }, []);
+
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, 'mermerciFaaliyetleri'), (snap) => {
+      const list: MermerciFaaliyet[] = [];
+      snap.forEach((d) => list.push({ id: d.id, ...(d.data() as Omit<MermerciFaaliyet, 'id'>) }));
+      setMermerciFaaliyetleri(list);
+    });
+    return () => unsub();
+  }, []);
+
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, 'soforSahaFaaliyetleri'), (snap) => {
+      const list: SoforSahaFaaliyet[] = [];
+      snap.forEach((d) => list.push({ id: d.id, ...(d.data() as Omit<SoforSahaFaaliyet, 'id'>) }));
+      setSoforSahaFaaliyetleri(list);
+    });
+    return () => unsub();
+  }, []);
+
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, 'operatorSahaFaaliyetleri'), (snap) => {
+      const list: OperatorSahaFaaliyet[] = [];
+      snap.forEach((d) => list.push({ id: d.id, ...(d.data() as Omit<OperatorSahaFaaliyet, 'id'>) }));
+      setOperatorSahaFaaliyetleri(list);
+    });
+    return () => unsub();
+  }, []);
+
+  const tumSahaFaaliyetleri = useMemo(
+    () => [
+      ...sahaFaaliyetleri,
+      ...tesisatciFaaliyetleri.map(tesisatciToSaha),
+      ...mermerciFaaliyetleri.map(mermerciToSaha),
+      ...soforSahaFaaliyetleri.map(soforToSaha),
+      ...operatorSahaFaaliyetleri
+        .filter((f) => {
+          const d = String(f.durum || '').toLocaleUpperCase('tr-TR');
+          if (d.includes('RED')) return false;
+          return true;
+        })
+        .map(operatorToSaha),
+    ],
+    [
+      sahaFaaliyetleri,
+      tesisatciFaaliyetleri,
+      mermerciFaaliyetleri,
+      soforSahaFaaliyetleri,
+      operatorSahaFaaliyetleri,
+    ]
+  );
 
   /* ── Filtre Options ── */
   const firmaOptions = useMemo(() => {
@@ -274,16 +351,14 @@ export const PersonelKartlariScreen: React.FC<PersonelKartlariScreenProps> = ({
 
   const personelSahaFaaliyetleri = useMemo(() => {
     if (!selectedPersonnel) return [] as SahaFaaliyeti[];
-    const normalizedSelectedName = normalizeTurkishName(`${selectedPersonnel.ad} ${selectedPersonnel.soyad}`);
-    return sahaFaaliyetleri
-      .filter((f) => {
-        if (f.personelId === selectedPersonnel.id) return true;
-        return (f.aktifPersonelListesi || []).some(
-          (n) => normalizeTurkishName(String(n)) === normalizedSelectedName
-        );
-      })
-      .sort((a, b) => String(b.tarih || '').localeCompare(String(a.tarih || ''), 'tr'));
-  }, [selectedPersonnel, sahaFaaliyetleri]);
+    return getPersonKartFaaliyetleri(
+      selectedPersonnel,
+      tumSahaFaaliyetleri,
+      personeller,
+      kampFaaliyetleri,
+      yoklamalar
+    );
+  }, [selectedPersonnel, tumSahaFaaliyetleri, personeller, kampFaaliyetleri, yoklamalar]);
 
   const personelTutanaklar = useMemo(() => {
     if (!selectedPersonnel) return [] as HazirTutanak[];
@@ -385,11 +460,13 @@ export const PersonelKartlariScreen: React.FC<PersonelKartlariScreenProps> = ({
 
       addSection('SAHA FAALİYETLERİ');
       addHeader('Tarih', 'İş Niteliği', 'Parsel', 'Blok', 'Açıklama');
-      const pSaha = sahaFaaliyetleri.filter((f) => {
-        if (f.personelId === p.id) return true;
-        const n = `${p.ad} ${p.soyad}`.trim().toLowerCase();
-        return (f.aktifPersonelListesi || []).some((x) => String(x).trim().toLowerCase() === n);
-      });
+      const pSaha = getPersonKartFaaliyetleri(
+        p,
+        tumSahaFaaliyetleri,
+        personeller,
+        kampFaaliyetleri,
+        yoklamalar
+      );
       pSaha.forEach((f) =>
         ws.addRow([f.tarih, f.isNiteligi || '', f.parsel || '', f.blok || '', f.aciklama || ''])
       );
