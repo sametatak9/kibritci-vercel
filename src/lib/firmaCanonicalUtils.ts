@@ -26,14 +26,24 @@ export function canonicalFirmaUnvan(name?: string | null): string {
   return upper;
 }
 
-/** Geçersiz / test cari unvanları (AAA vb.) */
+/** Geçersiz / test cari unvanları (AAA, Y, — vb.) */
 export function isJunkCariUnvan(unvan?: string | null): boolean {
   const u = String(unvan || '').trim();
   if (!u) return true;
+  const norm = u.toLocaleLowerCase('tr-TR');
+  if (/^[-–—.]+$/.test(norm)) return true;
+  if (/^(belirtilmedi|belirsiz|yok|tanimsiz|tanimlanmadi|bilinmiyor|test|deneme)$/i.test(norm)) {
+    return true;
+  }
   const key = firmaAnahtar(u);
   if (key.length <= 2) return true;
   if (/^[a]+$/i.test(key.replace(/\s/g, ''))) return true;
   return false;
+}
+
+/** Personel / kamp firmaAdi için junk kontrolü */
+export function isJunkFirmaAdi(name?: string | null): boolean {
+  return isJunkCariUnvan(name);
 }
 
 export type FirmaOptionEntry = { key: string; label: string };

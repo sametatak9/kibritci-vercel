@@ -24,11 +24,26 @@ export const PERSONEL_SORUN_LABEL: Record<PersonelKayitSorunu, string> = {
   GECERSIZ_ISIM: 'Geçersiz İsim',
   TEK_KELIME_ISIM: 'Tek Kelime İsim',
   GECERSIZ_TC: 'Geçersiz TC',
-  LEGACY_KAYIT: 'Legacy Import',
-  YAPAY_IMPORT: 'Yapay/Import Kayıt',
-  YOKLAMA_YETIM: 'Yoklama Yetim',
+  LEGACY_KAYIT: 'Excel Import',
+  YAPAY_IMPORT: 'Eksik Import Profili',
+  YOKLAMA_YETIM: 'Yetim Yoklama ID',
   EKSIK_BILGI: 'Eksik Bilgi',
 };
+
+/** Sorunlu kayıt filtresine giren gerçek hatalar */
+export const KRITIK_PERSONEL_SORUNLARI: PersonelKayitSorunu[] = [
+  'CIFT_ISIM',
+  'YAKIN_ISIM',
+  'CIFT_TC',
+  'ISIMDE_RAKAM',
+  'GECERSIZ_ISIM',
+  'TEK_KELIME_ISIM',
+  'GECERSIZ_TC',
+];
+
+export function isKritikPersonelSorunu(sorun: PersonelKayitSorunu): boolean {
+  return KRITIK_PERSONEL_SORUNLARI.includes(sorun);
+}
 
 export type PersonelKaliteOptions = {
   yoklamalar?: AylikYoklamaMap;
@@ -89,9 +104,40 @@ export function legacyImportKaydi(p: Pick<Personel, 'id'>): boolean {
   return /^PRS-LEGACY/i.test(String(p.id || ''));
 }
 
-/** createMinimalPersonel / AI yoklama import parmak izi */
-export function yapayImportKaydi(p: Personel): boolean {
-  if (legacyImportKaydi(p)) return true;
+/** createMinimalPersonel / AI yoklama import parmak izi — geçerli kadro kaydı değilse */
+export function yapayImportKaydi(p: Personel, yoklamalar?: AylikYoklamaMap): boolean {
+  if (isGercekCalisanImportKaydi(p, yoklamalar)) return false;
+
+  const noTc = !String(p.tcNo || '').trim();
+  const noTel = !String(p.telefonNo || '').trim();
+  const defaultDogum = String(p.dogumTarihi || '').startsWith('1990-01-01');
+  const defaultAdres = String(p.adres || '').includes('Yüksekova Konut');
+  const sigortasiz = String(p.sgkDurumu || '').trim() === 'Sigortasız';
+
+  if (legacyImportKaydi(p)) {
+    return noTc && !personHasYoklamaData(yoklamalar, p.id);
+  }
+
+  return noTc && noTel && sigortasiz && (defaultDogum || defaultAdres);
+}
+
+/** Excel/AI import ile açılmış ama yoklama/kimlik ile doğrulanmış gerçek çalışan */
+export function isGercekCalisanImportKaydi(
+  p: Personel,
+  yoklamalar?: AylikYoklamaMap
+): boolean {
+  if (gecersizIsimKaydi(p)) return false;
+  const hasTc = validateTC(String(p.tcNo || '').trim());
+  const hasYoklama = personHasYoklamaData(yoklamalar, p.id);
+  const hasHire = Boolean(String(p.iseGirisTarihi || '').trim());
+  if (p.kaynak === 'LEGACY_IMPORT' && hasHire && (hasTc || hasYoklama)) return true;
+  if (!legacyImportKaydi(p) && p.kaynak !== 'LEGACY_IMPORT') {
+    return hasHire && (hasTc || hasYoklama) && !yapayImportStubFingerprint(p);
+  }
+  return hasHire && (hasTc || hasYoklama);
+}
+
+function yapayImportStubFingerprint(p: Personel): boolean {
   const noTc = !String(p.tcNo || '').trim();
   const noTel = !String(p.telefonNo || '').trim();
   const defaultDogum = String(p.dogumTarihi || '').startsWith('1990-01-01');
@@ -100,8 +146,12 @@ export function yapayImportKaydi(p: Personel): boolean {
   return noTc && noTel && sigortasiz && (defaultDogum || defaultAdres);
 }
 
+export function eksikKritikBilgi(p: Personel): boolean {
+  return !String(p.ad || '').trim() || !String(p.soyad || '').trim();
+}
+
 export function eksikTemelBilgi(p: Personel): boolean {
-  return !String(p.ad || '').trim() || !String(p.soyad || '').trim() || !String(p.iseGirisTarihi || '').trim();
+  return eksikKritikBilgi(p) || !String(p.iseGirisTarihi || '').trim();
 }
 
 function personHasYoklamaData(yoklamalar: AylikYoklamaMap | undefined, personelId: string): boolean {
@@ -125,7 +175,7 @@ export type PersonelKaliteIndex = {
   invalidTcIds: Set<string>;
   legacyImportIds: Set<string>;
   yapayImportIds: Set<string>;
-  yoklamaYetimIds: Set<string>;
+  importKaynakIds: Set<string>;
   orphanYoklamaIds: string[];
 };
 
@@ -213,7 +263,7 @@ export function buildPersonelKaliteIndex(
   const invalidTcIds = new Set<string>();
   const legacyImportIds = new Set<string>();
   const yapayImportIds = new Set<string>();
-  const yoklamaYetimIds = new Set<string>();
+  const importKaynakIds = new Set<string>();
 
   for (const p of personeller) {
     const name = personelAdSoyadKey(p);
@@ -242,23 +292,26 @@ export function buildPersonelKaliteIndex(
       pushIssue(issuesById, p.id, 'GECERSIZ_TC');
       invalidTcIds.add(p.id);
     }
-    if (legacyImportKaydi(p)) {
-      pushIssue(issuesById, p.id, 'LEGACY_KAYIT');
-      legacyImportIds.add(p.id);
+
+    const gercekImportCalisan = isGercekCalisanImportKaydi(p, yoklamalar);
+
+    if (gercekImportCalisan) {
+      importKaynakIds.add(p.id);
+      if (legacyImportKaydi(p) || p.kaynak === 'LEGACY_IMPORT') {
+        legacyImportIds.add(p.id);
+      }
+    } else {
+      if (legacyImportKaydi(p)) {
+        pushIssue(issuesById, p.id, 'LEGACY_KAYIT');
+        legacyImportIds.add(p.id);
+      }
+      if (yapayImportKaydi(p, yoklamalar)) {
+        pushIssue(issuesById, p.id, 'YAPAY_IMPORT');
+        yapayImportIds.add(p.id);
+      }
     }
-    if (yapayImportKaydi(p)) {
-      pushIssue(issuesById, p.id, 'YAPAY_IMPORT');
-      yapayImportIds.add(p.id);
-    }
-    if (
-      yoklamalar &&
-      personHasYoklamaData(yoklamalar, p.id) &&
-      (yapayImportKaydi(p) || legacyImportKaydi(p) || !String(p.tcNo || '').trim())
-    ) {
-      pushIssue(issuesById, p.id, 'YOKLAMA_YETIM');
-      yoklamaYetimIds.add(p.id);
-    }
-    if (eksikTemelBilgi(p)) {
+
+    if (eksikKritikBilgi(p)) {
       pushIssue(issuesById, p.id, 'EKSIK_BILGI');
     }
   }
@@ -284,9 +337,16 @@ export function buildPersonelKaliteIndex(
       return [label, list] as [string, Personel[]];
     });
 
+  const problematicIds = new Set<string>();
+  for (const [personelId, issues] of issuesById) {
+    if (issues.some(isKritikPersonelSorunu)) {
+      problematicIds.add(personelId);
+    }
+  }
+
   return {
     issuesById,
-    problematicIds: new Set(issuesById.keys()),
+    problematicIds,
     duplicateNameGroups,
     nearDuplicateNameGroups,
     duplicateNameIds,
@@ -298,7 +358,7 @@ export function buildPersonelKaliteIndex(
     invalidTcIds,
     legacyImportIds,
     yapayImportIds,
-    yoklamaYetimIds,
+    importKaynakIds,
     orphanYoklamaIds,
   };
 }
@@ -322,12 +382,13 @@ export function formatPersonelKaliteOzet(index: PersonelKaliteIndex): string {
   if (index.invalidNameIds.size > 0) parts.push(`${index.invalidNameIds.size} geçersiz isim`);
   if (index.tekKelimeIsimIds.size > 0) parts.push(`${index.tekKelimeIsimIds.size} tek kelime`);
   if (index.invalidTcIds.size > 0) parts.push(`${index.invalidTcIds.size} geçersiz TC`);
-  if (index.legacyImportIds.size > 0) parts.push(`${index.legacyImportIds.size} legacy import`);
-  if (index.yapayImportIds.size > 0) parts.push(`${index.yapayImportIds.size} yapay/import`);
-  if (index.yoklamaYetimIds.size > 0) parts.push(`${index.yoklamaYetimIds.size} yoklama yetim`);
+  if (index.legacyImportIds.size > 0) {
+    parts.push(`${index.importKaynakIds.size} import kadro (onaylı)`);
+  }
+  if (index.yapayImportIds.size > 0) parts.push(`${index.yapayImportIds.size} eksik import profili`);
   if (index.orphanYoklamaIds.length > 0) {
     parts.push(`${index.orphanYoklamaIds.length} yetim yoklama ID`);
   }
-  parts.push(`toplam ${index.problematicIds.size} sorunlu`);
+  parts.push(`${index.problematicIds.size} gerçek sorunlu`);
   return parts.join(' · ');
 }

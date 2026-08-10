@@ -66,6 +66,10 @@ import {
   yazdirIsMakinesiIcmal,
   IS_MAKINESI_ICMAL_TIPLER,
 } from '../lib/isMakinesiIcmalUtils';
+import {
+  applyTaseronEnvanterTemizlik,
+  previewTaseronEnvanterTemizlik,
+} from '../lib/taseronEnvanterTemizlik';
 
 type SubPage =
   | 'envanter'
@@ -79,8 +83,11 @@ type SubPage =
 
 interface TaseronKesintiScreenProps {
   cariKartlar: CariKart[];
+  setCariKartlar?: React.Dispatch<React.SetStateAction<CariKart[]>>;
   personeller?: Personel[];
+  setPersoneller?: React.Dispatch<React.SetStateAction<Personel[]>>;
   kampKayitlari?: KampKaydi[];
+  setKampKayitlari?: React.Dispatch<React.SetStateAction<KampKaydi[]>>;
   kampOdalari?: KampOdasi[];
   operatorFaaliyetleri: OperatorFaaliyet[];
   setOperatorFaaliyetleri?: React.Dispatch<React.SetStateAction<OperatorFaaliyet[]>>;
@@ -98,8 +105,11 @@ interface TaseronKesintiScreenProps {
 
 export const TaseronKesintiScreen: React.FC<TaseronKesintiScreenProps> = ({
   cariKartlar,
+  setCariKartlar,
   personeller = [],
+  setPersoneller,
   kampKayitlari = [],
+  setKampKayitlari,
   kampOdalari = [],
   operatorFaaliyetleri,
   setOperatorFaaliyetleri,
@@ -153,6 +163,56 @@ export const TaseronKesintiScreen: React.FC<TaseronKesintiScreenProps> = ({
   const [selectedLogIds, setSelectedLogIds] = useState<string[]>([]);
   /** İcmal: varsayılan yalnızca onaylı faaliyetler */
   const [icmalOnlyOnayli, setIcmalOnlyOnayli] = useState(false);
+  const [repairingEnvanter, setRepairingEnvanter] = useState(false);
+
+  const handleRepairEnvanter = async () => {
+    const preview = previewTaseronEnvanterTemizlik(cariKartlar, personeller, kampKayitlari);
+    const hasWork =
+      preview.dedupPlans.length > 0 ||
+      preview.fuzzyMergePlans.length > 0 ||
+      preview.createCariler.length > 0 ||
+      preview.personelPatches.length > 0 ||
+      preview.deletePersonelIds.length > 0 ||
+      preview.kampPatches.length > 0;
+
+    if (!hasWork) {
+      alert('Düzeltilecek taşeron envanter kaydı bulunamadı.');
+      return;
+    }
+
+    const msg = [
+      'Taşeron firma envanteri düzeltilecek:',
+      '',
+      ...preview.summary.map((s) => `• ${s}`),
+      '',
+      'Devam edilsin mi?',
+    ].join('\n');
+
+    if (!window.confirm(msg)) return;
+
+    setRepairingEnvanter(true);
+    try {
+      const result = await applyTaseronEnvanterTemizlik(
+        cariKartlar,
+        personeller,
+        kampKayitlari,
+        preview
+      );
+      setCariKartlar?.(result.cariKartlar);
+      setPersoneller?.(result.personeller);
+      setKampKayitlari?.(result.kampKayitlari);
+      addNotification?.(
+        `Taşeron envanter düzeltildi: ${result.deletedCariIds.length} cari silindi, ${preview.createCariler.length} cari oluşturuldu, ${preview.personelPatches.length} personel güncellendi.`
+      );
+      alert(
+        `Envanter düzenlendi.\nSilinen cari: ${result.deletedCariIds.length}\nYeni cari: ${preview.createCariler.length}\nPersonel güncelleme: ${preview.personelPatches.length}\nPersonel silme: ${result.deletedPersonelIds.length}`
+      );
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Envanter düzeltmesi başarısız.');
+    } finally {
+      setRepairingEnvanter(false);
+    }
+  };
 
   useEffect(() => {
     const unsubKapi = onSnapshot(collection(db, 'guvenlikGirisCikisLoglari'), (snap) => {
@@ -924,9 +984,20 @@ export const TaseronKesintiScreen: React.FC<TaseronKesintiScreenProps> = ({
                 ))}
               </div>
               <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
-                <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
+                <div className="px-4 py-3 border-b border-slate-100 flex flex-wrap items-center justify-between gap-2">
                   <h3 className="text-xs font-black uppercase text-slate-800">Taşeron Firma Envanteri</h3>
-                  <span className="text-[10px] text-slate-500">Cari + personel firmaAdi + kamp birleşik</span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] text-slate-500 hidden sm:inline">Cari + personel firmaAdi + kamp birleşik</span>
+                    <button
+                      type="button"
+                      disabled={repairingEnvanter}
+                      onClick={() => void handleRepairEnvanter()}
+                      className="text-[10px] font-bold px-3 py-1.5 rounded-xl border border-amber-300 bg-amber-50 text-amber-900 hover:bg-amber-100 disabled:opacity-60 cursor-pointer"
+                      title="Cari'siz firmalara taşeron cari aç, AAA/Y sil, EMA+EMA MERMER birleştir, junk firma adlarını düzelt"
+                    >
+                      {repairingEnvanter ? 'Düzeltiliyor…' : 'Envanteri Düzelt'}
+                    </button>
+                  </div>
                 </div>
                 <div className="overflow-x-auto max-h-[480px] overflow-y-auto">
                   <table className="w-full text-left text-xs">

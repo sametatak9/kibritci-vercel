@@ -3760,8 +3760,11 @@ export default function App() {
               {activeTab === "taseron_kesinti" && (
                 <TaseronKesintiScreen 
                   cariKartlar={cariKartlar}
+                  setCariKartlar={setCariKartlarWithSync}
                   personeller={personeller}
+                  setPersoneller={setPersonellerWithSync}
                   kampKayitlari={kampKayitlari}
+                  setKampKayitlari={setKampKayitlariWithSync}
                   kampOdalari={kampOdalari}
                   operatorFaaliyetleri={operatorFaaliyetleri}
                   setOperatorFaaliyetleri={setOperatorFaaliyetleriWithSync}
