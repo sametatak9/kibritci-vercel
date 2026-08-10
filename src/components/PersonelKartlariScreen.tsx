@@ -7,7 +7,7 @@ import {
   Banknote, Shield, Star, TrendingUp, AlertCircle, CheckCircle2,
   XCircle, MinusCircle, Hash, Download, RefreshCw, Eye
 } from 'lucide-react';
-import { Personel, AylikYoklamaMap, AracBakim, KampKaydi, KampOdasi, HazirTutanak, KasaHareketi, SahaFaaliyeti } from '../types/erp';
+import { Personel, AylikYoklamaMap, AracBakim, KampKaydi, KampOdasi, HazirTutanak, KasaHareketi, SahaFaaliyeti, MaaşOdeme } from '../types/erp';
 import { getYoklamaDay, iterateMonthYoklama, isDayActiveForPersonel, asYoklamaGunMap, parseYoklamaDateKey, normalizeTurkishName } from '../lib/yoklamaUtils';
 import { PersonelIdCard } from './PersonelIdCard';
 import { db } from '../lib/firebase';
