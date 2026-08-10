@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   Tent, Plus, Trash2, Camera, Check, RefreshCw, Eye, 
-  Search, UserPlus, ClipboardList, Package, Layers, MapPin, Sparkles, CheckCircle, Clock, X, ArrowRight, ShieldCheck, DoorOpen, LogOut, Image as ImageIcon, MessageSquare, Calendar, Truck, AlertTriangle
+  Search, UserPlus, ClipboardList, Package, Layers, MapPin, Sparkles, CheckCircle, Clock, X, ArrowRight, ShieldCheck, DoorOpen, LogOut, Image as ImageIcon, MessageSquare, Calendar, Truck, AlertTriangle, Building2
 } from 'lucide-react';
 import { KampOdasi, KampKaydi, Personel, StokKart, KampYerleske, KampKat, CariKart, CariKartIslem, AylikYoklamaMap, Fatura, Irsaliye } from '../types/erp';
 import { db, saveDocument } from '../lib/firebase';
@@ -2024,8 +2024,8 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
               : 'bg-white border-slate-200/80 text-slate-500 hover:bg-slate-50'
           }`}
         >
-          <ClipboardList size={14} />
-          <span>📋 Personel &amp; Yoklama</span>
+          <Building2 size={14} />
+          <span>📋 Taşeron Sayım</span>
         </button>
 
         <button
