@@ -2,6 +2,7 @@ import React, { useMemo, useState, useRef } from 'react';
 import { 
   Wallet, ArrowUpRight, ArrowDownRight, Printer,
   Calendar, FileText, Search, Eye, Image as ImageIcon, AlertCircle,
+  Pencil, Trash2,
 } from 'lucide-react';
 import { KasaHareketi, KasaOdemeDurumu, Personel } from '../types/erp';
 import { ImageLightbox } from './ImageLightbox';
@@ -14,8 +15,6 @@ import {
   isSoforIadeKasaHareketi,
   isSoforKaynakliKasaHareketi,
   isSoforUzerindenKasaGideri,
-  isKasaninHarcamasiKalemi,
-  isDigerHarcamaKalemi,
   resolveKasaOdemeDurumu,
 } from '../lib/yolHarcamaUtils';
 import { resolvePersonelUnvan } from '../lib/personelUnvanUtils';
@@ -104,6 +103,7 @@ function defaultWeekRange(): { start: string; end: string } {
 export const KasaScreen: React.FC<KasaScreenProps> = ({ 
   kasaHareketleri, 
   setKasaHareketleri,
+  deleteKasaHareketi,
   personeller = [],
 }) => {
   const week0 = defaultWeekRange();
@@ -138,6 +138,8 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
   // Weekly Cash Report Print Modal Toggle
   const [exportingKasaExcel, setExportingKasaExcel] = useState(false);
   const [savingKasa, setSavingKasa] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const formPanelRef = useRef<HTMLDivElement>(null);
 
   const buildAralikHarcamaBundle = async () => {
     const {
@@ -202,12 +204,9 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
     .filter((k) => k.hareketTipi === 'ÇIKIŞ')
     .reduce((sum, current) => sum + current.tutar, 0);
 
-  const digerHarcamaOut = filteredHareketler
-    .filter((k) => k.hareketTipi === 'ÇIKIŞ' && isDigerHarcamaKalemi(k))
-    .reduce((sum, current) => sum + current.tutar, 0);
-  const kasaninHarcamaOut = filteredHareketler
-    .filter((k) => k.hareketTipi === 'ÇIKIŞ' && isKasaninHarcamasiKalemi(k))
-    .reduce((sum, current) => sum + current.tutar, 0);
+  /** Tüm kasa çıkışları — tek “Kasa Harcaması” kartı (BORÇ + Personel + Kasa ödedi) */
+  const kasaHarcamaOut = totalOut;
+  const cikisKayitSayisi = filteredHareketler.filter((k) => k.hareketTipi === 'ÇIKIŞ').length;
 
   /** Seçili aralık — BORÇ / Personel Ödedi / Kasa Ödedi + kişi kırılımı */
   const odemeBazliOzet = useMemo(() => {
@@ -346,6 +345,57 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
     fileInputRef.current?.click();
   };
 
+  const clearKasaForm = () => {
+    setEditingId(null);
+    setNewDate(todayDateKey());
+    setNewType('GİRİŞ');
+    setNewAmount('');
+    setNewDesc('');
+    setNewRefType('DİĞER');
+    setNewRefId('');
+    setNewOdemeDurumu('');
+    setNewPersonelId('');
+    setPersonelArama('');
+    setUploadedFileName(null);
+    setUploadedFileBase64(null);
+  };
+
+  const loadKasaForEdit = (kh: KasaHareketi) => {
+    setEditingId(kh.id);
+    setNewDate(kh.tarih);
+    setNewType(kh.hareketTipi);
+    setNewAmount(String(kh.tutar ?? ''));
+    setNewDesc(kh.aciklama || '');
+    setNewRefType(kh.referansTipi || 'DİĞER');
+    setNewRefId(kh.referansId || '');
+    const odeme = resolveOdemeDurumu(kh);
+    setNewOdemeDurumu(odeme || (kh.hareketTipi === 'ÇIKIŞ' ? 'KASA_ODEDI' : ''));
+    setNewPersonelId(kh.personelId || '');
+    setPersonelArama(kh.personelAdi || kh.surucu || '');
+    setUploadedFileBase64(null);
+    setUploadedFileName(kh.fisEvrakUrl ? 'Mevcut fiş (değiştirmek için yeni seçin)' : null);
+    formPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
+  const handleDeleteKasaKayit = async (kh: KasaHareketi) => {
+    if (!deleteKasaHareketi) {
+      alert('Silme işlemi yapılandırılmamış.');
+      return;
+    }
+    const soforKaynak = isSoforKaynakliKasaHareketi(kh);
+    const msg = soforKaynak
+      ? `Bu kayıt şoför/onay havuzu kaynağından gelmiş olabilir (${kh.id}).\n\nKasa defterinden kalıcı olarak silinsin mi?\n(Firestore: kasaHareketleri)`
+      : `“${kh.aciklama || kh.id}” kaydı kalıcı olarak silinsin mi?\n(Firestore: kasaHareketleri)`;
+    if (!window.confirm(msg)) return;
+    try {
+      await deleteKasaHareketi(kh.id);
+      if (editingId === kh.id) clearKasaForm();
+    } catch (err) {
+      console.error('[kasa-delete]', err);
+      alert(`Silinemedi: ${formatKasaSaveError(err)}`);
+    }
+  };
+
   // Safe validation & submit
   const handleSaveKasaHareketi = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -372,9 +422,13 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
 
     setSavingKasa(true);
     try {
-      const id = `kh_${Date.now()}`;
+      const existing = editingId ? kasaHareketleri.find((k) => k.id === editingId) : undefined;
+      const id = editingId || `kh_${Date.now()}`;
 
       let fisUrl = String(uploadedFileBase64 || '').trim();
+      if (!fisUrl && existing?.fisEvrakUrl) {
+        fisUrl = existing.fisEvrakUrl;
+      }
       // Yeni çekilen/yüklenen data URL → Storage; mevcut https/storage URL dokunma
       if (fisUrl.startsWith('data:')) {
         try {
@@ -399,6 +453,7 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
       }
 
       const record: KasaHareketi = {
+        ...(existing || {}),
         id,
         tarih: newDate,
         hareketTipi: newType,
@@ -462,16 +517,9 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
         setEndDate(newDate);
       }
 
-      setNewDate(todayDateKey());
-      setNewAmount('');
-      setNewDesc('');
-      setNewRefId('');
-      setNewOdemeDurumu('');
-      setNewPersonelId('');
-      setPersonelArama('');
-      setUploadedFileName(null);
-      setUploadedFileBase64(null);
-      alert('Kasa hareketi kaydedildi.');
+      const wasEditing = Boolean(editingId);
+      clearKasaForm();
+      alert(wasEditing ? 'Kasa hareketi güncellendi.' : 'Kasa hareketi kaydedildi.');
     } catch (err) {
       console.error('[kasa] kayıt hatası:', err);
       alert(`Kasa hareketi kaydedilemedi: ${formatKasaSaveError(err)}`);
@@ -500,7 +548,7 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
                 Haftalık Kasa
               </h1>
               <p className="text-[11px] text-[#64748B] font-semibold mt-0.5 leading-relaxed">
-                {appliedStartDate} — {appliedEndDate} · Diğer harcamalar · Kasanın harcaması · BORÇ · Personel ödedi · Kasa ödedi
+                {appliedStartDate} — {appliedEndDate} · Kasa harcaması · BORÇ · Personel ödedi · Kasa ödedi · Firestore kayıtlı
               </p>
             </div>
           </div>
@@ -511,12 +559,10 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
       </div>
 
       {/* Özet kartları — seçili aralık */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-3 shrink-0">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 shrink-0">
         {[
           { title: 'Giriş (aralık)', value: `₺${totalIn.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}`, card: 'border-emerald-200 bg-white text-emerald-800', icon: ArrowUpRight, iconBg: 'bg-emerald-50 text-emerald-700' },
-          { title: 'Çıkış (aralık)', value: `₺${totalOut.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}`, card: 'border-rose-200 bg-white text-rose-800', icon: ArrowDownRight, iconBg: 'bg-rose-50 text-rose-700' },
-          { title: 'Diğer harcamalar', value: `₺${digerHarcamaOut.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}`, card: 'border-[#FED7AA] bg-[#FFF7ED] text-[#9A3412]', icon: Wallet, iconBg: 'bg-[#FFEDD5] text-[#C2410C]', sub: 'Borç + personel ödedi' },
-          { title: 'Kasanın harcaması', value: `₺${kasaninHarcamaOut.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}`, card: 'border-orange-300 bg-[#FFEDD5]/60 text-[#C2410C]', icon: Wallet, iconBg: 'bg-white text-[#EA580C]', sub: 'Kasa ödedi' },
+          { title: 'Kasa harcaması', value: `₺${kasaHarcamaOut.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}`, card: 'border-[#FED7AA] bg-[#FFF7ED] text-[#9A3412]', icon: Wallet, iconBg: 'bg-[#FFEDD5] text-[#C2410C]', sub: `${cikisKayitSayisi} çıkış · borç + personel + kasa ödedi` },
           { title: 'Net bakiye', value: `₺${(totalIn - totalOut).toLocaleString('tr-TR', { minimumFractionDigits: 2 })}`, card: 'border-[#FDBA74] bg-white text-[#9A3412] font-bold', icon: Wallet, iconBg: 'bg-[#FFF7ED] text-[#EA580C]' },
         ].map((item, idx) => {
           const Icon = item.icon;
@@ -549,7 +595,7 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
               Ödeme durumu özeti (seçili aralık)
             </h3>
             <p className="text-[10px] text-[#64748B] mt-0.5">
-              BORÇ · PERSONEL ÖDEDİ · KASA ÖDEDİ — diğer / kasanın harcaması ayrımı yukarıda
+              BORÇ · PERSONEL ÖDEDİ · KASA ÖDEDİ kırılımı — TOPLAM = Kasa Harcaması kartı
             </p>
           </div>
           <div className="flex flex-wrap gap-1.5 text-[10px] font-mono font-bold">
@@ -602,15 +648,24 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
       <div className="flex flex-col lg:flex-1 lg:flex-row gap-4 lg:gap-6 lg:min-h-0">
         
         {/* Left side Form creator */}
-        <div className="order-2 lg:order-1 w-full lg:w-[380px] lg:shrink-0 bg-white border border-[#FED7AA] rounded-2xl flex flex-col overflow-hidden shadow-sm lg:min-h-0 lg:max-h-full">
+        <div ref={formPanelRef} className="order-2 lg:order-1 w-full lg:w-[380px] lg:shrink-0 bg-white border border-[#FED7AA] rounded-2xl flex flex-col overflow-hidden shadow-sm lg:min-h-0 lg:max-h-full">
           
           <div className="p-4 shrink-0 shadow-sm flex items-center justify-between text-white bg-gradient-to-r from-[#EA580C] to-[#C2410C]">
             <div className="flex items-center space-x-2">
               <Wallet size={16} />
               <h3 className="font-bold text-xs uppercase tracking-widest">
-                Yeni Kasa Hareketi
+                {editingId ? 'Kasa Hareketi Düzenle' : 'Yeni Kasa Hareketi'}
               </h3>
             </div>
+            {editingId && (
+              <button
+                type="button"
+                onClick={clearKasaForm}
+                className="text-[10px] font-bold px-2 py-1 rounded-lg bg-white/20 hover:bg-white/30 cursor-pointer"
+              >
+                İptal
+              </button>
+            )}
           </div>
 
           <form onSubmit={handleSaveKasaHareketi} className="lg:flex-grow overflow-y-auto p-5 space-y-4 text-xs max-h-[70vh] lg:max-h-none bg-[#FFFBF7]/50">
@@ -835,7 +890,7 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
               disabled={savingKasa}
               className="w-full text-white font-bold py-2.5 rounded-xl transition shadow-md cursor-pointer text-xs uppercase disabled:opacity-60 disabled:cursor-wait bg-emerald-600 hover:bg-emerald-700"
             >
-              {savingKasa ? 'Kaydediliyor…' : 'Hareketi Kaydet'}
+              {savingKasa ? 'Kaydediliyor…' : editingId ? 'Değişiklikleri Kaydet' : 'Hareketi Kaydet'}
             </button>
           </form>
         </div>
@@ -849,7 +904,7 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
               <h4 className="font-bold text-sm text-slate-800 uppercase tracking-widest">Kasa Hareketleri Defteri</h4>
             </div>
             <p className="w-full text-[10px] text-slate-500 leading-snug">
-              Şoför fişleri onay havuzundan otomatik gelir; listede silme/düzenleme yapılmaz. Yeni manuel hareket soldaki formdan eklenir.
+              Kayıtlar Firestore <span className="font-mono">kasaHareketleri</span> koleksiyonunda saklanır. Düzenle / sil listeden veya soldaki formdan yapılır; şoför fişleri de aynı defterde güncellenebilir.
             </p>
 
             <span className="bg-slate-100 text-slate-600 text-[10px] font-bold px-2 py-1 rounded-md shrink-0 font-mono">
@@ -987,6 +1042,26 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
                       {kh.surucu ? ` · ${kh.surucu}` : ''}
                     </p>
                     <div className="flex items-center justify-end gap-1 pt-1 border-t border-slate-100">
+                      <button
+                        type="button"
+                        onClick={() => loadKasaForEdit(kh)}
+                        className="inline-flex items-center gap-1 px-2 py-1.5 hover:bg-amber-50 text-amber-800 rounded-lg cursor-pointer text-[10px] font-bold border border-amber-200"
+                        title="Soldaki formda düzenle"
+                      >
+                        <Pencil size={14} />
+                        Düzenle
+                      </button>
+                      {deleteKasaHareketi && (
+                        <button
+                          type="button"
+                          onClick={() => void handleDeleteKasaKayit(kh)}
+                          className="inline-flex items-center gap-1 px-2 py-1.5 hover:bg-rose-50 text-rose-700 rounded-lg cursor-pointer text-[10px] font-bold border border-rose-200"
+                          title="Firestore kaydını sil"
+                        >
+                          <Trash2 size={14} />
+                          Sil
+                        </button>
+                      )}
                       {kh.fisEvrakUrl && (
                         <button
                           type="button"
@@ -1088,6 +1163,26 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
 
                       {/* Interactive Visual Action Icons */}
                       <div className="flex items-center space-x-1 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => loadKasaForEdit(kh)}
+                          className="p-1 px-1.5 bg-amber-50 border border-amber-200 hover:bg-amber-100 text-amber-900 rounded-lg flex items-center space-x-1 transition shadow-xs text-[9px] font-bold cursor-pointer"
+                          title="Soldaki formda düzenle"
+                        >
+                          <Pencil size={10} />
+                          <span>Düzenle</span>
+                        </button>
+                        {deleteKasaHareketi && (
+                          <button
+                            type="button"
+                            onClick={() => void handleDeleteKasaKayit(kh)}
+                            className="p-1 px-1.5 bg-rose-50 border border-rose-200 hover:bg-rose-100 text-rose-800 rounded-lg flex items-center space-x-1 transition shadow-xs text-[9px] font-bold cursor-pointer"
+                            title="Firestore kaydını sil"
+                          >
+                            <Trash2 size={10} />
+                            <span>Sil</span>
+                          </button>
+                        )}
                         {kh.fisEvrakUrl && (
                           <button 
                             onClick={() => {
