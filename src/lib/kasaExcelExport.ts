@@ -537,6 +537,206 @@ function groupByPersonel(
   return [...map.values()].sort((a, b) => b.toplam - a.toplam);
 }
 
+type MasrafOzetSatir = {
+  label: string;
+  kalem: number;
+  toplam: number;
+};
+
+function resolveMasrafKategori(
+  kh: KasaHareketi,
+  personeller: Array<Pick<Personel, 'id' | 'ad' | 'soyad' | 'eposta' | 'tcNo'>>
+): string {
+  const a = buildDefterAciklama(kh, personeller);
+  if (/ŞOFÖR|SOFOR|PLAKA|34[A-Z]{2}\d{2,3}|ARAÇ|ARAC|KENDİ HARCAMASI|KASA BORCU/.test(a)) {
+    return 'ARAÇ / ŞOFÖR';
+  }
+  if (/KIRTASİYE|KIRTASIYE|OFİS|OFIS|FOY|OZALİT|KALEM|DEFTER/.test(a)) {
+    return 'KIRTASİYE / OFİS';
+  }
+  if (/YEMEK|KANTİN|KANTIN|TOST|İKRAM|IKRAM|MEYVE|ÖĞLE|OGLEN|MASRAF|YEMEĞ/.test(a)) {
+    return 'YEMEK / İKRAM';
+  }
+  if (/NOTER|İGDAŞ|IGDAS|EMLAK KONUT|RESMİ|HARÇ|HARCI/.test(a)) {
+    return 'NOTER / RESMİ GİDER';
+  }
+  if (/KAMP|LOJMAN|BARINMA|TEMİZLİK|TEMIZLIK/.test(a)) {
+    return 'KAMP / LOJMAN';
+  }
+  if (/HURDA|SATIŞ|SATIS|EFT|GİRİŞ/.test(a) && kh.hareketTipi === 'GİRİŞ') {
+    return 'KASA GİRİŞİ';
+  }
+  return 'DİĞER MASRAFLAR';
+}
+
+function groupByMasrafKategorisi(
+  cikislar: KasaHareketi[],
+  personeller: Array<Pick<Personel, 'id' | 'ad' | 'soyad' | 'eposta' | 'tcNo'>>
+): MasrafOzetSatir[] {
+  const map = new Map<string, { kalem: number; toplam: number }>();
+  for (const kh of cikislar) {
+    const label = resolveMasrafKategori(kh, personeller);
+    const t = roundKasaMoney(kh.tutar);
+    const prev = map.get(label);
+    if (prev) {
+      prev.kalem += 1;
+      prev.toplam = roundKasaMoney(prev.toplam + t);
+    } else {
+      map.set(label, { kalem: 1, toplam: t });
+    }
+  }
+  return [...map.entries()]
+    .map(([label, v]) => ({ label, kalem: v.kalem, toplam: roundKasaMoney(v.toplam) }))
+    .sort((a, b) => b.toplam - a.toplam);
+}
+
+function writeOzetBaslik(
+  sheet: Worksheet,
+  row: number,
+  cols: number,
+  title: string,
+  bg = 'FFFFF7ED'
+): void {
+  sheet.mergeCells(row, 1, row, cols);
+  const cell = sheet.getCell(row, 1);
+  cell.value = title;
+  cell.font = { bold: true, size: 10 };
+  cell.alignment = { vertical: 'middle', wrapText: true };
+  cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: bg } };
+  sheet.getRow(row).height = 20;
+}
+
+function writeOzetTabloBaslik(sheet: Worksheet, row: number): void {
+  const hr = sheet.getRow(row);
+  hr.height = 18;
+  const headers = ['#', 'AÇIKLAMA / KİŞİ / KATEGORİ', '', '', 'KALEM', '', 'TOPLAM (₺)'];
+  headers.forEach((h, i) => {
+    if (i === 2 || i === 3 || i === 5) return;
+    const cell = hr.getCell(i + 1);
+    cell.value = h;
+    cell.font = { bold: true, size: 9 };
+    cell.alignment = { horizontal: i >= 4 ? 'center' : 'left', vertical: 'middle' };
+    cell.border = thinBorder();
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2E8F0' } };
+  });
+  sheet.mergeCells(row, 2, row, 4);
+}
+
+function writeOzetSatir(
+  sheet: Worksheet,
+  row: number,
+  sira: number,
+  label: string,
+  kalem: number,
+  toplam: number,
+  bold = false
+): void {
+  const r = sheet.getRow(row);
+  r.height = 18;
+  r.getCell(1).value = sira;
+  r.getCell(1).alignment = { horizontal: 'center', vertical: 'middle' };
+  sheet.mergeCells(row, 2, row, 4);
+  const labelCell = r.getCell(2);
+  labelCell.value = label;
+  labelCell.alignment = { vertical: 'middle', wrapText: true };
+  labelCell.font = { size: 10, bold };
+  r.getCell(5).value = kalem;
+  r.getCell(5).alignment = { horizontal: 'center', vertical: 'middle' };
+  setDefterMoneyValue(r.getCell(7), toplam);
+  for (let c = 1; c <= 7; c++) {
+    const cell = r.getCell(c);
+    cell.border = thinBorder();
+    if (!bold) cell.font = { size: 10, ...(c === 2 ? { bold: true } : {}) };
+    else cell.font = { size: 10, bold: true };
+  }
+}
+
+/** Üst özet: genel toplam + kişi + kategori — altına defter gelir */
+function appendKasaMasrafOzetBlock(
+  sheet: Worksheet,
+  inRange: KasaHareketi[],
+  personeller: Array<Pick<Personel, 'id' | 'ad' | 'soyad' | 'eposta' | 'tcNo'>>,
+  startRow: number,
+  cols: number
+): number {
+  let row = startRow;
+  const cikislar = inRange.filter((k) => k.hareketTipi === 'ÇIKIŞ');
+  const girisler = inRange.filter((k) => k.hareketTipi === 'GİRİŞ');
+  const totalOut = roundKasaMoney(cikislar.reduce((s, k) => s + roundKasaMoney(k.tutar), 0));
+  const totalIn = roundKasaMoney(girisler.reduce((s, k) => s + roundKasaMoney(k.tutar), 0));
+
+  writeOzetBaslik(sheet, row, cols, 'GENEL TOPLAM — KASA HARCAMA (ÇIKIŞ)', 'FFFFEDD5');
+  row += 1;
+  writeOzetSatir(
+    sheet,
+    row,
+    1,
+    `${cikislar.length} kalem · BORÇ + Personel ödedi + Kasa ödedi`,
+    cikislar.length,
+    totalOut,
+    true
+  );
+  row += 2;
+
+  if (girisler.length > 0) {
+    writeOzetBaslik(sheet, row, cols, 'KASA GİRİŞLERİ (EFT / TAHSİLAT)', 'FFC6EFCE');
+    row += 1;
+    writeOzetTabloBaslik(sheet, row);
+    row += 1;
+    girisler
+      .slice()
+      .sort((a, b) => String(a.tarih).localeCompare(String(b.tarih)))
+      .forEach((kh, i) => {
+        writeOzetSatir(
+          sheet,
+          row,
+          i + 1,
+          `${formatTarihDdMmYyyy(kh.tarih)} · ${buildDefterAciklama(kh, personeller)}`,
+          1,
+          roundKasaMoney(kh.tutar)
+        );
+        row += 1;
+      });
+    writeOzetSatir(sheet, row, 0, 'GİRİŞ TOPLAMI', girisler.length, totalIn, true);
+    row += 2;
+  }
+
+  writeOzetBaslik(
+    sheet,
+    row,
+    cols,
+    'HARCAMA BAZLI KİŞİ ÖZETİ — KİM NE KADAR MASRAF YAPMIŞ'
+  );
+  row += 1;
+  writeOzetTabloBaslik(sheet, row);
+  row += 1;
+  const kisiBuckets = groupByPersonel(cikislar, personeller);
+  kisiBuckets.forEach((b, i) => {
+    writeOzetSatir(sheet, row, i + 1, b.label, b.kalemler.length, roundKasaMoney(b.toplam));
+    row += 1;
+  });
+  if (kisiBuckets.length === 0) {
+    writeOzetSatir(sheet, row, 1, 'Bu dönemde kasa çıkışı yok', 0, 0);
+    row += 1;
+  }
+  row += 1;
+
+  writeOzetBaslik(sheet, row, cols, 'MASRAF KATEGORİ ÖZETİ — NEREYE NE HARCANDI');
+  row += 1;
+  writeOzetTabloBaslik(sheet, row);
+  row += 1;
+  const katBuckets = groupByMasrafKategorisi(cikislar, personeller);
+  katBuckets.forEach((b, i) => {
+    writeOzetSatir(sheet, row, i + 1, b.label, b.kalem, b.toplam);
+    row += 1;
+  });
+  row += 1;
+
+  writeOzetBaslik(sheet, row, cols, 'KALEM KALEM DEFTER — DETAY HAREKETLER', 'FFE2E8F0');
+  row += 1;
+  return row;
+}
+
 const TR_AY_UPPER = [
   'OCAK',
   'ŞUBAT',
@@ -641,9 +841,10 @@ function addHaftalikKasaDefterSheet(
   titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
   sheet.getRow(1).height = 24;
 
-  const headerRow = 3;
+  let row = appendKasaMasrafOzetBlock(sheet, inRange, personeller, 2, COLS);
+
   const headers = ['TARİH', 'AY', 'YIL', 'AÇIKLAMA', 'GİREN', 'ÇIKAN', 'BAKİYE'];
-  const hr = sheet.getRow(headerRow);
+  const hr = sheet.getRow(row);
   hr.height = 20;
   headers.forEach((h, i) => {
     const cell = hr.getCell(i + 1);
@@ -653,10 +854,9 @@ function addHaftalikKasaDefterSheet(
     cell.border = thinBorder();
     cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2E8F0' } };
   });
+  row += 1;
 
   let balance = openingBalance;
-
-  let row = headerRow + 1;
   const carry = sheet.getRow(row);
   carry.height = 18;
   carry.getCell(4).value =
@@ -762,17 +962,17 @@ function addArnavutkoyKasaDefterSheet(
   let balance = openingBalance;
   const closingBalance = roundKasaMoney(balance + totalIn - totalOut);
 
-  const meta = sheet.getRow(1);
-  meta.height = 22;
-  meta.getCell(2).value = 'PROJE MÜDÜRÜ';
-  meta.getCell(2).font = { bold: true, size: 10 };
-  setDefterMoneyValue(meta.getCell(5), totalIn);
-  setDefterMoneyValue(meta.getCell(6), totalOut);
-  setDefterMoneyValue(meta.getCell(7), closingBalance);
+  sheet.mergeCells(1, 1, 1, COLS);
+  const titleCell = sheet.getCell(1, 1);
+  titleCell.value = `ARNAVUTKÖY KASA DEFTERİ · ${formatTarihLabelTr(startDate)} — ${formatTarihLabelTr(endDate)}`;
+  titleCell.font = { bold: true, size: 13 };
+  titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
+  sheet.getRow(1).height = 26;
 
-  const headerRow = 2;
+  let row = appendKasaMasrafOzetBlock(sheet, inRange, personeller, 2, COLS);
+
   const headers = ['TARİH', 'AY', 'YIL', 'AÇIKLAMA', 'GİREN', 'ÇIKAN', 'BAKİYE'];
-  const hr = sheet.getRow(headerRow);
+  const hr = sheet.getRow(row);
   hr.height = 20;
   headers.forEach((h, i) => {
     const cell = hr.getCell(i + 1);
@@ -782,8 +982,7 @@ function addArnavutkoyKasaDefterSheet(
     cell.border = thinBorder();
     cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2E8F0' } };
   });
-
-  let row = headerRow + 1;
+  row += 1;
   const carry = sheet.getRow(row);
   carry.height = 18;
   carry.getCell(4).value =
@@ -843,7 +1042,24 @@ function addArnavutkoyKasaDefterSheet(
     row += 1;
   }
 
-  sheet.pageSetup.printArea = `A1:G${Math.max(row - 1, headerRow)}`;
+  const footer = sheet.getRow(row);
+  footer.height = 22;
+  footer.getCell(2).value = 'PROJE MÜDÜRÜ';
+  footer.getCell(2).font = { bold: true, size: 10 };
+  footer.getCell(4).value = 'DÖNEM TOPLAMLARI';
+  footer.getCell(4).font = { bold: true, size: 10 };
+  setDefterMoneyValue(footer.getCell(5), totalIn);
+  setDefterMoneyValue(footer.getCell(6), totalOut);
+  setDefterMoneyValue(footer.getCell(7), closingBalance);
+  for (let c = 1; c <= COLS; c++) {
+    const cell = footer.getCell(c);
+    cell.border = thinBorder();
+    cell.font = { bold: true, size: 10 };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF2CC' } };
+  }
+  row += 1;
+
+  sheet.pageSetup.printArea = `A1:G${Math.max(row - 1, 1)}`;
 }
 
 /**
@@ -939,19 +1155,10 @@ function addHaftalikKasaIcmalSheet(
   titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
   sheet.getRow(1).height = 26;
 
-  const meta = sheet.getRow(2);
-  meta.height = 22;
-  meta.getCell(2).value = 'PROJE MÜDÜRÜ';
-  meta.getCell(2).font = { bold: true, size: 10 };
-  meta.getCell(4).value = 'DÖNEM TOPLAMLARI';
-  meta.getCell(4).font = { bold: true, size: 10 };
-  setDefterMoneyValue(meta.getCell(5), totalIn);
-  setDefterMoneyValue(meta.getCell(6), totalOut);
-  setDefterMoneyValue(meta.getCell(7), closing);
+  let row = appendKasaMasrafOzetBlock(sheet, inRange, personeller, 2, COLS);
 
-  const headerRow = 3;
   const headers = ['TARİH', 'AY', 'YIL', 'AÇIKLAMA', 'GİREN', 'ÇIKAN', 'BAKİYE'];
-  const hr = sheet.getRow(headerRow);
+  const hr = sheet.getRow(row);
   hr.height = 20;
   headers.forEach((h, i) => {
     const cell = hr.getCell(i + 1);
@@ -961,8 +1168,7 @@ function addHaftalikKasaIcmalSheet(
     cell.border = thinBorder();
     cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2E8F0' } };
   });
-
-  let row = headerRow + 1;
+  row += 1;
   const carry = sheet.getRow(row);
   carry.height = 18;
   carry.getCell(4).value =
