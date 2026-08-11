@@ -7,6 +7,10 @@ import {
 import { KasaHareketi, KasaOdemeDurumu, Personel, AylikYoklamaMap } from '../types/erp';
 import { ImageLightbox } from './ImageLightbox';
 import { exportKasaExcel, buildKasaExcelBuffer } from '../lib/kasaExcelExport';
+import {
+  exportArnavutkoyKasaDefterExcel,
+  getArnavutkoyDefterMeta,
+} from '../lib/arnavutkoyKasaDefterExport';
 import { saveDocument } from '../lib/firebase';
 import {
   ensureKasaFisFotoPersisted,
@@ -144,6 +148,7 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
 
   // Weekly Cash Report Print Modal Toggle
   const [exportingKasaExcel, setExportingKasaExcel] = useState(false);
+  const [exportingArnavutDefter, setExportingArnavutDefter] = useState(false);
   const [printingGunlukRapor, setPrintingGunlukRapor] = useState(false);
   const [importingKasaDefter, setImportingKasaDefter] = useState(false);
   const [importProgress, setImportProgress] = useState('');
@@ -1389,6 +1394,47 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
             >
               <FileText size={12} />
               <span>{exportingKasaExcel ? 'Excel hazırlanıyor…' : 'Haftalık Kasa Excel'}</span>
+            </button>
+            <button
+              type="button"
+              disabled={exportingArnavutDefter}
+              onClick={() => {
+                void (async () => {
+                  if (exportingArnavutDefter) return;
+                  setExportingArnavutDefter(true);
+                  try {
+                    const meta = getArnavutkoyDefterMeta();
+                    const result = await exportArnavutkoyKasaDefterExcel(
+                      kasaHareketleri,
+                      appliedStartDate,
+                      appliedEndDate
+                    );
+                    alert(
+                      `Arnavutköy Kasa Defteri hazır.\n\n` +
+                        `Açılış: ₺${result.acilisBakiye.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}\n` +
+                        `Excel satır: ${result.excelKalem}\n` +
+                        `ERP devam: ${result.erpKalem}\n` +
+                        `Son bakiye: ₺${result.sonBakiye.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}\n\n` +
+                        `Defter seed sonu: ₺${Number(meta.sonBakiye).toLocaleString('tr-TR', { minimumFractionDigits: 2 })} (${meta.maxTarih})`
+                    );
+                  } catch (err) {
+                    console.error('[arnavut-defter]', err);
+                    alert(
+                      'Arnavutköy defter Excel oluşturulamadı:\n' +
+                        (err instanceof Error ? err.message : String(err))
+                    );
+                  } finally {
+                    setExportingArnavutDefter(false);
+                  }
+                })();
+              }}
+              className="bg-[#1E4E78] hover:bg-[#163a5c] disabled:opacity-60 disabled:cursor-wait border border-[#163a5c] text-white text-[11px] font-bold py-2 px-4 rounded-xl flex items-center space-x-1.5 transition cursor-pointer shadow-sm"
+              title="ARNAVUTKÖY KASA YENİ formatı · Kibritçi logo/antet · Excel seed + ERP devam + bakiye"
+            >
+              <FileText size={12} />
+              <span>
+                {exportingArnavutDefter ? 'Defter hazırlanıyor…' : 'Arnavutköy Defter Excel'}
+              </span>
             </button>
           </div>
         </div>
