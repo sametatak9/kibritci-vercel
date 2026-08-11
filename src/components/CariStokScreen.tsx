@@ -44,6 +44,12 @@ import {
   planSekerVidanjorFaturaReset,
 } from '../lib/sekerVidanjorFaturaReset';
 import { isSekerVidanjorFirma } from '../lib/vidanjorUtils';
+import {
+  malzemeTipiLabel,
+  micirMalzemeTipiSortKey,
+  resolveMicirMalzemeTipiFromIrsaliye,
+  type MicirMalzemeTipi,
+} from '../lib/micirUtils';
 
 interface CariStokScreenProps {
   cariKartlar: CariKart[];
@@ -93,6 +99,11 @@ type HistoryLog = {
   monthKey?: string;
   hizmetMiktar?: number;
   hizmetEtiket?: string;
+  kaynak?: string;
+  malzemeTipi?: MicirMalzemeTipi | null;
+  tonaj?: number;
+  kiloKg?: number;
+  plaka?: string;
 };
 
 type GenericDetail = {
@@ -350,12 +361,23 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
           const cariIdMatch = Boolean(data.cariKartId && data.cariKartId === id);
           if (firmaMatch || cariIdMatch) {
             const tarihKey = normalizeDateKey(data.tarih) || String(data.tarih || '');
-            const hizmet = irsaliyeHizmetMiktari(data as Irsaliye);
+            const ir = { id: docSnap.id, ...data } as Irsaliye;
+            const hizmet = irsaliyeHizmetMiktari(ir);
+            const malzemeTipi = resolveMicirMalzemeTipiFromIrsaliye(ir);
+            const malzemeLabel = malzemeTipi ? malzemeTipiLabel(malzemeTipi) : '';
+            const kaynakLabel =
+              data.kaynak === 'MICIR_STABILIZE_FIS' && malzemeLabel
+                ? malzemeLabel
+                : data.kaynak === 'VIDANJOR_FIS'
+                  ? 'Vidanjör'
+                  : data.kaynak === 'YILDIRIM_TANKER_FIS'
+                    ? 'Yıldırım'
+                    : data.kaynak || '';
             logs.push({
               id: docSnap.id,
               type: 'İRSALİYE',
               title: `İrsaliye: ${data.irsaliyeNo || 'İRS-KOD'}`,
-              desc: `Durum: ${data.onayDurumu}${data.kaynak ? ` · Kaynak: ${data.kaynak}` : ''}${
+              desc: `Durum: ${data.onayDurumu}${kaynakLabel ? ` · ${kaynakLabel}` : ''}${
                 data.plaka ? ` · ${data.plaka}` : ''
               }${hizmet.miktar > 0 ? ` · ${hizmet.miktar} ${hizmet.etiket}` : ''}${
                 Array.isArray(data.kalemler) && data.kalemler.length ? ` · ${data.kalemler.length} kalem` : ''
@@ -367,6 +389,11 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
               monthKey: tarihKey ? tarihKey.slice(0, 7) : undefined,
               hizmetMiktar: hizmet.miktar,
               hizmetEtiket: hizmet.etiket,
+              kaynak: String(data.kaynak || ''),
+              malzemeTipi,
+              tonaj: Number(data.tonaj) || undefined,
+              kiloKg: Number(data.kiloKg) || undefined,
+              plaka: data.plaka ? String(data.plaka) : undefined,
             });
           }
         });
@@ -727,11 +754,85 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
           mk === '0000-00' || !y || !m
             ? 'Tarihsiz'
             : `${AY[Number(m)] || m} ${y}`;
-        const hizmetToplam = items.reduce((s, it) => s + (Number(it.hizmetMiktar) || 0), 0);
-        const etiket = items.find((it) => it.hizmetEtiket)?.hizmetEtiket || 'çekim';
-        return { monthKey: mk, label, items, hizmetToplam, etiket };
+        // Mıcır / Taş Tozu / Stabilize grupları + tarih (yeni → eski)
+        const sorted = [...items].sort((a, b) => {
+          const aMicir = a.malzemeTipi || a.kaynak === 'MICIR_STABILIZE_FIS';
+          const bMicir = b.malzemeTipi || b.kaynak === 'MICIR_STABILIZE_FIS';
+          if (aMicir || bMicir) {
+            const ak = a.malzemeTipi != null ? micirMalzemeTipiSortKey(a.malzemeTipi) : aMicir ? 0 : 99;
+            const bk = b.malzemeTipi != null ? micirMalzemeTipiSortKey(b.malzemeTipi) : bMicir ? 0 : 99;
+            if (ak !== bk) return ak - bk;
+          }
+          return (b.date || '').localeCompare(a.date || '') || String(b.id).localeCompare(String(a.id));
+        });
+        const hizmetToplam = sorted.reduce((s, it) => s + (Number(it.hizmetMiktar) || 0), 0);
+        const etiket =
+          sorted.find((it) => it.hizmetEtiket === 'ton')?.hizmetEtiket ||
+          sorted.find((it) => it.hizmetEtiket)?.hizmetEtiket ||
+          'çekim';
+        const tipCounts: Partial<Record<MicirMalzemeTipi, number>> = {};
+        for (const it of sorted) {
+          if (!it.malzemeTipi) continue;
+          tipCounts[it.malzemeTipi] = (tipCounts[it.malzemeTipi] || 0) + 1;
+        }
+        return { monthKey: mk, label, items: sorted, hizmetToplam, etiket, tipCounts };
       });
   }, [filteredHistory]);
+
+  const selectedIrsaliyePreview = useMemo(() => {
+    if (selectedIrsaliyeIds.size === 0) return null;
+    const selected = historyList.filter(
+      (h) => h.collection === 'irsaliyeler' && selectedIrsaliyeIds.has(h.id)
+    );
+    if (!selected.length) {
+      // Firestore listesi dışında props irsaliyeler yedek
+      const fromProps = irsaliyeler.filter((ir) => selectedIrsaliyeIds.has(ir.id));
+      let ton = 0;
+      let kalemToplam = 0;
+      let kalemSayisi = 0;
+      const byTip: Partial<Record<MicirMalzemeTipi, number>> = {};
+      for (const ir of fromProps) {
+        const h = irsaliyeHizmetMiktari(ir);
+        ton += h.miktar || 0;
+        for (const k of ir.kalemler || []) {
+          kalemToplam += Number(k.miktar) || 0;
+          kalemSayisi += 1;
+        }
+        const tip = resolveMicirMalzemeTipiFromIrsaliye(ir);
+        if (tip) byTip[tip] = (byTip[tip] || 0) + (h.miktar || 0);
+      }
+      return {
+        adet: fromProps.length,
+        ton,
+        kalemToplam,
+        kalemSayisi,
+        byTip,
+        etiket: ton > 0 && Object.keys(byTip).length ? 'ton' : 'hizmet',
+      };
+    }
+    let ton = 0;
+    let kalemToplam = 0;
+    let kalemSayisi = 0;
+    const byTip: Partial<Record<MicirMalzemeTipi, number>> = {};
+    for (const h of selected) {
+      ton += Number(h.hizmetMiktar) || 0;
+      for (const k of h.kalemler || []) {
+        kalemToplam += Number(k.miktar) || 0;
+        kalemSayisi += 1;
+      }
+      if (h.malzemeTipi) {
+        byTip[h.malzemeTipi] = (byTip[h.malzemeTipi] || 0) + (Number(h.hizmetMiktar) || 0);
+      }
+    }
+    return {
+      adet: selected.length,
+      ton,
+      kalemToplam,
+      kalemSayisi,
+      byTip,
+      etiket: selected.find((x) => x.hizmetEtiket)?.hizmetEtiket || 'ton',
+    };
+  }, [selectedIrsaliyeIds, historyList, irsaliyeler]);
 
   const historyTypeCounts = useMemo(() => {
     const map: Record<string, number> = {};
@@ -2036,6 +2137,39 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
                 ))}
               </div>
 
+              {selectedIrsaliyePreview && (
+                <div className="mx-5 mt-3 mb-0 rounded-xl border border-violet-200 bg-violet-50 px-3 py-2.5 text-[11px] text-violet-950">
+                  <p className="font-black uppercase tracking-wide text-[10px] text-violet-800 mb-1">
+                    Seçim önizleme
+                  </p>
+                  <p className="font-semibold leading-relaxed">
+                    {selectedIrsaliyePreview.adet} irsaliye
+                    {selectedIrsaliyePreview.kalemSayisi > 0
+                      ? ` · ${selectedIrsaliyePreview.kalemSayisi} kalem`
+                      : ''}
+                    {selectedIrsaliyePreview.kalemToplam > 0
+                      ? ` · kalem toplamı ${selectedIrsaliyePreview.kalemToplam.toLocaleString('tr-TR')}`
+                      : ''}
+                    {selectedIrsaliyePreview.ton > 0
+                      ? ` · toplam ${selectedIrsaliyePreview.ton.toLocaleString('tr-TR')} ${selectedIrsaliyePreview.etiket}`
+                      : ''}
+                  </p>
+                  {Object.keys(selectedIrsaliyePreview.byTip).length > 0 && (
+                    <p className="mt-1 text-[10px] font-bold text-violet-800 flex flex-wrap gap-x-3 gap-y-1">
+                      {(['MICIR', 'TAS_TOZU', 'STABILIZE'] as MicirMalzemeTipi[]).map((tip) => {
+                        const v = selectedIrsaliyePreview.byTip[tip];
+                        if (!v) return null;
+                        return (
+                          <span key={tip}>
+                            {malzemeTipiLabel(tip)}: {v.toLocaleString('tr-TR')} ton
+                          </span>
+                        );
+                      })}
+                    </p>
+                  )}
+                </div>
+              )}
+
               <div className="p-5 max-h-[48vh] overflow-y-auto space-y-4">
                 {historyLoading ? (
                   <div className="flex items-center justify-center gap-2 py-16 text-slate-400 text-xs font-bold">
@@ -2057,11 +2191,40 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
                           {group.hizmetToplam > 0
                             ? ` · ${group.hizmetToplam.toLocaleString('tr-TR')} ${group.etiket}`
                             : ''}
+                          {group.tipCounts.MICIR
+                            ? ` · Mıcır ${group.tipCounts.MICIR}`
+                            : ''}
+                          {group.tipCounts.TAS_TOZU
+                            ? ` · Taş Tozu ${group.tipCounts.TAS_TOZU}`
+                            : ''}
+                          {group.tipCounts.STABILIZE
+                            ? ` · Stabilize ${group.tipCounts.STABILIZE}`
+                            : ''}
                         </span>
                       </div>
-                      {group.items.map((log, idx) => (
+                      {group.items.map((log, idx) => {
+                        const prev = idx > 0 ? group.items[idx - 1] : null;
+                        const showTipHeader =
+                          !!log.malzemeTipi &&
+                          (!prev || prev.malzemeTipi !== log.malzemeTipi);
+                        const tipBadgeClass =
+                          log.malzemeTipi === 'STABILIZE'
+                            ? 'bg-amber-100 text-amber-900'
+                            : log.malzemeTipi === 'TAS_TOZU'
+                              ? 'bg-stone-200 text-stone-800'
+                              : 'bg-emerald-100 text-emerald-800';
+                        return (
+                          <React.Fragment key={`${log.id}-${idx}`}>
+                            {showTipHeader && (
+                              <div className="pt-1 pb-0.5">
+                                <span
+                                  className={`text-[9px] font-black uppercase tracking-wider px-2 py-0.5 rounded ${tipBadgeClass}`}
+                                >
+                                  {malzemeTipiLabel(log.malzemeTipi)} grubu
+                                </span>
+                              </div>
+                            )}
                     <div
-                      key={`${log.id}-${idx}`}
                       className="flex gap-3 p-3.5 rounded-xl border border-slate-100 bg-slate-50/80 hover:border-slate-300 transition"
                     >
                       {log.collection === 'irsaliyeler' && (
@@ -2071,7 +2234,7 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
                             checked={selectedIrsaliyeIds.has(log.id)}
                             onChange={() => toggleIrsaliyeSelection(log.id)}
                             className="w-4 h-4 rounded border-slate-300 text-violet-700 cursor-pointer"
-                            title="Faturaya dönüştürmek için seç"
+                            title="Faturaya dönüştürmek / eşleştirmek için seç"
                           />
                         </label>
                       )}
@@ -2085,6 +2248,13 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
                           >
                             {log.type}
                           </span>
+                          {log.malzemeTipi && (
+                            <span
+                              className={`text-[8px] font-black px-2 py-0.5 rounded uppercase tracking-wider ${tipBadgeClass}`}
+                            >
+                              {malzemeTipiLabel(log.malzemeTipi)}
+                            </span>
+                          )}
                           <span className="text-[10px] font-mono font-bold text-slate-400">
                             {formatDateLabelTr(log.date)}
                             {normalizeDateKey(log.date) ? (
@@ -2111,7 +2281,9 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
                         </button>
                       )}
                     </div>
-                      ))}
+                          </React.Fragment>
+                        );
+                      })}
                     </div>
                   ))
                 )}

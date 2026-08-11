@@ -35,6 +35,11 @@ import { EvrakZincirBanner } from './EvrakZincirBanner';
 import { openEvrakZincirRaporu } from '../lib/evrakZincirRapor';
 import { resolveIrsaliyeProvenance } from '../lib/evrakProvenance';
 import {
+  malzemeTipiLabel,
+  micirMalzemeTipiSortKey,
+  resolveMicirMalzemeTipiFromIrsaliye,
+} from '../lib/micirUtils';
+import {
   EvrakAiDropzone,
   EvrakPageShell,
   EvrakSectionHeader,
@@ -668,7 +673,6 @@ export const IrsaliyeGirisScreen: React.FC<IrsaliyeGirisScreenProps> = ({
   const filteredArchive = useMemo(() => {
     const q = archiveSearch.trim().toLocaleLowerCase('tr-TR');
     return [...irsaliyeler]
-      .sort((a, b) => (b.tarih || '').localeCompare(a.tarih || ''))
       .filter((ir) => {
         if (archiveFilter === 'CARI_YOK' && ir.cariKartId) return false;
         if (archiveFilter === 'STOK_EKSIK') {
@@ -677,11 +681,27 @@ export const IrsaliyeGirisScreen: React.FC<IrsaliyeGirisScreenProps> = ({
         }
         if (archiveFilter === 'FATURASIZ' && !faturasizIds.has(ir.id)) return false;
         if (!q) return true;
+        const tip = resolveMicirMalzemeTipiFromIrsaliye(ir);
+        const tipLabel = tip ? malzemeTipiLabel(tip).toLocaleLowerCase('tr-TR') : '';
         return (
           String(ir.irsaliyeNo || '').toLocaleLowerCase('tr-TR').includes(q) ||
           String(ir.firma || '').toLocaleLowerCase('tr-TR').includes(q) ||
-          String(ir.onayDurumu || '').toLocaleLowerCase('tr-TR').includes(q)
+          String(ir.onayDurumu || '').toLocaleLowerCase('tr-TR').includes(q) ||
+          tipLabel.includes(q) ||
+          String(ir.malzemeTipi || '').toLocaleLowerCase('tr-TR').includes(q)
         );
+      })
+      .sort((a, b) => {
+        const aTip = resolveMicirMalzemeTipiFromIrsaliye(a);
+        const bTip = resolveMicirMalzemeTipiFromIrsaliye(b);
+        const aMicir = a.kaynak === 'MICIR_STABILIZE_FIS' || !!aTip;
+        const bMicir = b.kaynak === 'MICIR_STABILIZE_FIS' || !!bTip;
+        if (aMicir || bMicir) {
+          const ak = aTip != null ? micirMalzemeTipiSortKey(aTip) : aMicir ? 0 : 99;
+          const bk = bTip != null ? micirMalzemeTipiSortKey(bTip) : bMicir ? 0 : 99;
+          if (ak !== bk) return ak - bk;
+        }
+        return (b.tarih || '').localeCompare(a.tarih || '');
       })
       .slice(0, 200);
   }, [irsaliyeler, archiveSearch, archiveFilter, faturasizIds]);
@@ -1056,7 +1076,9 @@ export const IrsaliyeGirisScreen: React.FC<IrsaliyeGirisScreenProps> = ({
                               <span className="ml-1 text-[8px] font-black uppercase bg-sky-100 text-sky-700 px-1 py-0.5 rounded">Yıldırım</span>
                             )}
                             {(ir as any).kaynak === 'MICIR_STABILIZE_FIS' && (
-                              <span className="ml-1 text-[8px] font-black uppercase bg-emerald-100 text-emerald-700 px-1 py-0.5 rounded">Mıcır/Stabilize</span>
+                              <span className="ml-1 text-[8px] font-black uppercase bg-emerald-100 text-emerald-700 px-1 py-0.5 rounded">
+                                {malzemeTipiLabel(resolveMicirMalzemeTipiFromIrsaliye(ir))}
+                              </span>
                             )}
                             {resolveIrsaliyeProvenance(ir).map((b) => (
                               <span key={b.label} className={`ml-1 inline-block ${b.className}`} title={b.title}>

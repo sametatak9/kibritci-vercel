@@ -562,12 +562,27 @@ export function isGercekFaturaGirisi(ft: Pick<Fatura, 'genelToplam' | 'toplamTut
   return Number(ft.genelToplam ?? ft.toplamTutar ?? 0) > 0;
 }
 
-/** İrsaliyedeki hizmet miktarı (vidanjör çekim / kalem ADET) */
+/** İrsaliyedeki hizmet / miktar (vidanjör çekim · mıcır ton · diğer kalem) */
 export function irsaliyeHizmetMiktari(ir: Irsaliye): {
   miktar: number;
   birim: string;
   etiket: string;
 } {
+  if (
+    ir.kaynak === 'MICIR_STABILIZE_FIS' ||
+    Boolean(ir.malzemeTipi) ||
+    Boolean(ir.micirFisId)
+  ) {
+    const ton =
+      Number(ir.tonaj) > 0
+        ? Number(ir.tonaj)
+        : Number(ir.kiloKg) > 0
+          ? Math.round((Number(ir.kiloKg) / 1000) * 1000) / 1000
+          : (ir.kalemler || []).reduce((s, k) => s + (Number(k.miktar) || 0), 0);
+    if (ton > 0) {
+      return { miktar: ton, birim: 'TON', etiket: 'ton' };
+    }
+  }
   if (Number(ir.cekimAdedi) > 0) {
     return { miktar: Number(ir.cekimAdedi), birim: 'ADET', etiket: 'çekim' };
   }

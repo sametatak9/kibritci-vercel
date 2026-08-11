@@ -60,6 +60,42 @@ export function malzemeTipiLabel(tip?: MicirMalzemeTipi | string | null): string
   return 'Mıcır';
 }
 
+/** Liste sıralaması: Mıcır → Taş Tozu → Stabilize */
+export function micirMalzemeTipiSortKey(tip?: MicirMalzemeTipi | string | null): number {
+  const n = normalizeMicirMalzemeTipi(tip);
+  if (n === 'MICIR') return 0;
+  if (n === 'TAS_TOZU') return 1;
+  return 2;
+}
+
+/** İrsaliye / fiş / kalem adından malzeme tipi çıkar */
+export function resolveMicirMalzemeTipiFromIrsaliye(input?: {
+  malzemeTipi?: string | null;
+  kaynak?: string | null;
+  kalemler?: Array<{ urunAdi?: string | null } | null> | null;
+} | null): MicirMalzemeTipi | null {
+  if (!input) return null;
+  if (input.malzemeTipi) return normalizeMicirMalzemeTipi(input.malzemeTipi);
+  const kaynak = String(input.kaynak || '').toUpperCase();
+  if (kaynak !== 'MICIR_STABILIZE_FIS' && !kaynak.includes('MICIR')) {
+    // Kalem adından yine de dene
+    for (const k of input.kalemler || []) {
+      const ad = String(k?.urunAdi || '');
+      if (satinAlmaKalemMatchesMicir(ad, 'STABILIZE')) return 'STABILIZE';
+      if (satinAlmaKalemMatchesMicir(ad, 'TAS_TOZU')) return 'TAS_TOZU';
+      if (satinAlmaKalemMatchesMicir(ad, 'MICIR')) return 'MICIR';
+    }
+    return null;
+  }
+  for (const k of input.kalemler || []) {
+    const ad = String(k?.urunAdi || '');
+    if (satinAlmaKalemMatchesMicir(ad, 'STABILIZE')) return 'STABILIZE';
+    if (satinAlmaKalemMatchesMicir(ad, 'TAS_TOZU')) return 'TAS_TOZU';
+    if (satinAlmaKalemMatchesMicir(ad, 'MICIR')) return 'MICIR';
+  }
+  return 'MICIR';
+}
+
 /** Ton ↔ kg (kapı irsaliyesinde kilo tam girilir, stokta ton da tutulur) */
 export function tonToKg(tonaj: number): number {
   if (!Number.isFinite(tonaj)) return 0;
