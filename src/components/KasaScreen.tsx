@@ -2,11 +2,11 @@ import React, { useMemo, useState, useRef } from 'react';
 import { 
   Wallet, ArrowUpRight, ArrowDownRight, Printer,
   Calendar, FileText, Search, Eye, Image as ImageIcon, AlertCircle,
-  Pencil, Trash2, Mail, Upload, BookOpen,
+  Pencil, Trash2, Mail, Upload,
 } from 'lucide-react';
 import { KasaHareketi, KasaOdemeDurumu, Personel, AylikYoklamaMap } from '../types/erp';
 import { ImageLightbox } from './ImageLightbox';
-import { exportKasaExcel, buildKasaExcelBuffer, exportKasaDefterExcel, exportKasaHaftalikIcmalExcel } from '../lib/kasaExcelExport';
+import { exportKasaExcel, buildKasaExcelBuffer } from '../lib/kasaExcelExport';
 import { saveDocument } from '../lib/firebase';
 import {
   ensureKasaFisFotoPersisted,
@@ -144,8 +144,6 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
 
   // Weekly Cash Report Print Modal Toggle
   const [exportingKasaExcel, setExportingKasaExcel] = useState(false);
-  const [exportingKasaDefter, setExportingKasaDefter] = useState(false);
-  const [exportingKasaIcmal, setExportingKasaIcmal] = useState(false);
   const [printingGunlukRapor, setPrintingGunlukRapor] = useState(false);
   const [importingKasaDefter, setImportingKasaDefter] = useState(false);
   const [importProgress, setImportProgress] = useState('');
@@ -1328,74 +1326,6 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
             </button>
             <button
               type="button"
-              disabled={exportingKasaDefter}
-              onClick={() => {
-                void (async () => {
-                  if (exportingKasaDefter) return;
-                  setExportingKasaDefter(true);
-                  try {
-                    await exportKasaDefterExcel(
-                      hareketlerInRange,
-                      appliedStartDate,
-                      appliedEndDate,
-                      personeller,
-                      kasaHareketleri
-                    );
-                  } catch (err) {
-                    console.error('[kasa-defter-excel]', err);
-                    alert(
-                      'Kasa defter Excel oluşturulamadı:\n' +
-                        (err instanceof Error ? err.message : String(err))
-                    );
-                  } finally {
-                    setExportingKasaDefter(false);
-                  }
-                })();
-              }}
-              className="bg-[#1D4ED8] hover:bg-[#1E40AF] disabled:opacity-60 disabled:cursor-wait border border-[#1E40AF] text-white text-[11px] font-bold py-2 px-4 rounded-xl flex items-center space-x-1.5 transition cursor-pointer shadow-sm"
-              title="ARNAVUTKÖY tarzı tek sayfa defter — Tarih · Giren · Çıkan · Bakiye"
-            >
-              <BookOpen size={12} />
-              <span>
-                {exportingKasaDefter ? 'Defter hazırlanıyor…' : 'Kasa Defter Excel (Arnavutköy)'}
-              </span>
-            </button>
-            <button
-              type="button"
-              disabled={exportingKasaIcmal}
-              onClick={() => {
-                void (async () => {
-                  if (exportingKasaIcmal) return;
-                  setExportingKasaIcmal(true);
-                  try {
-                    await exportKasaHaftalikIcmalExcel(
-                      hareketlerInRange,
-                      appliedStartDate,
-                      appliedEndDate,
-                      personeller,
-                      kasaHareketleri
-                    );
-                  } catch (err) {
-                    console.error('[kasa-icmal-excel]', err);
-                    alert(
-                      'Haftalık Kasa İcmali oluşturulamadı:\n' +
-                        (err instanceof Error ? err.message : String(err))
-                    );
-                  } finally {
-                    setExportingKasaIcmal(false);
-                  }
-                })();
-              }}
-              className="bg-violet-700 hover:bg-violet-800 disabled:opacity-60 disabled:cursor-wait border border-violet-800 text-white text-[11px] font-bold py-2 px-4 rounded-xl flex items-center space-x-1.5 transition cursor-pointer shadow-sm"
-              title="Seçili aralık — toplam giren/çıkan/bakiye + defter satırları (Haftalık Kasa İcmali)"
-            >
-              <FileText size={12} />
-              <span>
-                {exportingKasaIcmal ? 'İcmal hazırlanıyor…' : 'Haftalık Kasa İcmali Excel'}
-              </span>
-            </button>
-            <button
-              type="button"
               disabled={printingGunlukRapor}
               onClick={() => void handleGunlukYoklamaKasaRaporu()}
               className="bg-sky-700 hover:bg-sky-800 disabled:opacity-60 disabled:cursor-wait border border-sky-800 text-white text-[11px] font-bold py-2 px-4 rounded-xl flex items-center space-x-1.5 transition cursor-pointer shadow-sm"
@@ -1443,7 +1373,7 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
                   } catch (err) {
                     console.error('[kasa-excel]', err);
                     alert(
-                      'Kasa Excel oluşturulamadı:\n' +
+                      'Haftalık Kasa Excel oluşturulamadı:\n' +
                         (err instanceof Error ? err.message : String(err))
                     );
                   } finally {
@@ -1452,10 +1382,10 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
                 })();
               }}
               className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 disabled:cursor-wait border border-emerald-700 text-white text-[11px] font-bold py-2 px-4 rounded-xl flex items-center space-x-1.5 transition cursor-pointer shadow-sm"
-              title="Excel — 1. sayfa sade defter (Giren/Çıkan/Bakiye) + özet + fiş evrakları"
+              title="Seçili aralık — ödeme özeti, imza barı, kalem kalem kayıtlar + fiş evrakları (Excel)"
             >
               <FileText size={12} />
-              <span>{exportingKasaExcel ? 'Excel hazırlanıyor…' : 'Kasa Excel'}</span>
+              <span>{exportingKasaExcel ? 'Excel hazırlanıyor…' : 'Haftalık Kasa Excel'}</span>
             </button>
           </div>
         </div>

@@ -356,7 +356,7 @@ export function openReportEmailComposer(payload: ReportEmailPayload): void {
       }
       if (act === 'download-excel' && payload.downloadExcel) {
         void Promise.resolve(payload.downloadExcel()).catch(() => {
-          alert('Excel indirilemedi. Tekrar deneyin veya Kasa Excel butonunu kullanın.');
+          alert('Excel indirilemedi. Tekrar deneyin veya Haftalık Kasa Excel butonunu kullanın.');
         });
         return;
       }

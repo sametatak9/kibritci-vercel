@@ -917,7 +917,7 @@ export async function buildSoforMasrafIadeReportHtml(options: {
     `Kalem: <strong>${rows.length}</strong> · Toplam: <strong>−${toplam.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺</strong>`,
     `Oluşturan: ${escapeHtml(options.olusturan || '—')} · ${new Date().toLocaleString('tr-TR')}`,
     'Her çıkışta ödeme durumu: <strong>BORÇ</strong> · <strong>PERSONEL ÖDEDİ</strong> · <strong>KASA ÖDEDİ</strong> (ayrı + toplam).',
-    '<em>Excel tablosu için Haftalık Kasa ekranındaki «Kasa Excel» butonunu kullanın.</em>',
+    '<em>Excel tablosu için Haftalık Kasa ekranındaki «Haftalık Kasa Excel» butonunu kullanın.</em>',
   ])}
     ${buildPersonelHarcamaOzetHtml(rows)}
     ${buildMasrafTableHtml(rows, toplam)}
@@ -972,7 +972,7 @@ export async function buildKasaHarcamaAralikReportHtml(options: {
   const bodyHtml = `${kasaHtmlInfoBox([
     `Çıkış kalemi: <strong>${kalemSayisi}</strong> · Genel toplam: <strong>−${toplam.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺</strong>`,
     `Oluşturan: ${escapeHtml(options.olusturan || '—')} · ${new Date().toLocaleString('tr-TR')}`,
-    '<em>Excel tablosu için «Kasa Excel» butonunu kullanın — bu dosya HTML raporudur.</em>',
+    '<em>Excel tablosu için «Haftalık Kasa Excel» butonunu kullanın — bu dosya HTML raporudur.</em>',
   ])}
     ${buildKaynakOzetHtml(rows, {
       totalOut: toplam,

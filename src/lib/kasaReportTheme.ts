@@ -5,7 +5,7 @@ import type { KibritciReportAssets } from './kibritciBrand';
 /** Haftalık Kasa raporları — Excel ve HTML karışmasın diye ayrı format etiketleri */
 export const KASA_REPORT_FORMAT = {
   excel: {
-    badge: 'EXCEL RAPORU — 1: Defter · 2: özet+kalem · 3: fiş foto',
+    badge: 'EXCEL RAPORU — 1: özet+imza+kalem · 2: fiş foto',
     filePrefix: 'Kibritci_Haftalik_Kasa_EXCEL',
     accentLabel: 'Excel',
   },
@@ -20,7 +20,7 @@ export const KASA_REPORT_FORMAT = {
     accentLabel: 'Kasa İcmali',
   },
   html: {
-    badge: 'HTML RAPORU — Yazdır / PDF / e-posta (Excel için «Kasa Excel» butonu)',
+    badge: 'HTML RAPORU — Yazdır / PDF / e-posta (Excel için «Haftalık Kasa Excel» butonu)',
     filePrefix: 'Kibritci_Haftalik_Kasa_HTML',
     accentLabel: 'HTML',
   },
