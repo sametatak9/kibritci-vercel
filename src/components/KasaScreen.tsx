@@ -176,6 +176,7 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
 
   const handleAralikHarcamaEmail = async () => {
     const { emailKasaHarcamaAralikReport } = await import('../lib/yolHarcamaUtils');
+    const { KASA_REPORT_FORMAT } = await import('../lib/kasaReportTheme');
     const bundle = await buildAralikHarcamaBundle();
     if (!bundle) return;
     emailKasaHarcamaAralikReport({
@@ -184,6 +185,9 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
       endDate: bundle.end,
       toplam: bundle.toplam,
       items: bundle.rows,
+      excelFileName: `${KASA_REPORT_FORMAT.excel.filePrefix}_${bundle.start}_${bundle.end}.xlsx`,
+      downloadExcel: () =>
+        exportKasaExcel(bundle.rows, bundle.start, bundle.end, personeller),
     });
   };
 
@@ -1241,7 +1245,7 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
               type="button"
               onClick={() => void handleAralikHarcamaEmail()}
               className="bg-[#047857] hover:bg-[#065f46] border border-[#065f46] text-white text-[11px] font-bold py-2 px-4 rounded-xl flex items-center space-x-1.5 transition cursor-pointer shadow-sm"
-              title="HTML raporu e-posta ile gönder (ek dosya otomatik indirilir)"
+              title="HTML + Excel raporu e-posta ile gönder (ek dosyalar otomatik indirilir)"
             >
               <Mail size={12} />
               <span>E-posta ile Gönder</span>

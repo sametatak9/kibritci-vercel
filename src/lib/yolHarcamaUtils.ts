@@ -923,7 +923,79 @@ export async function buildKasaHarcamaAralikReportHtml(options: {
   });
 }
 
-/** Düz metin kasa dökümü — e-posta gövdesi için */
+/** E-posta gövdesi — yalnızca özet (kalem dökümü ek dosyalarda) */
+export function buildKasaEmailSummaryPlainText(
+  items: KasaHareketi[],
+  startDate: string,
+  endDate: string
+): string {
+  const start = formatDateLabelTr(normalizeDateKey(startDate) || startDate);
+  const end = formatDateLabelTr(normalizeDateKey(endDate) || endDate);
+  const rows = [...(items || [])].sort((a, b) =>
+    String(a.tarih).localeCompare(String(b.tarih))
+  );
+
+  let borc = 0;
+  let personel = 0;
+  let kasa = 0;
+  const byKisi = new Map<string, number>();
+
+  rows.forEach((r) => {
+    const tutar = Number(r.tutar) || 0;
+    const d = resolveKasaOdemeDurumu(r) || 'KASA_ODEDI';
+    if (d === 'BORC') borc += tutar;
+    else if (d === 'PERSONEL_ODEDI') personel += tutar;
+    else kasa += tutar;
+
+    const who = String(r.personelAdi || r.surucu || 'Personel (adsız)').trim();
+    const label =
+      who.toLocaleLowerCase('tr-TR') === 'celal@kibritciinsaat.com' ? 'CELAL YILMAZ' : who;
+    byKisi.set(label, (byKisi.get(label) || 0) + tutar);
+  });
+
+  const genel = borc + personel + kasa;
+  const evrakSayisi = rows.filter((r) => String(r.fisEvrakUrl || '').trim()).length;
+
+  const lines: string[] = [
+    'KASA HARCAMA RAPORU — ÖZET',
+    '',
+    `Dönem: ${start} — ${end}`,
+    `Çıkış kalemi: ${rows.length}`,
+    `Fiş / evraklı kalem: ${evrakSayisi}`,
+    '',
+    `Genel toplam: −${genel.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺`,
+    '',
+    'Ödeme durumu özeti:',
+    `  • BORÇ: −${borc.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺`,
+    `  • PERSONEL ÖDEDİ: −${personel.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺`,
+    `  • KASA ÖDEDİ: −${kasa.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺`,
+    '',
+    'Kişi bazlı toplamlar:',
+  ];
+
+  const kisiList = [...byKisi.entries()].sort((a, b) => b[1] - a[1]);
+  kisiList.slice(0, 8).forEach(([name, sum], i) => {
+    lines.push(
+      `  ${i + 1}) ${name}: −${sum.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺`
+    );
+  });
+  if (kisiList.length > 8) {
+    lines.push(`  … ve ${kisiList.length - 8} kişi daha (detay HTML / Excel eklerinde)`);
+  }
+
+  lines.push(
+    '',
+    'Detaylı tablo, fiş görselleri ve kalem kalem döküm ek dosyalarda sunulmuştur:',
+    '  • HTML rapor — antetli, tablo ve evrak albümü',
+    '  • Excel tablo — özet, imza alanı, kalem kalem ve fiş sayfası',
+    '',
+    '«Gönder»e bastığınızda her iki dosya otomatik indirilir; lütfen e-postanıza ek dosya olarak ekleyin.'
+  );
+
+  return lines.join('\n');
+}
+
+/** Düz metin kasa dökümü — tam liste (yalnızca kopyala / arşiv için) */
 export function buildKasaCikisMailPlainText(
   items: KasaHareketi[],
   startDate: string,
@@ -1018,19 +1090,24 @@ export function emailSoforMasrafIadeReport(options: {
   endDate: string;
   toplam?: number;
   items?: KasaHareketi[];
+  downloadExcel?: () => void | Promise<void>;
+  excelFileName?: string;
 }): void {
   const start = formatDateLabelTr(normalizeDateKey(options.startDate) || options.startDate);
   const end = formatDateLabelTr(normalizeDateKey(options.endDate) || options.endDate);
   const body =
     options.items && options.items.length > 0
-      ? buildKasaCikisMailPlainText(options.items, options.startDate, options.endDate)
-      : htmlToPlainText(options.html);
+      ? buildKasaEmailSummaryPlainText(options.items, options.startDate, options.endDate)
+      : htmlToPlainText(options.html).slice(0, 1200);
   openReportEmailComposer({
     subject: `Kibritçi — Şoför Masraf İade (${start} / ${end})`,
     body,
     html: options.html,
     fileName: `${KASA_REPORT_FORMAT.soforHtml.filePrefix}_${options.startDate}_${options.endDate}.html`,
     defaultTo: MERKEZ_KASA_EMAIL,
+    expandHtmlInBody: false,
+    downloadExcel: options.downloadExcel,
+    excelFileName: options.excelFileName,
   });
 }
 
@@ -1040,18 +1117,23 @@ export function emailKasaHarcamaAralikReport(options: {
   endDate: string;
   toplam?: number;
   items?: KasaHareketi[];
+  downloadExcel?: () => void | Promise<void>;
+  excelFileName?: string;
 }): void {
   const start = formatDateLabelTr(normalizeDateKey(options.startDate) || options.startDate);
   const end = formatDateLabelTr(normalizeDateKey(options.endDate) || options.endDate);
   const body =
     options.items && options.items.length > 0
-      ? buildKasaCikisMailPlainText(options.items, options.startDate, options.endDate)
-      : htmlToPlainText(options.html);
+      ? buildKasaEmailSummaryPlainText(options.items, options.startDate, options.endDate)
+      : htmlToPlainText(options.html).slice(0, 1200);
   openReportEmailComposer({
     subject: `Kibritçi — Kasa Harcama Raporu (${start} / ${end})`,
     body,
     html: options.html,
     fileName: `${KASA_REPORT_FORMAT.html.filePrefix}_${options.startDate}_${options.endDate}.html`,
     defaultTo: MERKEZ_KASA_EMAIL,
+    expandHtmlInBody: false,
+    downloadExcel: options.downloadExcel,
+    excelFileName: options.excelFileName,
   });
 }

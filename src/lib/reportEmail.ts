@@ -11,6 +11,12 @@ export interface ReportEmailPayload {
   defaultTo?: string;
   /** Alıcının tarayıcıda açıp indirebileceği kalıcı bağlantı */
   downloadUrl?: string;
+  /** HTML raporu düz metin gövdeye dökme (kasa raporu gibi ek dosyalı gönderimler) */
+  expandHtmlInBody?: boolean;
+  /** Excel dosya adı — diyalogda gösterilir */
+  excelFileName?: string;
+  /** Excel indirme (e-posta gönderiminde otomatik çağrılır) */
+  downloadExcel?: () => void | Promise<void>;
 }
 
 const MAX_MAILTO_BODY = 12000;
@@ -36,14 +42,17 @@ export function buildReportMailBody(options: {
   body?: string;
   html?: string;
   downloadUrl?: string;
+  expandHtmlInBody?: boolean;
+  hasExcelAttachment?: boolean;
 }): string {
   const stubRe = /ekte\s+HTML|indirilebilir|HTML olarak/i;
   const bodyTrim = (options.body || '').trim();
   const fromHtml = options.html ? htmlToPlainText(options.html) : '';
+  const expandHtml = options.expandHtmlInBody !== false;
 
   // Kısa «ek indirin» metni yerine HTML rapordan düz metin dökümü kullan
   let base = bodyTrim;
-  if (fromHtml) {
+  if (fromHtml && expandHtml) {
     if (!base || stubRe.test(base) || base.length < 280) {
       const introLine = bodyTrim && !stubRe.test(bodyTrim) ? `${bodyTrim}\n\n` : '';
       base = `${introLine}${fromHtml}`;
@@ -66,15 +75,23 @@ Evrakı görüntülemek / indirmek için bağlantı:
 ${options.downloadUrl}
 `
     : '';
+  const attachmentNote =
+    options.html || options.hasExcelAttachment
+      ? `
+
+Ek dosyalar (otomatik indirilir — lütfen e-postanıza ekleyin):
+${options.html ? '• HTML rapor — antetli, tablo ve fiş görselleri' : ''}
+${options.hasExcelAttachment ? '• Excel tablo — özet, kalem kalem ve evrak sayfası' : ''}
+`
+      : '';
   const outro = `
 
 ---
 Bu mesaj Kibritçi ERP rapor gönderimi ile açılmıştır.${
-    options.html && !options.downloadUrl
+    options.html && !options.downloadUrl && expandHtml
       ? ' İsterseniz «HTML İndir» ile görsel ekli tam raporu da ekleyebilirsiniz.'
       : ''
-  }
-`;
+  }${attachmentNote}`;
   const combined = `${intro}${base}${linkBlock}${outro}`;
   return combined.length > MAX_MAILTO_BODY
     ? `${combined.slice(0, MAX_MAILTO_BODY)}\n\n… (rapor uzun olduğu için kısaltıldı; tam metin için HTML İndir kullanın)`
@@ -245,11 +262,21 @@ export function openReportEmailComposer(payload: ReportEmailPayload): void {
     body: payload.body,
     html: payload.html,
     downloadUrl: payload.downloadUrl,
+    expandHtmlInBody: payload.expandHtmlInBody,
+    hasExcelAttachment: Boolean(payload.downloadExcel),
   });
   const fileName = payload.fileName || `Kibritci_Rapor_${Date.now()}.html`;
+  const excelName = payload.excelFileName || '';
+  const hasDualAttach = Boolean(payload.html && payload.downloadExcel);
   const downloadUrlHint = payload.downloadUrl
     ? `Mesajda indirme bağlantısı yer alır: ${payload.downloadUrl}`
-    : 'HTML raporu eklemek için önce indirip mailinize ekleyebilirsiniz.';
+    : hasDualAttach
+      ? '«Gönder»e basınca HTML ve Excel dosyaları otomatik indirilir — her ikisini de e-postanıza ek dosya olarak ekleyin.'
+      : payload.html
+        ? 'HTML raporu eklemek için «Gönder»e basınca otomatik indirilir; mailinize ek dosya olarak ekleyin.'
+        : payload.downloadExcel
+          ? 'Excel dosyası «Gönder»e basınca otomatik indirilir; mailinize ek dosya olarak ekleyin.'
+          : '';
 
   const overlay = document.createElement('div');
   overlay.id = 'kibritci-report-email-overlay';
@@ -273,8 +300,9 @@ export function openReportEmailComposer(payload: ReportEmailPayload): void {
           <textarea id="kibritci-mail-body"></textarea>
         </div>
         <p class="hint">
-          Varsayılan posta, Gmail veya Outlook açılır. HTML rapor «Gönder»e basınca otomatik indirilir — e-postanıza ek dosya olarak ekleyin.
+          Varsayılan posta, Gmail veya Outlook açılır. Mesaj gövdesi özet bilgi içerir; tam rapor ek dosyalarda sunulur.
           ${downloadUrlHint}
+          ${excelName ? `<br><span style="font-family:ui-monospace,monospace;font-size:10px;color:#475569">Excel: ${excelName.replace(/</g, '&lt;')}</span>` : ''}
         </p>
       </div>
       <div class="actions">
@@ -282,6 +310,7 @@ export function openReportEmailComposer(payload: ReportEmailPayload): void {
         <button type="button" class="btn-gmail" data-act="gmail">Gmail</button>
         <button type="button" class="btn-outlook" data-act="outlook">Outlook</button>
         ${payload.html ? `<button type="button" class="btn-dl" data-act="download">HTML İndir (Ek)</button>` : ''}
+        ${payload.downloadExcel ? `<button type="button" class="btn-dl" data-act="download-excel">Excel İndir (Ek)</button>` : ''}
         <button type="button" class="btn-dl" data-act="close" style="margin-left:auto">Kapat</button>
       </div>
     </div>
@@ -306,6 +335,12 @@ export function openReportEmailComposer(payload: ReportEmailPayload): void {
         downloadReportHtmlFile(payload.html, fileName);
         return;
       }
+      if (act === 'download-excel' && payload.downloadExcel) {
+        void Promise.resolve(payload.downloadExcel()).catch(() => {
+          alert('Excel indirilemedi. Tekrar deneyin veya Kasa Excel butonunu kullanın.');
+        });
+        return;
+      }
       const to = (overlay.querySelector('#kibritci-mail-to') as HTMLInputElement)?.value || '';
       const subject =
         (overlay.querySelector('#kibritci-mail-subject') as HTMLInputElement)?.value || subject0;
@@ -313,18 +348,34 @@ export function openReportEmailComposer(payload: ReportEmailPayload): void {
         (overlay.querySelector('#kibritci-mail-body') as HTMLTextAreaElement)?.value || body0;
       const provider = act as ReportMailProvider;
       if (provider === 'default' || provider === 'gmail' || provider === 'outlook') {
-        if (payload.html && !payload.downloadUrl) {
-          downloadReportHtmlFile(payload.html, fileName);
-        }
-        openMailCompose(provider, to, subject, body);
-        if (payload.html && !payload.downloadUrl) {
-          setTimeout(() => {
-            alert(
-              'HTML rapor indirildi.\n\nPosta penceresinde indirilen .html dosyasını ek (attachment) olarak ekleyin — böylece alıcı tam raporu görür.'
-            );
-          }, 400);
-        }
-        close();
+        void (async () => {
+          try {
+            if (payload.downloadExcel) {
+              await Promise.resolve(payload.downloadExcel!());
+            }
+            if (payload.html && !payload.downloadUrl) {
+              downloadReportHtmlFile(payload.html!, fileName);
+            }
+          } catch {
+            alert('Ek dosyalar indirilemedi. «HTML İndir» / «Excel İndir» ile tekrar deneyin.');
+          }
+          openMailCompose(provider, to, subject, body);
+          if ((payload.html && !payload.downloadUrl) || payload.downloadExcel) {
+            setTimeout(() => {
+              const parts: string[] = [];
+              if (payload.html && !payload.downloadUrl) {
+                parts.push('HTML rapor (.html)');
+              }
+              if (payload.downloadExcel) {
+                parts.push('Excel tablo (.xlsx)');
+              }
+              alert(
+                `${parts.join(' ve ')} indirildi.\n\nPosta penceresinde indirilen dosyaları ek (attachment) olarak ekleyin — alıcı tam raporu HTML ve Excel formatında görür.`
+              );
+            }, 400);
+          }
+          close();
+        })();
       }
     });
   });
