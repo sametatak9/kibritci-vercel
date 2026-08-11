@@ -1,5 +1,117 @@
 import type { KasaHareketi } from '../types/erp';
 
+/** Kasa muhasebe miladı — 01.01.2026 öncesi geçmiş bu özet satırında toplanır */
+export const KASA_MILAD = {
+  /** Rapor başlangıcı bu tarihten itibaren milad kullanır */
+  tarih: '2026-01-01',
+  /** Bu tarihten önceki Firestore kayıtları milada gömülü; detay/toplama dışı */
+  detayBaslangic: '2026-08-11',
+  giren: 25000,
+  cikan: 24981.59,
+  bakiye: 18.41,
+  cikisKalem: 27,
+  carryLabel: '01.01.2026 MİLAD — DÖNEM BAŞI BAKİYE',
+} as const;
+
+export function isKasaMiladReport(startDate: string): boolean {
+  return String(startDate).slice(0, 10) >= KASA_MILAD.tarih;
+}
+
+export type KasaMiladContext = {
+  active: boolean;
+  opening: number;
+  miladGiren: number;
+  miladCikan: number;
+  miladBakiye: number;
+  miladCikisKalem: number;
+  carryLabel: string;
+};
+
+export type KasaMiladTotals = {
+  totalIn: number;
+  totalOut: number;
+  closing: number;
+  cikisKalem: number;
+  detayIn: number;
+  detayOut: number;
+};
+
+/** Milad + detayBaslangic sonrası kayıtların birleşik toplamları */
+export function computeKasaMiladTotals(
+  milad: KasaMiladContext,
+  detayHareketler: KasaHareketi[]
+): KasaMiladTotals {
+  const detayIn = roundKasaMoney(
+    detayHareketler
+      .filter((k) => k.hareketTipi === 'GİRİŞ')
+      .reduce((s, k) => s + roundKasaMoney(k.tutar), 0)
+  );
+  const detayOut = roundKasaMoney(
+    detayHareketler
+      .filter((k) => k.hareketTipi === 'ÇIKIŞ')
+      .reduce((s, k) => s + roundKasaMoney(k.tutar), 0)
+  );
+  const detayCikisKalem = detayHareketler.filter((k) => k.hareketTipi === 'ÇIKIŞ').length;
+
+  if (!milad.active) {
+    return {
+      totalIn: detayIn,
+      totalOut: detayOut,
+      closing: roundKasaMoney(detayIn - detayOut),
+      cikisKalem: detayCikisKalem,
+      detayIn,
+      detayOut,
+    };
+  }
+
+  return {
+    totalIn: roundKasaMoney(milad.miladGiren + detayIn),
+    totalOut: roundKasaMoney(milad.miladCikan + detayOut),
+    closing: roundKasaMoney(milad.miladBakiye + detayIn - detayOut),
+    cikisKalem: milad.miladCikisKalem + detayCikisKalem,
+    detayIn,
+    detayOut,
+  };
+}
+
+function buildKasaMiladContext(startDate: string): KasaMiladContext {
+  const active = isKasaMiladReport(startDate);
+  if (!active) {
+    return {
+      active: false,
+      opening: 0,
+      miladGiren: 0,
+      miladCikan: 0,
+      miladBakiye: 0,
+      miladCikisKalem: 0,
+      carryLabel: 'DÖNEM BAŞI BAKİYE (0)',
+    };
+  }
+  return {
+    active: true,
+    opening: KASA_MILAD.bakiye,
+    miladGiren: KASA_MILAD.giren,
+    miladCikan: KASA_MILAD.cikan,
+    miladBakiye: KASA_MILAD.bakiye,
+    miladCikisKalem: KASA_MILAD.cikisKalem,
+    carryLabel: KASA_MILAD.carryLabel,
+  };
+}
+
+/** Milad aktifken yalnızca detayBaslangic sonrası kayıtlar listelenir / toplanır */
+export function filterKasaMiladDetayHareketleri(
+  hareketler: KasaHareketi[],
+  startDate: string,
+  endDate: string,
+  miladActive: boolean
+): KasaHareketi[] {
+  const inRange = (hareketler || []).filter(
+    (k) => k.tarih >= startDate && k.tarih <= endDate
+  );
+  if (!miladActive) return inRange;
+  return inRange.filter((k) => k.tarih >= KASA_MILAD.detayBaslangic);
+}
+
 /** Kasa tutarları — 2 ondalık, kayan nokta artığı yok */
 export function roundKasaMoney(value: unknown): number {
   const n = Number(value);
@@ -108,12 +220,27 @@ export function prepareKasaLedgerExportData(
   inRange: KasaHareketi[];
   opening: number;
   periodOnly: boolean;
+  milad: KasaMiladContext;
+  totals: KasaMiladTotals;
 } {
   const periodOnly = opts?.periodOnly !== false;
   const dedupedAll = dedupeKasaHareketleriForLedger(allHareketler);
-  const inRange = dedupedAll.filter((k) => k.tarih >= startDate && k.tarih <= endDate);
-  const opening = periodOnly
-    ? 0
-    : computeKasaNetBalance(dedupedAll.filter((k) => String(k.tarih) < startDate));
-  return { dedupedAll, inRange, opening, periodOnly };
+  const milad = buildKasaMiladContext(startDate);
+
+  let inRange: KasaHareketi[];
+  let opening: number;
+
+  if (milad.active) {
+    inRange = filterKasaMiladDetayHareketleri(dedupedAll, startDate, endDate, true);
+    opening = milad.opening;
+  } else if (periodOnly) {
+    inRange = dedupedAll.filter((k) => k.tarih >= startDate && k.tarih <= endDate);
+    opening = 0;
+  } else {
+    inRange = dedupedAll.filter((k) => k.tarih >= startDate && k.tarih <= endDate);
+    opening = computeKasaNetBalance(dedupedAll.filter((k) => String(k.tarih) < startDate));
+  }
+
+  const totals = computeKasaMiladTotals(milad, inRange);
+  return { dedupedAll, inRange, opening, periodOnly, milad, totals };
 }

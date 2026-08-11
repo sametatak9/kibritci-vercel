@@ -22,7 +22,7 @@ import {
   resolveKasaOdemeDurumu,
 } from '../lib/yolHarcamaUtils';
 import { resolvePersonelUnvan } from '../lib/personelUnvanUtils';
-import { prepareKasaLedgerExportData, roundKasaMoney } from '../lib/kasaLedgerUtils';
+import { KASA_MILAD, prepareKasaLedgerExportData, roundKasaMoney } from '../lib/kasaLedgerUtils';
 
 type HarcamaKaynagi = 'KASA_HARCAMA' | 'PERSONEL_HARCAMA';
 
@@ -181,23 +181,23 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
   };
 
   const buildAralikHarcamaBundle = async () => {
-    const {
-      filterKasaCikisHareketleri,
-      buildKasaHarcamaAralikReportHtml,
-    } = await import('../lib/yolHarcamaUtils');
+    const { buildKasaHarcamaAralikReportHtml } = await import('../lib/yolHarcamaUtils');
     const start = appliedStartDate;
     const end = appliedEndDate;
-    const rows = filterKasaCikisHareketleri(kasaHareketleri, start, end);
-    if (rows.length === 0) {
+    const rows = ledgerExport.inRange.filter((k) => k.hareketTipi === 'ÇIKIŞ');
+    if (rows.length === 0 && !ledgerExport.milad.active) {
       alert('Seçili aralıkta kasa çıkışı / harcama kaydı yok. Önce tarih aralığını filtreleyin.');
       return null;
     }
-    const toplam = rows.reduce((s, r) => s + (Number(r.tutar) || 0), 0);
+    const toplam = ledgerExport.totals.totalOut;
     const html = await buildKasaHarcamaAralikReportHtml({
       startDate: start,
       endDate: end,
       items: rows,
       olusturan: 'Haftalık Kasa',
+      totalOut: toplam,
+      cikisKalem: ledgerExport.totals.cikisKalem,
+      miladActive: ledgerExport.milad.active,
     });
     return { html, start, end, toplam, rows };
   };
@@ -340,6 +340,8 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
   );
 
   const hareketlerInRange = ledgerExport.inRange;
+  const miladAktif = ledgerExport.milad.active;
+  const miladTotals = ledgerExport.totals;
 
   const filteredHareketler = useMemo(
     () =>
@@ -362,24 +364,14 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
     [hareketlerInRange, searchKeyword]
   );
 
-  // KPI: seçili aralık (filtre) üzerinden — şoför onaylı çıkışlar eksi bakiyeye yansır
-  const totalIn = roundKasaMoney(
-    filteredHareketler
-      .filter((k) => k.hareketTipi === 'GİRİŞ')
-      .reduce((sum, current) => sum + roundKasaMoney(current.tutar), 0)
-  );
+  // KPI: milad aktifse 01.01.2026 baz + detayBaslangic sonrası kayıtlar
+  const totalIn = miladTotals.totalIn;
+  const totalOut = miladTotals.totalOut;
+  const periodNet = roundKasaMoney(miladTotals.closing - (miladAktif ? ledgerExport.milad.miladBakiye : 0));
 
-  const totalOut = roundKasaMoney(
-    filteredHareketler
-      .filter((k) => k.hareketTipi === 'ÇIKIŞ')
-      .reduce((sum, current) => sum + roundKasaMoney(current.tutar), 0)
-  );
-
-  const periodNet = roundKasaMoney(totalIn - totalOut);
-
-  /** Tüm kasa çıkışları — tek “Kasa Harcaması” kartı (BORÇ + Personel + Kasa ödedi) */
+  /** Tüm kasa çıkışları — tek “Kasa Harcaması” kartı */
   const kasaHarcamaOut = totalOut;
-  const cikisKayitSayisi = filteredHareketler.filter((k) => k.hareketTipi === 'ÇIKIŞ').length;
+  const cikisKayitSayisi = miladTotals.cikisKalem;
 
   /** Seçili aralık — BORÇ / Personel Ödedi / Kasa Ödedi + kişi kırılımı */
   const odemeBazliOzet = useMemo(() => {
@@ -732,12 +724,25 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
         </div>
       </div>
 
+      {miladAktif && (
+        <div className="shrink-0 rounded-2xl border border-amber-300 bg-amber-50/90 px-4 py-3 text-[11px] text-amber-950 shadow-sm">
+          <p className="font-black uppercase tracking-wide text-amber-900">01.01.2026 Milad bazlı rapor</p>
+          <p className="mt-1 leading-relaxed">
+            Dönem toplamları: Giren <strong>₺{KASA_MILAD.giren.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}</strong>
+            {' · '}Çıkan <strong>₺{KASA_MILAD.cikan.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}</strong>
+            {' · '}Bakiye <strong>₺{KASA_MILAD.bakiye.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}</strong>
+            {' '}({KASA_MILAD.cikisKalem} kalem). {KASA_MILAD.detayBaslangic} öncesi kayıtlar milada gömülü;
+            yalnızca bu tarihten sonraki hareketler listelenir ve milad üzerine eklenir.
+          </p>
+        </div>
+      )}
+
       {/* Özet kartları — seçili aralık */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 shrink-0">
         {[
-          { title: 'Giriş (aralık)', value: `₺${totalIn.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}`, card: 'border-emerald-200 bg-white text-emerald-800', icon: ArrowUpRight, iconBg: 'bg-emerald-50 text-emerald-700' },
-          { title: 'Kasa harcaması', value: `₺${kasaHarcamaOut.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}`, card: 'border-[#FED7AA] bg-[#FFF7ED] text-[#9A3412]', icon: Wallet, iconBg: 'bg-[#FFEDD5] text-[#C2410C]', sub: `${cikisKayitSayisi} çıkış · borç + personel + kasa ödedi` },
-          { title: 'Dönem net', value: `₺${periodNet.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}`, card: 'border-[#FDBA74] bg-white text-[#9A3412] font-bold', icon: Wallet, iconBg: 'bg-[#FFF7ED] text-[#EA580C]', sub: `Giren − çıkan · ${appliedStartDate} — ${appliedEndDate}` },
+          { title: 'Giriş (aralık)', value: `₺${totalIn.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}`, card: 'border-emerald-200 bg-white text-emerald-800', icon: ArrowUpRight, iconBg: 'bg-emerald-50 text-emerald-700', sub: miladAktif ? `Milad ₺${KASA_MILAD.giren.toLocaleString('tr-TR')} + yeni` : undefined },
+          { title: 'Kasa harcaması', value: `₺${kasaHarcamaOut.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}`, card: 'border-[#FED7AA] bg-[#FFF7ED] text-[#9A3412]', icon: Wallet, iconBg: 'bg-[#FFEDD5] text-[#C2410C]', sub: miladAktif ? `${cikisKayitSayisi} kalem · milad ${KASA_MILAD.cikisKalem} + yeni` : `${cikisKayitSayisi} çıkış · borç + personel + kasa ödedi` },
+          { title: 'Dönem net / bakiye', value: `₺${(miladAktif ? miladTotals.closing : periodNet).toLocaleString('tr-TR', { minimumFractionDigits: 2 })}`, card: 'border-[#FDBA74] bg-white text-[#9A3412] font-bold', icon: Wallet, iconBg: 'bg-[#FFF7ED] text-[#EA580C]', sub: miladAktif ? `Milad bakiye ₺${KASA_MILAD.bakiye.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} + hareket` : `Giren − çıkan · ${appliedStartDate} — ${appliedEndDate}` },
         ].map((item, idx) => {
           const Icon = item.icon;
           return (
