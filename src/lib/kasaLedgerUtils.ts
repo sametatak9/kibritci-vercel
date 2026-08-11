@@ -10,19 +10,18 @@ import { resolveKasaOdemeDurumu } from './yolHarcamaUtils';
 export const KASA_DONEM_BAZ = {
   baslangic: '2026-01-01',
   kapanis: '2026-08-11',
-  /** Dönem başında kasaya ödenecek / borç tutarı */
-  borc: 24981.59,
-  /** Toplam giriş − toplam çıkış için dönem başı hedef net */
-  netHedef: 24981.59,
+  /** 11.08.2026 mutabakat — kasanın alacağı (rapor son bakiyesi) */
+  borc: 24982,
+  /** 11.08.2026 itibarıyla defter neti / kasa alacağı */
+  netHedef: 24982,
   cikisKalem: 27,
-  carryLabel: '01.01.2026 DÖNEM BAZ — KASAYA BORÇ / DEVREDEN NET',
+  carryLabel: '01.01.2026 — 11.08.2026 DÖNEM BAZ · KASA ALACAĞI ₺24.982',
 } as const;
 
-/** Dönem baz yalnızca tam mutabakat tarih aralığını kapsayan raporlarda kullanılır. */
+/** Dönem baz: bitiş ≥ 11.08.2026 ise aktif (başlangıç esnek — Arnavutköy defter mutabakatı) */
 export function isKasaDonemBazReport(startDate: string, endDate: string): boolean {
-  const start = String(startDate).slice(0, 10);
   const end = String(endDate).slice(0, 10);
-  return start === KASA_DONEM_BAZ.baslangic && end >= KASA_DONEM_BAZ.kapanis;
+  return end >= KASA_DONEM_BAZ.kapanis;
 }
 
 /** Dönem baz kapanışından sonraki kayıtlar — toplama / bakiye için */

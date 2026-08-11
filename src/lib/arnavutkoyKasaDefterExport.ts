@@ -4,6 +4,7 @@ import { createExcelWorkbook } from './exceljsLoader';
 import { KIBRITCI_COMPANY, loadKibritciLogoDataUrl } from './kibritciBrand';
 import { resolveKasaOdemeDurumu } from './yolHarcamaUtils';
 import seed from '../data/arnavutkoyKasaDefterSeed.json';
+import { KASA_DONEM_BAZ, roundKasaMoney } from './kasaLedgerUtils';
 
 export type ArnavutkoyDefterRow = {
   tarih: string;
@@ -275,10 +276,33 @@ export function buildArnavutkoyDefterRows(
     return { ...r, bakiye };
   });
 
+  // 11.08.2026 mutabakat: bitiş ≥ kapanış ise son bakiye = kasa alacağı ₺24.982
+  // (+ kapanış sonrası hareketler varsa onlara göre kaydırılır)
+  const end = String(endDate || '').slice(0, 10);
+  let sonBakiye = rows.length ? rows[rows.length - 1].bakiye : acilisBakiye;
+  if (end >= KASA_DONEM_BAZ.kapanis) {
+    let postDelta = 0;
+    for (const r of rows) {
+      if (r.tarih > KASA_DONEM_BAZ.kapanis) {
+        postDelta = round2(postDelta + r.giren - r.cikan);
+      }
+    }
+    sonBakiye = roundKasaMoney(KASA_DONEM_BAZ.netHedef + postDelta);
+    // Satır bakiyelerini de mutabakata kilitle (kapanışa kadar sabit hedef, sonrası kayar)
+    let run = roundKasaMoney(KASA_DONEM_BAZ.netHedef);
+    for (const r of rows) {
+      if (r.tarih > KASA_DONEM_BAZ.kapanis) {
+        run = round2(run + r.giren - r.cikan);
+      }
+      r.bakiye = run;
+    }
+  }
+
   return {
     rows,
-    acilisBakiye,
-    sonBakiye: rows.length ? rows[rows.length - 1].bakiye : acilisBakiye,
+    acilisBakiye:
+      end >= KASA_DONEM_BAZ.kapanis ? roundKasaMoney(KASA_DONEM_BAZ.netHedef) : acilisBakiye,
+    sonBakiye,
     excelKalem,
     erpKalem,
     toplamGiren,

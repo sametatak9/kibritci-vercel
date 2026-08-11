@@ -9,7 +9,6 @@ import { ImageLightbox } from './ImageLightbox';
 import { exportKasaExcel, buildKasaExcelBuffer, exportKasaDefterExcel } from '../lib/kasaExcelExport';
 import {
   exportArnavutkoyKasaDefterExcel,
-  getArnavutkoyDefterMeta,
 } from '../lib/arnavutkoyKasaDefterExport';
 import { saveDocument } from '../lib/firebase';
 import {
@@ -1487,58 +1486,54 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
                   if (exportingArnavutDefter) return;
                   setExportingArnavutDefter(true);
                   try {
-                    // Önce eksik seed satırlarını programa yaz (sessizce plan; kullanıcıya sor)
-                    const { buildEmbeddedArnavutkoySeedPlan, syncEmbeddedArnavutkoySeedToKasa } =
-                      await import('../lib/kasaDefterImportExport');
-                    let working = kasaHareketleri;
-                    const preview = await buildEmbeddedArnavutkoySeedPlan(working, {
-                      includeDevir: true,
-                    });
-                    if (preview.plan.toImport.length > 0) {
-                      const ok = window.confirm(
-                        `Rapordan önce Excel defterinden ${preview.plan.toImport.length} satır\n` +
-                          `henüz programda yok — şimdi kasa kaydı olarak eklensin mi?\n\n` +
-                          'Tamam = ekle + rapor  |  İptal = yalnız mevcut kayıtlarla rapor'
+                    const end = appliedEndDate.slice(0, 10);
+                    if (end < '2026-08-11') {
+                      const go = window.confirm(
+                        `Mutabakat bakiyesi (kasa alacağı ₺24.982) 11.08.2026 için kilitlidir.\n\n` +
+                          `Şu an bitiş tarihiniz: ${appliedEndDate}\n\n` +
+                          'Tamam = yine de bu aralıkla rapor  |  İptal = vazgeç\n' +
+                          '(11.08.2026 ve sonrası seçilirse SON BAKİYE = ₺24.982 + sonraki hareketler)'
                       );
-                      if (ok) {
-                        const { plan, saved } = await syncEmbeddedArnavutkoySeedToKasa(working, {
-                          includeDevir: true,
-                        });
-                        if (saved > 0) {
-                          const ids = new Set(working.map((k) => k.id));
-                          working = [...working];
-                          for (const kh of plan.toImport) {
-                            if (!ids.has(kh.id)) working.push(kh);
-                          }
-                          setKasaHareketleri(
-                            working.sort((a, b) => String(a.tarih).localeCompare(String(b.tarih)))
-                          );
-                        }
-                      }
+                      if (!go) return;
                     }
 
-                    // Asıl defter raporu: program kayıtları → GİREN/ÇIKAN/BAKİYE + Kibritçi antet
+                    // Program kayıtlarından Arnavutköy defter — dönem baz mutabakat zorunlu
                     await exportKasaDefterExcel(
-                      working,
+                      kasaHareketleri,
                       appliedStartDate,
                       appliedEndDate,
                       personeller,
-                      working
+                      kasaHareketleri
                     );
-                    const meta = getArnavutkoyDefterMeta();
+
+                    const { KASA_DONEM_BAZ } = await import('../lib/kasaLedgerUtils');
+                    const { prepareKasaLedgerExportData } = await import('../lib/kasaLedgerUtils');
+                    const { totals, donemBazAktif } = prepareKasaLedgerExportData(
+                      kasaHareketleri,
+                      appliedStartDate,
+                      appliedEndDate
+                    );
                     alert(
-                      `Arnavutköy Kasa Defteri (program kayıtları) indirildi.\n\n` +
+                      `Arnavutköy Kasa Defteri indirildi.\n\n` +
                         `Dönem: ${appliedStartDate} — ${appliedEndDate}\n` +
-                        `Seed referans son bakiye: ₺${Number(meta.sonBakiye).toLocaleString('tr-TR', { minimumFractionDigits: 2 })} (${meta.maxTarih})`
+                        `Dönem baz: ${donemBazAktif ? 'AÇIK' : 'kapalı'}\n` +
+                        `SON BAKİYE (kasa alacağı): ₺${totals.closing.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}\n` +
+                        (donemBazAktif
+                          ? `\n11.08.2026 mutabakat hedefi: ₺${KASA_DONEM_BAZ.netHedef.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}`
+                          : '')
                     );
                   } catch (err) {
                     console.error('[arnavut-defter]', err);
-                    // Yedek: seed birleşimli eski export
                     try {
-                      await exportArnavutkoyKasaDefterExcel(
+                      // Yedek yol — aynı mutabakat kilidiyle
+                      const result = await exportArnavutkoyKasaDefterExcel(
                         kasaHareketleri,
                         appliedStartDate,
                         appliedEndDate
+                      );
+                      alert(
+                        `Arnavutköy Defter (yedek) indirildi.\n\n` +
+                          `SON BAKİYE: ₺${result.sonBakiye.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}`
                       );
                     } catch (err2) {
                       alert(
@@ -1554,7 +1549,7 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
                 })();
               }}
               className="bg-[#1E4E78] hover:bg-[#163a5c] disabled:opacity-60 disabled:cursor-wait border border-[#163a5c] text-white text-[11px] font-bold py-2 px-4 rounded-xl flex items-center space-x-1.5 transition cursor-pointer shadow-sm"
-              title="Seçili aralıktaki program kasa kayıtlarını ARNAVUTKÖY Excel defter formatında (GİREN/ÇIKAN/BAKİYE) + Kibritçi logo"
+              title="11.08.2026 mutabakat: SON BAKİYE = kasa alacağı ₺24.982 (sonraki hareketler eklenir)"
             >
               <FileText size={12} />
               <span>
