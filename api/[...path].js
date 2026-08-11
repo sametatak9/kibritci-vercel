@@ -160,11 +160,19 @@ function isKibritciCompany(name) {
   const n = normalizeCompanyName(name);
   return !n || n.includes("KIBRITCI");
 }
+function isAnaFirmaFirmaAdi(name) {
+  const raw = String(name || "").trim();
+  if (!raw) return true;
+  const upper = raw.toLocaleUpperCase("tr-TR");
+  if (upper === "ANA F\u0130RMA" || upper === "ANA FIRMA") return true;
+  return isKibritciCompany(raw);
+}
 function isTaseronPersonel(p) {
   if (!p) return false;
   if (p.firmaTipi === "TASERON") return true;
   const firmaAdi = String(p.firmaAdi || "").trim();
   if (!firmaAdi) return false;
+  if (isAnaFirmaFirmaAdi(firmaAdi)) return false;
   return !isKibritciCompany(firmaAdi);
 }
 var init_yoklamaUtils = __esm({
@@ -851,6 +859,114 @@ function registerApiRoutes(app2) {
       }
       const admin2 = getFirebaseAdmin();
       const snap = await admin2.firestore().collection(PUBLIC_SA_SHARE_COLLECTION).doc(token).get();
+      if (!snap.exists) {
+        return res.status(404).json({ error: "Payla\u015F\u0131m bulunamad\u0131" });
+      }
+      return res.json({ id: snap.id, ...snap.data() });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Payla\u015F\u0131m okunamad\u0131";
+      return res.status(500).json({ error: message });
+    }
+  });
+  const PUBLIC_KASA_RAPOR_COLLECTION = "publicKasaRaporPaylasimlari";
+  const KASA_RAPOR_STORAGE_BUCKET = "kibritci-erp.firebasestorage.app";
+  function makeKasaRaporShareToken() {
+    return `kr_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 14)}${Math.random().toString(36).slice(2, 10)}`;
+  }
+  function buildKasaRaporViewUrl(req, token) {
+    const host = req.get?.("x-forwarded-host") || req.get?.("host") || req.headers.host || "kibritci-erp.onrender.com";
+    const proto = (req.get?.("x-forwarded-proto") || req.protocol || "https").split(",")[0].trim() || "https";
+    return `${proto}://${host}/?view_kasa_rapor=${encodeURIComponent(token)}`;
+  }
+  async function uploadKasaRaporFile(admin2, token, fileName, buffer, contentType) {
+    const bucket = admin2.storage().bucket(KASA_RAPOR_STORAGE_BUCKET);
+    const objectPath = `kasa-raporlari/${token}/${fileName}`;
+    const file = bucket.file(objectPath);
+    await file.save(buffer, {
+      contentType,
+      metadata: { cacheControl: "public, max-age=604800" }
+    });
+    const [signedUrl] = await file.getSignedUrl({
+      action: "read",
+      expires: Date.now() + 90 * 24 * 60 * 60 * 1e3
+    });
+    return signedUrl;
+  }
+  app2.post("/api/public/kasa-rapor-share", async (req, res) => {
+    if (!isFirebaseAdminConfigured()) {
+      return res.status(503).json({ error: "Firebase Admin yap\u0131land\u0131r\u0131lmam\u0131\u015F" });
+    }
+    try {
+      const idToken = await readBearerToken(req);
+      if (!idToken) return res.status(401).json({ error: "Authorization Bearer token gerekli" });
+      const decoded = await verifyIdToken(idToken);
+      const html = String(req.body?.html || "");
+      if (!html || html.length < 40) {
+        return res.status(400).json({ error: "html zorunlu" });
+      }
+      const meta = req.body?.meta || {};
+      const startDate = String(meta.startDate || "");
+      const endDate = String(meta.endDate || "");
+      if (!startDate || !endDate) {
+        return res.status(400).json({ error: "startDate ve endDate zorunlu" });
+      }
+      const token = makeKasaRaporShareToken();
+      const admin2 = getFirebaseAdmin();
+      const htmlUrl = await uploadKasaRaporFile(
+        admin2,
+        token,
+        "report.html",
+        Buffer.from(html, "utf8"),
+        "text/html; charset=utf-8"
+      );
+      let excelUrl = "";
+      const excelBase64 = String(req.body?.excelBase64 || "").trim();
+      if (excelBase64) {
+        excelUrl = await uploadKasaRaporFile(
+          admin2,
+          token,
+          "report.xlsx",
+          Buffer.from(excelBase64, "base64"),
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        );
+      }
+      const viewUrl = buildKasaRaporViewUrl(req, token);
+      const payload = {
+        kind: "kasa_harcama",
+        startDate,
+        endDate,
+        kalemCount: Number(meta.kalemCount) || 0,
+        genelToplam: Number(meta.genelToplam) || 0,
+        htmlUrl,
+        excelUrl: excelUrl || null,
+        viewUrl,
+        createdAt: (/* @__PURE__ */ new Date()).toISOString(),
+        createdBy: decoded.email || meta.createdBy || null
+      };
+      await admin2.firestore().collection(PUBLIC_KASA_RAPOR_COLLECTION).doc(token).set(payload);
+      return res.json({
+        success: true,
+        token,
+        viewUrl,
+        htmlUrl,
+        excelUrl: excelUrl || void 0
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Kasa rapor payla\u015F\u0131m\u0131 olu\u015Fturulamad\u0131";
+      return res.status(500).json({ error: message });
+    }
+  });
+  app2.get("/api/public/kasa-rapor-share/:token", async (req, res) => {
+    if (!isFirebaseAdminConfigured()) {
+      return res.status(503).json({ error: "Firebase Admin yap\u0131land\u0131r\u0131lmam\u0131\u015F" });
+    }
+    try {
+      const token = String(req.params.token || "").trim();
+      if (!token || token.length < 8) {
+        return res.status(400).json({ error: "Ge\xE7ersiz payla\u015F\u0131m kodu" });
+      }
+      const admin2 = getFirebaseAdmin();
+      const snap = await admin2.firestore().collection(PUBLIC_KASA_RAPOR_COLLECTION).doc(token).get();
       if (!snap.exists) {
         return res.status(404).json({ error: "Payla\u015F\u0131m bulunamad\u0131" });
       }

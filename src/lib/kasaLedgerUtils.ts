@@ -3,21 +3,26 @@ import { KASA_ADSIZ_UNVAN, resolvePersonelUnvan } from './personelUnvanUtils';
 import { resolveKasaOdemeDurumu } from './yolHarcamaUtils';
 
 /**
- * 01.01.2026 dönem baz — bir defalık onaylı kasa özeti (içe aktarım sonrası).
- * Kayıtlar listede kalır; rapor toplamları bu baz + 11.08.2026 sonrası hareketlerden gelir.
+ * 01.01.2026 dönem baz — eski düzen ile yeni düzen arasındaki tek seferlik
+ * açılış mutabakatı. Kayıtlar defterde kalır; bu dönemden sonraki hareketler
+ * normal giriş/çıkış olarak eklenir.
  */
 export const KASA_DONEM_BAZ = {
   baslangic: '2026-01-01',
   kapanis: '2026-08-11',
-  giren: 25000,
-  cikan: 24981.59,
-  bakiye: 18.41,
+  /** Dönem başında kasaya ödenecek / borç tutarı */
+  borc: 24981.59,
+  /** Toplam giriş − toplam çıkış için dönem başı hedef net */
+  netHedef: 24981.59,
   cikisKalem: 27,
-  carryLabel: '01.01.2026 DÖNEM BAZ — DEVREDEN BAKİYE',
+  carryLabel: '01.01.2026 DÖNEM BAZ — KASAYA BORÇ / DEVREDEN NET',
 } as const;
 
-export function isKasaDonemBazReport(startDate: string): boolean {
-  return String(startDate).slice(0, 10) >= KASA_DONEM_BAZ.baslangic;
+/** Dönem baz yalnızca tam mutabakat tarih aralığını kapsayan raporlarda kullanılır. */
+export function isKasaDonemBazReport(startDate: string, endDate: string): boolean {
+  const start = String(startDate).slice(0, 10);
+  const end = String(endDate).slice(0, 10);
+  return start === KASA_DONEM_BAZ.baslangic && end >= KASA_DONEM_BAZ.kapanis;
 }
 
 /** Dönem baz kapanışından sonraki kayıtlar — toplama / bakiye için */
@@ -120,7 +125,7 @@ export type KasaLedgerTotals = {
   totalOut: number;
   /** Defter / devreden bakiye — giren − çıkan */
   closing: number;
-  /** Kasaya borç / ödenecek tutar (dönem bazda = toplam çıkış) */
+  /** Rapor neti — toplam giriş − toplam çıkış */
   netDurum: number;
   cikisKalem: number;
   donemBazAktif: boolean;
@@ -128,9 +133,9 @@ export type KasaLedgerTotals = {
 
 export function computeKasaLedgerTotals(
   hareketler: KasaHareketi[],
-  opts?: { donemBazAktif?: boolean; startDate?: string }
+  opts?: { donemBazAktif?: boolean }
 ): KasaLedgerTotals {
-  const donemBazAktif = Boolean(opts?.donemBazAktif && opts?.startDate && isKasaDonemBazReport(opts.startDate));
+  const donemBazAktif = Boolean(opts?.donemBazAktif);
 
   if (!donemBazAktif) {
     const totalIn = roundKasaMoney(
@@ -149,13 +154,20 @@ export function computeKasaLedgerTotals(
       totalIn,
       totalOut,
       closing,
-      netDurum: totalOut,
+      netDurum: closing,
       cikisKalem,
       donemBazAktif: false,
     };
   }
 
   const post = filterPostDonemBazHareketleri(hareketler);
+  const donemPersonelOdedi = (hareketler || []).filter((k) => {
+    if (String(k.tarih).slice(0, 10) > KASA_DONEM_BAZ.kapanis) return false;
+    return k.hareketTipi === 'ÇIKIŞ' && resolveKasaOdemeDurumu(k) === 'PERSONEL_ODEDI';
+  });
+  const donemPersonelToplam = roundKasaMoney(
+    donemPersonelOdedi.reduce((sum, k) => sum + roundKasaMoney(k.tutar), 0)
+  );
   const postIn = roundKasaMoney(
     post.filter((k) => k.hareketTipi === 'GİRİŞ').reduce((s, k) => s + roundKasaMoney(k.tutar), 0)
   );
@@ -164,15 +176,22 @@ export function computeKasaLedgerTotals(
   );
   const postCikisKalem = post.filter((k) => k.hareketTipi === 'ÇIKIŞ').length;
 
-  const totalOut = roundKasaMoney(KASA_DONEM_BAZ.cikan + postOut);
-  const totalIn = roundKasaMoney(KASA_DONEM_BAZ.giren + postIn);
+  /**
+   * Eski dönemden yalnızca personel tarafından ödenen DB kayıtları taşınır.
+   * Diğer eski KASA / BORÇ satırları bir defalık açılış borcunda mutabık kalınır.
+   */
+  const donemCikis = roundKasaMoney(KASA_DONEM_BAZ.borc + donemPersonelToplam);
+  const donemGiris = roundKasaMoney(donemCikis + KASA_DONEM_BAZ.netHedef);
+  const totalOut = roundKasaMoney(donemCikis + postOut);
+  const totalIn = roundKasaMoney(donemGiris + postIn);
+  const closing = roundKasaMoney(KASA_DONEM_BAZ.netHedef + postIn - postOut);
 
   return {
     totalIn,
     totalOut,
-    closing: roundKasaMoney(KASA_DONEM_BAZ.bakiye + postIn - postOut),
-    netDurum: totalOut,
-    cikisKalem: KASA_DONEM_BAZ.cikisKalem + postCikisKalem,
+    closing,
+    netDurum: closing,
+    cikisKalem: KASA_DONEM_BAZ.cikisKalem + donemPersonelOdedi.length + postCikisKalem,
     donemBazAktif: true,
   };
 }
@@ -202,19 +221,19 @@ export function prepareKasaLedgerExportData(
   const periodOnly = opts?.periodOnly !== false;
   const dedupedAll = dedupeKasaHareketleriForLedger(allHareketler);
   const inRange = dedupedAll.filter((k) => k.tarih >= startDate && k.tarih <= endDate);
-  const donemBazAktif = isKasaDonemBazReport(startDate);
+  const donemBazAktif = isKasaDonemBazReport(startDate, endDate);
   const inRangePostBaz = donemBazAktif ? filterPostDonemBazHareketleri(inRange) : inRange;
 
   let opening: number;
   if (donemBazAktif) {
-    opening = KASA_DONEM_BAZ.bakiye;
+    opening = KASA_DONEM_BAZ.netHedef;
   } else if (periodOnly) {
     opening = 0;
   } else {
     opening = computeKasaNetBalance(dedupedAll.filter((k) => String(k.tarih) < startDate));
   }
 
-  const totals = computeKasaLedgerTotals(inRange, { donemBazAktif, startDate });
+  const totals = computeKasaLedgerTotals(inRange, { donemBazAktif });
   return { dedupedAll, inRange, inRangePostBaz, opening, periodOnly, totals, donemBazAktif };
 }
 
@@ -322,33 +341,35 @@ export function buildKasaKisiHarcamaRows(
     return aggregateKasaKisiHarcamaRows(cikislar, personeller);
   }
 
-  /** Dönem baz: eski dönem kişi/kasa kırılımı gösterilmez — başlangıç borcu tek KASA satırı */
+  /**
+   * Dönem baz: başlangıç borcu tek BORÇ satırıdır. Eski dönemin yalnızca
+   * PERSONEL ÖDEDİ kayıtları (Celal, Sabri, Enes, Fatih vb.) kişi bazında taşınır.
+   * Eski KASA / BORÇ kayıtları ikinci kez rapora katılmaz.
+   */
+  const donemPersonelOdedi = (cikislar || []).filter(
+    (k) =>
+      String(k.tarih).slice(0, 10) <= KASA_DONEM_BAZ.kapanis &&
+      k.hareketTipi === 'ÇIKIŞ' &&
+      resolveKasaOdemeDurumu(k) === 'PERSONEL_ODEDI'
+  );
   const postCikis = filterPostDonemBazHareketleri(cikislar);
-  const postRows = aggregateKasaKisiHarcamaRows(postCikis, personeller);
-  const namedPost = postRows.filter((r) => r.key !== 'kasa:anon');
-  const postAnon = postRows.find((r) => r.key === 'kasa:anon');
+  const personelVeSonrakiRows = aggregateKasaKisiHarcamaRows(
+    [...donemPersonelOdedi, ...postCikis],
+    personeller
+  );
 
-  const namedTotal = roundKasaMoney(namedPost.reduce((s, r) => s + r.tutar, 0));
-  const authoritativeOut =
-    opts.totalOut != null
-      ? roundKasaMoney(opts.totalOut)
-      : roundKasaMoney(KASA_DONEM_BAZ.cikan + (postAnon?.kasa ?? 0) + namedTotal);
-
-  const kasaTutar = roundKasaMoney(authoritativeOut - namedTotal);
-  const kasaKalem = KASA_DONEM_BAZ.cikisKalem + (postAnon?.kalem ?? 0);
-
-  const kasaRow: KasaKisiHarcamaRow = {
-    key: 'kasa:donem-baz',
-    label: 'KASA',
-    kalem: kasaKalem,
-    borc: 0,
+  const borcRow: KasaKisiHarcamaRow = {
+    key: 'borc:donem-baz',
+    label: 'BORÇ · dönem başlangıcı',
+    kalem: KASA_DONEM_BAZ.cikisKalem,
+    borc: KASA_DONEM_BAZ.borc,
     personel: 0,
-    kasa: kasaTutar,
-    tutar: kasaTutar,
-    durum: 'KASA_ODEDI',
+    kasa: 0,
+    tutar: KASA_DONEM_BAZ.borc,
+    durum: 'BORC',
   };
 
-  return [...namedPost, kasaRow].sort(
+  return [...personelVeSonrakiRows, borcRow].sort(
     (a, b) => b.tutar - a.tutar || a.label.localeCompare(b.label, 'tr')
   );
 }
@@ -377,17 +398,7 @@ export function computeKasaOdemeBazliOzet(
 
   let totals: Record<KasaOdemeDurumu, number>;
 
-  if (opts?.totalOut != null) {
-    const authoritativeOut = roundKasaMoney(opts.totalOut);
-    const rowSums = sumFromRows(satirlar);
-    totals = {
-      BORC: rowSums.BORC,
-      PERSONEL_ODEDI: rowSums.PERSONEL_ODEDI,
-      KASA_ODEDI: roundKasaMoney(authoritativeOut - rowSums.BORC - rowSums.PERSONEL_ODEDI),
-    };
-  } else {
-    totals = sumFromRows(satirlar);
-  }
+  totals = sumFromRows(satirlar);
 
   const genelToplam =
     opts?.totalOut ??

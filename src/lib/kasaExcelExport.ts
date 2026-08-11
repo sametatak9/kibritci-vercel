@@ -556,11 +556,10 @@ type ExcelPersonRow = {
 function buildKasaExcelPersonRows(
   inRange: KasaHareketi[],
   personeller: Array<Pick<Personel, 'id' | 'ad' | 'soyad' | 'eposta' | 'tcNo'>>,
-  donemBazAktif: boolean,
-  totalOut?: number
+  donemBazAktif: boolean
 ): ExcelPersonRow[] {
   const cikislar = inRange.filter((k) => k.hareketTipi === 'ÇIKIŞ');
-  return buildKasaKisiHarcamaRows(cikislar, personeller, { donemBazAktif, totalOut }).map(
+  return buildKasaKisiHarcamaRows(cikislar, personeller, { donemBazAktif }).map(
     (r) => ({
       label: r.label,
       kalem: r.kalem,
@@ -650,6 +649,10 @@ function appendKasaMasrafOzetBlock(
   const effectiveTotals = totals ?? computeKasaLedgerTotals(inRange);
   const totalOut = effectiveTotals.totalOut;
   const totalIn = effectiveTotals.totalIn;
+  const postGirisToplam = roundKasaMoney(
+    postGirisler.reduce((sum, k) => sum + roundKasaMoney(k.tutar), 0)
+  );
+  const donemBazGiris = roundKasaMoney(totalIn - postGirisToplam);
 
   writeOzetBaslik(sheet, row, cols, 'GENEL TOPLAM — KASA HARCAMA (ÇIKIŞ)', 'FFFFEDD5');
   row += 1;
@@ -676,7 +679,7 @@ function appendKasaMasrafOzetBlock(
         1,
         `Dönem baz giriş (${KASA_DONEM_BAZ.baslangic} — ${KASA_DONEM_BAZ.kapanis})`,
         1,
-        KASA_DONEM_BAZ.giren
+        donemBazGiris
       );
       row += 1;
     }
@@ -1332,7 +1335,7 @@ export async function buildKasaExcelBuffer(
 
   const cikislar = inRange.filter((k) => k.hareketTipi === 'ÇIKIŞ');
   const girisler = inRange.filter((k) => k.hareketTipi === 'GİRİŞ');
-  const personRows = buildKasaExcelPersonRows(inRange, personeller, donemBazAktif, totals.totalOut);
+  const personRows = buildKasaExcelPersonRows(inRange, personeller, donemBazAktif);
   const ozet = computeKasaOdemeBazliOzet(cikislar, personeller, {
     donemBazAktif,
     totalOut: totals.totalOut,
@@ -1344,11 +1347,12 @@ export async function buildKasaExcelBuffer(
   const personelOdedi = ozet.totals.PERSONEL_ODEDI;
   const kasaOdedi = ozet.totals.KASA_ODEDI;
 
-  const digerKalem = cikislar.filter((k) => {
-    const d = resolveKasaOdemeDurumu(k) || 'KASA_ODEDI';
-    return d === 'BORC' || d === 'PERSONEL_ODEDI';
-  }).length;
-  const kasaKalem = Math.max(0, totals.cikisKalem - digerKalem);
+  const digerKalem = personRows
+    .filter((row) => row.borc > 0 || row.personel > 0)
+    .reduce((sum, row) => sum + row.kalem, 0);
+  const kasaKalem = personRows
+    .filter((row) => row.kasa > 0)
+    .reduce((sum, row) => sum + row.kalem, 0);
 
   // Fiş URL’leri — yalnızca hazır https (Storage upload export’u kilitlemesin)
   const withFotoAll = cikislar.filter((k) => String(k.fisEvrakUrl || '').trim());
@@ -1468,7 +1472,7 @@ export async function buildKasaExcelBuffer(
     { label: 'KASA ÖDEDİ TOPLAM', value: kasaOdedi, color: 'FF1D4ED8' },
     { label: 'TOPLAM ÇIKIŞ', value: totalOut, color: 'FFB91C1C' },
     { label: 'TOPLAM GİRİŞ', value: totalIn, color: 'FF047857' },
-    { label: 'NET DURUM (KASAYA BORÇ)', value: totals.netDurum, color: 'FF1E4E78' },
+    { label: 'NET DURUM (GİRİŞ − ÇIKIŞ)', value: totals.netDurum, color: 'FF1E4E78' },
   ];
   for (const ot of ozetTotals) {
     sheet.mergeCells(row, 1, row, 5);
