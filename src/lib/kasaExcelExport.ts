@@ -534,13 +534,14 @@ function groupByPersonel(
 
 /**
  * Haftalık Kasa Excel — Kibritçi antetli, kişi bazlı masraf özeti + kalem kalem + fiş fotoğrafları.
+ * @returns xlsx binary buffer (e-posta paylaşımı / indirme için)
  */
-export async function exportKasaExcel(
+export async function buildKasaExcelBuffer(
   kasaHareketleri: KasaHareketi[],
   startDate: string,
   endDate: string,
   personeller: Array<Pick<Personel, 'id' | 'ad' | 'soyad' | 'eposta' | 'tcNo'>> = []
-): Promise<void> {
+): Promise<ArrayBuffer> {
   if (!Array.isArray(kasaHareketleri) || kasaHareketleri.length === 0) {
     throw new Error('Seçili aralıkta dışa aktarılacak kasa hareketi yok. Tarih filtresini kontrol edin.');
   }
@@ -932,8 +933,18 @@ export async function exportKasaExcel(
   }
 
   const buffer = await workbook.xlsx.writeBuffer();
+  return buffer as ArrayBuffer;
+}
+
+export async function exportKasaExcel(
+  kasaHareketleri: KasaHareketi[],
+  startDate: string,
+  endDate: string,
+  personeller: Array<Pick<Personel, 'id' | 'ad' | 'soyad' | 'eposta' | 'tcNo'>> = []
+): Promise<void> {
+  const buffer = await buildKasaExcelBuffer(kasaHareketleri, startDate, endDate, personeller);
   downloadBuffer(
-    buffer as ArrayBuffer | Uint8Array,
+    buffer,
     `${KASA_REPORT_FORMAT.excel.filePrefix}_${startDate}_${endDate}.xlsx`
   );
 }

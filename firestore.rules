@@ -95,6 +95,13 @@ service cloud.firestore {
       allow update, delete: if canUseFinance() || isYonetici() || isFounderEmail();
     }
 
+    // Kasa harcama HTML / Excel e-posta indirme linki
+    match /publicKasaRaporPaylasimlari/{docId} {
+      allow read: if true;
+      allow create: if isSignedIn();
+      allow update, delete: if canUseFinance() || isYonetici() || isFounderEmail();
+    }
+
     match /bekleyenUyelikler/{docId} {
       allow create: if isSignedIn();
       allow read, update, delete: if isYonetici() || legacyUnclaimedEmailUser() || isFounderEmail();

@@ -144,7 +144,9 @@ const YetkiVermeScreen = lazy(() => import('./components/YetkiVermeScreen').then
 const OperatorScreen = lazy(() => import('./components/OperatorScreen').then(m => ({ default: m.OperatorScreen })));
 const PublicGirisKayitScreen = lazy(() => import('./components/PublicGirisKayitScreen').then(m => ({ default: m.PublicGirisKayitScreen })));
 const PublicSatinAlmaShareScreen = lazy(() => import('./components/PublicSatinAlmaShareScreen').then(m => ({ default: m.PublicSatinAlmaShareScreen })));
+const PublicKasaRaporShareScreen = lazy(() => import('./components/PublicKasaRaporShareScreen').then(m => ({ default: m.PublicKasaRaporShareScreen })));
 import { fetchSatinAlmaPublicShare } from './lib/satinAlmaPublicShare';
+import { fetchKasaRaporPublicShare } from './lib/kasaRaporPublicShare';
 import { installReportEmailGlobalBridge } from './lib/reportEmail';
 import { CANONICAL_ANA_FIRMA_ADI, isKibritciCompany, normalizeTurkishName } from './lib/yoklamaUtils';
 import { findPersonelMatches, pickBestPersonelMatch } from './lib/personelMatchUtils';
@@ -355,6 +357,7 @@ export default function App() {
   // Public Personnel Boarding Document Viewer (WhatsApp link handler)
   const [publicViewGiris, setPublicViewGiris] = useState<any>(null);
   const [publicViewPo, setPublicViewPo] = useState<any>(null);
+  const [publicViewKasaRapor, setPublicViewKasaRapor] = useState<any>(null);
   const [publicLoading, setPublicLoading] = useState<boolean>(false);
 
   // Error reporting state
@@ -472,6 +475,7 @@ export default function App() {
     const urlParams = new URLSearchParams(window.location.search);
     const viewGirisId = urlParams.get('view_giris');
     const viewPoToken = urlParams.get('view_po');
+    const viewKasaRaporToken = urlParams.get('view_kasa_rapor');
     if (viewGirisId) {
       setPublicLoading(true);
       void (async () => {
@@ -491,6 +495,23 @@ export default function App() {
           }
         } catch (err) {
           console.error(err);
+        } finally {
+          setPublicLoading(false);
+        }
+      })();
+    } else if (viewKasaRaporToken) {
+      setPublicLoading(true);
+      void (async () => {
+        try {
+          const share = await fetchKasaRaporPublicShare(viewKasaRaporToken);
+          if (share) {
+            setPublicViewKasaRapor(share);
+          } else {
+            setPublicViewKasaRapor({ id: viewKasaRaporToken, _notFound: true });
+          }
+        } catch (err) {
+          console.error(err);
+          setPublicViewKasaRapor({ id: viewKasaRaporToken, _notFound: true });
         } finally {
           setPublicLoading(false);
         }
@@ -2854,6 +2875,13 @@ export default function App() {
     setPublicViewPo(null);
   };
 
+  const closePublicKasaRapor = () => {
+    const url = new URL(window.location.href);
+    url.searchParams.delete('view_kasa_rapor');
+    window.history.replaceState({}, '', url.toString());
+    setPublicViewKasaRapor(null);
+  };
+
   // Public WhatsApp giriş / satın alma evrak linki — oturum gerekmez
   if (publicLoading) {
     return (
@@ -2868,6 +2896,12 @@ export default function App() {
   if (publicViewGiris) {
     return (
       <PublicGirisKayitScreen talep={publicViewGiris} onClose={closePublicGiris} />
+    );
+  }
+
+  if (publicViewKasaRapor) {
+    return (
+      <PublicKasaRaporShareScreen share={publicViewKasaRapor} onClose={closePublicKasaRapor} />
     );
   }
 

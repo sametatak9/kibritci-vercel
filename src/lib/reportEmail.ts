@@ -9,8 +9,12 @@ export interface ReportEmailPayload {
   html?: string;
   fileName?: string;
   defaultTo?: string;
-  /** Alıcının tarayıcıda açıp indirebileceği kalıcı bağlantı */
+  /** Alıcının tarayıcıda açıp indirebileceği kalıcı bağlantı (tek link) */
   downloadUrl?: string;
+  /** Renkli HTML rapor görüntüleme / indirme bağlantısı */
+  htmlDownloadUrl?: string;
+  /** Excel tablo indirme bağlantısı */
+  excelDownloadUrl?: string;
   /** HTML raporu düz metin gövdeye dökme (kasa raporu gibi ek dosyalı gönderimler) */
   expandHtmlInBody?: boolean;
   /** Excel dosya adı — diyalogda gösterilir */
@@ -22,17 +26,18 @@ export interface ReportEmailPayload {
 const MAX_MAILTO_BODY = 12000;
 
 export function htmlToPlainText(html: string): string {
+  const stripped = html
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ');
   if (typeof document === 'undefined') {
-    return html
-      .replace(/<style[\s\S]*?<\/style>/gi, ' ')
-      .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    return stripped
       .replace(/<[^>]+>/g, ' ')
       .replace(/\s+/g, ' ')
       .trim();
   }
   const el = document.createElement('div');
-  el.innerHTML = html;
-  return (el.innerText || el.textContent || '')
+  el.innerHTML = stripped;
+  return (el.innerText || '')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
 }
@@ -42,6 +47,8 @@ export function buildReportMailBody(options: {
   body?: string;
   html?: string;
   downloadUrl?: string;
+  htmlDownloadUrl?: string;
+  excelDownloadUrl?: string;
   expandHtmlInBody?: boolean;
   hasExcelAttachment?: boolean;
 }): string {
@@ -68,13 +75,22 @@ Kibritçi İnşaat ERP üzerinden hazırlanan rapor bilginize sunulmuştur.
 Konu: ${options.subject}
 
 `;
-  const linkBlock = options.downloadUrl
-    ? `
+  const linkLines: string[] = [];
+  const htmlLink = options.htmlDownloadUrl || options.downloadUrl;
+  if (htmlLink) {
+    linkLines.push(`HTML Rapor (renkli tablo + fiş görselleri): ${htmlLink}`);
+  }
+  if (options.excelDownloadUrl) {
+    linkLines.push(`Excel Tablo (özet + kalem kalem + evrak): ${options.excelDownloadUrl}`);
+  }
+  const linkBlock =
+    linkLines.length > 0
+      ? `
 
-Evrakı görüntülemek / indirmek için bağlantı:
-${options.downloadUrl}
+── İNDİRME BAĞLANTILARI ──
+${linkLines.join('\n')}
 `
-    : '';
+      : '';
   const attachmentNote =
     options.html || options.hasExcelAttachment
       ? `
@@ -216,7 +232,7 @@ export function getReportEmailToolbarHtml(options?: {
     } catch (e) { alert('İndirme başarısız'); }
   };
   window.__kibritciEmailFromReportWindow = function(){
-    var payload = { subject: SUBJECT, body: plainFromDoc(), html: fullHtml(), fileName: FILENAME };
+    var payload = { subject: SUBJECT, body: plainFromDoc(), html: fullHtml(), fileName: FILENAME, expandHtmlInBody: false };
     if (openEmailComposer(payload)) return;
     var to = prompt('Alıcı e-posta (boş bırakılabilir):', '') || '';
     var body = encodeURIComponent('Sayın Yetkili,\\n\\n' + (payload.body || '') + '\\n\\n---\\nKibritçi ERP');
@@ -262,14 +278,17 @@ export function openReportEmailComposer(payload: ReportEmailPayload): void {
     body: payload.body,
     html: payload.html,
     downloadUrl: payload.downloadUrl,
+    htmlDownloadUrl: payload.htmlDownloadUrl,
+    excelDownloadUrl: payload.excelDownloadUrl,
     expandHtmlInBody: payload.expandHtmlInBody,
-    hasExcelAttachment: Boolean(payload.downloadExcel),
+    hasExcelAttachment: Boolean(payload.downloadExcel || payload.excelDownloadUrl),
   });
   const fileName = payload.fileName || `Kibritci_Rapor_${Date.now()}.html`;
   const excelName = payload.excelFileName || '';
+  const hasHostedLinks = Boolean(payload.htmlDownloadUrl || payload.excelDownloadUrl || payload.downloadUrl);
   const hasDualAttach = Boolean(payload.html && payload.downloadExcel);
-  const downloadUrlHint = payload.downloadUrl
-    ? `Mesajda indirme bağlantısı yer alır: ${payload.downloadUrl}`
+  const downloadUrlHint = hasHostedLinks
+    ? 'Mesajda HTML ve Excel indirme bağlantıları yer alır. Alıcılar linke tıklayarak renkli raporu görüntüleyebilir.'
     : hasDualAttach
       ? '«Gönder»e basınca HTML ve Excel dosyaları otomatik indirilir — her ikisini de e-postanıza ek dosya olarak ekleyin.'
       : payload.html
@@ -353,17 +372,20 @@ export function openReportEmailComposer(payload: ReportEmailPayload): void {
             if (payload.downloadExcel) {
               await Promise.resolve(payload.downloadExcel!());
             }
-            if (payload.html && !payload.downloadUrl) {
+            if (payload.html && !payload.downloadUrl && !payload.htmlDownloadUrl) {
               downloadReportHtmlFile(payload.html!, fileName);
             }
           } catch {
             alert('Ek dosyalar indirilemedi. «HTML İndir» / «Excel İndir» ile tekrar deneyin.');
           }
           openMailCompose(provider, to, subject, body);
-          if ((payload.html && !payload.downloadUrl) || payload.downloadExcel) {
+          if (
+            ((payload.html && !payload.downloadUrl && !payload.htmlDownloadUrl) || payload.downloadExcel) &&
+            !hasHostedLinks
+          ) {
             setTimeout(() => {
               const parts: string[] = [];
-              if (payload.html && !payload.downloadUrl) {
+              if (payload.html && !payload.downloadUrl && !payload.htmlDownloadUrl) {
                 parts.push('HTML rapor (.html)');
               }
               if (payload.downloadExcel) {
@@ -371,6 +393,12 @@ export function openReportEmailComposer(payload: ReportEmailPayload): void {
               }
               alert(
                 `${parts.join(' ve ')} indirildi.\n\nPosta penceresinde indirilen dosyaları ek (attachment) olarak ekleyin — alıcı tam raporu HTML ve Excel formatında görür.`
+              );
+            }, 400);
+          } else if (hasHostedLinks) {
+            setTimeout(() => {
+              alert(
+                'E-posta mesajında HTML ve Excel indirme bağlantıları yer alır.\n\nAlıcılar linke tıklayarak renkli HTML raporu ve Excel tabloyu indirebilir. İsterseniz indirilen dosyaları da ek olarak ekleyebilirsiniz.'
               );
             }, 400);
           }

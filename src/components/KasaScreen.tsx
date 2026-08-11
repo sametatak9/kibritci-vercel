@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import { KasaHareketi, KasaOdemeDurumu, Personel } from '../types/erp';
 import { ImageLightbox } from './ImageLightbox';
-import { exportKasaExcel } from '../lib/kasaExcelExport';
+import { exportKasaExcel, buildKasaExcelBuffer } from '../lib/kasaExcelExport';
 import { saveDocument } from '../lib/firebase';
 import {
   ensureKasaFisFotoPersisted,
@@ -141,6 +141,7 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
 
   // Weekly Cash Report Print Modal Toggle
   const [exportingKasaExcel, setExportingKasaExcel] = useState(false);
+  const [sendingKasaEmail, setSendingKasaEmail] = useState(false);
   const [savingKasa, setSavingKasa] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const formPanelRef = useRef<HTMLDivElement>(null);
@@ -175,20 +176,45 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
   };
 
   const handleAralikHarcamaEmail = async () => {
+    if (sendingKasaEmail) return;
     const { emailKasaHarcamaAralikReport } = await import('../lib/yolHarcamaUtils');
     const { KASA_REPORT_FORMAT } = await import('../lib/kasaReportTheme');
     const bundle = await buildAralikHarcamaBundle();
     if (!bundle) return;
-    emailKasaHarcamaAralikReport({
-      html: bundle.html,
-      startDate: bundle.start,
-      endDate: bundle.end,
-      toplam: bundle.toplam,
-      items: bundle.rows,
-      excelFileName: `${KASA_REPORT_FORMAT.excel.filePrefix}_${bundle.start}_${bundle.end}.xlsx`,
-      downloadExcel: () =>
-        exportKasaExcel(bundle.rows, bundle.start, bundle.end, personeller),
-    });
+    setSendingKasaEmail(true);
+    try {
+      let excelBuffer: ArrayBuffer | null = null;
+      try {
+        excelBuffer = await buildKasaExcelBuffer(
+          bundle.rows,
+          bundle.start,
+          bundle.end,
+          personeller
+        );
+      } catch (err) {
+        console.warn('[kasa-email-excel]', err);
+      }
+      await emailKasaHarcamaAralikReport({
+        html: bundle.html,
+        startDate: bundle.start,
+        endDate: bundle.end,
+        toplam: bundle.toplam,
+        items: bundle.rows,
+        excelBuffer,
+        excelFileName: `${KASA_REPORT_FORMAT.excel.filePrefix}_${bundle.start}_${bundle.end}.xlsx`,
+        downloadExcel: excelBuffer
+          ? () =>
+              exportKasaExcel(bundle.rows, bundle.start, bundle.end, personeller)
+          : undefined,
+      });
+    } catch (err) {
+      console.error('[kasa-email]', err);
+      alert(
+        'E-posta hazırlanamadı:\n' + (err instanceof Error ? err.message : String(err))
+      );
+    } finally {
+      setSendingKasaEmail(false);
+    }
   };
 
   // Filter records in range and search text keyword match
@@ -1243,12 +1269,13 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
           <div className="p-3 border-t border-[#FED7AA] bg-[#FFF7ED]/80 flex flex-wrap justify-end gap-2 shrink-0 select-none">
             <button
               type="button"
+              disabled={sendingKasaEmail}
               onClick={() => void handleAralikHarcamaEmail()}
-              className="bg-[#047857] hover:bg-[#065f46] border border-[#065f46] text-white text-[11px] font-bold py-2 px-4 rounded-xl flex items-center space-x-1.5 transition cursor-pointer shadow-sm"
-              title="HTML + Excel raporu e-posta ile gönder (ek dosyalar otomatik indirilir)"
+              className="bg-[#047857] hover:bg-[#065f46] disabled:opacity-60 disabled:cursor-wait border border-[#065f46] text-white text-[11px] font-bold py-2 px-4 rounded-xl flex items-center space-x-1.5 transition cursor-pointer shadow-sm"
+              title="HTML + Excel raporu e-posta ile gönder (indirme bağlantıları + ek dosya)"
             >
               <Mail size={12} />
-              <span>E-posta ile Gönder</span>
+              <span>{sendingKasaEmail ? 'Bağlantılar hazırlanıyor…' : 'E-posta ile Gönder'}</span>
             </button>
             <button
               type="button"

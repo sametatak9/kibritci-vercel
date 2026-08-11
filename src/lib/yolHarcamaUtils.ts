@@ -1084,7 +1084,7 @@ export function openSoforMasrafIadeReport(html: string, title: string): void {
   openHtmlReportWindow(html, title);
 }
 
-export function emailSoforMasrafIadeReport(options: {
+export async function emailSoforMasrafIadeReport(options: {
   html: string;
   startDate: string;
   endDate: string;
@@ -1092,13 +1092,35 @@ export function emailSoforMasrafIadeReport(options: {
   items?: KasaHareketi[];
   downloadExcel?: () => void | Promise<void>;
   excelFileName?: string;
-}): void {
+  excelBuffer?: ArrayBuffer | null;
+  createdBy?: string;
+}): Promise<void> {
   const start = formatDateLabelTr(normalizeDateKey(options.startDate) || options.startDate);
   const end = formatDateLabelTr(normalizeDateKey(options.endDate) || options.endDate);
   const body =
     options.items && options.items.length > 0
       ? buildKasaEmailSummaryPlainText(options.items, options.startDate, options.endDate)
       : htmlToPlainText(options.html).slice(0, 1200);
+
+  let htmlDownloadUrl = '';
+  let excelDownloadUrl = '';
+  try {
+    const { createKasaRaporPublicShare } = await import('./kasaRaporPublicShare');
+    const share = await createKasaRaporPublicShare({
+      html: options.html,
+      excelBuffer: options.excelBuffer,
+      startDate: options.startDate,
+      endDate: options.endDate,
+      kalemCount: options.items?.length || 0,
+      genelToplam: options.toplam || 0,
+      createdBy: options.createdBy,
+    });
+    htmlDownloadUrl = share.htmlUrl;
+    excelDownloadUrl = share.excelUrl || '';
+  } catch (err) {
+    console.warn('[kasa-email-share]', err);
+  }
+
   openReportEmailComposer({
     subject: `Kibritçi — Şoför Masraf İade (${start} / ${end})`,
     body,
@@ -1108,10 +1130,13 @@ export function emailSoforMasrafIadeReport(options: {
     expandHtmlInBody: false,
     downloadExcel: options.downloadExcel,
     excelFileName: options.excelFileName,
+    htmlDownloadUrl: htmlDownloadUrl || undefined,
+    excelDownloadUrl: excelDownloadUrl || undefined,
+    downloadUrl: htmlDownloadUrl || undefined,
   });
 }
 
-export function emailKasaHarcamaAralikReport(options: {
+export async function emailKasaHarcamaAralikReport(options: {
   html: string;
   startDate: string;
   endDate: string;
@@ -1119,13 +1144,35 @@ export function emailKasaHarcamaAralikReport(options: {
   items?: KasaHareketi[];
   downloadExcel?: () => void | Promise<void>;
   excelFileName?: string;
-}): void {
+  excelBuffer?: ArrayBuffer | null;
+  createdBy?: string;
+}): Promise<void> {
   const start = formatDateLabelTr(normalizeDateKey(options.startDate) || options.startDate);
   const end = formatDateLabelTr(normalizeDateKey(options.endDate) || options.endDate);
   const body =
     options.items && options.items.length > 0
       ? buildKasaEmailSummaryPlainText(options.items, options.startDate, options.endDate)
       : htmlToPlainText(options.html).slice(0, 1200);
+
+  let htmlDownloadUrl = '';
+  let excelDownloadUrl = '';
+  try {
+    const { createKasaRaporPublicShare } = await import('./kasaRaporPublicShare');
+    const share = await createKasaRaporPublicShare({
+      html: options.html,
+      excelBuffer: options.excelBuffer,
+      startDate: options.startDate,
+      endDate: options.endDate,
+      kalemCount: options.items?.length || 0,
+      genelToplam: options.toplam || 0,
+      createdBy: options.createdBy,
+    });
+    htmlDownloadUrl = share.htmlUrl;
+    excelDownloadUrl = share.excelUrl || '';
+  } catch (err) {
+    console.warn('[kasa-email-share]', err);
+  }
+
   openReportEmailComposer({
     subject: `Kibritçi — Kasa Harcama Raporu (${start} / ${end})`,
     body,
@@ -1135,5 +1182,8 @@ export function emailKasaHarcamaAralikReport(options: {
     expandHtmlInBody: false,
     downloadExcel: options.downloadExcel,
     excelFileName: options.excelFileName,
+    htmlDownloadUrl: htmlDownloadUrl || undefined,
+    excelDownloadUrl: excelDownloadUrl || undefined,
+    downloadUrl: htmlDownloadUrl || undefined,
   });
 }

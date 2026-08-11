@@ -106,6 +106,138 @@ app.get('/api/public/satin-alma-share/:token', async (req, res) => {
   }
 });
 
+const PUBLIC_KASA_RAPOR_COLLECTION = 'publicKasaRaporPaylasimlari';
+const KASA_RAPOR_STORAGE_BUCKET = 'kibritci-erp.firebasestorage.app';
+
+function makeKasaRaporShareToken(): string {
+  return `kr_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 14)}${Math.random()
+    .toString(36)
+    .slice(2, 10)}`;
+}
+
+function buildKasaRaporViewUrl(
+  req: { protocol?: string; get?: (name: string) => string | undefined; headers: { host?: string } },
+  token: string
+): string {
+  const host = req.get?.('x-forwarded-host') || req.get?.('host') || req.headers.host || 'kibritci-erp.onrender.com';
+  const proto = (req.get?.('x-forwarded-proto') || req.protocol || 'https').split(',')[0].trim() || 'https';
+  return `${proto}://${host}/?view_kasa_rapor=${encodeURIComponent(token)}`;
+}
+
+async function uploadKasaRaporFile(
+  admin: ReturnType<typeof getFirebaseAdmin>,
+  token: string,
+  fileName: string,
+  buffer: Buffer,
+  contentType: string
+): Promise<string> {
+  const bucket = admin.storage().bucket(KASA_RAPOR_STORAGE_BUCKET);
+  const objectPath = `kasa-raporlari/${token}/${fileName}`;
+  const file = bucket.file(objectPath);
+  await file.save(buffer, {
+    contentType,
+    metadata: { cacheControl: 'public, max-age=604800' },
+  });
+  const [signedUrl] = await file.getSignedUrl({
+    action: 'read',
+    expires: Date.now() + 90 * 24 * 60 * 60 * 1000,
+  });
+  return signedUrl;
+}
+
+/** Kasa harcama HTML + Excel paylaşımı (e-posta indirme bağlantıları) */
+app.post('/api/public/kasa-rapor-share', async (req, res) => {
+  if (!isFirebaseAdminConfigured()) {
+    return res.status(503).json({ error: 'Firebase Admin yapılandırılmamış' });
+  }
+  try {
+    const idToken = await readBearerToken(req);
+    if (!idToken) return res.status(401).json({ error: 'Authorization Bearer token gerekli' });
+    const decoded = await verifyIdToken(idToken);
+
+    const html = String(req.body?.html || '');
+    if (!html || html.length < 40) {
+      return res.status(400).json({ error: 'html zorunlu' });
+    }
+    const meta = req.body?.meta || {};
+    const startDate = String(meta.startDate || '');
+    const endDate = String(meta.endDate || '');
+    if (!startDate || !endDate) {
+      return res.status(400).json({ error: 'startDate ve endDate zorunlu' });
+    }
+
+    const token = makeKasaRaporShareToken();
+    const admin = getFirebaseAdmin();
+    const htmlUrl = await uploadKasaRaporFile(
+      admin,
+      token,
+      'report.html',
+      Buffer.from(html, 'utf8'),
+      'text/html; charset=utf-8'
+    );
+
+    let excelUrl = '';
+    const excelBase64 = String(req.body?.excelBase64 || '').trim();
+    if (excelBase64) {
+      excelUrl = await uploadKasaRaporFile(
+        admin,
+        token,
+        'report.xlsx',
+        Buffer.from(excelBase64, 'base64'),
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+      );
+    }
+
+    const viewUrl = buildKasaRaporViewUrl(req, token);
+    const payload = {
+      kind: 'kasa_harcama',
+      startDate,
+      endDate,
+      kalemCount: Number(meta.kalemCount) || 0,
+      genelToplam: Number(meta.genelToplam) || 0,
+      htmlUrl,
+      excelUrl: excelUrl || null,
+      viewUrl,
+      createdAt: new Date().toISOString(),
+      createdBy: decoded.email || meta.createdBy || null,
+    };
+    await admin.firestore().collection(PUBLIC_KASA_RAPOR_COLLECTION).doc(token).set(payload);
+
+    return res.json({
+      success: true,
+      token,
+      viewUrl,
+      htmlUrl,
+      excelUrl: excelUrl || undefined,
+    });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Kasa rapor paylaşımı oluşturulamadı';
+    return res.status(500).json({ error: message });
+  }
+});
+
+/** Herkese açık kasa rapor paylaşımı oku */
+app.get('/api/public/kasa-rapor-share/:token', async (req, res) => {
+  if (!isFirebaseAdminConfigured()) {
+    return res.status(503).json({ error: 'Firebase Admin yapılandırılmamış' });
+  }
+  try {
+    const token = String(req.params.token || '').trim();
+    if (!token || token.length < 8) {
+      return res.status(400).json({ error: 'Geçersiz paylaşım kodu' });
+    }
+    const admin = getFirebaseAdmin();
+    const snap = await admin.firestore().collection(PUBLIC_KASA_RAPOR_COLLECTION).doc(token).get();
+    if (!snap.exists) {
+      return res.status(404).json({ error: 'Paylaşım bulunamadı' });
+    }
+    return res.json({ id: snap.id, ...snap.data() });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Paylaşım okunamadı';
+    return res.status(500).json({ error: message });
+  }
+});
+
 app.post('/api/auth/founder-bootstrap', async (req, res) => {
   if (!isFirebaseAdminConfigured()) {
     return res.status(503).json({
