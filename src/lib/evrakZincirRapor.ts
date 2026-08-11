@@ -9,6 +9,12 @@ import {
   isGercekFaturaGirisi,
   isTaslakMaliBagFatura,
 } from './evrakDonusum';
+import {
+  irsaliyeNoChainSortKey,
+  malzemeTipiLabel,
+  micirMalzemeTipiSortKey,
+  resolveMicirMalzemeTipiFromIrsaliye,
+} from './micirUtils';
 import { getReportEmailToolbarHtml, openHtmlReportWindow } from './reportEmail';
 
 function esc(s: unknown): string {
@@ -168,6 +174,14 @@ function renderIrsaliyeCard(ir: Irsaliye, faturalar: Fatura[]): string {
                   : ''
               }
               ${
+                (() => {
+                  const tip = resolveMicirMalzemeTipiFromIrsaliye(ir);
+                  return tip
+                    ? `<span class="text-[9px] uppercase font-black bg-emerald-50 text-emerald-800 border border-emerald-200 px-1.5 py-0.5 rounded">${esc(malzemeTipiLabel(tip))}</span>`
+                    : '';
+                })()
+              }
+              ${
                 ir.saId
                   ? `<span class="text-[9px] uppercase font-black bg-white border border-slate-200 px-1.5 py-0.5 rounded">SA ${esc(ir.saId)}</span>`
                   : `<span class="text-[9px] uppercase font-black bg-amber-100 text-amber-900 border border-amber-200 px-1.5 py-0.5 rounded">SA bağı zayıf</span>`
@@ -203,7 +217,13 @@ export function buildEvrakZincirRaporHtml(input: EvrakZincirRaporInput): string 
 
   const toplamHizmet = irs.reduce((s, ir) => s + irsaliyeHizmetMiktari(ir).miktar, 0);
   const hizmetEtiket =
-    irs.map((ir) => irsaliyeHizmetMiktari(ir).etiket).find((e) => e === 'çekim') || 'hizmet';
+    irs.map((ir) => irsaliyeHizmetMiktari(ir).etiket).find((e) => e === 'ton') ||
+    irs.map((ir) => irsaliyeHizmetMiktari(ir).etiket).find((e) => e === 'çekim') ||
+    'ton';
+  const toplamAgirlikLabel =
+    toplamHizmet > 0
+      ? `Toplam ağırlık: ${toplamHizmet.toLocaleString('tr-TR')} ${hizmetEtiket}`
+      : '';
 
   let durumMetni = z.durumMetni;
   if (!sa && sevk > 0) {
@@ -287,9 +307,21 @@ export function buildEvrakZincirRaporHtml(input: EvrakZincirRaporInput): string 
     </section>`;
 
   const byMonth = new Map<string, Irsaliye[]>();
-  for (const ir of [...irs].sort((a, b) =>
-    String(b.tarih || '').localeCompare(String(a.tarih || ''))
-  )) {
+  const sortedIrs = [...irs].sort((a, b) => {
+    const aTip = resolveMicirMalzemeTipiFromIrsaliye(a);
+    const bTip = resolveMicirMalzemeTipiFromIrsaliye(b);
+    if (aTip || bTip) {
+      const ak = aTip != null ? micirMalzemeTipiSortKey(aTip) : 99;
+      const bk = bTip != null ? micirMalzemeTipiSortKey(bTip) : 99;
+      if (ak !== bk) return ak - bk;
+    }
+    const d = String(normalizeDateKey(a.tarih) || a.tarih || '').localeCompare(
+      String(normalizeDateKey(b.tarih) || b.tarih || '')
+    );
+    if (d !== 0) return d;
+    return irsaliyeNoChainSortKey(a.irsaliyeNo) - irsaliyeNoChainSortKey(b.irsaliyeNo);
+  });
+  for (const ir of sortedIrs) {
     const mk = monthKeyOf(ir);
     if (!byMonth.has(mk)) byMonth.set(mk, []);
     byMonth.get(mk)!.push(ir);
@@ -300,12 +332,16 @@ export function buildEvrakZincirRaporHtml(input: EvrakZincirRaporInput): string 
     <section class="mb-8">
       <h2 class="text-sm font-black uppercase tracking-wider text-slate-500 mb-3">
         2 · Dönüşüm — Sevk irsaliyeleri (${sevk})
-        ${
-          toplamHizmet > 0
-            ? ` · Toplam ${toplamHizmet.toLocaleString('tr-TR')} ${hizmetEtiket}`
-            : ''
-        }
+        ${toplamAgirlikLabel ? ` · ${esc(toplamAgirlikLabel)}` : ''}
       </h2>
+      ${
+        toplamHizmet > 0
+          ? `<p class="text-xs font-bold text-indigo-900 bg-indigo-50 border border-indigo-100 rounded-xl px-3 py-2 mb-3">
+              <strong>${esc(toplamAgirlikLabel)}</strong>
+              ${sa ? ` · Satın alma: <strong>${esc(sa.saId)}</strong> · ${esc(sa.cariFirma || '')}` : ''}
+            </p>`
+          : ''
+      }
       ${
         sevk === 0
           ? `<p class="text-xs text-slate-600 border border-dashed border-slate-200 rounded-xl p-4">
@@ -409,7 +445,7 @@ export function buildEvrakZincirRaporHtml(input: EvrakZincirRaporInput): string 
       <h1 class="text-xl font-extrabold text-slate-900 tracking-tight">${esc(title)}</h1>
       <p class="text-xs text-slate-500 mt-1">
         Satın Alma → İrsaliye(ler) → Fatura · Sevk ${sevk}
-        ${toplamHizmet > 0 ? ` · ${toplamHizmet.toLocaleString('tr-TR')} ${hizmetEtiket}` : ''}
+        ${toplamHizmet > 0 ? ` · ${esc(toplamAgirlikLabel)}` : ''}
         · Gerçek fatura ${faturaSayisi}${taslakSayisi ? ` · Taslak ${taslakSayisi}` : ''}
         ${tamamlandi ? ' · Zincir tamam' : ' · Zincir devam ediyor'}
       </p>
@@ -437,5 +473,15 @@ export function buildEvrakZincirRaporHtml(input: EvrakZincirRaporInput): string 
 export function openEvrakZincirRaporu(input: EvrakZincirRaporInput): Window | null {
   const html = buildEvrakZincirRaporHtml(input);
   const title = input.sa ? `Evrak Zinciri — ${input.sa.saId}` : 'Evrak Zinciri';
-  return openHtmlReportWindow(html, title);
+  const win = openHtmlReportWindow(html, title);
+  // Antetli Excel (logo + toplam ağırlık + SA + irsaliyeler) — HTML ile birlikte
+  void import('./evrakZincirExcelExport')
+    .then(({ exportEvrakZincirExcel }) => exportEvrakZincirExcel(input))
+    .catch((err) => console.error('Evrak zinciri Excel üretilemedi:', err));
+  return win;
+}
+
+export async function openEvrakZincirExcel(input: EvrakZincirRaporInput) {
+  const { exportEvrakZincirExcel } = await import('./evrakZincirExcelExport');
+  return exportEvrakZincirExcel(input);
 }

@@ -38,7 +38,7 @@ import {
   linkIrsaliyelerToFatura,
 } from '../lib/evrakDonusum';
 import { appendCariIslemOnce, buildCariEvrakHistory } from '../lib/evrakCariStokSync';
-import { openEvrakZincirRaporu } from '../lib/evrakZincirRapor';
+import { openEvrakZincirExcel, openEvrakZincirRaporu } from '../lib/evrakZincirRapor';
 import {
   applySekerVidanjorFaturaResetInMemory,
   planSekerVidanjorFaturaReset,
@@ -2169,9 +2169,57 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
                     type="button"
                     onClick={handleOpenZincirRaporuFromCari}
                     className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-[10px] font-bold bg-amber-600 text-white cursor-pointer"
-                    title="SA → İrsaliye → Fatura zincir raporu"
+                    title="SA → İrsaliye → Fatura zincir raporu (HTML + antetli Excel)"
                   >
                     <ClipboardList size={12} /> Zincir Raporu
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void (async () => {
+                        try {
+                          const selected = irsaliyeler.filter((ir) => selectedIrsaliyeIds.has(ir.id));
+                          const focusIds = selected.length
+                            ? selected.map((ir) => ir.id)
+                            : historyList
+                                .filter((h) => h.collection === 'irsaliyeler')
+                                .map((h) => h.id);
+                          const saId =
+                            selected.find((ir) => ir.saId)?.saId ||
+                            irsaliyeler.find((ir) => focusIds.includes(ir.id) && ir.saId)?.saId;
+                          let sa = saId
+                            ? satinAlmaTalepleri.find((s) => s.saId === saId)
+                            : undefined;
+                          if (!sa && selectedCariId) {
+                            sa = satinAlmaTalepleri
+                              .filter(
+                                (s) =>
+                                  s.cariKartId === selectedCariId ||
+                                  firmaEslesir(s.cariFirma || '', selectedCari?.unvan || '')
+                              )
+                              .sort((a, b) =>
+                                String(b.tarih || '').localeCompare(String(a.tarih || ''))
+                              )[0];
+                          }
+                          const result = await openEvrakZincirExcel({
+                            sa,
+                            irsaliyeler,
+                            faturalar,
+                            focusIrsaliyeIds: focusIds.length ? focusIds : undefined,
+                          });
+                          alert(
+                            `Antetli Excel indirildi.\n${result.sevk} irsaliye · Toplam ağırlık: ${result.toplamAgirlik.toLocaleString('tr-TR')} ton\n${result.fileName}`
+                          );
+                        } catch (err: any) {
+                          console.error(err);
+                          alert('Excel üretilemedi: ' + (err?.message || err));
+                        }
+                      })();
+                    }}
+                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-[10px] font-bold bg-emerald-700 text-white cursor-pointer"
+                    title="Kibritçi antetli Excel — toplam ağırlık + SA + irsaliyeler"
+                  >
+                    <Download size={12} /> Zincir Excel
                   </button>
                   <button
                     type="button"
