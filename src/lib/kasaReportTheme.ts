@@ -9,6 +9,11 @@ export const KASA_REPORT_FORMAT = {
     filePrefix: 'Kibritci_Haftalik_Kasa_EXCEL',
     accentLabel: 'Excel',
   },
+  defterExcel: {
+    badge: 'ARNAVUTKÖY tarzı sade kasa defteri (.xlsx)',
+    filePrefix: 'ARNAVUTKOY_KASA_DEFTER',
+    accentLabel: 'Kasa Defter',
+  },
   html: {
     badge: 'HTML RAPORU — Yazdır / PDF / e-posta (Excel için «Kasa Excel» butonu)',
     filePrefix: 'Kibritci_Haftalik_Kasa_HTML',

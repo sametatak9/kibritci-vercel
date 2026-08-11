@@ -398,6 +398,8 @@ export interface KasaHareketi {
   masrafTipi?: SoforMasrafTipi;
   surucu?: string;
   fisNo?: string;
+  /** Geçmiş Excel aktarımı vb. — mevcut kayıtları etkilemez */
+  kaynak?: 'LEGACY_XLS' | string;
 }
 
 /** Şoför evrak beyanı / yönetici nihai ayrımı */

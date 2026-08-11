@@ -722,6 +722,175 @@ function addHaftalikKasaDefterSheet(
   sheet.pageSetup.printArea = `A1:G${row - 1}`;
 }
 
+/** ARNAVUTKÖY.xls şablonu — tek sayfa, özet satırı + başlık + defter */
+function addArnavutkoyKasaDefterSheet(
+  workbook: Workbook,
+  inRange: KasaHareketi[],
+  startDate: string,
+  endDate: string,
+  allHareketler: KasaHareketi[],
+  personeller: Array<Pick<Personel, 'id' | 'ad' | 'soyad' | 'eposta' | 'tcNo'>>
+): void {
+  const COLS = 7;
+  const sheet = workbook.addWorksheet('ARNAVUTKÖY', {
+    pageSetup: { paperSize: 9, orientation: 'portrait', fitToPage: true, fitToWidth: 1 },
+    views: [{ showGridLines: true }],
+  });
+  sheet.columns = [
+    { width: 12 },
+    { width: 11 },
+    { width: 7 },
+    { width: 52 },
+    { width: 14 },
+    { width: 14 },
+    { width: 15 },
+  ];
+
+  let totalIn = 0;
+  let totalOut = 0;
+  for (const kh of inRange) {
+    const t = Number(kh.tutar) || 0;
+    if (kh.hareketTipi === 'GİRİŞ') totalIn += t;
+    else totalOut += t;
+  }
+  const beforeRange = allHareketler.filter((k) => String(k.tarih) < startDate);
+  let balance = computeKasaNetBalance(beforeRange);
+  const closingBalance = balance + totalIn - totalOut;
+
+  const meta = sheet.getRow(1);
+  meta.height = 22;
+  meta.getCell(2).value = 'PROJE MÜDÜRÜ';
+  meta.getCell(2).font = { bold: true, size: 10 };
+  meta.getCell(5).value = totalIn;
+  meta.getCell(6).value = totalOut;
+  meta.getCell(7).value = closingBalance;
+  for (const c of [5, 6, 7]) applyDefterMoneyCell(meta.getCell(c));
+
+  const headerRow = 2;
+  const headers = ['TARİH', 'AY', 'YIL', 'AÇIKLAMA', 'GİREN', 'ÇIKAN', 'BAKİYE'];
+  const hr = sheet.getRow(headerRow);
+  hr.height = 20;
+  headers.forEach((h, i) => {
+    const cell = hr.getCell(i + 1);
+    cell.value = h;
+    cell.font = { bold: true, size: 10 };
+    cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+    cell.border = thinBorder();
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2E8F0' } };
+  });
+
+  let row = headerRow + 1;
+  const carry = sheet.getRow(row);
+  carry.height = 18;
+  carry.getCell(4).value = 'GEÇEN HAFTADAN DEVREDEN';
+  carry.getCell(4).font = { bold: true, size: 10 };
+  carry.getCell(4).alignment = { vertical: 'middle', wrapText: true };
+  carry.getCell(5).value = 0;
+  carry.getCell(6).value = 0;
+  carry.getCell(7).value = balance;
+  for (let c = 1; c <= COLS; c++) {
+    const cell = carry.getCell(c);
+    cell.border = thinBorder();
+    cell.font = { size: 10, ...(c === 4 ? { bold: true } : {}) };
+    if (c >= 5) applyDefterMoneyCell(cell);
+  }
+  row += 1;
+
+  const sorted = [...inRange].sort((a, b) => {
+    const dc = String(a.tarih).localeCompare(String(b.tarih));
+    if (dc !== 0) return dc;
+    if (a.hareketTipi !== b.hareketTipi) {
+      return a.hareketTipi === 'GİRİŞ' ? -1 : 1;
+    }
+    return String(a.id).localeCompare(String(b.id));
+  });
+
+  for (const kh of sorted) {
+    const t = Number(kh.tutar) || 0;
+    const isGiris = kh.hareketTipi === 'GİRİŞ';
+    const { ay, yil } = tarihAyYilParts(kh.tarih);
+    const r = sheet.getRow(row);
+    r.height = 18;
+
+    const dateCell = r.getCell(1);
+    dateCell.value = new Date(`${String(kh.tarih).slice(0, 10)}T12:00:00`);
+    dateCell.numFmt = 'dd.mm.yyyy';
+    dateCell.alignment = { horizontal: 'center', vertical: 'middle' };
+    r.getCell(2).value = ay;
+    r.getCell(2).alignment = { horizontal: 'center', vertical: 'middle' };
+    r.getCell(3).value = Number(yil) || yil;
+    r.getCell(3).alignment = { horizontal: 'center', vertical: 'middle' };
+    r.getCell(4).value = buildDefterAciklama(kh, personeller);
+    r.getCell(4).alignment = { vertical: 'middle', wrapText: true };
+    r.getCell(5).value = isGiris ? t : 0;
+    r.getCell(6).value = isGiris ? 0 : t;
+    if (isGiris) balance += t;
+    else balance -= t;
+    r.getCell(7).value = balance;
+
+    for (let c = 1; c <= COLS; c++) {
+      const cell = r.getCell(c);
+      cell.border = thinBorder();
+      cell.font = { size: 10 };
+      if (c >= 5) applyDefterMoneyCell(cell);
+      if (isGiris) {
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: DEFTER_GIRIS_FILL } };
+      }
+    }
+    row += 1;
+  }
+
+  sheet.pageSetup.printArea = `A1:G${Math.max(row - 1, headerRow)}`;
+}
+
+/**
+ * Yalnızca ARNAVUTKÖY tarzı kasa defteri (.xlsx) — tek sayfa.
+ */
+export async function buildKasaDefterOnlyExcelBuffer(
+  kasaHareketleri: KasaHareketi[],
+  startDate: string,
+  endDate: string,
+  personeller: Array<Pick<Personel, 'id' | 'ad' | 'soyad' | 'eposta' | 'tcNo'>> = [],
+  allKasaHareketleri?: KasaHareketi[]
+): Promise<ArrayBuffer> {
+  const inRange = (kasaHareketleri || []).filter(
+    (k) => k.tarih >= startDate && k.tarih <= endDate
+  );
+  const all = allKasaHareketleri ?? kasaHareketleri ?? [];
+  const opening = computeKasaNetBalance(all.filter((k) => String(k.tarih) < startDate));
+
+  if (inRange.length === 0 && opening === 0) {
+    throw new Error('Seçili aralıkta dışa aktarılacak kasa hareketi yok. Tarih filtresini kontrol edin.');
+  }
+
+  const workbook = await createExcelWorkbook();
+  workbook.creator = 'Kibritçi ERP';
+  workbook.created = new Date();
+  addArnavutkoyKasaDefterSheet(workbook, inRange, startDate, endDate, all, personeller);
+  return (await workbook.xlsx.writeBuffer()) as ArrayBuffer;
+}
+
+export async function exportKasaDefterExcel(
+  kasaHareketleri: KasaHareketi[],
+  startDate: string,
+  endDate: string,
+  personeller: Array<Pick<Personel, 'id' | 'ad' | 'soyad' | 'eposta' | 'tcNo'>> = [],
+  allKasaHareketleri?: KasaHareketi[]
+): Promise<void> {
+  const { KASA_REPORT_FORMAT } = await import('./kasaReportTheme');
+  const buffer = await buildKasaDefterOnlyExcelBuffer(
+    kasaHareketleri,
+    startDate,
+    endDate,
+    personeller,
+    allKasaHareketleri
+  );
+  downloadBuffer(
+    buffer,
+    `${KASA_REPORT_FORMAT.defterExcel.filePrefix}_${startDate}_${endDate}.xlsx`
+  );
+}
+
 /**
  * Haftalık Kasa Excel — Kibritçi antetli, kişi bazlı masraf özeti + kalem kalem + fiş fotoğrafları.
  * @returns xlsx binary buffer (e-posta paylaşımı / indirme için)

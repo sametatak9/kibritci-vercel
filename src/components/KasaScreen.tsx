@@ -2,11 +2,11 @@ import React, { useMemo, useState, useRef } from 'react';
 import { 
   Wallet, ArrowUpRight, ArrowDownRight, Printer,
   Calendar, FileText, Search, Eye, Image as ImageIcon, AlertCircle,
-  Pencil, Trash2, Mail,
+  Pencil, Trash2, Mail, Upload, BookOpen,
 } from 'lucide-react';
 import { KasaHareketi, KasaOdemeDurumu, Personel } from '../types/erp';
 import { ImageLightbox } from './ImageLightbox';
-import { exportKasaExcel, buildKasaExcelBuffer } from '../lib/kasaExcelExport';
+import { exportKasaExcel, buildKasaExcelBuffer, exportKasaDefterExcel } from '../lib/kasaExcelExport';
 import { saveDocument } from '../lib/firebase';
 import {
   ensureKasaFisFotoPersisted,
@@ -141,6 +141,10 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
 
   // Weekly Cash Report Print Modal Toggle
   const [exportingKasaExcel, setExportingKasaExcel] = useState(false);
+  const [exportingKasaDefter, setExportingKasaDefter] = useState(false);
+  const [importingKasaDefter, setImportingKasaDefter] = useState(false);
+  const [importProgress, setImportProgress] = useState('');
+  const kasaDefterImportRef = useRef<HTMLInputElement>(null);
   const [sendingKasaEmail, setSendingKasaEmail] = useState(false);
   const [savingKasa, setSavingKasa] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -166,6 +170,70 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
       olusturan: 'Haftalık Kasa',
     });
     return { html, start, end, toplam, rows };
+  };
+
+  const handleKasaDefterImport = async (file: File) => {
+    if (importingKasaDefter) return;
+    setImportingKasaDefter(true);
+    setImportProgress('Excel okunuyor…');
+    try {
+      const buffer = await file.arrayBuffer();
+      const {
+        parseKasaDefterWorkbook,
+        buildLegacyKasaHareketleri,
+        formatKasaDefterImportSummary,
+        importKasaDefterFromBuffer,
+      } = await import('../lib/kasaDefterImportExport');
+
+      const parse = await parseKasaDefterWorkbook(buffer);
+      const previewPlan = buildLegacyKasaHareketleri(parse.rows, kasaHareketleri);
+      const summary = formatKasaDefterImportSummary(parse, previewPlan);
+
+      if (previewPlan.toImport.length === 0) {
+        alert(`İçe aktarılacak yeni kayıt yok.\n\n${summary}`);
+        return;
+      }
+
+      const ok = window.confirm(
+        `${file.name} dosyasından ${previewPlan.toImport.length} yeni geçmiş kasa hareketi aktarılacak.\n\n` +
+          `${summary}\n\n` +
+          'Mevcut kayıtlar değiştirilmez; yalnızca yeni satırlar eklenir.\n\nDevam edilsin mi?'
+      );
+      if (!ok) return;
+
+      setImportProgress(`0 / ${previewPlan.toImport.length}`);
+      const { plan, saved } = await importKasaDefterFromBuffer(
+        buffer,
+        kasaHareketleri,
+        (done, total) => setImportProgress(`${done} / ${total}`)
+      );
+
+      if (saved > 0) {
+        setKasaHareketleri((prev) => {
+          const ids = new Set(prev.map((k) => k.id));
+          const merged = [...prev];
+          for (const kh of plan.toImport) {
+            if (!ids.has(kh.id)) merged.push(kh);
+          }
+          return merged.sort((a, b) => String(a.tarih).localeCompare(String(b.tarih)));
+        });
+      }
+
+      alert(
+        saved > 0
+          ? `${saved} geçmiş kasa hareketi aktarıldı.\n\n${formatKasaDefterImportSummary(parse, plan)}`
+          : `Yeni kayıt eklenmedi.\n\n${formatKasaDefterImportSummary(parse, plan)}`
+      );
+    } catch (err) {
+      console.error('[kasa-defter-import]', err);
+      alert(
+        'Kasa defteri içe aktarılamadı:\n' + (err instanceof Error ? err.message : String(err))
+      );
+    } finally {
+      setImportProgress('');
+      setImportingKasaDefter(false);
+      if (kasaDefterImportRef.current) kasaDefterImportRef.current.value = '';
+    }
   };
 
   const handleAralikHarcamaRaporu = async () => {
@@ -1281,8 +1349,66 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
             )}
           </div>
 
-          {/* Raporlar — yalnızca HTML + Excel */}
+          {/* Raporlar — HTML + Excel + defter dışa/içe aktar */}
           <div className="p-3 border-t border-[#FED7AA] bg-[#FFF7ED]/80 flex flex-wrap justify-end gap-2 shrink-0 select-none">
+            <input
+              ref={kasaDefterImportRef}
+              type="file"
+              accept=".xls,.xlsx,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) void handleKasaDefterImport(file);
+              }}
+            />
+            <button
+              type="button"
+              disabled={importingKasaDefter}
+              onClick={() => kasaDefterImportRef.current?.click()}
+              className="bg-slate-700 hover:bg-slate-800 disabled:opacity-60 disabled:cursor-wait border border-slate-800 text-white text-[11px] font-bold py-2 px-4 rounded-xl flex items-center space-x-1.5 transition cursor-pointer shadow-sm"
+              title="ARNAVUTKÖY tarzı Excel defterinden geçmiş kasa işlemlerini içe aktar (.xls / .xlsx)"
+            >
+              <Upload size={12} />
+              <span>
+                {importingKasaDefter
+                  ? importProgress || 'İçe aktarılıyor…'
+                  : 'Geçmiş Kasa İçe Aktar'}
+              </span>
+            </button>
+            <button
+              type="button"
+              disabled={exportingKasaDefter}
+              onClick={() => {
+                void (async () => {
+                  if (exportingKasaDefter) return;
+                  setExportingKasaDefter(true);
+                  try {
+                    await exportKasaDefterExcel(
+                      hareketlerInRange,
+                      appliedStartDate,
+                      appliedEndDate,
+                      personeller,
+                      kasaHareketleri
+                    );
+                  } catch (err) {
+                    console.error('[kasa-defter-excel]', err);
+                    alert(
+                      'Kasa defter Excel oluşturulamadı:\n' +
+                        (err instanceof Error ? err.message : String(err))
+                    );
+                  } finally {
+                    setExportingKasaDefter(false);
+                  }
+                })();
+              }}
+              className="bg-[#1D4ED8] hover:bg-[#1E40AF] disabled:opacity-60 disabled:cursor-wait border border-[#1E40AF] text-white text-[11px] font-bold py-2 px-4 rounded-xl flex items-center space-x-1.5 transition cursor-pointer shadow-sm"
+              title="ARNAVUTKÖY tarzı tek sayfa defter — Tarih · Giren · Çıkan · Bakiye"
+            >
+              <BookOpen size={12} />
+              <span>
+                {exportingKasaDefter ? 'Defter hazırlanıyor…' : 'Kasa Defter Excel (Arnavutköy)'}
+              </span>
+            </button>
             <button
               type="button"
               disabled={sendingKasaEmail}

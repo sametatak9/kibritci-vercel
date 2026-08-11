@@ -224,6 +224,28 @@ export async function saveDocument<T extends { id: string }>(collectionName: str
   await withTimeout(setDoc(docRef, cleanUndefined(item), { merge: true }), 15000);
 }
 
+/** Çoklu kayıt — Firestore 500 işlem sınırına göre parçalı batch */
+export async function saveDocumentsBatch<T extends { id: string }>(
+  collectionName: string,
+  items: T[],
+  onProgress?: (saved: number, total: number) => void
+): Promise<number> {
+  if (items.length === 0) return 0;
+  const CHUNK = 450;
+  let saved = 0;
+  for (let i = 0; i < items.length; i += CHUNK) {
+    const chunk = items.slice(i, i + CHUNK);
+    const batch = writeBatch(db);
+    for (const item of chunk) {
+      batch.set(doc(db, collectionName, item.id), cleanUndefined(item), { merge: true });
+    }
+    await withTimeout(batch.commit(), 60000);
+    saved += chunk.length;
+    onProgress?.(saved, items.length);
+  }
+  return saved;
+}
+
 /** Yeni üyelik — portal + kullanıcı kayıtlarını paralel yazar */
 export async function saveSignupDocuments(
   emailKey: string,
