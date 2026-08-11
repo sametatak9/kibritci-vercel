@@ -118,7 +118,10 @@ export function computeKasaOpeningBalance(
 export type KasaLedgerTotals = {
   totalIn: number;
   totalOut: number;
+  /** Defter / devreden bakiye — giren − çıkan */
   closing: number;
+  /** Kasaya borç / ödenecek tutar (dönem bazda = toplam çıkış) */
+  netDurum: number;
   cikisKalem: number;
   donemBazAktif: boolean;
 };
@@ -141,10 +144,12 @@ export function computeKasaLedgerTotals(
         .reduce((s, k) => s + roundKasaMoney(k.tutar), 0)
     );
     const cikisKalem = hareketler.filter((k) => k.hareketTipi === 'ÇIKIŞ').length;
+    const closing = roundKasaMoney(totalIn - totalOut);
     return {
       totalIn,
       totalOut,
-      closing: roundKasaMoney(totalIn - totalOut),
+      closing,
+      netDurum: totalOut,
       cikisKalem,
       donemBazAktif: false,
     };
@@ -159,10 +164,14 @@ export function computeKasaLedgerTotals(
   );
   const postCikisKalem = post.filter((k) => k.hareketTipi === 'ÇIKIŞ').length;
 
+  const totalOut = roundKasaMoney(KASA_DONEM_BAZ.cikan + postOut);
+  const totalIn = roundKasaMoney(KASA_DONEM_BAZ.giren + postIn);
+
   return {
-    totalIn: roundKasaMoney(KASA_DONEM_BAZ.giren + postIn),
-    totalOut: roundKasaMoney(KASA_DONEM_BAZ.cikan + postOut),
+    totalIn,
+    totalOut,
     closing: roundKasaMoney(KASA_DONEM_BAZ.bakiye + postIn - postOut),
+    netDurum: totalOut,
     cikisKalem: KASA_DONEM_BAZ.cikisKalem + postCikisKalem,
     donemBazAktif: true,
   };

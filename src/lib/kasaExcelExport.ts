@@ -1465,7 +1465,7 @@ export async function buildKasaExcelBuffer(
     { label: 'KASA ÖDEDİ TOPLAM', value: kasaOdedi, color: 'FF1D4ED8' },
     { label: 'TOPLAM ÇIKIŞ', value: totalOut, color: 'FFB91C1C' },
     { label: 'TOPLAM GİRİŞ', value: totalIn, color: 'FF047857' },
-    { label: 'NET DURUM', value: totals.closing, color: 'FF1E4E78' },
+    { label: 'NET DURUM (KASAYA BORÇ)', value: totals.netDurum, color: 'FF1E4E78' },
   ];
   for (const ot of ozetTotals) {
     sheet.mergeCells(row, 1, row, 5);

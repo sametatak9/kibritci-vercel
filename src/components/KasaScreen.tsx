@@ -361,7 +361,8 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
 
   const totalIn = ledgerExport.totals.totalIn;
   const totalOut = ledgerExport.totals.totalOut;
-  const periodNet = ledgerExport.totals.closing;
+  const periodNet = ledgerExport.totals.netDurum;
+  const periodBakiye = ledgerExport.totals.closing;
 
   /** Tüm kasa çıkışları — tek “Kasa Harcaması” kartı */
   const kasaHarcamaOut = totalOut;
@@ -672,7 +673,7 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
         {[
           { title: 'Giriş (aralık)', value: `₺${totalIn.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}`, card: 'border-emerald-200 bg-white text-emerald-800', icon: ArrowUpRight, iconBg: 'bg-emerald-50 text-emerald-700' },
           { title: 'Kasa harcaması', value: `₺${kasaHarcamaOut.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}`, card: 'border-[#FED7AA] bg-[#FFF7ED] text-[#9A3412]', icon: Wallet, iconBg: 'bg-[#FFEDD5] text-[#C2410C]', sub: `${cikisKayitSayisi} çıkış · borç + personel + kasa ödedi` },
-          { title: 'Dönem net', value: `₺${periodNet.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}`, card: 'border-[#FDBA74] bg-white text-[#9A3412] font-bold', icon: Wallet, iconBg: 'bg-[#FFF7ED] text-[#EA580C]', sub: `Giren − çıkan · ${appliedStartDate} — ${appliedEndDate}` },
+          { title: 'Dönem net', value: `₺${periodNet.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}`, card: 'border-[#FDBA74] bg-white text-[#9A3412] font-bold', icon: Wallet, iconBg: 'bg-[#FFF7ED] text-[#EA580C]', sub: ledgerExport.donemBazAktif ? `Kasaya borç · ödenecek tutar · bakiye ₺${periodBakiye.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}` : `Kasaya borç · ${appliedStartDate} — ${appliedEndDate}` },
         ].map((item, idx) => {
           const Icon = item.icon;
           return (
