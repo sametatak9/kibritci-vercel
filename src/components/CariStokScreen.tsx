@@ -50,6 +50,14 @@ import {
   planEntoMicirFaturaReset,
 } from '../lib/entoMicirFaturaReset';
 import {
+  buildTaslakBirlesimPaketleri,
+  exportTaslakBirlesimExcel,
+  openTaslakBirlesimHtmlRapor,
+  paketlerForSelectedIrsaliyeler,
+  planSelectedBirlesimReset,
+  type TaslakBirlesimPaketi,
+} from '../lib/taslakBirlesimRapor';
+import {
   irsaliyeNoChainSortKey,
   isEntoMadenFirma,
   malzemeTipiLabel,
@@ -796,6 +804,124 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
     [historyList]
   );
 
+  const taslakPaketler = useMemo(() => {
+    if (!selectedCari) return [] as TaslakBirlesimPaketi[];
+    return buildTaslakBirlesimPaketleri({
+      faturalar,
+      irsaliyeler,
+      satinAlmaTalepleri,
+      cariKartId: selectedCari.id,
+      onlyTaslak: true,
+    });
+  }, [selectedCari, faturalar, irsaliyeler, satinAlmaTalepleri]);
+
+  const tumBirlesimPaketleri = useMemo(() => {
+    if (!selectedCari) return [] as TaslakBirlesimPaketi[];
+    return buildTaslakBirlesimPaketleri({
+      faturalar,
+      irsaliyeler,
+      satinAlmaTalepleri,
+      cariKartId: selectedCari.id,
+      onlyTaslak: false,
+    });
+  }, [selectedCari, faturalar, irsaliyeler, satinAlmaTalepleri]);
+
+  const selectBirlesimPaketi = (paket: TaslakBirlesimPaketi) => {
+    setSelectedIrsaliyeIds(new Set(paket.irsaliyeler.map((ir) => ir.id)));
+    setHistoryFilter('BİRLEŞTİRİLEN');
+  };
+
+  const handleResetSelectedBirlesimler = async (overrideIds?: string[]) => {
+    if (!selectedCari || !setFaturalar || !setIrsaliyeler) {
+      alert('Cari / fatura bağlantısı yok.');
+      return;
+    }
+    const ids = overrideIds?.length ? overrideIds : [...selectedIrsaliyeIds];
+    if (ids.length === 0) {
+      alert('Sıfırlamak için birleşim paketinden irsaliye seçin (veya «Paketi seç»).');
+      return;
+    }
+    const plan = planSelectedBirlesimReset({
+      selectedIrsaliyeIds: ids,
+      irsaliyeler,
+      faturalar,
+    });
+    if (!plan.faturalarToDelete.length && !plan.linkedIrsaliyeler.length) {
+      alert('Seçili kayıtlarda sıfırlanacak birleşim yok.');
+      return;
+    }
+    const ok = window.confirm(
+      `Seçili birleşimler sıfırlansın mı?\n\n${plan.ozet}\n\n• İrsaliyelerin faturaNo temizlenir\n• Taslak faturalar silinir\n• İrsaliye evrakları yerinde kalır`
+    );
+    if (!ok) return;
+    try {
+      for (const ir of plan.linkedIrsaliyeler) {
+        await updateDoc(doc(db, 'irsaliyeler', ir.id), { faturaNo: deleteField() });
+      }
+      for (const ft of plan.faturalarToDelete) {
+        await removeDocument('faturalar', ft.id);
+      }
+      const deleteFtIds = new Set(plan.faturalarToDelete.map((f) => f.id));
+      const linkedIds = new Set(plan.linkedIrsaliyeler.map((ir) => ir.id));
+      setFaturalar((prev) => prev.filter((ft) => !deleteFtIds.has(ft.id)));
+      setIrsaliyeler((prev) =>
+        prev.map((ir) => (linkedIds.has(ir.id) ? { ...ir, faturaNo: undefined } : ir))
+      );
+      setHistoryList((prev) =>
+        prev
+          .filter((h) => !(h.collection === 'faturalar' && deleteFtIds.has(h.id)))
+          .map((h) => {
+            if (!linkedIds.has(h.id) || h.collection !== 'irsaliyeler') return h;
+            return {
+              ...h,
+              birlestirilmis: false,
+              bagliFaturaNo: undefined,
+              desc: String(h.desc || '')
+                .replace(/\s·\sBirleşim:\s[^\s·]+/g, '')
+                .trim(),
+            };
+          })
+      );
+      setSelectedIrsaliyeIds(new Set());
+      setHistoryFilter('İRSALİYE');
+      alert(
+        `Sıfırlandı.\n${plan.linkedIrsaliyeler.length} irsaliye serbest\n${plan.faturalarToDelete.length} taslak silindi`
+      );
+    } catch (err: any) {
+      console.error(err);
+      alert('Sıfırlama başarısız: ' + (err?.message || err));
+    }
+  };
+
+  const handleTaslakPaketRapor = async (mode: 'html' | 'excel') => {
+    let paketler = paketlerForSelectedIrsaliyeler(tumBirlesimPaketleri, selectedIrsaliyeIds);
+    if (!paketler.length && historyFilter === 'TASLAK BAĞ') paketler = taslakPaketler;
+    if (!paketler.length && tumBirlesimPaketleri.length) {
+      const ok = window.confirm(
+        `Seçim yok. Tüm ${tumBirlesimPaketleri.length} birleşim paketi rapora alınsın mı?`
+      );
+      if (!ok) return;
+      paketler = tumBirlesimPaketleri;
+    }
+    if (!paketler.length) {
+      alert('Rapor için birleşim paketi bulunamadı.');
+      return;
+    }
+    try {
+      if (mode === 'html') {
+        openTaslakBirlesimHtmlRapor(paketler);
+      } else {
+        const r = await exportTaslakBirlesimExcel(paketler);
+        alert(
+          `Antetli Excel indirildi.\n${r.paket} paket · ${r.irsaliye} irsaliye · ${r.toplamTon.toLocaleString('tr-TR')} ton\n${r.fileName}`
+        );
+      }
+    } catch (err: any) {
+      console.error(err);
+      alert('Rapor üretilemedi: ' + (err?.message || err));
+    }
+  };
+
   const historyByMonth = useMemo(() => {
     const AY = ['', 'Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran', 'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'];
     const map = new Map<string, HistoryLog[]>();
@@ -1009,29 +1135,36 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
       return next;
     });
     setSelectedIrsaliyeIds(new Set());
-    setHistoryFilter('BİRLEŞTİRİLEN');
+    setHistoryFilter('TASLAK BAĞ');
 
     const openRapor = window.confirm(
-      `Taslak fatura oluşturuldu.\nNo: ${fatura.faturaNo}\nBirleştirilen irsaliye: ${withKalem.length}\n\nEvraklar «BİRLEŞTİRİLEN» listesinde birikir.\n\nZincir raporunu açmak ister misiniz?`
+      `Taslak fatura oluşturuldu.\nNo: ${fatura.faturaNo}\nBirleştirilen irsaliye: ${withKalem.length}\n\nPaket «TASLAK BAĞ» sekmesinde evrak bütünü olarak görünür.\n\nAntetli taslak raporu açılsın mı?`
     );
     if (openRapor) {
-      const saIds = [...new Set(withKalem.map((ir) => ir.saId).filter(Boolean))];
-      const saId = saIds.length === 1 ? saIds[0] : undefined;
-      const sa = saId ? satinAlmaTalepleri.find((s) => s.saId === saId) : undefined;
-      try {
-        openEvrakZincirRaporu(
-          {
-            sa,
-            irsaliyeler: nextIrs,
-            faturalar: [fatura, ...faturalar],
-            focusIrsaliyeIds: withKalem.map((ir) => ir.id),
-          },
-          { withExcel: withKalem.length <= 120 }
-        );
-      } catch (err: any) {
-        console.error(err);
-        alert('Zincir raporu açılamadı: ' + (err?.message || err));
+      const tipMap = new Map<string, number>();
+      for (const ir of withKalem) {
+        const tip = resolveMicirMalzemeTipiFromIrsaliye(ir);
+        const label = tip ? malzemeTipiLabel(tip) : 'Diğer';
+        tipMap.set(label, (tipMap.get(label) || 0) + irsaliyeHizmetMiktari(ir).miktar);
       }
+      const saIds = [...new Set(withKalem.map((ir) => ir.saId).filter(Boolean).map(String))];
+      openTaslakBirlesimHtmlRapor([
+        {
+          fatura,
+          irsaliyeler: withKalem,
+          toplamTon: withKalem.reduce((s, ir) => s + irsaliyeHizmetMiktari(ir).miktar, 0),
+          saIds,
+          saOzet: saIds
+            .map((sid) => {
+              const sa = satinAlmaTalepleri.find((s) => s.saId === sid);
+              return sa ? `${sid} (${sa.cariFirma || '—'})` : sid;
+            })
+            .join(' · ') || '—',
+          malzemeOzet: [...tipMap.entries()]
+            .map(([k, v]) => `${k} ${v.toLocaleString('tr-TR')} ton`)
+            .join(' · ') || '—',
+        },
+      ]);
     }
   };
 
@@ -2259,9 +2392,17 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
                         type="button"
                         onClick={handleBagSelectedIrsaliyelerToFatura}
                         className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-[10px] font-bold bg-violet-700 text-white cursor-pointer"
-                        title="Seçili irsaliyeleri birleştirip taslak faturaya dönüştür (kilitlenmez)"
+                        title="Seçili irsaliyeleri birleştirip taslak faturaya dönüştür"
                       >
                         <Receipt size={12} /> Seçilenleri Faturaya Dönüştür ({selectedIrsaliyeIds.size})
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void handleResetSelectedBirlesimler()}
+                        className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-[10px] font-bold bg-rose-600 text-white cursor-pointer"
+                        title="Seçili birleşim paketini sıfırla — irsaliyeler kalır"
+                      >
+                        <RefreshCw size={12} /> Birleşimi Sıfırla
                       </button>
                       <button
                         type="button"
@@ -2272,6 +2413,22 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
                       </button>
                     </>
                   )}
+                  <button
+                    type="button"
+                    onClick={() => void handleTaslakPaketRapor('html')}
+                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-[10px] font-bold bg-violet-800 text-white cursor-pointer"
+                    title="Seçili/tüm taslak birleşim paketleri — antetli HTML"
+                  >
+                    <FileText size={12} /> Taslak HTML
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleTaslakPaketRapor('excel')}
+                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-[10px] font-bold bg-emerald-800 text-white cursor-pointer"
+                    title="Seçili/tüm taslak birleşim paketleri — antetli Excel (SA bağı dahil)"
+                  >
+                    <Download size={12} /> Taslak Excel
+                  </button>
                   <button
                     type="button"
                     onClick={handleOpenZincirRaporuFromCari}
@@ -2382,11 +2539,17 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
                     onClick={() => setHistoryFilter(type)}
                     className={`text-[10px] font-black px-2.5 py-1 rounded-lg border cursor-pointer ${
                       historyFilter === type
-                        ? 'bg-slate-900 text-white border-slate-900'
-                        : 'bg-white text-slate-600 border-slate-200'
+                        ? type === 'TASLAK BAĞ'
+                          ? 'bg-violet-700 text-white border-violet-700'
+                          : 'bg-slate-900 text-white border-slate-900'
+                        : type === 'TASLAK BAĞ' && taslakPaketler.length > 0
+                          ? 'bg-violet-50 text-violet-800 border-violet-200'
+                          : 'bg-white text-slate-600 border-slate-200'
                     }`}
                   >
-                    {type} ({count})
+                    {type === 'TASLAK BAĞ'
+                      ? `TASLAK BAĞ (${taslakPaketler.length || count})`
+                      : `${type} (${count})`}
                   </button>
                 ))}
               </div>
@@ -2429,6 +2592,124 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
                   <div className="flex items-center justify-center gap-2 py-16 text-slate-400 text-xs font-bold">
                     <RefreshCw size={16} className="animate-spin" /> İşlem geçmişi yükleniyor…
                   </div>
+                ) : historyFilter === 'TASLAK BAĞ' ? (
+                  taslakPaketler.length === 0 ? (
+                    <div className="text-center py-16 text-slate-400 text-xs">
+                      Taslak birleşim paketi yok. İrsaliye seçip «Faturaya Dönüştür» ile paket oluşturun.
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      <p className="text-[11px] text-violet-900 bg-violet-50 border border-violet-100 rounded-xl px-3 py-2 font-semibold">
+                        {taslakPaketler.length} taslak paket · her satır bir evrak bütünü (birleşim).
+                        «Paketi seç» ile tüm irsaliyeleri işaretleyin; HTML/Excel antetli rapor alın.
+                      </p>
+                      {taslakPaketler.map((paket) => {
+                        const allSelected = paket.irsaliyeler.every((ir) =>
+                          selectedIrsaliyeIds.has(ir.id)
+                        );
+                        return (
+                          <div
+                            key={paket.fatura.id}
+                            className="rounded-2xl border border-violet-200 bg-white overflow-hidden shadow-sm"
+                          >
+                            <div className="px-4 py-3 bg-violet-50 border-b border-violet-100 flex flex-wrap items-center gap-2 justify-between">
+                              <div className="min-w-0">
+                                <p className="text-[10px] font-black uppercase tracking-wider text-violet-900">
+                                  Birleşim bütünü · {paket.fatura.faturaNo}
+                                </p>
+                                <p className="text-[11px] font-bold text-slate-800 mt-0.5">
+                                  {paket.irsaliyeler.length} irsaliye ·{' '}
+                                  {paket.toplamTon.toLocaleString('tr-TR')} ton
+                                  {paket.malzemeOzet !== '—' ? ` · ${paket.malzemeOzet}` : ''}
+                                </p>
+                                <p className="text-[10px] text-slate-600 mt-0.5">
+                                  SA: {paket.saOzet}
+                                </p>
+                              </div>
+                              <div className="flex flex-wrap gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => selectBirlesimPaketi(paket)}
+                                  className={`text-[10px] font-black px-2.5 py-1.5 rounded-lg cursor-pointer border ${
+                                    allSelected
+                                      ? 'bg-violet-700 text-white border-violet-700'
+                                      : 'bg-white text-violet-800 border-violet-200'
+                                  }`}
+                                >
+                                  {allSelected ? 'Paket seçili' : 'Paketi seç'}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    void handleResetSelectedBirlesimler(
+                                      paket.irsaliyeler.map((ir) => ir.id)
+                                    )
+                                  }
+                                  className="text-[10px] font-black px-2.5 py-1.5 rounded-lg cursor-pointer bg-rose-600 text-white"
+                                >
+                                  Paketi sıfırla
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => openTaslakBirlesimHtmlRapor([paket])}
+                                  className="text-[10px] font-black px-2.5 py-1.5 rounded-lg cursor-pointer bg-violet-800 text-white"
+                                >
+                                  HTML
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    void exportTaslakBirlesimExcel([paket]).then((r) =>
+                                      alert(
+                                        `Excel: ${r.irsaliye} irsaliye · ${r.toplamTon.toLocaleString('tr-TR')} ton`
+                                      )
+                                    )
+                                  }
+                                  className="text-[10px] font-black px-2.5 py-1.5 rounded-lg cursor-pointer bg-emerald-700 text-white"
+                                >
+                                  Excel
+                                </button>
+                              </div>
+                            </div>
+                            <div className="divide-y divide-slate-100 max-h-56 overflow-y-auto">
+                              {paket.irsaliyeler.map((ir) => {
+                                const tip = resolveMicirMalzemeTipiFromIrsaliye(ir);
+                                const h = irsaliyeHizmetMiktari(ir);
+                                return (
+                                  <label
+                                    key={ir.id}
+                                    className="flex items-center gap-3 px-4 py-2 hover:bg-violet-50/40 cursor-pointer"
+                                  >
+                                    <input
+                                      type="checkbox"
+                                      checked={selectedIrsaliyeIds.has(ir.id)}
+                                      onChange={() => toggleIrsaliyeSelection(ir.id)}
+                                      className="w-4 h-4 rounded border-slate-300 text-violet-700 cursor-pointer"
+                                    />
+                                    <div className="min-w-0 flex-1 text-[11px]">
+                                      <span className="font-black text-slate-900">
+                                        {ir.irsaliyeNo}
+                                      </span>
+                                      <span className="text-slate-500">
+                                        {' '}
+                                        · {formatDateLabelTr(ir.tarih)}
+                                        {tip ? ` · ${malzemeTipiLabel(tip)}` : ''}
+                                        {ir.plaka ? ` · ${ir.plaka}` : ''}
+                                        {h.miktar > 0
+                                          ? ` · ${h.miktar.toLocaleString('tr-TR')} ${h.etiket}`
+                                          : ''}
+                                        {ir.saId ? ` · SA ${ir.saId}` : ''}
+                                      </span>
+                                    </div>
+                                  </label>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )
                 ) : filteredHistory.length === 0 ? (
                   <div className="text-center py-16 text-slate-400 text-xs">
                     Bu filtrede / kartta işlem kaydı yok.
@@ -2460,6 +2741,7 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
                         const prev = idx > 0 ? group.items[idx - 1] : null;
                         const showBirlesimHeader =
                           !!log.bagliFaturaNo &&
+                          log.collection === 'irsaliyeler' &&
                           (!prev || prev.bagliFaturaNo !== log.bagliFaturaNo);
                         const showTipHeader =
                           !!log.malzemeTipi &&
@@ -2484,13 +2766,43 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
                         return (
                           <React.Fragment key={`${log.id}-${idx}`}>
                             {showBirlesimHeader && (
-                              <div className="pt-2 pb-0.5">
+                              <div className="pt-2 pb-0.5 flex flex-wrap items-center gap-2">
                                 <span className="text-[9px] font-black uppercase tracking-wider px-2 py-0.5 rounded bg-violet-100 text-violet-900 border border-violet-200">
-                                  Birleşim {log.bagliFaturaNo} · {birlesimCount} irsaliye
+                                  Birleşim bütünü {log.bagliFaturaNo} · {birlesimCount} irsaliye
                                   {birlesimTon > 0
                                     ? ` · ${birlesimTon.toLocaleString('tr-TR')} ton`
                                     : ''}
                                 </span>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const paket = tumBirlesimPaketleri.find(
+                                      (p) => p.fatura.faturaNo === log.bagliFaturaNo
+                                    );
+                                    if (paket) selectBirlesimPaketi(paket);
+                                    else {
+                                      const ids = group.items
+                                        .filter((x) => x.bagliFaturaNo === log.bagliFaturaNo)
+                                        .map((x) => x.id);
+                                      setSelectedIrsaliyeIds(new Set(ids));
+                                    }
+                                  }}
+                                  className="text-[9px] font-black px-2 py-0.5 rounded bg-violet-700 text-white cursor-pointer"
+                                >
+                                  Paketi seç
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const ids = group.items
+                                      .filter((x) => x.bagliFaturaNo === log.bagliFaturaNo)
+                                      .map((x) => x.id);
+                                    void handleResetSelectedBirlesimler(ids);
+                                  }}
+                                  className="text-[9px] font-black px-2 py-0.5 rounded bg-rose-600 text-white cursor-pointer"
+                                >
+                                  Paketi sıfırla
+                                </button>
                               </div>
                             )}
                             {showTipHeader && historyFilter !== 'BİRLEŞTİRİLEN' && (
