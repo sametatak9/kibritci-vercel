@@ -218,14 +218,34 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
     };
   }, [kasaHareketleri]);
 
-  const odemeBazliOzet = useMemo(
+  /** Program kayıtları — Excel seed / LEGACY özet kırılımına girmesin */
+  const programHareketleri = useMemo(
     () =>
-      computeKasaOdemeBazliOzet(filteredHareketler, personeller, {
-        donemBazAktif: false,
-        totalOut: kasaHarcamaOut,
-      }),
-    [filteredHareketler, personeller, kasaHarcamaOut]
+      (filteredHareketler || []).filter(
+        (kh) =>
+          String(kh.kaynak || '') !== 'LEGACY_XLS' &&
+          !String(kh.id || '').startsWith('kh_legacy_xls_')
+      ),
+    [filteredHareketler]
   );
+
+  const odemeBazliOzet = useMemo(() => {
+    const programOut = roundKasaMoney(
+      programHareketleri
+        .filter((k) => k.hareketTipi === 'ÇIKIŞ')
+        .reduce((s, k) => s + roundKasaMoney(k.tutar), 0)
+    );
+    return computeKasaOdemeBazliOzet(programHareketleri, personeller, {
+      donemBazAktif: false,
+      totalOut: programOut,
+    });
+  }, [programHareketleri, personeller]);
+
+  /** Negatif bakiyede kasaya olan borç (= |bakiye|) */
+  const kasaBorcTutari = useMemo(() => {
+    const b = roundKasaMoney(kasaBakiyesiInfo.bakiye);
+    return b < 0 ? roundKasaMoney(Math.abs(b)) : 0;
+  }, [kasaBakiyesiInfo.bakiye]);
 
   const openFisLightbox = (url?: string | null, title?: string) => {
     const u = String(url || '').trim();
@@ -548,7 +568,13 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
             {cikisKayitSayisi} çıkış · borç + personel + kasa ödedi
           </span>
         </div>
-        <div className="p-4 rounded-2xl border border-[#FDBA74] bg-white text-[#9A3412] font-bold shadow-sm">
+        <div
+          className={`p-4 rounded-2xl border font-bold shadow-sm ${
+            kasaBakiyesiInfo.bakiye < 0
+              ? 'border-rose-300 bg-rose-50 text-rose-800'
+              : 'border-[#FDBA74] bg-white text-[#9A3412]'
+          }`}
+        >
           <span className="text-[10px] text-[#64748B] font-bold uppercase tracking-wider block mb-1">
             Kasa bakiyesi
           </span>
@@ -557,38 +583,74 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
           </span>
           <span className="text-[9px] text-[#94A3B8] font-semibold mt-0.5 block">
             Excel ₺{kasaBakiyesiInfo.excelSon.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} + program fişleri
+            {kasaBorcTutari > 0
+              ? ` · kasa borç ₺${kasaBorcTutari.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}`
+              : ''}
           </span>
         </div>
       </div>
 
       {/* Kim ne harcadı özeti */}
       <div className="shrink-0 rounded-2xl border border-[#FED7AA] bg-white p-4 shadow-sm">
+        {/* Güncel kasa bakiyesi — Excel ~905 + program fişleri (eski 24.982 yerine) */}
+        <div
+          className={`mb-3 rounded-xl border-2 px-4 py-3 flex flex-wrap items-center justify-between gap-2 ${
+            kasaBakiyesiInfo.bakiye < 0
+              ? 'border-rose-400 bg-rose-50'
+              : 'border-emerald-400 bg-emerald-50'
+          }`}
+        >
+          <div className="min-w-0">
+            <div className="text-[11px] font-black uppercase tracking-wider text-slate-700">
+              Kasa bakiyesi (güncel)
+            </div>
+            <p className="text-[10px] text-slate-500 font-semibold mt-0.5">
+              Excel ₺{kasaBakiyesiInfo.excelSon.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}{' '}
+              + program fişleri · eski ₺24.982 sabitinin yerine geçen net sonuç
+            </p>
+          </div>
+          <div className="text-right shrink-0">
+            <div
+              className={`text-2xl sm:text-3xl font-black font-mono tabular-nums ${
+                kasaBakiyesiInfo.bakiye < 0 ? 'text-rose-700' : 'text-emerald-700'
+              }`}
+            >
+              ₺{kasaBakiyesiInfo.bakiye.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
+            </div>
+            {kasaBorcTutari > 0 && (
+              <div className="text-[10px] font-bold text-amber-800 mt-0.5">
+                Kasa borç ₺{kasaBorcTutari.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
+              </div>
+            )}
+          </div>
+        </div>
+
         <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
           <div>
             <h3 className="text-[11px] font-black uppercase tracking-wider text-[#9A3412]">
-              Kim ne harcadı (seçili aralık)
+              Kim ne harcadı (program kayıtları)
             </h3>
             <p className="text-[10px] text-[#64748B] mt-0.5">
-              Kişi / KASA bazlı kırılım — TOPLAM = Kasa Harcaması kartı
+              Excel defter satırları hariç · kişi / ödeme kırılımı
             </p>
           </div>
           <div className="flex flex-wrap gap-1.5 text-[10px] font-mono font-bold">
             <span className="bg-amber-50 border border-amber-200 text-amber-900 px-2 py-1 rounded-lg">
-              BORÇ ₺{odemeBazliOzet.totals.BORC.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
+              KASA BORÇ ₺{kasaBorcTutari.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
             </span>
             <span className="bg-violet-50 border border-violet-200 text-violet-900 px-2 py-1 rounded-lg">
               PERSONEL ₺{odemeBazliOzet.totals.PERSONEL_ODEDI.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
             </span>
             <span className="bg-[#FFEDD5] border border-[#FDBA74] text-[#9A3412] px-2 py-1 rounded-lg">
-              KASA ₺{odemeBazliOzet.totals.KASA_ODEDI.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
+              KASA ÖDEDİ ₺{odemeBazliOzet.totals.KASA_ODEDI.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
             </span>
-            <span className="bg-rose-50 border border-rose-200 text-rose-900 px-2 py-1 rounded-lg">
-              TOPLAM ₺{odemeBazliOzet.genelToplam.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
+            <span className="bg-slate-100 border border-slate-200 text-slate-700 px-2 py-1 rounded-lg">
+              KAYITLI BORÇ ₺{odemeBazliOzet.totals.BORC.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
             </span>
           </div>
         </div>
         {odemeBazliOzet.satirlar.length === 0 ? (
-          <p className="text-[11px] text-slate-400 italic">Bu aralıkta çıkış / harcama yok.</p>
+          <p className="text-[11px] text-slate-400 italic">Bu aralıkta program çıkış / harcama yok.</p>
         ) : (
           <>
           <div className="flex flex-wrap gap-2">
@@ -615,8 +677,10 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
               </div>
             ))}
           </div>
-          <div className="mt-3 pt-3 border-t border-[#FED7AA] flex items-center justify-between">
-            <span className="text-[11px] font-black uppercase tracking-wider text-[#9A3412]">Toplam</span>
+          <div className="mt-3 pt-3 border-t border-[#FED7AA] flex items-center justify-between gap-3 flex-wrap">
+            <span className="text-[11px] font-black uppercase tracking-wider text-[#9A3412]">
+              Program harcama toplamı
+            </span>
             <span className="text-lg font-black font-mono tabular-nums text-rose-700">
               ₺{odemeBazliOzet.genelToplam.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
             </span>

@@ -346,6 +346,47 @@ export async function exportArnavutkoyKasaDefterExcel(
     colCount: COLS,
   });
 
+  // Üst özet — PROJE MÜDÜRÜ / ARNAVUTKÖY / GİREN / ÇIKAN / KASA BAKİYESİ
+  ws.getCell(row, 2).value = 'PROJE MÜDÜRÜ';
+  ws.getCell(row, 2).font = { bold: true, size: 11 };
+  ws.getCell(row, 4).value = 'ARNAVUTKÖY';
+  ws.getCell(row, 4).font = { bold: true, size: 12, color: { argb: 'FF1E4E78' } };
+  ws.getCell(row, 5).value = built.toplamGiren;
+  ws.getCell(row, 5).numFmt = '#,##0.00';
+  ws.getCell(row, 6).value = built.toplamCikan;
+  ws.getCell(row, 6).numFmt = '#,##0.00';
+  ws.getCell(row, 7).value = built.sonBakiye;
+  ws.getCell(row, 7).numFmt = '#,##0.00';
+  ws.getCell(row, 7).font = {
+    bold: true,
+    size: 12,
+    color: { argb: built.sonBakiye < 0 ? 'FFB91C1C' : 'FF047857' },
+  };
+  row += 1;
+
+  // Vurgulu KASA BAKİYESİ bandı (eski 24.982 yerine geçen net sonuç)
+  ws.mergeCells(row, 1, row, 6);
+  ws.getCell(row, 1).value =
+    `KASA BAKİYESİ (güncel)  ·  Excel ₺${built.excelSonBakiye.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} + program fişleri  ·  Excel satır ${built.excelKalem} · Program satır ${built.erpKalem}`;
+  ws.getCell(row, 1).font = { bold: true, size: 10, color: { argb: 'FFFFFFFF' } };
+  ws.getCell(row, 1).fill = {
+    type: 'pattern',
+    pattern: 'solid',
+    fgColor: { argb: built.sonBakiye < 0 ? 'FFB91C1C' : 'FF047857' },
+  };
+  ws.getCell(row, 1).alignment = { horizontal: 'left', vertical: 'middle' };
+  ws.getCell(row, 7).value = built.sonBakiye;
+  ws.getCell(row, 7).numFmt = '#,##0.00" ₺"';
+  ws.getCell(row, 7).font = { bold: true, size: 14, color: { argb: 'FFFFFFFF' } };
+  ws.getCell(row, 7).fill = {
+    type: 'pattern',
+    pattern: 'solid',
+    fgColor: { argb: built.sonBakiye < 0 ? 'FFB91C1C' : 'FF047857' },
+  };
+  ws.getCell(row, 7).alignment = { horizontal: 'right', vertical: 'middle' };
+  ws.getRow(row).height = 26;
+  row += 2;
+
   const headers = ['TARİH', 'AY', 'YIL', 'AÇIKLAMA', 'GİREN', 'ÇIKAN', 'BAKİYE'];
   const hr = ws.getRow(row);
   headers.forEach((h, i) => {
@@ -388,7 +429,7 @@ export async function exportArnavutkoyKasaDefterExcel(
   const lastDataRow = row - 1;
 
   row += 1;
-  const footRows: Array<{ label: string; value: number; color: string }> = [
+  const footRows: Array<{ label: string; value: number; color: string; emphasize?: boolean }> = [
     { label: 'TOPLAM GİREN', value: built.toplamGiren, color: 'FF047857' },
     { label: 'TOPLAM ÇIKAN', value: built.toplamCikan, color: 'FFB91C1C' },
     {
@@ -396,17 +437,43 @@ export async function exportArnavutkoyKasaDefterExcel(
       value: built.excelSonBakiye,
       color: 'FF64748B',
     },
-    { label: 'SON BAKİYE', value: built.sonBakiye, color: 'FF1E4E78' },
+    {
+      label: 'KASA BAKİYESİ (güncel)',
+      value: built.sonBakiye,
+      color: built.sonBakiye < 0 ? 'FFB91C1C' : 'FF047857',
+      emphasize: true,
+    },
   ];
   for (const f of footRows) {
     // Etiket F, değer G — orijinal defter alt özeti
     ws.getCell(row, 6).value = f.label;
-    ws.getCell(row, 6).font = { bold: true, size: 10, color: { argb: f.color } };
+    ws.getCell(row, 6).font = {
+      bold: true,
+      size: f.emphasize ? 12 : 10,
+      color: { argb: f.color },
+    };
     ws.getCell(row, 6).alignment = { horizontal: 'right', vertical: 'middle' };
     ws.getCell(row, 7).value = f.value;
     ws.getCell(row, 7).numFmt = '#,##0.00" ₺"';
-    ws.getCell(row, 7).font = { bold: true, size: 11, color: { argb: f.color } };
+    ws.getCell(row, 7).font = {
+      bold: true,
+      size: f.emphasize ? 14 : 11,
+      color: { argb: f.color },
+    };
     ws.getCell(row, 7).border = thinBorder();
+    if (f.emphasize) {
+      ws.getCell(row, 6).fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FFFFE4E6' },
+      };
+      ws.getCell(row, 7).fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FFFFE4E6' },
+      };
+      ws.getRow(row).height = 24;
+    }
     row += 1;
   }
 
@@ -424,21 +491,38 @@ export async function exportArnavutkoyKasaDefterExcel(
   ];
   let orow = await applyAntet(workbook, ozetWs, {
     title: 'KASA HARCAMA ÖZETİ',
-    subtitle: `Kimlere ne harcandı · SON BAKİYE ₺${built.sonBakiye.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}`,
+    subtitle: `Kimlere ne harcandı · KASA BAKİYESİ ₺${built.sonBakiye.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}`,
     colCount: 6,
   });
 
-  // Üst özet kutuları
+  // Vurgulu kasa bakiyesi
+  ozetWs.mergeCells(orow, 1, orow, 5);
+  ozetWs.getCell(orow, 1).value = 'KASA BAKİYESİ (Excel ~905 + program fişleri — eski 24.982 yerine)';
+  ozetWs.getCell(orow, 1).font = { bold: true, size: 11, color: { argb: 'FFFFFFFF' } };
+  ozetWs.getCell(orow, 1).fill = {
+    type: 'pattern',
+    pattern: 'solid',
+    fgColor: { argb: built.sonBakiye < 0 ? 'FFB91C1C' : 'FF047857' },
+  };
+  ozetWs.getCell(orow, 6).value = built.sonBakiye;
+  ozetWs.getCell(orow, 6).numFmt = '#,##0.00" ₺"';
+  ozetWs.getCell(orow, 6).font = { bold: true, size: 14, color: { argb: 'FFFFFFFF' } };
+  ozetWs.getCell(orow, 6).fill = {
+    type: 'pattern',
+    pattern: 'solid',
+    fgColor: { argb: built.sonBakiye < 0 ? 'FFB91C1C' : 'FF047857' },
+  };
+  ozetWs.getRow(orow).height = 26;
+  orow += 2;
+
   ozetWs.getCell(orow, 1).value = 'Excel son bakiye';
   ozetWs.getCell(orow, 2).value = built.excelSonBakiye;
   ozetWs.getCell(orow, 2).numFmt = '#,##0.00" ₺"';
-  ozetWs.getCell(orow, 3).value = 'Program satır';
-  ozetWs.getCell(orow, 4).value = built.erpKalem;
-  ozetWs.getCell(orow, 5).value = 'SON BAKİYE';
-  ozetWs.getCell(orow, 5).font = { bold: true, color: { argb: 'FF1E4E78' } };
-  ozetWs.getCell(orow, 6).value = built.sonBakiye;
-  ozetWs.getCell(orow, 6).numFmt = '#,##0.00" ₺"';
-  ozetWs.getCell(orow, 6).font = { bold: true, size: 12, color: { argb: 'FF1E4E78' } };
+  ozetWs.getCell(orow, 3).value = 'Kasa borç (|bakiye|)';
+  ozetWs.getCell(orow, 4).value = built.sonBakiye < 0 ? round2(Math.abs(built.sonBakiye)) : 0;
+  ozetWs.getCell(orow, 4).numFmt = '#,##0.00" ₺"';
+  ozetWs.getCell(orow, 5).value = 'Program satır';
+  ozetWs.getCell(orow, 6).value = built.erpKalem;
   orow += 2;
 
   const erpOnly = (kasaHareketleri || []).filter(
