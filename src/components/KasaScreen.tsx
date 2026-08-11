@@ -16,9 +16,9 @@ import {
 } from '../lib/sahaFaaliyetFotoStorage';
 import { todayDateKey } from '../lib/dateKeyUtils';
 import {
-  isSoforIadeKasaHareketi,
   isSoforKaynakliKasaHareketi,
   isSoforUzerindenKasaGideri,
+  kasaListeOdemeEtiketi,
   resolveKasaOdemeDurumu,
 } from '../lib/yolHarcamaUtils';
 import { resolvePersonelUnvan } from '../lib/personelUnvanUtils';
@@ -1160,9 +1160,19 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
               <div className="divide-y divide-slate-100 divide-dashed overflow-y-auto">
                 {filteredHareketler.map(kh => {
                   const sofor = isSoforKaynakliKasaHareketi(kh);
-                  const soforIade = isSoforIadeKasaHareketi(kh);
                   const soforKasa = isSoforUzerindenKasaGideri(kh);
                   const odeme = resolveOdemeDurumu(kh);
+                  const odemeEtiket = kasaListeOdemeEtiketi(kh, personeller);
+                  const odemeBadgeClass =
+                    odeme === 'PERSONEL_ODEDI'
+                      ? 'bg-violet-100 text-violet-800 border-violet-200'
+                      : odeme === 'BORC'
+                        ? 'bg-amber-100 text-amber-900 border-amber-200'
+                        : odeme === 'KASA_ODEDI'
+                          ? sofor
+                            ? 'bg-sky-100 text-sky-800 border-sky-200'
+                            : 'bg-slate-100 text-slate-700 border-slate-200'
+                          : 'bg-rose-100 text-rose-800 border-rose-200';
                   return (
                   <React.Fragment key={kh.id}>
                   {/* Mobil kart görünümü */}
@@ -1170,11 +1180,9 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
                     className={`md:hidden p-3 space-y-2 ${
                       soforKasa
                         ? 'bg-sky-50/50'
-                        : soforIade
-                          ? 'bg-rose-50/40'
-                          : sofor
-                            ? 'bg-indigo-50/40'
-                            : 'bg-white'
+                        : sofor
+                          ? 'bg-violet-50/35'
+                          : 'bg-white'
                     }`}
                   >
                     <div className="flex items-start justify-between gap-2">
@@ -1189,23 +1197,10 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
                           }`}>
                             {kh.hareketTipi}
                           </span>
-                          {soforIade && (
-                            <span className="inline-block py-0.5 px-2 rounded-full text-[9px] font-extrabold bg-rose-100 text-rose-800 border border-rose-200">ŞOFÖR İADE</span>
-                          )}
-                          {soforKasa && (
-                            <span className="inline-block py-0.5 px-2 rounded-full text-[9px] font-extrabold bg-sky-100 text-sky-800 border border-sky-200">KASA (ŞOFÖR)</span>
-                          )}
-                          {sofor && !soforIade && !soforKasa && (
-                            <span className="inline-block py-0.5 px-2 rounded-full text-[9px] font-extrabold bg-indigo-100 text-indigo-800 border border-indigo-200">ŞOFÖR FİŞ</span>
-                          )}
-                          {odeme === 'BORC' && (
-                            <span className="inline-block py-0.5 px-2 rounded-full text-[9px] font-extrabold bg-amber-100 text-amber-900 border border-amber-200">BORÇ</span>
-                          )}
-                          {odeme === 'PERSONEL_ODEDI' && (
-                            <span className="inline-block py-0.5 px-2 rounded-full text-[9px] font-extrabold bg-violet-100 text-violet-800 border border-violet-200">PERSONEL ÖDEDİ</span>
-                          )}
-                          {odeme === 'KASA_ODEDI' && (
-                            <span className="inline-block py-0.5 px-2 rounded-full text-[9px] font-extrabold bg-slate-100 text-slate-700 border border-slate-200">KASA ÖDEDİ</span>
+                          {kh.hareketTipi === 'ÇIKIŞ' && odeme && (
+                            <span className={`inline-block py-0.5 px-2 rounded-full text-[9px] font-extrabold border ${odemeBadgeClass}`}>
+                              {odemeEtiket}
+                            </span>
                           )}
                           {kh.hareketTipi === 'ÇIKIŞ' && !odeme && (
                             <span className="inline-block py-0.5 px-2 rounded-full text-[9px] font-extrabold bg-rose-100 text-rose-800 border border-rose-200">ÖDEME DURUMU SEÇİN</span>
@@ -1269,11 +1264,9 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
                     className={`hidden md:grid grid-cols-5 min-w-[720px] items-center py-2.5 px-4 text-xs transition cursor-default group ${
                       soforKasa
                         ? 'bg-sky-50/50 hover:bg-sky-50/80'
-                        : soforIade
-                        ? 'bg-rose-50/40 hover:bg-rose-50/70'
                         : sofor
-                        ? 'bg-indigo-50/40 hover:bg-indigo-50/70'
-                        : 'hover:bg-amber-500/5'
+                          ? 'bg-violet-50/35 hover:bg-violet-50/60'
+                          : 'hover:bg-amber-500/5'
                     }`}
                   >
                     {/* Tarih Column */}
@@ -1289,34 +1282,9 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
                       }`}>
                         {kh.hareketTipi}
                       </span>
-                      {soforIade && (
-                        <span className="inline-block py-0.5 px-2 rounded-full text-[9px] font-extrabold bg-rose-100 text-rose-800 border border-rose-200">
-                          ŞOFÖR İADE
-                        </span>
-                      )}
-                      {soforKasa && (
-                        <span className="inline-block py-0.5 px-2 rounded-full text-[9px] font-extrabold bg-sky-100 text-sky-800 border border-sky-200">
-                          KASA (ŞOFÖR)
-                        </span>
-                      )}
-                      {sofor && !soforIade && !soforKasa && (
-                        <span className="inline-block py-0.5 px-2 rounded-full text-[9px] font-extrabold bg-indigo-100 text-indigo-800 border border-indigo-200">
-                          ŞOFÖR FİŞ
-                        </span>
-                      )}
-                      {odeme === 'BORC' && (
-                        <span className="inline-block py-0.5 px-2 rounded-full text-[9px] font-extrabold bg-amber-100 text-amber-900 border border-amber-200">
-                          BORÇ
-                        </span>
-                      )}
-                      {odeme === 'PERSONEL_ODEDI' && (
-                        <span className="inline-block py-0.5 px-2 rounded-full text-[9px] font-extrabold bg-violet-100 text-violet-800 border border-violet-200">
-                          PERSONEL ÖDEDİ
-                        </span>
-                      )}
-                      {odeme === 'KASA_ODEDI' && (
-                        <span className="inline-block py-0.5 px-2 rounded-full text-[9px] font-extrabold bg-slate-100 text-slate-700 border border-slate-200">
-                          KASA ÖDEDİ
+                      {kh.hareketTipi === 'ÇIKIŞ' && odeme && (
+                        <span className={`inline-block py-0.5 px-2 rounded-full text-[9px] font-extrabold border ${odemeBadgeClass}`}>
+                          {odemeEtiket}
                         </span>
                       )}
                       {kh.hareketTipi === 'ÇIKIŞ' && !odeme && (

@@ -1,6 +1,6 @@
 /** Şoför yol / masraf fişi yardımcıları — onay sonrası Haftalık Kasa çıkışı */
 import { doc, getDoc, arrayUnion, updateDoc } from 'firebase/firestore';
-import { KasaHareketi, KasaOdemeDurumu, SoforMasrafTipi, YolHarcamasi } from '../types/erp';
+import { KasaHareketi, KasaOdemeDurumu, Personel, SoforMasrafTipi, YolHarcamasi } from '../types/erp';
 import { loadKibritciReportAssets } from './kibritciBrand';
 import { formatDateLabelTr, normalizeDateKey, todayDateKey } from './dateKeyUtils';
 import {
@@ -14,7 +14,7 @@ import {
 } from './kasaReportTheme';
 import { db, saveDocument } from './firebase';
 import { isKasaFisPdfUrl } from './sahaFaaliyetFotoStorage';
-import { KASA_ADSIZ_UNVAN } from './personelUnvanUtils';
+import { KASA_ADSIZ_UNVAN, resolvePersonelUnvan } from './personelUnvanUtils';
 import {
   htmlToPlainText,
   openHtmlReportWindow,
@@ -67,9 +67,22 @@ export function isSoforKasaHareketi(
   return isSoforKaynakliKasaHareketi(k);
 }
 
+/** Şoför kendi cebinden ödedi (KENDI / kh_yol_) — kasa borcu değil, personel ödedi */
+function isSoforKendiHarcamasi(
+  k?: Pick<
+    KasaHareketi,
+    'id' | 'soforOdemesi' | 'soforKasaHarcamasi' | 'masrafTipi'
+  > | null
+): boolean {
+  if (!k || !isSoforKaynakliKasaHareketi(k)) return false;
+  if (k.soforKasaHarcamasi) return false;
+  if (normalizeSoforMasrafTipi(k.masrafTipi) === 'KASA') return false;
+  return Boolean(k.soforOdemesi) || String(k.id || '').startsWith('kh_yol_');
+}
+
 /**
  * Yönetici / kayıt ödeme durumu — kasaya yazılan her çıkış için.
- * BORC = kasanın ödemesi gereken borç (personel/şoföre).
+ * Şoför kendi harcaması → PERSONEL ÖDEDİ (eski BORC etiketi kaldırıldı).
  */
 export function resolveKasaOdemeDurumu(
   k?: Pick<
@@ -84,16 +97,21 @@ export function resolveKasaOdemeDurumu(
   > | null
 ): KasaOdemeDurumu | null {
   if (!k || k.hareketTipi === 'GİRİŞ') return null;
-  if (k.odemeDurumu === 'BORC' || k.odemeDurumu === 'PERSONEL_ODEDI' || k.odemeDurumu === 'KASA_ODEDI') {
-    return k.odemeDurumu;
-  }
 
   // Şoför kaynaklı: masraf tipi / bayraklar, harcamaKaynagi'nden önce (eski karışık kayıtlar)
   if (isSoforKaynakliKasaHareketi(k)) {
     if (k.soforKasaHarcamasi || normalizeSoforMasrafTipi(k.masrafTipi) === 'KASA') {
       return 'KASA_ODEDI';
     }
-    if (k.soforOdemesi || String(k.id || '').startsWith('kh_yol_')) return 'BORC';
+    if (isSoforKendiHarcamasi(k)) return 'PERSONEL_ODEDI';
+  }
+
+  if (k.odemeDurumu === 'BORC' || k.odemeDurumu === 'PERSONEL_ODEDI' || k.odemeDurumu === 'KASA_ODEDI') {
+    // Eski şoför iade kayıtları BORC olarak yazılmış — PERSONEL ÖDEDİ göster
+    if (k.odemeDurumu === 'BORC' && isSoforKendiHarcamasi(k)) {
+      return 'PERSONEL_ODEDI';
+    }
+    return k.odemeDurumu;
   }
 
   if (k.harcamaKaynagi === 'KASA_HARCAMA') return 'KASA_ODEDI';
@@ -109,6 +127,48 @@ export function kasaOdemeDurumuLabel(d?: KasaOdemeDurumu | null): string {
   if (d === 'PERSONEL_ODEDI') return 'PERSONEL ÖDEDİ';
   if (d === 'KASA_ODEDI') return 'KASA ÖDEDİ';
   return '';
+}
+
+/** Liste / rapor etiketi — şoför kayıtları gönderen kişi adıyla gruplanır */
+export function kasaListeOdemeEtiketi(
+  kh: Pick<
+    KasaHareketi,
+    | 'hareketTipi'
+    | 'odemeDurumu'
+    | 'harcamaKaynagi'
+    | 'soforOdemesi'
+    | 'soforKasaHarcamasi'
+    | 'masrafTipi'
+    | 'id'
+    | 'personelId'
+    | 'personelAdi'
+    | 'surucu'
+  >,
+  personeller: Array<Pick<Personel, 'id' | 'ad' | 'soyad' | 'eposta' | 'tcNo'>> = []
+): string {
+  const odeme = resolveKasaOdemeDurumu(kh);
+  if (!odeme) return 'ÖDEME DURUMU SEÇİN';
+  const base = kasaOdemeDurumuLabel(odeme);
+
+  const needsPerson =
+    odeme === 'BORC' ||
+    odeme === 'PERSONEL_ODEDI' ||
+    (odeme === 'KASA_ODEDI' && isSoforKaynakliKasaHareketi(kh));
+
+  if (!needsPerson) return base;
+
+  const unvan = resolvePersonelUnvan(
+    {
+      personelId: kh.personelId,
+      personelAdi: kh.personelAdi,
+      surucu: kh.surucu,
+    },
+    personeller
+  );
+  if (unvan.label !== KASA_ADSIZ_UNVAN) {
+    return `${unvan.label} · ${base}`;
+  }
+  return base;
 }
 
 /**
@@ -133,15 +193,9 @@ export function resolveKasaRaporMasrafTipi(
   return null;
 }
 
-/** Şoföre iade / kasa borcu — yönetici KASA veya Personel ödedi ise false */
+/** Şoför kendi cebinden ödedi — kasa borcu / iade (PERSONEL ÖDEDİ olarak gösterilir) */
 export function isSoforIadeKasaHareketi(k?: KasaHareketi | null): boolean {
-  if (!k || !isSoforKaynakliKasaHareketi(k)) return false;
-  const d = resolveKasaOdemeDurumu(k);
-  if (d === 'KASA_ODEDI' || d === 'PERSONEL_ODEDI') return false;
-  if (d === 'BORC') return true;
-  if (k.soforKasaHarcamasi) return false;
-  if (normalizeSoforMasrafTipi(k.masrafTipi) === 'KASA') return false;
-  return Boolean(k.soforOdemesi) || String(k.id || '').startsWith('kh_yol_');
+  return isSoforKendiHarcamasi(k);
 }
 
 /** Kasanın doğrudan ödediği çıkış (KASA ÖDEDİ) */
@@ -278,7 +332,7 @@ export function buildYolHarcamaKasaCikisPayload(
     soforOdemesi: isKendi,
     soforKasaHarcamasi: !isKendi,
     masrafTipi: tip,
-    odemeDurumu: isKendi ? 'BORC' : 'KASA_ODEDI',
+    odemeDurumu: isKendi ? 'PERSONEL_ODEDI' : 'KASA_ODEDI',
     harcamaKaynagi: isKendi ? 'PERSONEL_HARCAMA' : 'KASA_HARCAMA',
     surucu,
     fisNo,
@@ -571,9 +625,12 @@ function buildCikisListeHtml(rows: RaporKalem[]): string {
 
 function raporKalemOdemeDurumu(r: RaporKalem): KasaOdemeDurumu {
   if (r.odemeDurumu === 'BORC' || r.odemeDurumu === 'PERSONEL_ODEDI' || r.odemeDurumu === 'KASA_ODEDI') {
+    if (r.odemeDurumu === 'BORC' && normalizeSoforMasrafTipi(r.masrafTipi) === 'KENDI') {
+      return 'PERSONEL_ODEDI';
+    }
     return r.odemeDurumu;
   }
-  return normalizeSoforMasrafTipi(r.masrafTipi) === 'KASA' ? 'KASA_ODEDI' : 'BORC';
+  return normalizeSoforMasrafTipi(r.masrafTipi) === 'KASA' ? 'KASA_ODEDI' : 'PERSONEL_ODEDI';
 }
 
 /** Kim ne kadar masraf yapmış — kişi özeti + kalem kalem döküm */
@@ -895,6 +952,7 @@ export async function buildKasaHarcamaAralikReportHtml(options: {
         personelAdi: r.personelAdi || r.surucu || undefined,
         fotoUrl: r.fisEvrakUrl,
         tipEtiket: '',
+        masrafTipi: r.masrafTipi,
         odemeDurumu: odeme,
       };
     });
