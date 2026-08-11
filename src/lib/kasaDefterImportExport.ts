@@ -1,4 +1,4 @@
-import type { KasaHareketi } from '../types/erp';
+﻿import type { KasaHareketi } from '../types/erp';
 import { roundKasaMoney } from './kasaLedgerUtils';
 
 export interface ParsedKasaDefterRow {
@@ -320,4 +320,104 @@ export async function importKasaDefterFromBuffer(
   const { saveDocumentsBatch } = await import('./firebase');
   const saved = await saveDocumentsBatch('kasaHareketleri', plan.toImport, opts?.onProgress);
   return { plan, parse, saved };
+}
+
+/**
+ * Gömülü ARNAVUTKÖY KASA YENİ seed → import planı (Firestore yazmaz).
+ */
+export async function buildEmbeddedArnavutkoySeedPlan(
+  existing: KasaHareketi[],
+  opts?: KasaDefterImportOptions & { includeDevir?: boolean }
+): Promise<{
+  plan: KasaDefterImportPlan;
+  parse: KasaDefterParseResult;
+  meta: { sonBakiye: number; maxTarih: string; kayitSayisi: number; kaynak: string };
+}> {
+  const seed = (await import('../data/arnavutkoyKasaDefterSeed.json')).default as {
+    meta: { sonBakiye: number; maxTarih: string; kayitSayisi: number; kaynak: string };
+    rows: Array<{
+      tarih: string;
+      aciklama: string;
+      giren: number;
+      cikan: number;
+      bakiye?: number;
+    }>;
+  };
+
+  const includeDevir = opts?.includeDevir !== false;
+  const rows: ParsedKasaDefterRow[] = [];
+  let skippedMeta = 0;
+  let skippedEmpty = 0;
+
+  seed.rows.forEach((r, idx) => {
+    const aciklama = String(r.aciklama || '').trim();
+    const giren = roundKasaMoney(r.giren);
+    const cikan = roundKasaMoney(r.cikan);
+    if (!aciklama && !giren && !cikan) {
+      skippedEmpty += 1;
+      return;
+    }
+    if (!giren && !cikan) {
+      skippedMeta += 1;
+      return;
+    }
+    if (!includeDevir && SKIP_ACIKLAMA.test(aciklama)) {
+      skippedMeta += 1;
+      return;
+    }
+    rows.push({
+      rowIndex: idx + 1,
+      tarih: String(r.tarih).slice(0, 10),
+      aciklama,
+      giren,
+      cikan,
+      bakiye: r.bakiye != null ? roundKasaMoney(r.bakiye) : undefined,
+    });
+  });
+
+  const parse: KasaDefterParseResult = {
+    sheetName: 'ARNAVUTKÖY (gömülü seed)',
+    rows,
+    skippedMeta,
+    skippedEmpty,
+  };
+  const plan = buildLegacyKasaHareketleri(rows, existing, opts);
+  plan.skippedMeta = skippedMeta;
+  plan.skippedEmpty = skippedEmpty;
+
+  return {
+    plan,
+    parse,
+    meta: {
+      sonBakiye: roundKasaMoney(seed.meta.sonBakiye),
+      maxTarih: seed.meta.maxTarih,
+      kayitSayisi: seed.meta.kayitSayisi,
+      kaynak: seed.meta.kaynak,
+    },
+  };
+}
+
+/**
+ * Gömülü seed'i gerçek kasaHareketleri kayıtlarına yazar.
+ * Tarih aralığı seçiminde listede görünür; raporlar bu kayıtlardan üretilir.
+ */
+export async function syncEmbeddedArnavutkoySeedToKasa(
+  existing: KasaHareketi[],
+  opts?: KasaDefterImportOptions & {
+    onProgress?: (saved: number, total: number) => void;
+    includeDevir?: boolean;
+  }
+): Promise<{
+  plan: KasaDefterImportPlan;
+  parse: KasaDefterParseResult;
+  saved: number;
+  meta: { sonBakiye: number; maxTarih: string; kayitSayisi: number; kaynak: string };
+}> {
+  const { plan, parse, meta } = await buildEmbeddedArnavutkoySeedPlan(existing, opts);
+  if (plan.toImport.length === 0) {
+    return { plan, parse, saved: 0, meta };
+  }
+  const { saveDocumentsBatch } = await import('./firebase');
+  const saved = await saveDocumentsBatch('kasaHareketleri', plan.toImport, opts?.onProgress);
+  return { plan, parse, saved, meta };
 }

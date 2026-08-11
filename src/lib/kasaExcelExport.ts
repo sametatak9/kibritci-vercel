@@ -944,8 +944,8 @@ function writeDefterCarryRow(
   }
 }
 
-/** ARNAVUTKÖY.xls şablonu — tek sayfa, özet satırı + başlık + defter */
-function addArnavutkoyKasaDefterSheet(
+/** ARNAVUTKÖY.xls şablonu — Kibritçi antet/logo + özet + defter */
+async function addArnavutkoyKasaDefterSheet(
   workbook: Workbook,
   inRange: KasaHareketi[],
   startDate: string,
@@ -953,7 +953,7 @@ function addArnavutkoyKasaDefterSheet(
   openingBalance: number,
   personeller: Array<Pick<Personel, 'id' | 'ad' | 'soyad' | 'eposta' | 'tcNo'>>,
   totals?: KasaLedgerTotals
-): void {
+): Promise<void> {
   const COLS = 7;
   const sheet = workbook.addWorksheet('ARNAVUTKÖY', {
     pageSetup: { paperSize: 9, orientation: 'portrait', fitToPage: true, fitToWidth: 1 },
@@ -985,14 +985,13 @@ function addArnavutkoyKasaDefterSheet(
   let balance = openingBalance;
   const donemBazAktif = Boolean(totals?.donemBazAktif);
 
-  sheet.mergeCells(1, 1, 1, COLS);
-  const titleCell = sheet.getCell(1, 1);
-  titleCell.value = `ARNAVUTKÖY KASA DEFTERİ · ${formatTarihLabelTr(startDate)} — ${formatTarihLabelTr(endDate)}`;
-  titleCell.font = { bold: true, size: 13 };
-  titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
-  sheet.getRow(1).height = 26;
+  let row = await applyKasaAntetCompact(workbook, sheet, {
+    title: 'ARNAVUTKÖY ŞANTİYE KASA DEFTERİ',
+    subtitle: `${formatTarihLabelTr(startDate)} — ${formatTarihLabelTr(endDate)} · GİREN / ÇIKAN / BAKİYE`,
+    colCount: COLS,
+  });
 
-  let row = appendKasaMasrafOzetBlock(sheet, inRange, personeller, 2, COLS, totals);
+  row = appendKasaMasrafOzetBlock(sheet, inRange, personeller, row, COLS, totals);
 
   const headers = ['TARİH', 'AY', 'YIL', 'AÇIKLAMA', 'GİREN', 'ÇIKAN', 'BAKİYE'];
   const hr = sheet.getRow(row);
@@ -1100,7 +1099,7 @@ export async function buildKasaDefterOnlyExcelBuffer(
   const workbook = await createExcelWorkbook();
   workbook.creator = 'Kibritçi ERP';
   workbook.created = new Date();
-  addArnavutkoyKasaDefterSheet(
+  await addArnavutkoyKasaDefterSheet(
     workbook,
     inRange,
     startDate,

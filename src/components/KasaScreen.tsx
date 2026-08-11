@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import { KasaHareketi, KasaOdemeDurumu, Personel, AylikYoklamaMap } from '../types/erp';
 import { ImageLightbox } from './ImageLightbox';
-import { exportKasaExcel, buildKasaExcelBuffer } from '../lib/kasaExcelExport';
+import { exportKasaExcel, buildKasaExcelBuffer, exportKasaDefterExcel } from '../lib/kasaExcelExport';
 import {
   exportArnavutkoyKasaDefterExcel,
   getArnavutkoyDefterMeta,
@@ -272,6 +272,80 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
       setImportProgress('');
       setImportingKasaDefter(false);
       if (kasaDefterImportRef.current) kasaDefterImportRef.current.value = '';
+    }
+  };
+
+  /** Gömülü ARNAVUTKÖY KASA YENİ → programa gerçek kayıt olarak yaz */
+  const handleSyncEmbeddedArnavutkoySeed = async () => {
+    if (importingKasaDefter) return;
+    setImportingKasaDefter(true);
+    setImportProgress('Excel defteri hazırlanıyor…');
+    try {
+      const {
+        buildEmbeddedArnavutkoySeedPlan,
+        syncEmbeddedArnavutkoySeedToKasa,
+        formatKasaDefterImportSummary,
+      } = await import('../lib/kasaDefterImportExport');
+
+      const preview = await buildEmbeddedArnavutkoySeedPlan(kasaHareketleri, {
+        includeDevir: true,
+      });
+      const summary = formatKasaDefterImportSummary(preview.parse, preview.plan);
+
+      if (preview.plan.toImport.length === 0) {
+        alert(
+          `Excel defteri zaten programda.\n\n${summary}\n\n` +
+            `Seed son bakiye: ₺${preview.meta.sonBakiye.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} (${preview.meta.maxTarih})\n\n` +
+            'Tarih aralığı seçip listede / Arnavutköy Defter Excel raporunda görebilirsiniz.'
+        );
+        return;
+      }
+
+      const ok = window.confirm(
+        `ARNAVUTKÖY KASA YENİ defterinden ${preview.plan.toImport.length} satır\n` +
+          `programa KASA KAYDI olarak yazılacak.\n\n${summary}\n\n` +
+          `Seed son bakiye: ₺${preview.meta.sonBakiye.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}\n\n` +
+          'Sonra tarih aralığı seçince bu kayıtlar listede görünür.\nYeni kasa kayıtları aynı defter raporuna eklenir.\n\nDevam?'
+      );
+      if (!ok) return;
+
+      setImportProgress(`0 / ${preview.plan.toImport.length}`);
+      const { plan, saved, meta } = await syncEmbeddedArnavutkoySeedToKasa(kasaHareketleri, {
+        includeDevir: true,
+        onProgress: (done, total) => setImportProgress(`${done} / ${total}`),
+      });
+
+      if (saved > 0) {
+        setKasaHareketleri((prev) => {
+          const ids = new Set(prev.map((k) => k.id));
+          const merged = [...prev];
+          for (const kh of plan.toImport) {
+            if (!ids.has(kh.id)) merged.push(kh);
+          }
+          return merged.sort((a, b) => String(a.tarih).localeCompare(String(b.tarih)));
+        });
+        try {
+          localStorage.setItem('arnavutkoy_seed_synced_v1', '1');
+        } catch {
+          /* ignore */
+        }
+      }
+
+      alert(
+        saved > 0
+          ? `${saved} Excel satırı kasa kaydı oldu.\n\n${formatKasaDefterImportSummary(preview.parse, plan)}\n\n` +
+              `Defter sonu: ₺${meta.sonBakiye.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} · ${meta.maxTarih}\n` +
+              'Tarih filtresini genişletip listede kontrol edin.'
+          : `Yeni kayıt yazılmadı.\n\n${formatKasaDefterImportSummary(preview.parse, plan)}`
+      );
+    } catch (err) {
+      console.error('[arnavut-seed-sync]', err);
+      alert(
+        'Excel defteri programa alınamadı:\n' + (err instanceof Error ? err.message : String(err))
+      );
+    } finally {
+      setImportProgress('');
+      setImportingKasaDefter(false);
     }
   };
 
@@ -1321,16 +1395,26 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
             <button
               type="button"
               disabled={importingKasaDefter}
-              onClick={() => kasaDefterImportRef.current?.click()}
-              className="bg-slate-700 hover:bg-slate-800 disabled:opacity-60 disabled:cursor-wait border border-slate-800 text-white text-[11px] font-bold py-2 px-4 rounded-xl flex items-center space-x-1.5 transition cursor-pointer shadow-sm"
-              title="ARNAVUTKÖY tarzı Excel defterinden geçmiş kasa işlemlerini içe aktar (.xls / .xlsx)"
+              onClick={() => void handleSyncEmbeddedArnavutkoySeed()}
+              className="bg-[#1E4E78] hover:bg-[#163a5c] disabled:opacity-60 disabled:cursor-wait border border-[#163a5c] text-white text-[11px] font-bold py-2 px-4 rounded-xl flex items-center space-x-1.5 transition cursor-pointer shadow-sm"
+              title="ARNAVUTKÖY KASA YENİ gömülü defteri programa gerçek kasa kaydı olarak yazar — tarih filtresinde görünür"
             >
               <Upload size={12} />
               <span>
                 {importingKasaDefter
-                  ? importProgress || 'İçe aktarılıyor…'
-                  : 'Geçmiş Kasa İçe Aktar'}
+                  ? importProgress || 'Defter yazılıyor…'
+                  : 'Excel Defteri → Programa Al'}
               </span>
+            </button>
+            <button
+              type="button"
+              disabled={importingKasaDefter}
+              onClick={() => kasaDefterImportRef.current?.click()}
+              className="bg-slate-700 hover:bg-slate-800 disabled:opacity-60 disabled:cursor-wait border border-slate-800 text-white text-[11px] font-bold py-2 px-4 rounded-xl flex items-center space-x-1.5 transition cursor-pointer shadow-sm"
+              title="Harici .xls / .xlsx dosyasından geçmiş kasa işlemlerini içe aktar"
+            >
+              <Upload size={12} />
+              <span>Dosyadan İçe Aktar</span>
             </button>
             <button
               type="button"
@@ -1403,33 +1487,74 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
                   if (exportingArnavutDefter) return;
                   setExportingArnavutDefter(true);
                   try {
-                    const meta = getArnavutkoyDefterMeta();
-                    const result = await exportArnavutkoyKasaDefterExcel(
-                      kasaHareketleri,
+                    // Önce eksik seed satırlarını programa yaz (sessizce plan; kullanıcıya sor)
+                    const { buildEmbeddedArnavutkoySeedPlan, syncEmbeddedArnavutkoySeedToKasa } =
+                      await import('../lib/kasaDefterImportExport');
+                    let working = kasaHareketleri;
+                    const preview = await buildEmbeddedArnavutkoySeedPlan(working, {
+                      includeDevir: true,
+                    });
+                    if (preview.plan.toImport.length > 0) {
+                      const ok = window.confirm(
+                        `Rapordan önce Excel defterinden ${preview.plan.toImport.length} satır\n` +
+                          `henüz programda yok — şimdi kasa kaydı olarak eklensin mi?\n\n` +
+                          'Tamam = ekle + rapor  |  İptal = yalnız mevcut kayıtlarla rapor'
+                      );
+                      if (ok) {
+                        const { plan, saved } = await syncEmbeddedArnavutkoySeedToKasa(working, {
+                          includeDevir: true,
+                        });
+                        if (saved > 0) {
+                          const ids = new Set(working.map((k) => k.id));
+                          working = [...working];
+                          for (const kh of plan.toImport) {
+                            if (!ids.has(kh.id)) working.push(kh);
+                          }
+                          setKasaHareketleri(
+                            working.sort((a, b) => String(a.tarih).localeCompare(String(b.tarih)))
+                          );
+                        }
+                      }
+                    }
+
+                    // Asıl defter raporu: program kayıtları → GİREN/ÇIKAN/BAKİYE + Kibritçi antet
+                    await exportKasaDefterExcel(
+                      working,
                       appliedStartDate,
-                      appliedEndDate
+                      appliedEndDate,
+                      personeller,
+                      working
                     );
+                    const meta = getArnavutkoyDefterMeta();
                     alert(
-                      `Arnavutköy Kasa Defteri hazır.\n\n` +
-                        `Açılış: ₺${result.acilisBakiye.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}\n` +
-                        `Excel satır: ${result.excelKalem}\n` +
-                        `ERP devam: ${result.erpKalem}\n` +
-                        `Son bakiye: ₺${result.sonBakiye.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}\n\n` +
-                        `Defter seed sonu: ₺${Number(meta.sonBakiye).toLocaleString('tr-TR', { minimumFractionDigits: 2 })} (${meta.maxTarih})`
+                      `Arnavutköy Kasa Defteri (program kayıtları) indirildi.\n\n` +
+                        `Dönem: ${appliedStartDate} — ${appliedEndDate}\n` +
+                        `Seed referans son bakiye: ₺${Number(meta.sonBakiye).toLocaleString('tr-TR', { minimumFractionDigits: 2 })} (${meta.maxTarih})`
                     );
                   } catch (err) {
                     console.error('[arnavut-defter]', err);
-                    alert(
-                      'Arnavutköy defter Excel oluşturulamadı:\n' +
-                        (err instanceof Error ? err.message : String(err))
-                    );
+                    // Yedek: seed birleşimli eski export
+                    try {
+                      await exportArnavutkoyKasaDefterExcel(
+                        kasaHareketleri,
+                        appliedStartDate,
+                        appliedEndDate
+                      );
+                    } catch (err2) {
+                      alert(
+                        'Arnavutköy defter Excel oluşturulamadı:\n' +
+                          (err instanceof Error ? err.message : String(err)) +
+                          '\n' +
+                          (err2 instanceof Error ? err2.message : String(err2))
+                      );
+                    }
                   } finally {
                     setExportingArnavutDefter(false);
                   }
                 })();
               }}
               className="bg-[#1E4E78] hover:bg-[#163a5c] disabled:opacity-60 disabled:cursor-wait border border-[#163a5c] text-white text-[11px] font-bold py-2 px-4 rounded-xl flex items-center space-x-1.5 transition cursor-pointer shadow-sm"
-              title="ARNAVUTKÖY KASA YENİ formatı · Kibritçi logo/antet · Excel seed + ERP devam + bakiye"
+              title="Seçili aralıktaki program kasa kayıtlarını ARNAVUTKÖY Excel defter formatında (GİREN/ÇIKAN/BAKİYE) + Kibritçi logo"
             >
               <FileText size={12} />
               <span>
