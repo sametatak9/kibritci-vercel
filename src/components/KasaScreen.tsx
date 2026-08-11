@@ -1,13 +1,16 @@
 import React, { useMemo, useState, useRef } from 'react';
 import { 
-  Wallet, ArrowUpRight, ArrowDownRight, Printer,
-  Calendar, FileText, Search, Eye, Image as ImageIcon, AlertCircle,
-  Pencil, Trash2, Mail, Upload,
+  Wallet, Calendar, Eye,
+  FileText, AlertCircle,
+  Pencil, Trash2, Image as ImageIcon,
 } from 'lucide-react';
 import { KasaHareketi, KasaOdemeDurumu, Personel, AylikYoklamaMap } from '../types/erp';
 import { ImageLightbox } from './ImageLightbox';
-import { exportKasaExcel, buildKasaExcelBuffer } from '../lib/kasaExcelExport';
-import { exportArnavutkoyKasaDefterExcel } from '../lib/arnavutkoyKasaDefterExport';
+import {
+  exportArnavutkoyKasaDefterExcel,
+  buildArnavutkoyDefterRows,
+  getArnavutkoyDefterMeta,
+} from '../lib/arnavutkoyKasaDefterExport';
 import { saveDocument } from '../lib/firebase';
 import {
   ensureKasaFisFotoPersisted,
@@ -23,9 +26,17 @@ import {
   resolveKasaOdemeDurumu,
 } from '../lib/yolHarcamaUtils';
 import { resolvePersonelUnvan, KASA_ADSIZ_UNVAN } from '../lib/personelUnvanUtils';
-import { prepareKasaLedgerExportData, roundKasaMoney, computeKasaOdemeBazliOzet } from '../lib/kasaLedgerUtils';
+import {
+  dedupeKasaHareketleriForLedger,
+  roundKasaMoney,
+  computeKasaOdemeBazliOzet,
+} from '../lib/kasaLedgerUtils';
 
 type HarcamaKaynagi = 'KASA_HARCAMA' | 'PERSONEL_HARCAMA';
+
+/** Varsayılan: tüm kasa geçmişi (tarih filtresi isteğe bağlı) */
+const KASA_TUM_BASLANGIC = '2020-01-01';
+const KASA_TUM_BITIS = '2099-12-31';
 
 const ODEME_OPTIONS: { id: KasaOdemeDurumu; label: string; short: string; hint: string }[] = [
   {
@@ -98,13 +109,7 @@ interface KasaScreenProps {
 }
 
 function defaultWeekRange(): { start: string; end: string } {
-  const end = todayDateKey();
-  const d = new Date(`${end}T12:00:00`);
-  d.setDate(d.getDate() - 6);
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return { start: `${y}-${m}-${day}`, end };
+  return { start: KASA_TUM_BASLANGIC, end: KASA_TUM_BITIS };
 }
 
 export const KasaScreen: React.FC<KasaScreenProps> = ({ 
@@ -112,12 +117,11 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
   setKasaHareketleri,
   deleteKasaHareketi,
   personeller = [],
-  yoklamalar = {},
+  yoklamalar: _yoklamalar = {},
 }) => {
   const week0 = defaultWeekRange();
-  // Exact layout filters matching top of table in the screenshot
-  const [startDate, setStartDate] = useState(week0.start);
-  const [endDate, setEndDate] = useState(week0.end);
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
   const [appliedStartDate, setAppliedStartDate] = useState(week0.start);
   const [appliedEndDate, setAppliedEndDate] = useState(week0.end);
   const [searchKeyword, setSearchKeyword] = useState("");
@@ -143,314 +147,84 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
   const [selectedReceiptUrl, setSelectedReceiptUrl] = useState<string | null>(null);
   const [selectedReceiptName, setSelectedReceiptName] = useState<string | null>(null);
 
-  // Weekly Cash Report Print Modal Toggle
-  const [exportingKasaExcel, setExportingKasaExcel] = useState(false);
   const [exportingArnavutDefter, setExportingArnavutDefter] = useState(false);
-  const [printingGunlukRapor, setPrintingGunlukRapor] = useState(false);
-  const [importingKasaDefter, setImportingKasaDefter] = useState(false);
-  const [importProgress, setImportProgress] = useState('');
-  const kasaDefterImportRef = useRef<HTMLInputElement>(null);
-  const [sendingKasaEmail, setSendingKasaEmail] = useState(false);
   const [savingKasa, setSavingKasa] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const formPanelRef = useRef<HTMLDivElement>(null);
 
-  const handleGunlukYoklamaKasaRaporu = async () => {
-    if (printingGunlukRapor) return;
-    setPrintingGunlukRapor(true);
-    try {
-      const { buildGunlukYoklamaKasaRaporHtml, openGunlukYoklamaKasaRaporHtml } = await import(
-        '../lib/kasaGunlukRapor'
+  // Liste: tüm kayıtlar (isteğe bağlı tarih filtresi) · yeniden → eskiye
+  const filteredHareketler = useMemo(() => {
+    const deduped = dedupeKasaHareketleriForLedger(kasaHareketleri || []);
+    const start = String(appliedStartDate || '').slice(0, 10);
+    const end = String(appliedEndDate || '').slice(0, 10);
+    const tumu = start === KASA_TUM_BASLANGIC && end === KASA_TUM_BITIS;
+    const list = deduped.filter((kh) => {
+      const t = String(kh.tarih || '').slice(0, 10);
+      if (!tumu) {
+        if (start && t < start) return false;
+        if (end && t > end) return false;
+      }
+      if (!searchKeyword.trim()) return true;
+      const kw = searchKeyword.toLowerCase();
+      return (
+        kh.aciklama.toLowerCase().includes(kw) ||
+        kh.referansTipi.toLowerCase().includes(kw) ||
+        (kh.referansId || '').toLowerCase().includes(kw) ||
+        String(kh.surucu || '').toLowerCase().includes(kw) ||
+        String(kh.personelAdi || '').toLowerCase().includes(kw)
       );
-      const today = todayDateKey();
-      const html = buildGunlukYoklamaKasaRaporHtml({
-        personeller,
-        yoklamalar,
-        kasaHareketleri,
-        dateKey: today,
-      });
-      openGunlukYoklamaKasaRaporHtml(html, `Bugünkü Yoklama + Kasa — ${today}`);
-    } catch (err) {
-      console.error('[kasa-gunluk-rapor]', err);
-      alert(
-        'Günlük rapor oluşturulamadı:\n' + (err instanceof Error ? err.message : String(err))
-      );
-    } finally {
-      setPrintingGunlukRapor(false);
-    }
-  };
-
-  const buildAralikHarcamaBundle = async () => {
-    const { buildKasaHarcamaAralikReportHtml } = await import('../lib/yolHarcamaUtils');
-    const start = appliedStartDate;
-    const end = appliedEndDate;
-    const rows = ledgerExport.inRange.filter((k) => k.hareketTipi === 'ÇIKIŞ');
-    if (rows.length === 0) {
-      alert('Seçili aralıkta kasa çıkışı / harcama kaydı yok. Önce tarih aralığını filtreleyin.');
-      return null;
-    }
-    const toplam = ledgerExport.totals.totalOut;
-    const html = await buildKasaHarcamaAralikReportHtml({
-      startDate: start,
-      endDate: end,
-      items: rows,
-      olusturan: 'Haftalık Kasa',
-      totalOut: toplam,
-      cikisKalem: ledgerExport.totals.cikisKalem,
     });
-    return { html, start, end, toplam, rows };
-  };
+    return list.sort((a, b) => {
+      const dc = String(b.tarih).localeCompare(String(a.tarih));
+      if (dc !== 0) return dc;
+      return String(b.id).localeCompare(String(a.id));
+    });
+  }, [kasaHareketleri, appliedStartDate, appliedEndDate, searchKeyword]);
 
-  const handleKasaDefterImport = async (file: File) => {
-    if (importingKasaDefter) return;
-    setImportingKasaDefter(true);
-    setImportProgress('Excel okunuyor…');
-    try {
-      const buffer = await file.arrayBuffer();
-      const {
-        parseKasaDefterWorkbook,
-        buildLegacyKasaHareketleri,
-        formatKasaDefterImportSummary,
-        importKasaDefterFromBuffer,
-      } = await import('../lib/kasaDefterImportExport');
-
-      const parse = await parseKasaDefterWorkbook(buffer);
-      const importOpts = { minTarih: '2026-01-01' as string | undefined };
-      const only2026 = window.confirm(
-        `${file.name} dosyası okundu (${parse.rows.length} satır).\n\n` +
-          'Varsayılan: yalnızca 2026 ve sonrası kayıtlar aktarılır (mevcut kayıtlara dokunulmaz).\n\n' +
-          'Tamam = 2026+  |  İptal = tüm yıllar'
-      );
-      if (!only2026) importOpts.minTarih = undefined;
-
-      const previewPlan = buildLegacyKasaHareketleri(parse.rows, kasaHareketleri, importOpts);
-      const summary = formatKasaDefterImportSummary(parse, previewPlan, importOpts);
-
-      if (previewPlan.toImport.length === 0) {
-        alert(`İçe aktarılacak yeni kayıt yok.\n\n${summary}`);
-        return;
-      }
-
-      const ok = window.confirm(
-        `${file.name} dosyasından ${previewPlan.toImport.length} yeni geçmiş kasa hareketi aktarılacak.\n\n` +
-          `${summary}\n\n` +
-          'Mevcut kayıtlar değiştirilmez; yalnızca yeni satırlar eklenir.\n\nDevam edilsin mi?'
-      );
-      if (!ok) return;
-
-      setImportProgress(`0 / ${previewPlan.toImport.length}`);
-      const { plan, saved } = await importKasaDefterFromBuffer(buffer, kasaHareketleri, {
-        ...importOpts,
-        onProgress: (done, total) => setImportProgress(`${done} / ${total}`),
-      });
-
-      if (saved > 0) {
-        setKasaHareketleri((prev) => {
-          const ids = new Set(prev.map((k) => k.id));
-          const merged = [...prev];
-          for (const kh of plan.toImport) {
-            if (!ids.has(kh.id)) merged.push(kh);
-          }
-          return merged.sort((a, b) => String(a.tarih).localeCompare(String(b.tarih)));
-        });
-      }
-
-      alert(
-        saved > 0
-          ? `${saved} geçmiş kasa hareketi aktarıldı.\n\n${formatKasaDefterImportSummary(parse, plan, importOpts)}`
-          : `Yeni kayıt eklenmedi.\n\n${formatKasaDefterImportSummary(parse, plan, importOpts)}`
-      );
-    } catch (err) {
-      console.error('[kasa-defter-import]', err);
-      alert(
-        'Kasa defteri içe aktarılamadı:\n' + (err instanceof Error ? err.message : String(err))
-      );
-    } finally {
-      setImportProgress('');
-      setImportingKasaDefter(false);
-      if (kasaDefterImportRef.current) kasaDefterImportRef.current.value = '';
-    }
-  };
-
-  /** Gömülü ARNAVUTKÖY KASA YENİ → programa gerçek kayıt olarak yaz */
-  const handleSyncEmbeddedArnavutkoySeed = async () => {
-    if (importingKasaDefter) return;
-    setImportingKasaDefter(true);
-    setImportProgress('Excel defteri hazırlanıyor…');
-    try {
-      const {
-        buildEmbeddedArnavutkoySeedPlan,
-        syncEmbeddedArnavutkoySeedToKasa,
-        formatKasaDefterImportSummary,
-      } = await import('../lib/kasaDefterImportExport');
-
-      const preview = await buildEmbeddedArnavutkoySeedPlan(kasaHareketleri, {
-        includeDevir: true,
-      });
-      const summary = formatKasaDefterImportSummary(preview.parse, preview.plan);
-
-      if (preview.plan.toImport.length === 0) {
-        alert(
-          `Excel defteri zaten programda.\n\n${summary}\n\n` +
-            `Seed son bakiye: ₺${preview.meta.sonBakiye.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} (${preview.meta.maxTarih})\n\n` +
-            'Tarih aralığı seçip listede / Arnavutköy Defter Excel raporunda görebilirsiniz.'
-        );
-        return;
-      }
-
-      const ok = window.confirm(
-        `ARNAVUTKÖY KASA YENİ defterinden ${preview.plan.toImport.length} satır\n` +
-          `programa KASA KAYDI olarak yazılacak.\n\n${summary}\n\n` +
-          `Seed son bakiye: ₺${preview.meta.sonBakiye.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}\n\n` +
-          'Sonra tarih aralığı seçince bu kayıtlar listede görünür.\nYeni kasa kayıtları aynı defter raporuna eklenir.\n\nDevam?'
-      );
-      if (!ok) return;
-
-      setImportProgress(`0 / ${preview.plan.toImport.length}`);
-      const { plan, saved, meta } = await syncEmbeddedArnavutkoySeedToKasa(kasaHareketleri, {
-        includeDevir: true,
-        onProgress: (done, total) => setImportProgress(`${done} / ${total}`),
-      });
-
-      if (saved > 0) {
-        setKasaHareketleri((prev) => {
-          const ids = new Set(prev.map((k) => k.id));
-          const merged = [...prev];
-          for (const kh of plan.toImport) {
-            if (!ids.has(kh.id)) merged.push(kh);
-          }
-          return merged.sort((a, b) => String(a.tarih).localeCompare(String(b.tarih)));
-        });
-        try {
-          localStorage.setItem('arnavutkoy_seed_synced_v1', '1');
-        } catch {
-          /* ignore */
-        }
-      }
-
-      alert(
-        saved > 0
-          ? `${saved} Excel satırı kasa kaydı oldu.\n\n${formatKasaDefterImportSummary(preview.parse, plan)}\n\n` +
-              `Defter sonu: ₺${meta.sonBakiye.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} · ${meta.maxTarih}\n` +
-              'Tarih filtresini genişletip listede kontrol edin.'
-          : `Yeni kayıt yazılmadı.\n\n${formatKasaDefterImportSummary(preview.parse, plan)}`
-      );
-    } catch (err) {
-      console.error('[arnavut-seed-sync]', err);
-      alert(
-        'Excel defteri programa alınamadı:\n' + (err instanceof Error ? err.message : String(err))
-      );
-    } finally {
-      setImportProgress('');
-      setImportingKasaDefter(false);
-    }
-  };
-
-  const handleAralikHarcamaRaporu = async () => {
-    const { openSoforMasrafIadeReport } = await import('../lib/yolHarcamaUtils');
-    const bundle = await buildAralikHarcamaBundle();
-    if (!bundle) return;
-    openSoforMasrafIadeReport(bundle.html, 'Kasa Harcama Raporu');
-  };
-
-  const handleAralikHarcamaEmail = async () => {
-    if (sendingKasaEmail) return;
-    const { emailKasaHarcamaAralikReport } = await import('../lib/yolHarcamaUtils');
-    const { KASA_REPORT_FORMAT } = await import('../lib/kasaReportTheme');
-    const bundle = await buildAralikHarcamaBundle();
-    if (!bundle) return;
-    setSendingKasaEmail(true);
-    try {
-      let excelBuffer: ArrayBuffer | null = null;
-      try {
-        excelBuffer = await buildKasaExcelBuffer(
-          hareketlerInRange.filter(
-            (kh) => kh.tarih >= bundle.start && kh.tarih <= bundle.end
-          ),
-          bundle.start,
-          bundle.end,
-          personeller,
-          kasaHareketleri
-        );
-      } catch (err) {
-        console.warn('[kasa-email-excel]', err);
-      }
-      await emailKasaHarcamaAralikReport({
-        html: bundle.html,
-        startDate: bundle.start,
-        endDate: bundle.end,
-        toplam: bundle.toplam,
-        items: bundle.rows,
-        excelBuffer,
-        excelFileName: `${KASA_REPORT_FORMAT.excel.filePrefix}_${bundle.start}_${bundle.end}.xlsx`,
-        downloadExcel: excelBuffer
-          ? () =>
-              exportKasaExcel(
-                hareketlerInRange.filter(
-                  (kh) => kh.tarih >= bundle.start && kh.tarih <= bundle.end
-                ),
-                bundle.start,
-                bundle.end,
-                personeller,
-                kasaHareketleri
-              )
-          : undefined,
-      });
-    } catch (err) {
-      console.error('[kasa-email]', err);
-      alert(
-        'E-posta hazırlanamadı:\n' + (err instanceof Error ? err.message : String(err))
-      );
-    } finally {
-      setSendingKasaEmail(false);
-    }
-  };
-
-  // Filter records in range and search text keyword match (mükerrer legacy/program kayıtları ayıklanır)
-  const ledgerExport = useMemo(
-    () => prepareKasaLedgerExportData(kasaHareketleri, appliedStartDate, appliedEndDate),
-    [kasaHareketleri, appliedStartDate, appliedEndDate]
-  );
-
-  const hareketlerInRange = ledgerExport.inRange;
-
-  const filteredHareketler = useMemo(
+  const totalIn = useMemo(
     () =>
-      hareketlerInRange.filter((kh) => {
-        if (searchKeyword.trim()) {
-          const kw = searchKeyword.toLowerCase();
-          const matchDesc = kh.aciklama.toLowerCase().includes(kw);
-          const matchType = kh.referansTipi.toLowerCase().includes(kw);
-          const matchId = (kh.referansId || '').toLowerCase().includes(kw);
-          const matchSurucu = String(kh.surucu || '')
-            .toLowerCase()
-            .includes(kw);
-          const matchPersonel = String(kh.personelAdi || '')
-            .toLowerCase()
-            .includes(kw);
-          return matchDesc || matchType || matchId || matchSurucu || matchPersonel;
-        }
-        return true;
-      }),
-    [hareketlerInRange, searchKeyword]
+      roundKasaMoney(
+        filteredHareketler
+          .filter((k) => k.hareketTipi === 'GİRİŞ')
+          .reduce((s, k) => s + roundKasaMoney(k.tutar), 0)
+      ),
+    [filteredHareketler]
   );
-
-  const totalIn = ledgerExport.totals.totalIn;
-  const totalOut = ledgerExport.totals.totalOut;
-  const periodNet = ledgerExport.totals.netDurum;
-
-  /** Tüm kasa çıkışları — tek “Kasa Harcaması” kartı */
+  const totalOut = useMemo(
+    () =>
+      roundKasaMoney(
+        filteredHareketler
+          .filter((k) => k.hareketTipi === 'ÇIKIŞ')
+          .reduce((s, k) => s + roundKasaMoney(k.tutar), 0)
+      ),
+    [filteredHareketler]
+  );
   const kasaHarcamaOut = totalOut;
-  const cikisKayitSayisi = ledgerExport.totals.cikisKalem;
+  const cikisKayitSayisi = filteredHareketler.filter((k) => k.hareketTipi === 'ÇIKIŞ').length;
 
-  /** Seçili aralık — BORÇ / Personel Ödedi / Kasa Ödedi + kişi kırılımı */
+  /** Excel ~₺905 + program fişleri → gerçek kasa bakiyesi (liste filtresinden bağımsız) */
+  const kasaBakiyesiInfo = useMemo(() => {
+    const built = buildArnavutkoyDefterRows(
+      kasaHareketleri,
+      KASA_TUM_BASLANGIC,
+      KASA_TUM_BITIS
+    );
+    const meta = getArnavutkoyDefterMeta();
+    return {
+      bakiye: built.sonBakiye,
+      excelSon: meta.sonBakiye,
+      excelKalem: built.excelKalem,
+      erpKalem: built.erpKalem,
+    };
+  }, [kasaHareketleri]);
+
   const odemeBazliOzet = useMemo(
     () =>
       computeKasaOdemeBazliOzet(filteredHareketler, personeller, {
-        donemBazAktif: ledgerExport.donemBazAktif,
+        donemBazAktif: false,
         totalOut: kasaHarcamaOut,
       }),
-    [filteredHareketler, personeller, kasaHarcamaOut, ledgerExport.donemBazAktif]
+    [filteredHareketler, personeller, kasaHarcamaOut]
   );
 
   const openFisLightbox = (url?: string | null, title?: string) => {
@@ -714,8 +488,15 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
   };
 
   const handleFilterSubmit = () => {
-    setAppliedStartDate(startDate);
-    setAppliedEndDate(endDate);
+    setAppliedStartDate(startDate || KASA_TUM_BASLANGIC);
+    setAppliedEndDate(endDate || KASA_TUM_BITIS);
+  };
+
+  const handleShowAllRecords = () => {
+    setStartDate('');
+    setEndDate('');
+    setAppliedStartDate(KASA_TUM_BASLANGIC);
+    setAppliedEndDate(KASA_TUM_BITIS);
   };
 
   return (
@@ -733,7 +514,7 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
                 Haftalık Kasa
               </h1>
               <p className="text-[11px] text-[#64748B] font-semibold mt-0.5 leading-relaxed">
-                {appliedStartDate} — {appliedEndDate} · Kasa harcaması · BORÇ · Personel ödedi · Kasa ödedi · Firestore kayıtlı
+                Tüm kasa kayıtları · Excel bakiyesi (~₺{kasaBakiyesiInfo.excelSon.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}) + program fişleri · yeniden → eskiye
               </p>
             </div>
           </div>
@@ -743,33 +524,38 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
         </div>
       </div>
 
-      {/* Özet kartları — seçili aralık */}
+      {/* Özet kartları */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 shrink-0">
-        {[
-          { title: 'Giriş (aralık)', value: `₺${totalIn.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}`, card: 'border-emerald-200 bg-white text-emerald-800', icon: ArrowUpRight, iconBg: 'bg-emerald-50 text-emerald-700' },
-          { title: 'Kasa harcaması', value: `₺${kasaHarcamaOut.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}`, card: 'border-[#FED7AA] bg-[#FFF7ED] text-[#9A3412]', icon: Wallet, iconBg: 'bg-[#FFEDD5] text-[#C2410C]', sub: `${cikisKayitSayisi} çıkış · borç + personel + kasa ödedi` },
-          { title: 'Dönem net', value: `₺${periodNet.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}`, card: 'border-[#FDBA74] bg-white text-[#9A3412] font-bold', icon: Wallet, iconBg: 'bg-[#FFF7ED] text-[#EA580C]', sub: `Giren − çıkan · ${appliedStartDate} — ${appliedEndDate}` },
-        ].map((item, idx) => {
-          const Icon = item.icon;
-          return (
-            <div key={idx} className={`p-4 rounded-2xl border flex items-center justify-between shadow-sm ${item.card}`}>
-              <div className="min-w-0">
-                <span className="text-[10px] text-[#64748B] font-bold uppercase tracking-wider block mb-1">
-                  {item.title}
-                </span>
-                <span className="text-lg sm:text-xl font-black font-mono tabular-nums block truncate">
-                  {item.value}
-                </span>
-                {'sub' in item && item.sub ? (
-                  <span className="text-[9px] text-[#94A3B8] font-semibold mt-0.5 block">{item.sub}</span>
-                ) : null}
-              </div>
-              <div className={`w-10 h-10 rounded-xl flex items-center justify-center border border-[#FED7AA]/80 shrink-0 ${item.iconBg}`}>
-                <Icon size={20} className="stroke-[2.5]" />
-              </div>
-            </div>
-          );
-        })}
+        <div className="p-4 rounded-2xl border border-emerald-200 bg-white text-emerald-800 shadow-sm">
+          <span className="text-[10px] text-[#64748B] font-bold uppercase tracking-wider block mb-1">
+            Giriş (liste)
+          </span>
+          <span className="text-lg sm:text-xl font-black font-mono tabular-nums block truncate">
+            ₺{totalIn.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
+          </span>
+        </div>
+        <div className="p-4 rounded-2xl border border-[#FED7AA] bg-[#FFF7ED] text-[#9A3412] shadow-sm">
+          <span className="text-[10px] text-[#64748B] font-bold uppercase tracking-wider block mb-1">
+            Kasa harcaması
+          </span>
+          <span className="text-lg sm:text-xl font-black font-mono tabular-nums block truncate">
+            ₺{kasaHarcamaOut.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
+          </span>
+          <span className="text-[9px] text-[#94A3B8] font-semibold mt-0.5 block">
+            {cikisKayitSayisi} çıkış · borç + personel + kasa ödedi
+          </span>
+        </div>
+        <div className="p-4 rounded-2xl border border-[#FDBA74] bg-white text-[#9A3412] font-bold shadow-sm">
+          <span className="text-[10px] text-[#64748B] font-bold uppercase tracking-wider block mb-1">
+            Kasa bakiyesi
+          </span>
+          <span className="text-lg sm:text-xl font-black font-mono tabular-nums block truncate">
+            ₺{kasaBakiyesiInfo.bakiye.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
+          </span>
+          <span className="text-[9px] text-[#94A3B8] font-semibold mt-0.5 block">
+            Excel ₺{kasaBakiyesiInfo.excelSon.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} + program fişleri
+          </span>
+        </div>
       </div>
 
       {/* Kim ne harcadı özeti */}
@@ -1143,6 +929,14 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
               >
                 Filtrele
               </button>
+              <button
+                type="button"
+                onClick={handleShowAllRecords}
+                className="bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 font-bold text-[11px] py-1.5 px-3 rounded-lg shadow-sm transition cursor-pointer font-sans"
+                title="Tarih filtresini kaldır — tüm kayıtları göster"
+              >
+                Tüm kayıtlar
+              </button>
             </div>
 
             {/* Real Search Input Box */}
@@ -1377,105 +1171,8 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
             )}
           </div>
 
-          {/* Raporlar — HTML + Excel + defter dışa/içe aktar */}
+          {/* Tek rapor: Arnavutköy Defter Excel */}
           <div className="p-3 border-t border-[#FED7AA] bg-[#FFF7ED]/80 flex flex-wrap justify-end gap-2 shrink-0 select-none">
-            <input
-              ref={kasaDefterImportRef}
-              type="file"
-              accept=".xls,.xlsx,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-              className="hidden"
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                if (file) void handleKasaDefterImport(file);
-              }}
-            />
-            <button
-              type="button"
-              disabled={importingKasaDefter}
-              onClick={() => void handleSyncEmbeddedArnavutkoySeed()}
-              className="bg-[#1E4E78] hover:bg-[#163a5c] disabled:opacity-60 disabled:cursor-wait border border-[#163a5c] text-white text-[11px] font-bold py-2 px-4 rounded-xl flex items-center space-x-1.5 transition cursor-pointer shadow-sm"
-              title="ARNAVUTKÖY KASA YENİ gömülü defteri programa gerçek kasa kaydı olarak yazar — tarih filtresinde görünür"
-            >
-              <Upload size={12} />
-              <span>
-                {importingKasaDefter
-                  ? importProgress || 'Defter yazılıyor…'
-                  : 'Excel Defteri → Programa Al'}
-              </span>
-            </button>
-            <button
-              type="button"
-              disabled={importingKasaDefter}
-              onClick={() => kasaDefterImportRef.current?.click()}
-              className="bg-slate-700 hover:bg-slate-800 disabled:opacity-60 disabled:cursor-wait border border-slate-800 text-white text-[11px] font-bold py-2 px-4 rounded-xl flex items-center space-x-1.5 transition cursor-pointer shadow-sm"
-              title="Harici .xls / .xlsx dosyasından geçmiş kasa işlemlerini içe aktar"
-            >
-              <Upload size={12} />
-              <span>Dosyadan İçe Aktar</span>
-            </button>
-            <button
-              type="button"
-              disabled={printingGunlukRapor}
-              onClick={() => void handleGunlukYoklamaKasaRaporu()}
-              className="bg-sky-700 hover:bg-sky-800 disabled:opacity-60 disabled:cursor-wait border border-sky-800 text-white text-[11px] font-bold py-2 px-4 rounded-xl flex items-center space-x-1.5 transition cursor-pointer shadow-sm"
-              title="Bugünün yoklama listesi + bugünkü kasa giriş/çıkışları — HTML yazdır"
-            >
-              <Calendar size={12} />
-              <span>
-                {printingGunlukRapor ? 'Rapor hazırlanıyor…' : 'Bugünkü Yoklama + Kasa (HTML)'}
-              </span>
-            </button>
-            <button
-              type="button"
-              disabled={sendingKasaEmail}
-              onClick={() => void handleAralikHarcamaEmail()}
-              className="bg-[#047857] hover:bg-[#065f46] disabled:opacity-60 disabled:cursor-wait border border-[#065f46] text-white text-[11px] font-bold py-2 px-4 rounded-xl flex items-center space-x-1.5 transition cursor-pointer shadow-sm"
-              title="HTML + Excel raporu e-posta ile gönder (indirme bağlantıları + ek dosya)"
-            >
-              <Mail size={12} />
-              <span>{sendingKasaEmail ? 'Bağlantılar hazırlanıyor…' : 'E-posta ile Gönder'}</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => void handleAralikHarcamaRaporu()}
-              className="bg-[#EA580C] hover:bg-[#C2410C] border border-[#C2410C] text-white text-[11px] font-bold py-2 px-4 rounded-xl flex items-center space-x-1.5 transition cursor-pointer shadow-sm"
-              title="Filtredeki aralığın tüm kasa çıkışları — HTML rapor"
-            >
-              <Printer size={12} />
-              <span>Aralık Harcama Raporu (HTML)</span>
-            </button>
-            <button
-              type="button"
-              disabled={exportingKasaExcel}
-              onClick={() => {
-                void (async () => {
-                  if (exportingKasaExcel) return;
-                  setExportingKasaExcel(true);
-                  try {
-                    await exportKasaExcel(
-                      hareketlerInRange,
-                      appliedStartDate,
-                      appliedEndDate,
-                      personeller,
-                      kasaHareketleri
-                    );
-                  } catch (err) {
-                    console.error('[kasa-excel]', err);
-                    alert(
-                      'Haftalık Kasa Excel oluşturulamadı:\n' +
-                        (err instanceof Error ? err.message : String(err))
-                    );
-                  } finally {
-                    setExportingKasaExcel(false);
-                  }
-                })();
-              }}
-              className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 disabled:cursor-wait border border-emerald-700 text-white text-[11px] font-bold py-2 px-4 rounded-xl flex items-center space-x-1.5 transition cursor-pointer shadow-sm"
-              title="Seçili aralık — ödeme özeti, imza barı, kalem kalem kayıtlar + fiş evrakları (Excel)"
-            >
-              <FileText size={12} />
-              <span>{exportingKasaExcel ? 'Excel hazırlanıyor…' : 'Haftalık Kasa Excel'}</span>
-            </button>
             <button
               type="button"
               disabled={exportingArnavutDefter}
@@ -1486,16 +1183,15 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
                   try {
                     const result = await exportArnavutkoyKasaDefterExcel(
                       kasaHareketleri,
-                      appliedStartDate,
-                      appliedEndDate
+                      KASA_TUM_BASLANGIC,
+                      KASA_TUM_BITIS
                     );
                     alert(
                       `Arnavutköy Kasa Defteri indirildi.\n\n` +
                         `Excel son bakiye: ₺${result.excelSonBakiye.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}\n` +
                         `Excel satır: ${result.excelKalem}\n` +
                         `Program satır: ${result.erpKalem}\n` +
-                        `SON BAKİYE: ₺${result.sonBakiye.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}\n\n` +
-                        `(Excel ~₺905 üzerine program fişleri işlendi — tablo formüllü)`
+                        `KASA BAKİYESİ: ₺${result.sonBakiye.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}`
                     );
                   } catch (err) {
                     console.error('[arnavut-defter]', err);
@@ -1509,7 +1205,7 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
                 })();
               }}
               className="bg-[#1E4E78] hover:bg-[#163a5c] disabled:opacity-60 disabled:cursor-wait border border-[#163a5c] text-white text-[11px] font-bold py-2 px-4 rounded-xl flex items-center space-x-1.5 transition cursor-pointer shadow-sm"
-              title="ARNAVUTKÖY KASA YENİ formatı · Excel bakiyesinden devam · program kayıtları · formüllü BAKİYE · Kibritçi antet/logo"
+              title="Excel bakiyesi + program kayıtları · formüllü defter · Kibritçi antet/logo"
             >
               <FileText size={12} />
               <span>
