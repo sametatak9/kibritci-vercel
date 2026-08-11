@@ -1186,7 +1186,7 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
                 })();
               }}
               className="bg-[#1E4E78] hover:bg-[#163a5c] disabled:opacity-60 disabled:cursor-wait border border-[#163a5c] text-white text-[11px] font-bold py-2 px-4 rounded-xl flex items-center space-x-1.5 transition cursor-pointer shadow-sm"
-              title="Excel bakiyesi + program kayıtları · formüllü defter · Kibritçi antet/logo"
+              title="Gerçek ARNAVUTKÖY KASA YENİ.xls üzerine program kayıtlarını ekler · ÖZET sayfası"
             >
               <FileText size={12} />
               <span>
