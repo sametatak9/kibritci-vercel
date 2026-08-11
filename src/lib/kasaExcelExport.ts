@@ -13,6 +13,7 @@ import {
   computeKasaLedgerTotals,
   computeKasaOdemeBazliOzet,
   filterPostDonemBazHareketleri,
+  buildKasaKisiHarcamaRows,
   KASA_DONEM_BAZ,
   prepareKasaLedgerExportData,
   roundKasaMoney,
@@ -551,51 +552,21 @@ type ExcelPersonRow = {
   toplam: number;
 };
 
-/** Excel özet tablosu — dönem baz satırı + kişi kırılımı (BORÇ / Personel / Kasa sütunları) */
+/** Excel özet tablosu — kişi kırılımı (BORÇ / Personel / Kasa sütunları) */
 function buildKasaExcelPersonRows(
   inRange: KasaHareketi[],
   personeller: Array<Pick<Personel, 'id' | 'ad' | 'soyad' | 'eposta' | 'tcNo'>>,
-  donemBazAktif: boolean
+  _donemBazAktif: boolean
 ): ExcelPersonRow[] {
-  const rows: ExcelPersonRow[] = [];
-
-  if (donemBazAktif) {
-    rows.push({
-      label: `KASA · dönem baz (${formatTarihDdMmYyyy(KASA_DONEM_BAZ.baslangic)}—${formatTarihDdMmYyyy(KASA_DONEM_BAZ.kapanis)})`,
-      kalem: KASA_DONEM_BAZ.cikisKalem,
-      borc: 0,
-      personel: 0,
-      kasa: KASA_DONEM_BAZ.cikan,
-      toplam: KASA_DONEM_BAZ.cikan,
-    });
-  }
-
-  const cikisKaynak = donemBazAktif
-    ? filterPostDonemBazHareketleri(inRange).filter((k) => k.hareketTipi === 'ÇIKIŞ')
-    : inRange.filter((k) => k.hareketTipi === 'ÇIKIŞ');
-
-  for (const b of groupByPersonel(cikisKaynak, personeller)) {
-    let bBorc = 0;
-    let bPers = 0;
-    let bKasa = 0;
-    for (const kh of b.kalemler) {
-      const d = resolveKasaOdemeDurumu(kh) || 'KASA_ODEDI';
-      const t = roundKasaMoney(kh.tutar);
-      if (d === 'BORC') bBorc += t;
-      else if (d === 'PERSONEL_ODEDI') bPers += t;
-      else bKasa += t;
-    }
-    rows.push({
-      label: b.label,
-      kalem: b.kalemler.length,
-      borc: roundKasaMoney(bBorc),
-      personel: roundKasaMoney(bPers),
-      kasa: roundKasaMoney(bKasa),
-      toplam: roundKasaMoney(bBorc + bPers + bKasa),
-    });
-  }
-
-  return rows.sort((a, b) => b.toplam - a.toplam || a.label.localeCompare(b.label, 'tr'));
+  const cikislar = inRange.filter((k) => k.hareketTipi === 'ÇIKIŞ');
+  return buildKasaKisiHarcamaRows(cikislar, personeller).map((r) => ({
+    label: r.label,
+    kalem: r.kalem,
+    borc: r.borc,
+    personel: r.personel,
+    kasa: r.kasa,
+    toplam: r.tutar,
+  }));
 }
 
 function writeOzetBaslik(
@@ -739,7 +710,7 @@ function appendKasaMasrafOzetBlock(
     totalOut,
   });
   kisiOzet.satirlar.forEach((b, i) => {
-    writeOzetSatir(sheet, row, i + 1, b.label, 1, roundKasaMoney(b.tutar));
+    writeOzetSatir(sheet, row, i + 1, b.label, b.kalem, roundKasaMoney(b.tutar));
     row += 1;
   });
   if (kisiOzet.satirlar.length === 0) {
@@ -1370,14 +1341,11 @@ export async function buildKasaExcelBuffer(
   const personelOdedi = ozet.totals.PERSONEL_ODEDI;
   const kasaOdedi = ozet.totals.KASA_ODEDI;
 
-  const postCikis = donemBazAktif
-    ? filterPostDonemBazHareketleri(cikislar)
-    : cikislar;
-  const digerKalem = postCikis.filter((k) => {
+  const digerKalem = cikislar.filter((k) => {
     const d = resolveKasaOdemeDurumu(k) || 'KASA_ODEDI';
     return d === 'BORC' || d === 'PERSONEL_ODEDI';
   }).length;
-  const kasaKalem = totals.cikisKalem - digerKalem;
+  const kasaKalem = Math.max(0, totals.cikisKalem - digerKalem);
 
   // Fiş URL’leri — yalnızca hazır https (Storage upload export’u kilitlemesin)
   const withFotoAll = cikislar.filter((k) => String(k.fisEvrakUrl || '').trim());

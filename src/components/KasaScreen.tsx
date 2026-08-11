@@ -741,6 +741,9 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
                 <span className="text-[10px] font-black uppercase tracking-wide opacity-90">
                   {row.label}
                 </span>
+                <span className="text-[9px] font-bold opacity-75 tabular-nums">
+                  {row.kalem} kalem
+                </span>
                 <span className="text-sm font-black font-mono tabular-nums">
                   ₺{row.tutar.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
                 </span>

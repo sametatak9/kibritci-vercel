@@ -222,8 +222,87 @@ export type KasaOdemeBazliOzetSatir = {
   key: string;
   label: string;
   tutar: number;
+  kalem: number;
+  borc: number;
+  personel: number;
+  kasa: number;
   durum: KasaOdemeDurumu;
 };
+
+export type KasaKisiHarcamaRow = KasaOdemeBazliOzetSatir;
+
+function dominantKasaOdemeDurumu(
+  w: Partial<Record<KasaOdemeDurumu, number>>
+): KasaOdemeDurumu {
+  let best: KasaOdemeDurumu = 'KASA_ODEDI';
+  let bestV = -1;
+  for (const d of ['KASA_ODEDI', 'PERSONEL_ODEDI', 'BORC'] as const) {
+    const v = w[d] || 0;
+    if (v > bestV) {
+      bestV = v;
+      best = d;
+    }
+  }
+  return best;
+}
+
+/** Kişi / KASA bazlı harcama satırları — aynı kişinin borç+personel+kasa kayıtları birleşir */
+export function buildKasaKisiHarcamaRows(
+  cikislar: KasaHareketi[],
+  personeller: Array<Pick<Personel, 'id' | 'ad' | 'soyad' | 'eposta' | 'tcNo'>>
+): KasaKisiHarcamaRow[] {
+  type Acc = {
+    key: string;
+    label: string;
+    kalem: number;
+    borc: number;
+    personel: number;
+    kasa: number;
+    w: Partial<Record<KasaOdemeDurumu, number>>;
+  };
+  const map = new Map<string, Acc>();
+
+  for (const kh of cikislar) {
+    if (kh.hareketTipi !== 'ÇIKIŞ') continue;
+    const tutar = roundKasaMoney(kh.tutar);
+    if (tutar <= 0) continue;
+    const durum = resolveKasaOdemeDurumu(kh) || 'KASA_ODEDI';
+    const unvan = resolvePersonelUnvan(
+      { personelId: kh.personelId, personelAdi: kh.personelAdi, surucu: kh.surucu },
+      personeller
+    );
+
+    const key =
+      unvan.label === KASA_ADSIZ_UNVAN && durum === 'KASA_ODEDI'
+        ? 'kasa:anon'
+        : `kisi:${unvan.key}`;
+    const label = key === 'kasa:anon' ? 'KASA' : unvan.label;
+
+    let acc = map.get(key);
+    if (!acc) {
+      acc = { key, label, kalem: 0, borc: 0, personel: 0, kasa: 0, w: {} };
+      map.set(key, acc);
+    }
+    acc.kalem += 1;
+    acc.w[durum] = roundKasaMoney((acc.w[durum] || 0) + tutar);
+    if (durum === 'BORC') acc.borc = roundKasaMoney(acc.borc + tutar);
+    else if (durum === 'PERSONEL_ODEDI') acc.personel = roundKasaMoney(acc.personel + tutar);
+    else acc.kasa = roundKasaMoney(acc.kasa + tutar);
+  }
+
+  return [...map.values()]
+    .map((acc) => ({
+      key: acc.key,
+      label: acc.label,
+      kalem: acc.kalem,
+      borc: acc.borc,
+      personel: acc.personel,
+      kasa: acc.kasa,
+      tutar: roundKasaMoney(acc.borc + acc.personel + acc.kasa),
+      durum: dominantKasaOdemeDurumu(acc.w),
+    }))
+    .sort((a, b) => b.tutar - a.tutar || a.label.localeCompare(b.label, 'tr'));
+}
 
 export function computeKasaOdemeBazliOzet(
   hareketler: KasaHareketi[],
@@ -234,93 +313,18 @@ export function computeKasaOdemeBazliOzet(
   totals: Record<KasaOdemeDurumu, number>;
   genelToplam: number;
 } {
-  const donemBazAktif = Boolean(opts?.donemBazAktif);
-  type Bucket = KasaOdemeBazliOzetSatir & {
-    w: Partial<Record<KasaOdemeDurumu, number>>;
-  };
-  const buckets = new Map<string, Bucket>();
+  const cikislar = (hareketler || []).filter((k) => k.hareketTipi === 'ÇIKIŞ');
+  const satirlar = buildKasaKisiHarcamaRows(cikislar, personeller);
+
   const totals: Record<KasaOdemeDurumu, number> = {
-    BORC: 0,
-    PERSONEL_ODEDI: 0,
-    KASA_ODEDI: 0,
+    BORC: roundKasaMoney(satirlar.reduce((s, r) => s + r.borc, 0)),
+    PERSONEL_ODEDI: roundKasaMoney(satirlar.reduce((s, r) => s + r.personel, 0)),
+    KASA_ODEDI: roundKasaMoney(satirlar.reduce((s, r) => s + r.kasa, 0)),
   };
-
-  const dominantDurum = (w: Partial<Record<KasaOdemeDurumu, number>>): KasaOdemeDurumu => {
-    let best: KasaOdemeDurumu = 'KASA_ODEDI';
-    let bestV = -1;
-    for (const d of ['KASA_ODEDI', 'PERSONEL_ODEDI', 'BORC'] as const) {
-      const v = w[d] || 0;
-      if (v > bestV) {
-        bestV = v;
-        best = d;
-      }
-    }
-    return best;
-  };
-
-  const add = (key: string, label: string, durum: KasaOdemeDurumu, tutar: number) => {
-    const t = roundKasaMoney(tutar);
-    if (t <= 0) return;
-    totals[durum] = roundKasaMoney(totals[durum] + t);
-    const prev = buckets.get(key);
-    if (prev) {
-      prev.tutar = roundKasaMoney(prev.tutar + t);
-      prev.w[durum] = roundKasaMoney((prev.w[durum] || 0) + t);
-      prev.durum = dominantDurum(prev.w);
-    } else {
-      buckets.set(key, { key, label, tutar: t, durum, w: { [durum]: t } });
-    }
-  };
-
-  const addKisi = (
-    unvan: { key: string; label: string },
-    durum: KasaOdemeDurumu,
-    tutar: number
-  ) => {
-    if (unvan.label === KASA_ADSIZ_UNVAN && durum === 'KASA_ODEDI') {
-      add('kasa:anon', 'KASA', 'KASA_ODEDI', tutar);
-      return;
-    }
-    add(`kisi:${unvan.key}`, unvan.label, durum, tutar);
-  };
-
-  if (donemBazAktif) {
-    add(
-      'donem-baz:kasa',
-      `KASA · dönem baz (${formatDonemBazLabel()})`,
-      'KASA_ODEDI',
-      KASA_DONEM_BAZ.cikan
-    );
-  }
-
-  const cikisKaynak = donemBazAktif ? filterPostDonemBazHareketleri(hareketler) : hareketler;
-  for (const kh of cikisKaynak) {
-    if (kh.hareketTipi !== 'ÇIKIŞ') continue;
-    const tutar = roundKasaMoney(kh.tutar);
-    if (tutar <= 0) continue;
-    const durum = resolveKasaOdemeDurumu(kh) || 'KASA_ODEDI';
-    const unvan = resolvePersonelUnvan(
-      { personelId: kh.personelId, personelAdi: kh.personelAdi, surucu: kh.surucu },
-      personeller
-    );
-    addKisi(unvan, durum, tutar);
-  }
-
-  const satirlar = [...buckets.values()]
-    .map(({ w: _w, ...row }) => row)
-    .sort((a, b) => b.tutar - a.tutar || a.label.localeCompare(b.label, 'tr'));
 
   const genelToplam =
     opts?.totalOut ??
     roundKasaMoney(totals.BORC + totals.PERSONEL_ODEDI + totals.KASA_ODEDI);
 
   return { satirlar, totals, genelToplam };
-}
-
-function formatDonemBazLabel(): string {
-  const fmt = (iso: string) => {
-    const [y, m, d] = String(iso).slice(0, 10).split('-');
-    return `${d}.${m}.${y}`;
-  };
-  return `${fmt(KASA_DONEM_BAZ.baslangic)}—${fmt(KASA_DONEM_BAZ.kapanis)}`;
 }
