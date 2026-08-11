@@ -556,17 +556,20 @@ type ExcelPersonRow = {
 function buildKasaExcelPersonRows(
   inRange: KasaHareketi[],
   personeller: Array<Pick<Personel, 'id' | 'ad' | 'soyad' | 'eposta' | 'tcNo'>>,
-  _donemBazAktif: boolean
+  donemBazAktif: boolean,
+  totalOut?: number
 ): ExcelPersonRow[] {
   const cikislar = inRange.filter((k) => k.hareketTipi === 'ÇIKIŞ');
-  return buildKasaKisiHarcamaRows(cikislar, personeller).map((r) => ({
-    label: r.label,
-    kalem: r.kalem,
-    borc: r.borc,
-    personel: r.personel,
-    kasa: r.kasa,
-    toplam: r.tutar,
-  }));
+  return buildKasaKisiHarcamaRows(cikislar, personeller, { donemBazAktif, totalOut }).map(
+    (r) => ({
+      label: r.label,
+      kalem: r.kalem,
+      borc: r.borc,
+      personel: r.personel,
+      kasa: r.kasa,
+      toplam: r.tutar,
+    })
+  );
 }
 
 function writeOzetBaslik(
@@ -1329,7 +1332,7 @@ export async function buildKasaExcelBuffer(
 
   const cikislar = inRange.filter((k) => k.hareketTipi === 'ÇIKIŞ');
   const girisler = inRange.filter((k) => k.hareketTipi === 'GİRİŞ');
-  const personRows = buildKasaExcelPersonRows(inRange, personeller, donemBazAktif);
+  const personRows = buildKasaExcelPersonRows(inRange, personeller, donemBazAktif, totals.totalOut);
   const ozet = computeKasaOdemeBazliOzet(cikislar, personeller, {
     donemBazAktif,
     totalOut: totals.totalOut,
