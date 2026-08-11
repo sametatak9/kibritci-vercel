@@ -1,5 +1,12 @@
 import type { KasaHareketi } from '../types/erp';
 
+/** Kasa tutarları — 2 ondalık, kayan nokta artığı yok */
+export function roundKasaMoney(value: unknown): number {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return 0;
+  return Math.round(n * 100) / 100;
+}
+
 function normalizeKasaAciklama(raw: string): string {
   return String(raw || '')
     .replace(/\s+/g, ' ')
@@ -66,11 +73,11 @@ export function dedupeKasaHareketleriForLedger(hareketler: KasaHareketi[]): Kasa
 export function computeKasaNetBalance(hareketler: KasaHareketi[]): number {
   let bal = 0;
   for (const kh of hareketler) {
-    const t = Number(kh.tutar) || 0;
+    const t = roundKasaMoney(kh.tutar);
     if (kh.hareketTipi === 'GİRİŞ') bal += t;
     else bal -= t;
   }
-  return bal;
+  return roundKasaMoney(bal);
 }
 
 /** Seçili dönem öncesi devreden bakiye — mükerrer kayıtlar ayıklanmış */

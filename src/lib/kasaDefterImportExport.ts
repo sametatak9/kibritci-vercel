@@ -1,4 +1,5 @@
 import type { KasaHareketi } from '../types/erp';
+import { roundKasaMoney } from './kasaLedgerUtils';
 
 export interface ParsedKasaDefterRow {
   rowIndex: number;
@@ -50,7 +51,7 @@ function parseMoney(raw: unknown): number {
     ? text.replace(/\./g, '').replace(',', '.')
     : text.replace(/[^\d.-]/g, '');
   const n = Number(normalized);
-  return Number.isFinite(n) ? n : 0;
+  return Number.isFinite(n) ? roundKasaMoney(n) : 0;
 }
 
 function pad2(n: number): string {

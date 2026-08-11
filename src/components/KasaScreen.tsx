@@ -22,7 +22,7 @@ import {
   resolveKasaOdemeDurumu,
 } from '../lib/yolHarcamaUtils';
 import { resolvePersonelUnvan } from '../lib/personelUnvanUtils';
-import { prepareKasaLedgerExportData } from '../lib/kasaLedgerUtils';
+import { prepareKasaLedgerExportData, roundKasaMoney } from '../lib/kasaLedgerUtils';
 
 type HarcamaKaynagi = 'KASA_HARCAMA' | 'PERSONEL_HARCAMA';
 
@@ -364,13 +364,17 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
   );
 
   // KPI: seçili aralık (filtre) üzerinden — şoför onaylı çıkışlar eksi bakiyeye yansır
-  const totalIn = filteredHareketler
-    .filter((k) => k.hareketTipi === 'GİRİŞ')
-    .reduce((sum, current) => sum + current.tutar, 0);
+  const totalIn = roundKasaMoney(
+    filteredHareketler
+      .filter((k) => k.hareketTipi === 'GİRİŞ')
+      .reduce((sum, current) => sum + roundKasaMoney(current.tutar), 0)
+  );
 
-  const totalOut = filteredHareketler
-    .filter((k) => k.hareketTipi === 'ÇIKIŞ')
-    .reduce((sum, current) => sum + current.tutar, 0);
+  const totalOut = roundKasaMoney(
+    filteredHareketler
+      .filter((k) => k.hareketTipi === 'ÇIKIŞ')
+      .reduce((sum, current) => sum + roundKasaMoney(current.tutar), 0)
+  );
 
   /** Tüm kasa çıkışları — tek “Kasa Harcaması” kartı (BORÇ + Personel + Kasa ödedi) */
   const kasaHarcamaOut = totalOut;

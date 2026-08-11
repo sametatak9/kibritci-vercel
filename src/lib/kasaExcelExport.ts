@@ -9,6 +9,12 @@ import {
   KASA_EXCEL_ARGB,
   KASA_REPORT_FORMAT,
 } from './kasaReportTheme';
+import {
+  computeKasaNetBalance,
+  computeKasaOpeningBalance,
+  prepareKasaLedgerExportData,
+  roundKasaMoney,
+} from './kasaLedgerUtils';
 
 function odemeLabel(d: KasaOdemeDurumu | null): string {
   if (d === 'BORC') return 'BORÇ';
@@ -548,7 +554,8 @@ const TR_AY_UPPER = [
 ] as const;
 
 const DEFTER_GIRIS_FILL = 'FFC6EFCE';
-const DEFTER_NUM_FMT = '#.##0,00';
+/** Excel format tanımı — binlik , ondalık . (Excel locale'e göre 25.000,00 gösterir) */
+const DEFTER_NUM_FMT = '#,##0.00';
 
 function formatTarihDdMmYyyy(iso: string): string {
   const [y, m, d] = String(iso || '').slice(0, 10).split('-');
@@ -562,18 +569,22 @@ function tarihAyYilParts(iso: string): { ay: string; yil: string } {
   return { ay: TR_AY_UPPER[mi], yil: y || '' };
 }
 
-import {
-  computeKasaNetBalance,
-  computeKasaOpeningBalance,
-  prepareKasaLedgerExportData,
-} from './kasaLedgerUtils';
-
 function applyDefterMoneyCell(cell: {
   numFmt?: string;
   alignment?: unknown;
+  value?: unknown;
 }): void {
   cell.numFmt = DEFTER_NUM_FMT;
   cell.alignment = { horizontal: 'right', vertical: 'middle' };
+}
+
+/** Para hücresine yuvarlanmış sayı yazar — kayan nokta / fazla sıfır olmaz */
+function setDefterMoneyValue(
+  cell: { value?: unknown; numFmt?: string; alignment?: unknown },
+  amount: number
+): void {
+  cell.value = roundKasaMoney(amount);
+  applyDefterMoneyCell(cell);
 }
 
 function buildDefterAciklama(
@@ -653,14 +664,13 @@ function addHaftalikKasaDefterSheet(
   carry.getCell(4).value = 'GEÇEN HAFTADAN DEVREDEN';
   carry.getCell(4).font = { bold: true, size: 10 };
   carry.getCell(4).alignment = { vertical: 'middle', wrapText: true };
-  carry.getCell(5).value = 0;
-  carry.getCell(6).value = 0;
-  carry.getCell(7).value = balance;
+  setDefterMoneyValue(carry.getCell(5), 0);
+  setDefterMoneyValue(carry.getCell(6), 0);
+  setDefterMoneyValue(carry.getCell(7), balance);
   for (let c = 1; c <= COLS; c++) {
     const cell = carry.getCell(c);
     cell.border = thinBorder();
     cell.font = { size: 10, ...(c === 4 ? { bold: true } : {}) };
-    if (c >= 5) applyDefterMoneyCell(cell);
   }
   row += 1;
 
@@ -674,7 +684,7 @@ function addHaftalikKasaDefterSheet(
   });
 
   for (const kh of sorted) {
-    const t = Number(kh.tutar) || 0;
+    const t = roundKasaMoney(kh.tutar);
     const isGiris = kh.hareketTipi === 'GİRİŞ';
     const { ay, yil } = tarihAyYilParts(kh.tarih);
     const r = sheet.getRow(row);
@@ -688,11 +698,10 @@ function addHaftalikKasaDefterSheet(
     r.getCell(3).alignment = { horizontal: 'center', vertical: 'middle' };
     r.getCell(4).value = buildDefterAciklama(kh, personeller);
     r.getCell(4).alignment = { vertical: 'middle', wrapText: true };
-    r.getCell(5).value = isGiris ? t : 0;
-    r.getCell(6).value = isGiris ? 0 : t;
-    if (isGiris) balance += t;
-    else balance -= t;
-    r.getCell(7).value = balance;
+    setDefterMoneyValue(r.getCell(5), isGiris ? t : 0);
+    setDefterMoneyValue(r.getCell(6), isGiris ? 0 : t);
+    balance = roundKasaMoney(isGiris ? balance + t : balance - t);
+    setDefterMoneyValue(r.getCell(7), balance);
 
     for (let c = 1; c <= COLS; c++) {
       const cell = r.getCell(c);
@@ -745,22 +754,23 @@ function addArnavutkoyKasaDefterSheet(
   let totalIn = 0;
   let totalOut = 0;
   for (const kh of inRange) {
-    const t = Number(kh.tutar) || 0;
+    const t = roundKasaMoney(kh.tutar);
     if (kh.hareketTipi === 'GİRİŞ') totalIn += t;
     else totalOut += t;
   }
+  totalIn = roundKasaMoney(totalIn);
+  totalOut = roundKasaMoney(totalOut);
   const beforeRange = allHareketler.filter((k) => String(k.tarih) < startDate);
   let balance = computeKasaOpeningBalance(allHareketler, startDate);
-  const closingBalance = balance + totalIn - totalOut;
+  const closingBalance = roundKasaMoney(balance + totalIn - totalOut);
 
   const meta = sheet.getRow(1);
   meta.height = 22;
   meta.getCell(2).value = 'PROJE MÜDÜRÜ';
   meta.getCell(2).font = { bold: true, size: 10 };
-  meta.getCell(5).value = totalIn;
-  meta.getCell(6).value = totalOut;
-  meta.getCell(7).value = closingBalance;
-  for (const c of [5, 6, 7]) applyDefterMoneyCell(meta.getCell(c));
+  setDefterMoneyValue(meta.getCell(5), totalIn);
+  setDefterMoneyValue(meta.getCell(6), totalOut);
+  setDefterMoneyValue(meta.getCell(7), closingBalance);
 
   const headerRow = 2;
   const headers = ['TARİH', 'AY', 'YIL', 'AÇIKLAMA', 'GİREN', 'ÇIKAN', 'BAKİYE'];
@@ -781,14 +791,13 @@ function addArnavutkoyKasaDefterSheet(
   carry.getCell(4).value = 'GEÇEN HAFTADAN DEVREDEN';
   carry.getCell(4).font = { bold: true, size: 10 };
   carry.getCell(4).alignment = { vertical: 'middle', wrapText: true };
-  carry.getCell(5).value = 0;
-  carry.getCell(6).value = 0;
-  carry.getCell(7).value = balance;
+  setDefterMoneyValue(carry.getCell(5), 0);
+  setDefterMoneyValue(carry.getCell(6), 0);
+  setDefterMoneyValue(carry.getCell(7), balance);
   for (let c = 1; c <= COLS; c++) {
     const cell = carry.getCell(c);
     cell.border = thinBorder();
     cell.font = { size: 10, ...(c === 4 ? { bold: true } : {}) };
-    if (c >= 5) applyDefterMoneyCell(cell);
   }
   row += 1;
 
@@ -802,7 +811,7 @@ function addArnavutkoyKasaDefterSheet(
   });
 
   for (const kh of sorted) {
-    const t = Number(kh.tutar) || 0;
+    const t = roundKasaMoney(kh.tutar);
     const isGiris = kh.hareketTipi === 'GİRİŞ';
     const { ay, yil } = tarihAyYilParts(kh.tarih);
     const r = sheet.getRow(row);
@@ -818,11 +827,10 @@ function addArnavutkoyKasaDefterSheet(
     r.getCell(3).alignment = { horizontal: 'center', vertical: 'middle' };
     r.getCell(4).value = buildDefterAciklama(kh, personeller);
     r.getCell(4).alignment = { vertical: 'middle', wrapText: true };
-    r.getCell(5).value = isGiris ? t : 0;
-    r.getCell(6).value = isGiris ? 0 : t;
-    if (isGiris) balance += t;
-    else balance -= t;
-    r.getCell(7).value = balance;
+    setDefterMoneyValue(r.getCell(5), isGiris ? t : 0);
+    setDefterMoneyValue(r.getCell(6), isGiris ? 0 : t);
+    balance = roundKasaMoney(isGiris ? balance + t : balance - t);
+    setDefterMoneyValue(r.getCell(7), balance);
 
     for (let c = 1; c <= COLS; c++) {
       const cell = r.getCell(c);
@@ -915,13 +923,15 @@ function addHaftalikKasaIcmalSheet(
   let totalIn = 0;
   let totalOut = 0;
   for (const kh of inRange) {
-    const t = Number(kh.tutar) || 0;
+    const t = roundKasaMoney(kh.tutar);
     if (kh.hareketTipi === 'GİRİŞ') totalIn += t;
     else totalOut += t;
   }
+  totalIn = roundKasaMoney(totalIn);
+  totalOut = roundKasaMoney(totalOut);
   const opening = computeKasaOpeningBalance(allHareketler, startDate);
   let balance = opening;
-  const closing = opening + totalIn - totalOut;
+  const closing = roundKasaMoney(opening + totalIn - totalOut);
 
   sheet.mergeCells(1, 1, 1, COLS);
   const titleCell = sheet.getCell(1, 1);
@@ -936,10 +946,9 @@ function addHaftalikKasaIcmalSheet(
   meta.getCell(2).font = { bold: true, size: 10 };
   meta.getCell(4).value = 'DÖNEM TOPLAMLARI';
   meta.getCell(4).font = { bold: true, size: 10 };
-  meta.getCell(5).value = totalIn;
-  meta.getCell(6).value = totalOut;
-  meta.getCell(7).value = closing;
-  for (const c of [5, 6, 7]) applyDefterMoneyCell(meta.getCell(c));
+  setDefterMoneyValue(meta.getCell(5), totalIn);
+  setDefterMoneyValue(meta.getCell(6), totalOut);
+  setDefterMoneyValue(meta.getCell(7), closing);
 
   const headerRow = 3;
   const headers = ['TARİH', 'AY', 'YIL', 'AÇIKLAMA', 'GİREN', 'ÇIKAN', 'BAKİYE'];
@@ -959,13 +968,12 @@ function addHaftalikKasaIcmalSheet(
   carry.height = 18;
   carry.getCell(4).value = 'DÖNEM BAŞI DEVREDEN BAKİYE';
   carry.getCell(4).font = { bold: true, size: 10 };
-  carry.getCell(5).value = 0;
-  carry.getCell(6).value = 0;
-  carry.getCell(7).value = opening;
+  setDefterMoneyValue(carry.getCell(5), 0);
+  setDefterMoneyValue(carry.getCell(6), 0);
+  setDefterMoneyValue(carry.getCell(7), opening);
   for (let c = 1; c <= COLS; c++) {
     const cell = carry.getCell(c);
     cell.border = thinBorder();
-    if (c >= 5) applyDefterMoneyCell(cell);
   }
   row += 1;
 
@@ -977,7 +985,7 @@ function addHaftalikKasaIcmalSheet(
   });
 
   for (const kh of sorted) {
-    const t = Number(kh.tutar) || 0;
+    const t = roundKasaMoney(kh.tutar);
     const isGiris = kh.hareketTipi === 'GİRİŞ';
     const { ay, yil } = tarihAyYilParts(kh.tarih);
     const r = sheet.getRow(row);
@@ -989,11 +997,10 @@ function addHaftalikKasaIcmalSheet(
     r.getCell(2).value = ay;
     r.getCell(3).value = Number(yil) || yil;
     r.getCell(4).value = buildDefterAciklama(kh, personeller);
-    r.getCell(5).value = isGiris ? t : 0;
-    r.getCell(6).value = isGiris ? 0 : t;
-    if (isGiris) balance += t;
-    else balance -= t;
-    r.getCell(7).value = balance;
+    setDefterMoneyValue(r.getCell(5), isGiris ? t : 0);
+    setDefterMoneyValue(r.getCell(6), isGiris ? 0 : t);
+    balance = roundKasaMoney(isGiris ? balance + t : balance - t);
+    setDefterMoneyValue(r.getCell(7), balance);
     for (let c = 1; c <= COLS; c++) {
       const cell = r.getCell(c);
       cell.border = thinBorder();
@@ -1010,15 +1017,14 @@ function addHaftalikKasaIcmalSheet(
   totalRow.height = 22;
   totalRow.getCell(4).value = `DÖNEM TOPLAMI (${formatTarihLabelTr(startDate)} — ${formatTarihLabelTr(endDate)})`;
   totalRow.getCell(4).font = { bold: true, size: 10 };
-  totalRow.getCell(5).value = totalIn;
-  totalRow.getCell(6).value = totalOut;
-  totalRow.getCell(7).value = closing;
+  setDefterMoneyValue(totalRow.getCell(5), totalIn);
+  setDefterMoneyValue(totalRow.getCell(6), totalOut);
+  setDefterMoneyValue(totalRow.getCell(7), closing);
   for (let c = 1; c <= COLS; c++) {
     const cell = totalRow.getCell(c);
     cell.border = thinBorder();
     cell.font = { bold: true, size: 10 };
     cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF2CC' } };
-    if (c >= 5) applyDefterMoneyCell(cell);
   }
 
   sheet.pageSetup.printArea = `A1:G${row}`;
