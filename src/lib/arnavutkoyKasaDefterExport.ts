@@ -1,30 +1,35 @@
 /**
  * Arnavutköy kasa defteri:
- * Gerçek `public/arnavutkoy-kasa-yeni.xls` dosyasının ÜZERİNE program kayıtlarını ekler.
+ * Excel ile dönüştürülmüş gerçek `public/arnavutkoy-kasa-yeni.xlsx` şablonunu açar,
+ * mevcut satırları/stilleri HİÇ yeniden yazmaz; yalnızca program kayıtlarını ekler.
  * Taklit üretmez. Ekstra yalnızca ÖZET sayfası.
  */
+import type { Cell, Worksheet } from 'exceljs';
 import type { KasaHareketi, Personel } from '../types/erp';
-import { createExcelWorkbook } from './exceljsLoader';
+import { loadExcelJS } from './exceljsLoader';
 import { KIBRITCI_COMPANY } from './kibritciBrand';
 import { resolveKasaOdemeDurumu } from './yolHarcamaUtils';
 import { computeKasaOdemeBazliOzet } from './kasaLedgerUtils';
 import seed from '../data/arnavutkoyKasaDefterSeed.json';
 
-/** Orijinal ARNAVUTKÖY KASA YENİ.xls renkleri (xlrd colour_map) */
-const XLS_RED = 'FFFF0000'; // satır 1 özet
-const XLS_CYAN = 'FF00CCFF'; // satır 2 başlık
-const XLS_GREEN = 'FF008000'; // GİREN satırları
-const XLS_WHITE = 'FFFFFFFF';
+/** Excel’de görünen gerçek renkler (Office tema → ARGB; xlrd palette yanılır) */
+const XLS_RED = 'FFFF0000';
+const XLS_CYAN = 'FF00B0F0';
+const XLS_GREEN = 'FF00B050';
 const XLS_FONT = 'Calibri';
-const XLS_FONT_SIZE = 9;
+
+function solidFill(argb: string) {
+  return { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb } };
+}
 
 function thinBorderBlack() {
   const edge = { style: 'thin' as const, color: { argb: 'FF000000' } };
   return { top: edge, left: edge, bottom: edge, right: edge };
 }
 
-function solidFill(argb: string) {
-  return { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb } };
+function copyCellStyle(from: Cell, to: Cell) {
+  to.style = JSON.parse(JSON.stringify(from.style || {}));
+  if (from.numFmt) to.numFmt = from.numFmt;
 }
 
 export type ArnavutkoyDefterRow = {
@@ -53,8 +58,8 @@ const AYLAR = [
   'ARALIK',
 ] as const;
 
-/** Masaüstündeki ARNAVUTKÖY KASA YENİ.xls — public’e kopyalandı */
-export const ARNAVUTKOY_KASA_XLS_URL = '/arnavutkoy-kasa-yeni.xls';
+/** Masaüstü XLS → Excel COM ile stilleri korunarak XLSX’e çevrildi */
+export const ARNAVUTKOY_KASA_XLS_URL = '/arnavutkoy-kasa-yeni.xlsx';
 
 function round2(n: number): number {
   return Math.round((Number(n) || 0) * 100) / 100;
@@ -90,6 +95,9 @@ function isoToExcelDate(iso: string): Date {
 function cellToNumber(v: unknown): number {
   if (v === '' || v == null) return 0;
   if (typeof v === 'number' && Number.isFinite(v)) return v;
+  if (typeof v === 'object' && v && 'result' in (v as object)) {
+    return cellToNumber((v as { result?: unknown }).result);
+  }
   const n = parseFloat(String(v).replace(/\./g, '').replace(',', '.'));
   return Number.isFinite(n) ? n : 0;
 }
@@ -280,18 +288,74 @@ export function buildArnavutkoyDefterRows(
   };
 }
 
-function pickArnavutSheetName(names: string[]): string {
-  const hit = names.find((n) => /arnavut/i.test(n));
-  return hit || names[0] || 'ARNAVUTKÖY';
+function pickArnavutSheet(wb: { worksheets: Worksheet[] }): Worksheet {
+  const hit = wb.worksheets.find((w) => /arnavut/i.test(w.name));
+  return hit || wb.worksheets[0];
 }
 
-function findLastDataRowIndex(aoa: unknown[][]): number {
-  let last = 1; // header row
-  for (let i = 2; i < aoa.length; i++) {
-    const aciklama = String(aoa[i]?.[3] ?? '').trim();
-    if (aciklama) last = i;
+function cellPlain(v: unknown): string {
+  if (v == null) return '';
+  if (v instanceof Date) return v.toISOString().slice(0, 10);
+  if (typeof v === 'object' && v && 'result' in (v as object)) {
+    return String((v as { result?: unknown }).result ?? '');
   }
+  if (typeof v === 'object' && v && 'richText' in (v as object)) {
+    return ((v as { richText: Array<{ text: string }> }).richText || []).map((t) => t.text).join('');
+  }
+  return String(v);
+}
+
+function findLastDataRow(ws: Worksheet): number {
+  let last = 2;
+  ws.eachRow({ includeEmpty: false }, (row, rowNumber) => {
+    if (rowNumber < 3) return;
+    const aciklama = cellPlain(row.getCell(4).value).trim();
+    const giren = cellToNumber(row.getCell(5).value);
+    const cikan = cellToNumber(row.getCell(6).value);
+    if (aciklama || giren || cikan) last = rowNumber;
+  });
   return last;
+}
+
+function findStylePrototypeRows(ws: Worksheet): { green: number; exit: number } {
+  let green = 0;
+  let exit = 0;
+  const maxScan = Math.min(ws.rowCount, 80);
+  for (let r = 3; r <= maxScan; r++) {
+    const giren = cellToNumber(ws.getCell(r, 5).value);
+    const fill = ws.getCell(r, 4).fill as { fgColor?: { argb?: string } } | undefined;
+    const argb = String(fill?.fgColor?.argb || '').toUpperCase();
+    if (!green && giren > 0 && (argb === XLS_GREEN || argb.endsWith('00B050') || argb.endsWith('008000'))) {
+      green = r;
+    }
+    if (!exit && giren <= 0 && cellToNumber(ws.getCell(r, 6).value) > 0) {
+      exit = r;
+    }
+    if (green && exit) break;
+  }
+  return { green: green || 4, exit: exit || 6 };
+}
+
+function appendDefterRow(
+  ws: Worksheet,
+  rowNum: number,
+  protoRow: number,
+  data: { tarih: string; ay: string; yil: number; aciklama: string; giren: number; cikan: number }
+) {
+  const proto = ws.getRow(protoRow);
+  const row = ws.getRow(rowNum);
+  for (let c = 1; c <= 7; c++) {
+    copyCellStyle(proto.getCell(c), row.getCell(c));
+  }
+  row.getCell(1).value = isoToExcelDate(data.tarih);
+  row.getCell(2).value = data.ay;
+  row.getCell(3).value = data.yil;
+  row.getCell(4).value = data.aciklama;
+  row.getCell(5).value = data.giren > 0 ? data.giren : null;
+  row.getCell(6).value = data.cikan > 0 ? data.cikan : null;
+  // Orijinal defter: bakıye formülü
+  row.getCell(7).value = { formula: `G${rowNum - 1}+E${rowNum}-F${rowNum}` };
+  if (proto.height) row.height = proto.height;
 }
 
 function buildOzetAoa(
@@ -361,8 +425,8 @@ function buildOzetAoa(
 }
 
 /**
- * Gerçek ARNAVUTKÖY KASA YENİ.xls dosyasını açar, son satırdan sonra program
- * kayıtlarını ekler, üst satır toplamlarını günceller, ÖZET sayfası ekler.
+ * Gerçek ARNAVUTKÖY şablonunu (stilleri bozulmadan) açar; son satırdan sonra
+ * program kayıtlarını ekler; üst satır SUM formüllerini günceller; ÖZET ekler.
  */
 export async function exportArnavutkoyKasaDefterExcel(
   kasaHareketleri: KasaHareketi[],
@@ -381,188 +445,79 @@ export async function exportArnavutkoyKasaDefterExcel(
   const res = await fetch(ARNAVUTKOY_KASA_XLS_URL);
   if (!res.ok) {
     throw new Error(
-      'ARNAVUTKÖY KASA YENİ.xls yüklenemedi. public/arnavutkoy-kasa-yeni.xls dosyasını kontrol edin.'
+      'ARNAVUTKÖY KASA şablonu yüklenemedi. public/arnavutkoy-kasa-yeni.xlsx dosyasını kontrol edin.'
     );
   }
   const buffer = await res.arrayBuffer();
-  const XLSX = await import('xlsx');
-  const wb = XLSX.read(buffer, { type: 'array', cellDates: true });
-  const sheetName = pickArnavutSheetName(wb.SheetNames);
-  const ws = wb.Sheets[sheetName];
+  const ExcelJS = await loadExcelJS();
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(buffer);
+
+  const ws = pickArnavutSheet(wb);
   if (!ws) throw new Error('Excel içinde ARNAVUTKÖY sayfası bulunamadı.');
 
-  const aoa = XLSX.utils.sheet_to_json<unknown[]>(ws, {
-    header: 1,
-    defval: '',
-    raw: true,
-  });
+  const lastData = findLastDataRow(ws);
+  const protos = findStylePrototypeRows(ws);
 
-  // Boş kuyruk satırlarını at (orijinal dosyada binlerce boş satır var)
-  const lastData = findLastDataRowIndex(aoa);
-  const trimmed = aoa.slice(0, lastData + 1).map((r) => {
-    const row = [...(r || [])];
-    while (row.length < 7) row.push('');
-    return row.slice(0, 7);
-  });
-
-  // Mevcut satırlardan dedupe anahtarları
+  // Mevcut satırlardan dedupe + excel bakiyesi
   const seen = new Set<string>();
-  let runningBakiye = 0;
   let excelKalem = 0;
-  for (let i = 2; i < trimmed.length; i++) {
-    const row = trimmed[i];
-    const tarih = cellToIsoDate(row[0]);
-    const aciklama = String(row[3] || '').trim();
-    const giren = round2(cellToNumber(row[4]));
-    const cikan = round2(cellToNumber(row[5]));
-    const bakiyeCell = round2(cellToNumber(row[6]));
-    if (aciklama) {
-      seen.add(rowDedupeKey(tarih, aciklama, giren, cikan));
-      runningBakiye = bakiyeCell || round2(runningBakiye + giren - cikan);
-      excelKalem += 1;
-    }
+  let excelSonBakiye = 0;
+  for (let r = 3; r <= lastData; r++) {
+    const tarih = cellToIsoDate(ws.getCell(r, 1).value);
+    const aciklama = cellPlain(ws.getCell(r, 4).value).trim();
+    const giren = round2(cellToNumber(ws.getCell(r, 5).value));
+    const cikan = round2(cellToNumber(ws.getCell(r, 6).value));
+    const bakiyeCell = round2(cellToNumber(ws.getCell(r, 7).value));
+    if (!aciklama && !giren && !cikan) continue;
+    seen.add(rowDedupeKey(tarih, aciklama, giren, cikan));
+    excelSonBakiye = bakiyeCell || round2(excelSonBakiye + giren - cikan);
+    excelKalem += 1;
   }
-  const excelSonBakiye = round2(runningBakiye);
 
-  // Program kayıtları — dosyanın sonuna ekle
+  // Program kayıtları — dosyanın sonuna, orijinal satır stilini kopyalayarak
   const erpRows = built.rows.filter((r) => r.kaynak === 'ERP');
   let erpKalem = 0;
-  let bakiye = excelSonBakiye;
+  let rowNum = lastData;
   for (const r of erpRows) {
     const key = rowDedupeKey(r.tarih, r.aciklama, r.giren, r.cikan);
     if (seen.has(key)) continue;
     seen.add(key);
-    bakiye = round2(bakiye + r.giren - r.cikan);
-    trimmed.push([
-      isoToExcelDate(r.tarih),
-      r.ay,
-      r.yil,
-      r.aciklama,
-      r.giren ? r.giren : '',
-      r.cikan ? r.cikan : '',
-      bakiye,
-    ]);
+    rowNum += 1;
+    appendDefterRow(ws, rowNum, r.giren > 0 ? protos.green : protos.exit, {
+      tarih: r.tarih,
+      ay: r.ay,
+      yil: r.yil,
+      aciklama: r.aciklama,
+      giren: r.giren,
+      cikan: r.cikan,
+    });
     erpKalem += 1;
   }
 
-  // Üst satır toplamları (orijinal satır 0)
-  let toplamGiren = 0;
-  let toplamCikan = 0;
-  for (let i = 2; i < trimmed.length; i++) {
-    toplamGiren = round2(toplamGiren + cellToNumber(trimmed[i][4]));
-    toplamCikan = round2(toplamCikan + cellToNumber(trimmed[i][5]));
-  }
-  const sonBakiye = trimmed.length > 2 ? round2(cellToNumber(trimmed[trimmed.length - 1][6])) : excelSonBakiye;
+  const finalLast = rowNum;
+  // Üst satır formülleri — orijinal yapı (değer yazma, formül güncelle)
+  ws.getCell(1, 5).value = { formula: `SUM(E3:E${finalLast})` };
+  ws.getCell(1, 6).value = { formula: `SUM(F3:F${finalLast})` };
+  ws.getCell(1, 7).value = { formula: 'E1-F1' };
 
-  if (!trimmed[0]) trimmed[0] = ['', 'PROJE MÜDÜRÜ', '', 'ARNAVUTKÖY', 0, 0, 0];
-  while (trimmed[0].length < 7) trimmed[0].push('');
-  // Orijinal etiketleri koru; yalnızca E/F/G güncelle
-  trimmed[0][4] = toplamGiren;
-  trimmed[0][5] = toplamCikan;
-  trimmed[0][6] = sonBakiye;
-  // D sütunu orijinalde bozuk "P" olabiliyor — ARNAVUTKÖY yaz
-  if (String(trimmed[0][3] || '').trim().length <= 1) {
-    trimmed[0][3] = 'ARNAVUTKÖY';
-  }
-  if (!String(trimmed[0][1] || '').trim()) {
-    trimmed[0][1] = 'PROJE MÜDÜRÜ';
-  }
+  const finalSonBakiye = built.sonBakiye;
 
-  // ExcelJS ile orijinal renkleri uygula (SheetJS stilleri siler)
-  const excelWb = await createExcelWorkbook();
-  excelWb.creator = 'Kibritçi ERP';
-  excelWb.created = new Date();
-  const excelWs = excelWb.addWorksheet(sheetName || 'ARNAVUTKÖY', {
-    pageSetup: { paperSize: 9, orientation: 'landscape', fitToPage: true, fitToWidth: 1 },
-  });
-  // Orijinal col width ≈ xlrd width/256
-  excelWs.columns = [
-    { width: 12.7 },
-    { width: 8.5 },
-    { width: 5.4 },
-    { width: 56.7 },
-    { width: 8.6 },
-    { width: 9.7 },
-    { width: 8.4 },
-  ];
-
-  const border = thinBorderBlack();
-  const fontBase = { name: XLS_FONT, size: XLS_FONT_SIZE, color: { argb: 'FF000000' } };
-
-  for (let r = 0; r < trimmed.length; r++) {
-    const raw = trimmed[r];
-    const rowNum = r + 1;
-    const giren = cellToNumber(raw[4]);
-    const isGirenRow = r >= 2 && giren > 0;
-
-    let fillArgb = XLS_WHITE;
-    if (r === 0) fillArgb = XLS_RED;
-    else if (r === 1) fillArgb = XLS_CYAN;
-    else if (isGirenRow) fillArgb = XLS_GREEN;
-
-    const fill = solidFill(fillArgb);
-
-    for (let c = 0; c < 7; c++) {
-      const cell = excelWs.getCell(rowNum, c + 1);
-      const val: unknown = raw[c];
-      if (val === '' || val == null) {
-        cell.value = null;
-      } else if (c === 0 && r >= 2) {
-        const iso = cellToIsoDate(val);
-        if (iso) {
-          cell.value = isoToExcelDate(iso);
-          // Orijinal: m/d/yy (xlrd format 14)
-          cell.numFmt = 'm/d/yy';
-        } else if (typeof val === 'number' || typeof val === 'string') {
-          cell.value = val;
-        } else {
-          cell.value = String(val);
-        }
-      } else if (c >= 4 && (typeof val === 'number' || (typeof val === 'string' && val !== ''))) {
-        const num = typeof val === 'number' ? val : cellToNumber(val);
-        cell.value = num;
-        // Orijinal: GİREN/ÇIKAN → 0.00, BAKİYE / üst özet → #,##0.00
-        cell.numFmt = c === 6 || r <= 1 ? '#,##0.00' : '0.00';
-      } else if (c === 2 && r >= 2) {
-        const yil = Number(val);
-        cell.value = Number.isFinite(yil) && yil > 0 ? yil : typeof val === 'string' ? val : String(val ?? '');
-      } else if (typeof val === 'string' || typeof val === 'number' || typeof val === 'boolean') {
-        cell.value = val;
-      } else {
-        cell.value = String(val);
-      }
-
-      // Orijinal: üst/başlık bold değil; yeşil GİREN satırında tarih+açıklama+giren+çıkan bold
-      cell.font = {
-        ...fontBase,
-        bold: isGirenRow && (c === 0 || c === 3 || c === 4 || c === 5),
-      };
-      cell.fill = fill;
-      cell.border = border;
-      cell.alignment = {
-        vertical: 'middle',
-        horizontal: c === 3 ? 'left' : c >= 4 ? 'right' : 'center',
-        wrapText: c === 3,
-      };
-    }
-    excelWs.getRow(rowNum).height = r === 1 ? 26 : 12;
-  }
-
-  // ÖZET sayfası
+  // ÖZET sayfası (yoksa ekle / varsa değiştir)
   const ozetAoa = buildOzetAoa(
     {
       ...built,
-      sonBakiye,
+      sonBakiye: finalSonBakiye,
       excelKalem,
       erpKalem,
-      toplamGiren,
-      toplamCikan,
       excelSonBakiye,
     },
     kasaHareketleri,
     personeller
   );
-  const ozetWs = excelWb.addWorksheet('ÖZET');
+  const existingOzet = wb.getWorksheet('ÖZET');
+  if (existingOzet) wb.removeWorksheet(existingOzet.id);
+  const ozetWs = wb.addWorksheet('ÖZET');
   ozetWs.columns = [
     { width: 28 },
     { width: 14 },
@@ -571,6 +526,7 @@ export async function exportArnavutkoyKasaDefterExcel(
     { width: 14 },
     { width: 10 },
   ];
+  const border = thinBorderBlack();
   ozetAoa.forEach((line, idx) => {
     const row = ozetWs.getRow(idx + 1);
     (line as unknown[]).forEach((v, ci) => {
@@ -589,27 +545,7 @@ export async function exportArnavutkoyKasaDefterExcel(
     });
   });
 
-  // Diğer orijinal sayfalar (değer olarak)
-  for (const name of wb.SheetNames) {
-    if (name === sheetName) continue;
-    const src = wb.Sheets[name];
-    if (!src) continue;
-    const copyAoa = XLSX.utils.sheet_to_json<unknown[]>(src, {
-      header: 1,
-      defval: '',
-      raw: true,
-    });
-    if (!copyAoa.length) continue;
-    const extra = excelWb.addWorksheet(String(name).slice(0, 31));
-    copyAoa.forEach((line, idx) => {
-      const row = extra.getRow(idx + 1);
-      (line as unknown[]).forEach((v, ci) => {
-        row.getCell(ci + 1).value = (v as string | number | Date) ?? null;
-      });
-    });
-  }
-
-  const outBuffer = await excelWb.xlsx.writeBuffer();
+  const outBuffer = await wb.xlsx.writeBuffer();
   downloadBuffer(
     outBuffer as ArrayBuffer,
     `ARNAVUTKOY_KASA_YENI_devam_${new Date().toISOString().slice(0, 10)}.xlsx`
@@ -617,7 +553,7 @@ export async function exportArnavutkoyKasaDefterExcel(
 
   return {
     acilisBakiye: excelSonBakiye,
-    sonBakiye,
+    sonBakiye: finalSonBakiye,
     excelKalem,
     erpKalem,
     excelSonBakiye,
