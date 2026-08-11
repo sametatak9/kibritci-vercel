@@ -10,11 +10,10 @@ import {
   KASA_REPORT_FORMAT,
 } from './kasaReportTheme';
 import {
-  computeKasaMiladTotals,
+  computeKasaLedgerTotals,
   prepareKasaLedgerExportData,
   roundKasaMoney,
-  type KasaMiladContext,
-  type KasaMiladTotals,
+  type KasaLedgerTotals,
 } from './kasaLedgerUtils';
 
 function odemeLabel(d: KasaOdemeDurumu | null): string {
@@ -539,59 +538,6 @@ function groupByPersonel(
   return [...map.values()].sort((a, b) => b.toplam - a.toplam);
 }
 
-type MasrafOzetSatir = {
-  label: string;
-  kalem: number;
-  toplam: number;
-};
-
-function resolveMasrafKategori(
-  kh: KasaHareketi,
-  personeller: Array<Pick<Personel, 'id' | 'ad' | 'soyad' | 'eposta' | 'tcNo'>>
-): string {
-  const a = buildDefterAciklama(kh, personeller);
-  if (/ŞOFÖR|SOFOR|PLAKA|34[A-Z]{2}\d{2,3}|ARAÇ|ARAC|KENDİ HARCAMASI|KASA BORCU/.test(a)) {
-    return 'ARAÇ / ŞOFÖR';
-  }
-  if (/KIRTASİYE|KIRTASIYE|OFİS|OFIS|FOY|OZALİT|KALEM|DEFTER/.test(a)) {
-    return 'KIRTASİYE / OFİS';
-  }
-  if (/YEMEK|KANTİN|KANTIN|TOST|İKRAM|IKRAM|MEYVE|ÖĞLE|OGLEN|MASRAF|YEMEĞ/.test(a)) {
-    return 'YEMEK / İKRAM';
-  }
-  if (/NOTER|İGDAŞ|IGDAS|EMLAK KONUT|RESMİ|HARÇ|HARCI/.test(a)) {
-    return 'NOTER / RESMİ GİDER';
-  }
-  if (/KAMP|LOJMAN|BARINMA|TEMİZLİK|TEMIZLIK/.test(a)) {
-    return 'KAMP / LOJMAN';
-  }
-  if (/HURDA|SATIŞ|SATIS|EFT|GİRİŞ/.test(a) && kh.hareketTipi === 'GİRİŞ') {
-    return 'KASA GİRİŞİ';
-  }
-  return 'DİĞER MASRAFLAR';
-}
-
-function groupByMasrafKategorisi(
-  cikislar: KasaHareketi[],
-  personeller: Array<Pick<Personel, 'id' | 'ad' | 'soyad' | 'eposta' | 'tcNo'>>
-): MasrafOzetSatir[] {
-  const map = new Map<string, { kalem: number; toplam: number }>();
-  for (const kh of cikislar) {
-    const label = resolveMasrafKategori(kh, personeller);
-    const t = roundKasaMoney(kh.tutar);
-    const prev = map.get(label);
-    if (prev) {
-      prev.kalem += 1;
-      prev.toplam = roundKasaMoney(prev.toplam + t);
-    } else {
-      map.set(label, { kalem: 1, toplam: t });
-    }
-  }
-  return [...map.entries()]
-    .map(([label, v]) => ({ label, kalem: v.kalem, toplam: roundKasaMoney(v.toplam) }))
-    .sort((a, b) => b.toplam - a.toplam);
-}
-
 function writeOzetBaslik(
   sheet: Worksheet,
   row: number,
@@ -611,7 +557,7 @@ function writeOzetBaslik(
 function writeOzetTabloBaslik(sheet: Worksheet, row: number): void {
   const hr = sheet.getRow(row);
   hr.height = 18;
-  const headers = ['#', 'AÇIKLAMA / KİŞİ / KATEGORİ', '', '', 'KALEM', '', 'TOPLAM (₺)'];
+  const headers = ['#', 'AÇIKLAMA / KİŞİ', '', '', 'KALEM', '', 'TOPLAM (₺)'];
   headers.forEach((h, i) => {
     if (i === 2 || i === 3 || i === 5) return;
     const cell = hr.getCell(i + 1);
@@ -660,26 +606,12 @@ function appendKasaMasrafOzetBlock(
   personeller: Array<Pick<Personel, 'id' | 'ad' | 'soyad' | 'eposta' | 'tcNo'>>,
   startRow: number,
   cols: number,
-  milad?: KasaMiladContext,
-  totals?: KasaMiladTotals
+  totals?: KasaLedgerTotals
 ): number {
   let row = startRow;
   const cikislar = inRange.filter((k) => k.hareketTipi === 'ÇIKIŞ');
   const girisler = inRange.filter((k) => k.hareketTipi === 'GİRİŞ');
-  const effectiveTotals =
-    totals ??
-    computeKasaMiladTotals(
-      milad ?? {
-        active: false,
-        opening: 0,
-        miladGiren: 0,
-        miladCikan: 0,
-        miladBakiye: 0,
-        miladCikisKalem: 0,
-        carryLabel: 'DÖNEM BAŞI BAKİYE (0)',
-      },
-      inRange
-    );
+  const effectiveTotals = totals ?? computeKasaLedgerTotals(inRange);
   const totalOut = effectiveTotals.totalOut;
   const totalIn = effectiveTotals.totalIn;
 
@@ -689,36 +621,14 @@ function appendKasaMasrafOzetBlock(
     sheet,
     row,
     1,
-    milad?.active
-      ? `${effectiveTotals.cikisKalem} kalem · Milad (${milad.miladCikisKalem}) + yeni kayıtlar · BORÇ + Personel + Kasa`
-      : `${effectiveTotals.cikisKalem} kalem · BORÇ + Personel ödedi + Kasa ödedi`,
+    `${effectiveTotals.cikisKalem} kalem · BORÇ + Personel ödedi + Kasa ödedi`,
     effectiveTotals.cikisKalem,
     totalOut,
     true
   );
   row += 2;
 
-  if (milad?.active) {
-    writeOzetBaslik(sheet, row, cols, '01.01.2026 MİLAD — DÖNEM TOPLAMLARI', 'FFFFF2CC');
-    row += 1;
-    writeOzetSatir(
-      sheet,
-      row,
-      1,
-      'PROJE MÜDÜRÜ · DÖNEM TOPLAMLARI (milad baz)',
-      milad.miladCikisKalem,
-      milad.miladCikan,
-      true
-    );
-    row += 1;
-    writeOzetSatir(sheet, row, 0, 'Milad giriş toplamı', 0, milad.miladGiren, true);
-    row += 1;
-    writeOzetSatir(sheet, row, 0, 'Milad kapanış bakiyesi', 0, milad.miladBakiye, true);
-    row += 2;
-  }
-
-  const showGirisDetay = girisler.length > 0 || (milad?.active && milad.miladGiren > 0);
-  if (showGirisDetay) {
+  if (girisler.length > 0) {
     writeOzetBaslik(sheet, row, cols, 'KASA GİRİŞLERİ (EFT / TAHSİLAT)', 'FFC6EFCE');
     row += 1;
     writeOzetTabloBaslik(sheet, row);
@@ -737,7 +647,7 @@ function appendKasaMasrafOzetBlock(
         );
         row += 1;
       });
-    writeOzetSatir(sheet, row, 0, 'GİRİŞ TOPLAMI', girisler.length + (milad?.active ? 1 : 0), totalIn, true);
+    writeOzetSatir(sheet, row, 0, 'GİRİŞ TOPLAMI', girisler.length, totalIn, true);
     row += 2;
   }
 
@@ -758,18 +668,10 @@ function appendKasaMasrafOzetBlock(
   if (kisiBuckets.length === 0) {
     writeOzetSatir(sheet, row, 1, 'Bu dönemde kasa çıkışı yok', 0, 0);
     row += 1;
-  }
-  row += 1;
-
-  writeOzetBaslik(sheet, row, cols, 'MASRAF KATEGORİ ÖZETİ — NEREYE NE HARCANDI');
-  row += 1;
-  writeOzetTabloBaslik(sheet, row);
-  row += 1;
-  const katBuckets = groupByMasrafKategorisi(cikislar, personeller);
-  katBuckets.forEach((b, i) => {
-    writeOzetSatir(sheet, row, i + 1, b.label, b.kalem, b.toplam);
+  } else {
+    writeOzetSatir(sheet, row, 0, 'TOPLAM', effectiveTotals.cikisKalem, totalOut, true);
     row += 1;
-  });
+  }
   row += 1;
 
   writeOzetBaslik(sheet, row, cols, 'KALEM KALEM DEFTER — DETAY HAREKETLER', 'FFE2E8F0');
@@ -846,7 +748,7 @@ function buildDefterAciklama(
   if (unvan.label !== KASA_ADSIZ_UNVAN) {
     return `${unvan.label} — KASA ÇIKIŞI`;
   }
-  return 'ADSIZ KASA HARCAMASI';
+  return 'KASA HARCAMASI';
 }
 
 /** Sade kayıt defteri — Tarih · Ay · Yıl · Açıklama · Giren · Çıkan · Bakiye */
@@ -857,8 +759,7 @@ function addHaftalikKasaDefterSheet(
   endDate: string,
   openingBalance: number,
   personeller: Array<Pick<Personel, 'id' | 'ad' | 'soyad' | 'eposta' | 'tcNo'>>,
-  milad?: KasaMiladContext,
-  totals?: KasaMiladTotals
+  totals?: KasaLedgerTotals
 ): void {
   const COLS = 7;
   const sheet = workbook.addWorksheet('Haftalik Defter', {
@@ -883,7 +784,7 @@ function addHaftalikKasaDefterSheet(
   titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
   sheet.getRow(1).height = 24;
 
-  let row = appendKasaMasrafOzetBlock(sheet, inRange, personeller, 2, COLS, milad, totals);
+  let row = appendKasaMasrafOzetBlock(sheet, inRange, personeller, 2, COLS, totals);
 
   const headers = ['TARİH', 'AY', 'YIL', 'AÇIKLAMA', 'GİREN', 'ÇIKAN', 'BAKİYE'];
   const hr = sheet.getRow(row);
@@ -899,7 +800,7 @@ function addHaftalikKasaDefterSheet(
   row += 1;
 
   let balance = openingBalance;
-  writeDefterCarryRow(sheet, row, COLS, openingBalance, milad);
+  writeDefterCarryRow(sheet, row, COLS, openingBalance);
   row += 1;
 
   const sorted = [...inRange].sort((a, b) => {
@@ -959,23 +860,15 @@ function writeDefterCarryRow(
   sheet: Worksheet,
   row: number,
   cols: number,
-  openingBalance: number,
-  milad?: KasaMiladContext
+  openingBalance: number
 ): void {
   const carry = sheet.getRow(row);
   carry.height = 18;
-  if (milad?.active) {
-    carry.getCell(4).value = milad.carryLabel;
-    setDefterMoneyValue(carry.getCell(5), milad.miladGiren);
-    setDefterMoneyValue(carry.getCell(6), milad.miladCikan);
-    setDefterMoneyValue(carry.getCell(7), milad.miladBakiye);
-  } else {
-    carry.getCell(4).value =
-      openingBalance === 0 ? 'DÖNEM BAŞI BAKİYE (0)' : 'GEÇEN HAFTADAN DEVREDEN';
-    setDefterMoneyValue(carry.getCell(5), 0);
-    setDefterMoneyValue(carry.getCell(6), 0);
-    setDefterMoneyValue(carry.getCell(7), openingBalance);
-  }
+  carry.getCell(4).value =
+    openingBalance === 0 ? 'DÖNEM BAŞI BAKİYE (0)' : 'GEÇEN HAFTADAN DEVREDEN';
+  setDefterMoneyValue(carry.getCell(5), 0);
+  setDefterMoneyValue(carry.getCell(6), 0);
+  setDefterMoneyValue(carry.getCell(7), openingBalance);
   carry.getCell(4).font = { bold: true, size: 10 };
   carry.getCell(4).alignment = { vertical: 'middle', wrapText: true };
   for (let c = 1; c <= cols; c++) {
@@ -994,8 +887,7 @@ function addArnavutkoyKasaDefterSheet(
   endDate: string,
   openingBalance: number,
   personeller: Array<Pick<Personel, 'id' | 'ad' | 'soyad' | 'eposta' | 'tcNo'>>,
-  milad?: KasaMiladContext,
-  totals?: KasaMiladTotals
+  totals?: KasaLedgerTotals
 ): void {
   const COLS = 7;
   const sheet = workbook.addWorksheet('ARNAVUTKÖY', {
@@ -1034,7 +926,7 @@ function addArnavutkoyKasaDefterSheet(
   titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
   sheet.getRow(1).height = 26;
 
-  let row = appendKasaMasrafOzetBlock(sheet, inRange, personeller, 2, COLS, milad, totals);
+  let row = appendKasaMasrafOzetBlock(sheet, inRange, personeller, 2, COLS, totals);
 
   const headers = ['TARİH', 'AY', 'YIL', 'AÇIKLAMA', 'GİREN', 'ÇIKAN', 'BAKİYE'];
   const hr = sheet.getRow(row);
@@ -1048,7 +940,7 @@ function addArnavutkoyKasaDefterSheet(
     cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2E8F0' } };
   });
   row += 1;
-  writeDefterCarryRow(sheet, row, COLS, openingBalance, milad);
+  writeDefterCarryRow(sheet, row, COLS, openingBalance);
   row += 1;
 
   const sorted = [...inRange].sort((a, b) => {
@@ -1125,7 +1017,7 @@ export async function buildKasaDefterOnlyExcelBuffer(
   allKasaHareketleri?: KasaHareketi[]
 ): Promise<ArrayBuffer> {
   const all = allKasaHareketleri ?? kasaHareketleri ?? [];
-  const { inRange, opening, milad, totals } = prepareKasaLedgerExportData(all, startDate, endDate);
+  const { inRange, opening, totals } = prepareKasaLedgerExportData(all, startDate, endDate);
 
   if (inRange.length === 0 && opening === 0) {
     throw new Error('Seçili aralıkta dışa aktarılacak kasa hareketi yok. Tarih filtresini kontrol edin.');
@@ -1141,7 +1033,6 @@ export async function buildKasaDefterOnlyExcelBuffer(
     endDate,
     opening,
     personeller,
-    milad,
     totals
   );
   return (await workbook.xlsx.writeBuffer()) as ArrayBuffer;
@@ -1180,8 +1071,7 @@ function addHaftalikKasaIcmalSheet(
   endDate: string,
   openingBalance: number,
   personeller: Array<Pick<Personel, 'id' | 'ad' | 'soyad' | 'eposta' | 'tcNo'>>,
-  milad?: KasaMiladContext,
-  totals?: KasaMiladTotals
+  totals?: KasaLedgerTotals
 ): void {
   const COLS = 7;
   const sheet = workbook.addWorksheet('KASA İCMALİ', {
@@ -1220,7 +1110,7 @@ function addHaftalikKasaIcmalSheet(
   titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
   sheet.getRow(1).height = 26;
 
-  let row = appendKasaMasrafOzetBlock(sheet, inRange, personeller, 2, COLS, milad, totals);
+  let row = appendKasaMasrafOzetBlock(sheet, inRange, personeller, 2, COLS, totals);
 
   const headers = ['TARİH', 'AY', 'YIL', 'AÇIKLAMA', 'GİREN', 'ÇIKAN', 'BAKİYE'];
   const hr = sheet.getRow(row);
@@ -1234,7 +1124,7 @@ function addHaftalikKasaIcmalSheet(
     cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2E8F0' } };
   });
   row += 1;
-  writeDefterCarryRow(sheet, row, COLS, openingBalance, milad);
+  writeDefterCarryRow(sheet, row, COLS, openingBalance);
   row += 1;
 
   const sorted = [...inRange].sort((a, b) => {
@@ -1298,7 +1188,7 @@ export async function buildKasaHaftalikIcmalExcelBuffer(
   allKasaHareketleri?: KasaHareketi[]
 ): Promise<ArrayBuffer> {
   const all = allKasaHareketleri ?? kasaHareketleri ?? [];
-  const { inRange, opening, milad, totals } = prepareKasaLedgerExportData(all, startDate, endDate);
+  const { inRange, opening, totals } = prepareKasaLedgerExportData(all, startDate, endDate);
   if (inRange.length === 0 && opening === 0) {
     throw new Error('Seçili aralıkta icmal raporu için kasa hareketi yok.');
   }
@@ -1312,7 +1202,6 @@ export async function buildKasaHaftalikIcmalExcelBuffer(
     endDate,
     opening,
     personeller,
-    milad,
     totals
   );
   return (await workbook.xlsx.writeBuffer()) as ArrayBuffer;
@@ -1351,7 +1240,7 @@ export async function buildKasaExcelBuffer(
   allKasaHareketleri?: KasaHareketi[]
 ): Promise<ArrayBuffer> {
   const all = allKasaHareketleri ?? kasaHareketleri ?? [];
-  const { inRange, opening, milad, totals } = prepareKasaLedgerExportData(all, startDate, endDate);
+  const { inRange, opening, totals } = prepareKasaLedgerExportData(all, startDate, endDate);
 
   if (inRange.length === 0 && opening === 0) {
     throw new Error('Seçili aralıkta dışa aktarılacak kasa hareketi yok. Tarih filtresini kontrol edin.');
@@ -1368,7 +1257,6 @@ export async function buildKasaExcelBuffer(
     endDate,
     opening,
     personeller,
-    milad,
     totals
   );
 

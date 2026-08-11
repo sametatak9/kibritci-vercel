@@ -21,8 +21,8 @@ import {
   kasaListeOdemeEtiketi,
   resolveKasaOdemeDurumu,
 } from '../lib/yolHarcamaUtils';
-import { resolvePersonelUnvan } from '../lib/personelUnvanUtils';
-import { KASA_MILAD, prepareKasaLedgerExportData, roundKasaMoney } from '../lib/kasaLedgerUtils';
+import { resolvePersonelUnvan, KASA_ADSIZ_UNVAN } from '../lib/personelUnvanUtils';
+import { prepareKasaLedgerExportData, roundKasaMoney } from '../lib/kasaLedgerUtils';
 
 type HarcamaKaynagi = 'KASA_HARCAMA' | 'PERSONEL_HARCAMA';
 
@@ -185,7 +185,7 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
     const start = appliedStartDate;
     const end = appliedEndDate;
     const rows = ledgerExport.inRange.filter((k) => k.hareketTipi === 'ÇIKIŞ');
-    if (rows.length === 0 && !ledgerExport.milad.active) {
+    if (rows.length === 0) {
       alert('Seçili aralıkta kasa çıkışı / harcama kaydı yok. Önce tarih aralığını filtreleyin.');
       return null;
     }
@@ -197,7 +197,6 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
       olusturan: 'Haftalık Kasa',
       totalOut: toplam,
       cikisKalem: ledgerExport.totals.cikisKalem,
-      miladActive: ledgerExport.milad.active,
     });
     return { html, start, end, toplam, rows };
   };
@@ -340,8 +339,6 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
   );
 
   const hareketlerInRange = ledgerExport.inRange;
-  const miladAktif = ledgerExport.milad.active;
-  const miladTotals = ledgerExport.totals;
 
   const filteredHareketler = useMemo(
     () =>
@@ -364,14 +361,13 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
     [hareketlerInRange, searchKeyword]
   );
 
-  // KPI: milad aktifse 01.01.2026 baz + detayBaslangic sonrası kayıtlar
-  const totalIn = miladTotals.totalIn;
-  const totalOut = miladTotals.totalOut;
-  const periodNet = roundKasaMoney(miladTotals.closing - (miladAktif ? ledgerExport.milad.miladBakiye : 0));
+  const totalIn = ledgerExport.totals.totalIn;
+  const totalOut = ledgerExport.totals.totalOut;
+  const periodNet = ledgerExport.totals.closing;
 
   /** Tüm kasa çıkışları — tek “Kasa Harcaması” kartı */
   const kasaHarcamaOut = totalOut;
-  const cikisKayitSayisi = miladTotals.cikisKalem;
+  const cikisKayitSayisi = ledgerExport.totals.cikisKalem;
 
   /** Seçili aralık — BORÇ / Personel Ödedi / Kasa Ödedi + kişi kırılımı */
   const odemeBazliOzet = useMemo(() => {
@@ -401,10 +397,6 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
       if (tutar <= 0) continue;
       const durum = resolveOdemeDurumu(kh) || 'KASA_ODEDI';
 
-      if (durum === 'KASA_ODEDI') {
-        add('kasa-odedi', 'KASA ÖDEDİ', 'KASA_ODEDI', tutar);
-        continue;
-      }
       const unvan = resolvePersonelUnvan(
         {
           personelId: kh.personelId,
@@ -413,6 +405,13 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
         },
         personeller
       );
+
+      if (durum === 'KASA_ODEDI') {
+        const label =
+          unvan.label === KASA_ADSIZ_UNVAN ? 'KASA' : `${unvan.label} · KASA ÖDEDİ`;
+        add(`kasa:${unvan.key}`, label, 'KASA_ODEDI', tutar);
+        continue;
+      }
       if (durum === 'BORC') {
         add(`borc:${unvan.key}`, `BORÇ · ${unvan.label}`, 'BORC', tutar);
         continue;
@@ -431,8 +430,8 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
       return b.tutar - a.tutar || a.label.localeCompare(b.label, 'tr');
     });
 
-    return { satirlar, totals };
-  }, [filteredHareketler, personeller]);
+    return { satirlar, totals, genelToplam: kasaHarcamaOut };
+  }, [filteredHareketler, personeller, kasaHarcamaOut]);
 
   const openFisLightbox = (url?: string | null, title?: string) => {
     const u = String(url || '').trim();
@@ -724,25 +723,12 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
         </div>
       </div>
 
-      {miladAktif && (
-        <div className="shrink-0 rounded-2xl border border-amber-300 bg-amber-50/90 px-4 py-3 text-[11px] text-amber-950 shadow-sm">
-          <p className="font-black uppercase tracking-wide text-amber-900">01.01.2026 Milad bazlı rapor</p>
-          <p className="mt-1 leading-relaxed">
-            Dönem toplamları: Giren <strong>₺{KASA_MILAD.giren.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}</strong>
-            {' · '}Çıkan <strong>₺{KASA_MILAD.cikan.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}</strong>
-            {' · '}Bakiye <strong>₺{KASA_MILAD.bakiye.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}</strong>
-            {' '}({KASA_MILAD.cikisKalem} kalem). {KASA_MILAD.detayBaslangic} öncesi kayıtlar milada gömülü;
-            yalnızca bu tarihten sonraki hareketler listelenir ve milad üzerine eklenir.
-          </p>
-        </div>
-      )}
-
       {/* Özet kartları — seçili aralık */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 shrink-0">
         {[
-          { title: 'Giriş (aralık)', value: `₺${totalIn.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}`, card: 'border-emerald-200 bg-white text-emerald-800', icon: ArrowUpRight, iconBg: 'bg-emerald-50 text-emerald-700', sub: miladAktif ? `Milad ₺${KASA_MILAD.giren.toLocaleString('tr-TR')} + yeni` : undefined },
-          { title: 'Kasa harcaması', value: `₺${kasaHarcamaOut.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}`, card: 'border-[#FED7AA] bg-[#FFF7ED] text-[#9A3412]', icon: Wallet, iconBg: 'bg-[#FFEDD5] text-[#C2410C]', sub: miladAktif ? `${cikisKayitSayisi} kalem · milad ${KASA_MILAD.cikisKalem} + yeni` : `${cikisKayitSayisi} çıkış · borç + personel + kasa ödedi` },
-          { title: 'Dönem net / bakiye', value: `₺${(miladAktif ? miladTotals.closing : periodNet).toLocaleString('tr-TR', { minimumFractionDigits: 2 })}`, card: 'border-[#FDBA74] bg-white text-[#9A3412] font-bold', icon: Wallet, iconBg: 'bg-[#FFF7ED] text-[#EA580C]', sub: miladAktif ? `Milad bakiye ₺${KASA_MILAD.bakiye.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} + hareket` : `Giren − çıkan · ${appliedStartDate} — ${appliedEndDate}` },
+          { title: 'Giriş (aralık)', value: `₺${totalIn.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}`, card: 'border-emerald-200 bg-white text-emerald-800', icon: ArrowUpRight, iconBg: 'bg-emerald-50 text-emerald-700' },
+          { title: 'Kasa harcaması', value: `₺${kasaHarcamaOut.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}`, card: 'border-[#FED7AA] bg-[#FFF7ED] text-[#9A3412]', icon: Wallet, iconBg: 'bg-[#FFEDD5] text-[#C2410C]', sub: `${cikisKayitSayisi} çıkış · borç + personel + kasa ödedi` },
+          { title: 'Dönem net', value: `₺${periodNet.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}`, card: 'border-[#FDBA74] bg-white text-[#9A3412] font-bold', icon: Wallet, iconBg: 'bg-[#FFF7ED] text-[#EA580C]', sub: `Giren − çıkan · ${appliedStartDate} — ${appliedEndDate}` },
         ].map((item, idx) => {
           const Icon = item.icon;
           return (
@@ -766,15 +752,15 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
         })}
       </div>
 
-      {/* Ödeme durumu özeti */}
+      {/* Kim ne harcadı özeti */}
       <div className="shrink-0 rounded-2xl border border-[#FED7AA] bg-white p-4 shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
           <div>
             <h3 className="text-[11px] font-black uppercase tracking-wider text-[#9A3412]">
-              Ödeme durumu özeti (seçili aralık)
+              Kim ne harcadı (seçili aralık)
             </h3>
             <p className="text-[10px] text-[#64748B] mt-0.5">
-              BORÇ · PERSONEL ÖDEDİ · KASA ÖDEDİ kırılımı — TOPLAM = Kasa Harcaması kartı
+              Kişi / KASA bazlı kırılım — TOPLAM = Kasa Harcaması kartı
             </p>
           </div>
           <div className="flex flex-wrap gap-1.5 text-[10px] font-mono font-bold">
@@ -788,17 +774,14 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
               KASA ₺{odemeBazliOzet.totals.KASA_ODEDI.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
             </span>
             <span className="bg-rose-50 border border-rose-200 text-rose-900 px-2 py-1 rounded-lg">
-              TOPLAM ₺{(
-                odemeBazliOzet.totals.BORC +
-                odemeBazliOzet.totals.PERSONEL_ODEDI +
-                odemeBazliOzet.totals.KASA_ODEDI
-              ).toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
+              TOPLAM ₺{odemeBazliOzet.genelToplam.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
             </span>
           </div>
         </div>
         {odemeBazliOzet.satirlar.length === 0 ? (
           <p className="text-[11px] text-slate-400 italic">Bu aralıkta çıkış / harcama yok.</p>
         ) : (
+          <>
           <div className="flex flex-wrap gap-2">
             {odemeBazliOzet.satirlar.map((row) => (
               <div
@@ -820,6 +803,13 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
               </div>
             ))}
           </div>
+          <div className="mt-3 pt-3 border-t border-[#FED7AA] flex items-center justify-between">
+            <span className="text-[11px] font-black uppercase tracking-wider text-[#9A3412]">Toplam</span>
+            <span className="text-lg font-black font-mono tabular-nums text-rose-700">
+              ₺{odemeBazliOzet.genelToplam.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
+            </span>
+          </div>
+          </>
         )}
       </div>
 

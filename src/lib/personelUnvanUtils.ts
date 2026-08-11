@@ -35,7 +35,7 @@ function normalizeNameKey(value: string): string {
 }
 
 /** Kişi atanmamış kasa çıkışları — kasanın doğrudan harcaması */
-export const KASA_ADSIZ_UNVAN = 'ADSIZ KASA';
+export const KASA_ADSIZ_UNVAN = 'KASA';
 
 /**
  * Kasa / şoför özetlerinde aynı kişiyi tek unvan altında birleştirir.

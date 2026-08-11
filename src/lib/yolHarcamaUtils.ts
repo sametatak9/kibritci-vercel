@@ -12,7 +12,6 @@ import {
   KASA_LIGHT,
   KASA_REPORT_FORMAT,
 } from './kasaReportTheme';
-import { KASA_MILAD } from './kasaLedgerUtils';
 import { db, saveDocument } from './firebase';
 import { isKasaFisPdfUrl } from './sahaFaaliyetFotoStorage';
 import { KASA_ADSIZ_UNVAN, resolvePersonelUnvan } from './personelUnvanUtils';
@@ -550,15 +549,10 @@ function raporKalemKisiAdi(r: RaporKalem): string {
 /** Genel toplam özeti — tek rakam (Diğer/Kasa ayrımı yok) */
 function buildKaynakOzetHtml(
   rows: RaporKalem[],
-  opts?: { totalOut?: number; cikisKalem?: number; miladActive?: boolean }
+  opts?: { totalOut?: number; cikisKalem?: number }
 ): string {
   const genel = opts?.totalOut ?? rows.reduce((s, r) => s + (Number(r.tutar) || 0), 0);
   const kalem = opts?.cikisKalem ?? rows.length;
-  const miladNote = opts?.miladActive
-    ? `<div style="margin-top:10px;padding:10px 12px;border:1px solid #fcd34d;background:#fffbeb;border-radius:8px;font-size:10px;color:#92400e;line-height:1.5">
-        <strong>01.01.2026 Milad bazlı:</strong> Dönem toplamları milad özetinden gelir; ${KASA_MILAD.detayBaslangic} sonrası kayıtlar milad üzerine eklenir.
-      </div>`
-    : '';
 
   return `<section style="margin:14px 0 18px">
     ${kasaHtmlSectionTitle('Genel toplam')}
@@ -566,7 +560,6 @@ function buildKaynakOzetHtml(
       <div style="font-size:10px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:${KASA_LIGHT.accentDark}">Kasa harcama (çıkış) toplamı</div>
       <div style="font-size:22px;font-weight:900;color:#b91c1c;margin-top:6px">−${genel.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺</div>
       <div style="font-size:10px;color:${KASA_LIGHT.muted};margin-top:4px">${kalem} kalem · BORÇ + Personel ödedi + Kasa ödedi</div>
-      ${miladNote}
     </div>
   </section>`;
 }
@@ -948,7 +941,6 @@ export async function buildKasaHarcamaAralikReportHtml(options: {
   olusturan?: string;
   totalOut?: number;
   cikisKalem?: number;
-  miladActive?: boolean;
 }): Promise<string> {
   const start = formatDateLabelTr(normalizeDateKey(options.startDate) || options.startDate);
   const end = formatDateLabelTr(normalizeDateKey(options.endDate) || options.endDate);
@@ -980,15 +972,11 @@ export async function buildKasaHarcamaAralikReportHtml(options: {
   const bodyHtml = `${kasaHtmlInfoBox([
     `Çıkış kalemi: <strong>${kalemSayisi}</strong> · Genel toplam: <strong>−${toplam.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺</strong>`,
     `Oluşturan: ${escapeHtml(options.olusturan || '—')} · ${new Date().toLocaleString('tr-TR')}`,
-    options.miladActive
-      ? `Milad (01.01.2026): Giren <strong>₺${KASA_MILAD.giren.toLocaleString('tr-TR')}</strong> · Çıkan <strong>₺${KASA_MILAD.cikan.toLocaleString('tr-TR')}</strong> · Bakiye <strong>₺${KASA_MILAD.bakiye.toLocaleString('tr-TR')}</strong>`
-      : '',
     '<em>Excel tablosu için «Kasa Excel» butonunu kullanın — bu dosya HTML raporudur.</em>',
-  ].filter(Boolean))}
+  ])}
     ${buildKaynakOzetHtml(rows, {
       totalOut: toplam,
       cikisKalem: kalemSayisi,
-      miladActive: options.miladActive,
     })}
     ${buildPersonelHarcamaOzetHtml(rows)}
     ${buildCikisListeHtml(rows)}
