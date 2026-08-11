@@ -2,7 +2,7 @@ import type { Worksheet, Workbook } from 'exceljs';
 import type { KasaHareketi, KasaOdemeDurumu, Personel } from '../types/erp';
 import { createExcelWorkbook } from './exceljsLoader';
 import { KIBRITCI_COMPANY, loadKibritciReportAssets } from './kibritciBrand';
-import { resolvePersonelUnvan } from './personelUnvanUtils';
+import { resolvePersonelUnvan, KASA_ADSIZ_UNVAN } from './personelUnvanUtils';
 import { resolveKasaOdemeDurumu } from './yolHarcamaUtils';
 import { ensureKasaFisFotoPersisted, isKasaFisPdfUrl } from './sahaFaaliyetFotoStorage';
 import {
@@ -523,7 +523,7 @@ function groupByPersonel(
     } else {
       map.set(unvan.key, {
         key: unvan.key,
-        label: unvan.label || 'Personel (adsız)',
+        label: unvan.label || KASA_ADSIZ_UNVAN,
         toplam: tutar,
         kalemler: [kh],
       });

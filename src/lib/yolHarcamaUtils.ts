@@ -14,6 +14,7 @@ import {
 } from './kasaReportTheme';
 import { db, saveDocument } from './firebase';
 import { isKasaFisPdfUrl } from './sahaFaaliyetFotoStorage';
+import { KASA_ADSIZ_UNVAN } from './personelUnvanUtils';
 import {
   htmlToPlainText,
   openHtmlReportWindow,
@@ -485,7 +486,7 @@ type RaporKalem = {
 
 function raporKalemKisiAdi(r: RaporKalem): string {
   const name = String(r.personelAdi || r.surucu || '').trim();
-  if (!name) return 'Personel (adsız)';
+  if (!name) return KASA_ADSIZ_UNVAN;
   const low = name.toLocaleLowerCase('tr-TR');
   if (low === 'celal@kibritciinsaat.com') return 'CELAL YILMAZ';
   return name;
@@ -947,7 +948,7 @@ export function buildKasaEmailSummaryPlainText(
     else if (d === 'PERSONEL_ODEDI') personel += tutar;
     else kasa += tutar;
 
-    const who = String(r.personelAdi || r.surucu || 'Personel (adsız)').trim();
+    const who = String(r.personelAdi || r.surucu || KASA_ADSIZ_UNVAN).trim();
     const label =
       who.toLocaleLowerCase('tr-TR') === 'celal@kibritciinsaat.com' ? 'CELAL YILMAZ' : who;
     byKisi.set(label, (byKisi.get(label) || 0) + tutar);
@@ -1030,7 +1031,7 @@ export function buildKasaCikisMailPlainText(
   lines.push('', '── KİŞİ BAZLI TOPLAM ──');
 
   rows.forEach((r) => {
-    const who = String(r.personelAdi || r.surucu || 'Personel (adsız)').trim();
+    const who = String(r.personelAdi || r.surucu || KASA_ADSIZ_UNVAN).trim();
     const label =
       who.toLocaleLowerCase('tr-TR') === 'celal@kibritciinsaat.com' ? 'CELAL YILMAZ' : who;
     byKisi.set(label, (byKisi.get(label) || 0) + (Number(r.tutar) || 0));

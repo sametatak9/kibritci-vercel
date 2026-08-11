@@ -34,6 +34,9 @@ function normalizeNameKey(value: string): string {
   return foldTr(value).replace(/\s+/g, ' ');
 }
 
+/** Kişi atanmamış kasa çıkışları — kasanın doğrudan harcaması */
+export const KASA_ADSIZ_UNVAN = 'ADSIZ KASA';
+
 /**
  * Kasa / şoför özetlerinde aynı kişiyi tek unvan altında birleştirir.
  * Örn. "CELAL YILMAZ" ile "celal@kibritciinsaat.com" → CELAL YILMAZ.
@@ -108,7 +111,7 @@ export function resolvePersonelUnvan(
     return { key: `raw:${normalizeNameKey(rawName)}`, label: rawName };
   }
 
-  return { key: 'adsiz', label: 'Personel (adsız)' };
+  return { key: 'adsiz', label: KASA_ADSIZ_UNVAN };
 }
 
 /** Şoför portal hesabını personel kartına bağlar (id / TC / e-posta / ad). */
