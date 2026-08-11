@@ -421,6 +421,8 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
         referansTipi: newRefType,
         referansId: newRefId || undefined,
         fisEvrakUrl: fisUrl || undefined,
+        // Düzenlemede onay havuzu senkronu geri almasın
+        ...(editingId ? { kasaManuelKilidi: true } : {}),
       };
 
       if (newType === 'ÇIKIŞ' && newOdemeDurumu) {
@@ -457,6 +459,7 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
         soforOdemesi: record.soforOdemesi ?? null,
         personelId: record.personelId ?? null,
         personelAdi: record.personelAdi ?? null,
+        kasaManuelKilidi: record.kasaManuelKilidi ?? null,
       } as KasaHareketi);
 
       setKasaHareketleri((prev) => {
@@ -1184,7 +1187,8 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
                     const result = await exportArnavutkoyKasaDefterExcel(
                       kasaHareketleri,
                       KASA_TUM_BASLANGIC,
-                      KASA_TUM_BITIS
+                      KASA_TUM_BITIS,
+                      personeller
                     );
                     alert(
                       `Arnavutköy Kasa Defteri indirildi.\n\n` +

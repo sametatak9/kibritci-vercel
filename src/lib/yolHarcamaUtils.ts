@@ -363,6 +363,7 @@ export async function syncApprovedYolHarcamalariToKasa(
       | 'durum'
       | 'personelId'
       | 'personelAdi'
+      | 'kasaDefterHaric'
     >
   >,
   options?: {
@@ -383,6 +384,11 @@ export async function syncApprovedYolHarcamalariToKasa(
 
   for (const item of approved) {
     if (!item?.id) continue;
+    // Yönetici kasadan sildiyse yeniden oluşturma
+    if (item.kasaDefterHaric) {
+      skipped += 1;
+      continue;
+    }
     const kasaId = yolHarcamaKasaDocId(item.id);
     try {
       const payload = buildYolHarcamaKasaCikisPayload(item);
@@ -399,6 +405,12 @@ export async function syncApprovedYolHarcamalariToKasa(
       }
 
       const prev = existing.data() as Partial<KasaHareketi>;
+      // Yönetici Kasa'dan düzenlediyse onay senkronu üzerine yazmasın
+      if (prev.kasaManuelKilidi && !forceFromNihai) {
+        skipped += 1;
+        continue;
+      }
+
       const prevOdeme = resolveKasaOdemeDurumu(prev as KasaHareketi);
 
       // Manuel PERSONEL_ODEDI seçimini koru (force değilse) — tutar/personel/masraf yine hizalanır
@@ -414,6 +426,9 @@ export async function syncApprovedYolHarcamalariToKasa(
         next.odemeDurumu = 'PERSONEL_ODEDI';
         next.harcamaKaynagi = 'PERSONEL_HARCAMA';
         // Masraf tipi yol nihai ile kalsın; ödeme durumu personel ödedi olarak işaretli
+      }
+      if (prev.kasaManuelKilidi) {
+        next.kasaManuelKilidi = true;
       }
 
       const changed =

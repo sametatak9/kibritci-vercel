@@ -390,6 +390,8 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
         onaylayanYonetici: currentUser?.email || 'Sistem Yöneticisi',
         onayTarihi: new Date().toISOString(),
         kasaHareketId: payload.id,
+        // Kasadan silinmiş olsa bile yeniden onayda deftere alınsın
+        kasaDefterHaric: false,
       });
 
       if (item.personelId) {

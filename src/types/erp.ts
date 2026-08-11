@@ -400,6 +400,10 @@ export interface KasaHareketi {
   fisNo?: string;
   /** Geçmiş Excel aktarımı vb. — mevcut kayıtları etkilemez */
   kaynak?: 'LEGACY_XLS' | string;
+  /**
+   * Yönetici Kasa ekranından düzenledi — onay havuzu / yol senkronu üzerine yazmasın
+   */
+  kasaManuelKilidi?: boolean;
 }
 
 /** Şoför evrak beyanı / yönetici nihai ayrımı */
@@ -426,6 +430,11 @@ export interface YolHarcamasi {
   onaylayanYonetici?: string;
   onayTarihi?: string;
   olusturulma?: string;
+  /**
+   * true ise onaylı olsa bile kasaHareketleri'ne yeniden yazılmaz
+   * (yönetici kasadan sildi)
+   */
+  kasaDefterHaric?: boolean;
 }
 
 export interface AracBakim {
