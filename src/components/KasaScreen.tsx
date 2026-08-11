@@ -200,7 +200,6 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
     [filteredHareketler]
   );
   const kasaHarcamaOut = totalOut;
-  const cikisKayitSayisi = filteredHareketler.filter((k) => k.hareketTipi === 'ÇIKIŞ').length;
 
   /** Excel ~₺905 + program fişleri → gerçek kasa bakiyesi (liste filtresinden bağımsız) */
   const kasaBakiyesiInfo = useMemo(() => {
@@ -523,141 +522,72 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
   };
 
   return (
-    <div className="flex-grow p-3 sm:p-4 lg:p-6 min-h-0 lg:h-full flex flex-col font-sans gap-4 lg:gap-6 select-none bg-[#FFFBF7]">
+    <div className="flex-grow p-2 sm:p-3 min-h-0 lg:h-full flex flex-col font-sans gap-2 select-none bg-[#FFFBF7] overflow-hidden">
       
-      {/* Üst başlık — Kibritçi turuncu antet */}
-      <div className="shrink-0 rounded-2xl border border-[#FED7AA] bg-gradient-to-r from-[#FFF7ED] via-white to-[#FFFBF7] p-4 sm:p-5 shadow-sm">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-3 min-w-0">
-            <div className="w-11 h-11 rounded-xl bg-[#EA580C] text-white flex items-center justify-center shadow-md shrink-0">
-              <Wallet size={22} strokeWidth={2.5} />
-            </div>
-            <div className="min-w-0">
-              <h1 className="text-xl sm:text-2xl font-black tracking-tight text-[#9A3412]">
-                Haftalık Kasa
-              </h1>
-              <p className="text-[11px] text-[#64748B] font-semibold mt-0.5 leading-relaxed">
-                Tüm kasa kayıtları · Excel bakiyesi (~₺{kasaBakiyesiInfo.excelSon.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}) + program fişleri · yeniden → eskiye
-              </p>
-            </div>
+      {/* Kompakt üst bar: başlık + bakıye + mini KPI */}
+      <div className="shrink-0 rounded-xl border border-[#FED7AA] bg-white px-3 py-2 shadow-sm flex flex-wrap items-center gap-2">
+        <div className="flex items-center gap-2 min-w-0 flex-1">
+          <div className="w-8 h-8 rounded-lg bg-[#EA580C] text-white flex items-center justify-center shrink-0">
+            <Wallet size={16} strokeWidth={2.5} />
           </div>
-          <span className="bg-[#FFEDD5] text-[#9A3412] border border-[#FDBA74] text-[10px] font-bold px-3 py-1.5 rounded-full uppercase tracking-wider shrink-0">
-            Aktif Modül
-          </span>
-        </div>
-      </div>
-
-      {/* Özet kartları */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 shrink-0">
-        <div className="p-4 rounded-2xl border border-emerald-200 bg-white text-emerald-800 shadow-sm">
-          <span className="text-[10px] text-[#64748B] font-bold uppercase tracking-wider block mb-1">
-            Giriş (liste)
-          </span>
-          <span className="text-lg sm:text-xl font-black font-mono tabular-nums block truncate">
-            ₺{totalIn.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
-          </span>
-        </div>
-        <div className="p-4 rounded-2xl border border-[#FED7AA] bg-[#FFF7ED] text-[#9A3412] shadow-sm">
-          <span className="text-[10px] text-[#64748B] font-bold uppercase tracking-wider block mb-1">
-            Kasa harcaması
-          </span>
-          <span className="text-lg sm:text-xl font-black font-mono tabular-nums block truncate">
-            ₺{kasaHarcamaOut.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
-          </span>
-          <span className="text-[9px] text-[#94A3B8] font-semibold mt-0.5 block">
-            {cikisKayitSayisi} çıkış · borç + personel + kasa ödedi
-          </span>
-        </div>
-        <div
-          className={`p-4 rounded-2xl border font-bold shadow-sm ${
-            kasaBakiyesiInfo.bakiye < 0
-              ? 'border-rose-300 bg-rose-50 text-rose-800'
-              : 'border-[#FDBA74] bg-white text-[#9A3412]'
-          }`}
-        >
-          <span className="text-[10px] text-[#64748B] font-bold uppercase tracking-wider block mb-1">
-            Kasa bakiyesi
-          </span>
-          <span className="text-lg sm:text-xl font-black font-mono tabular-nums block truncate">
-            ₺{kasaBakiyesiInfo.bakiye.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
-          </span>
-          <span className="text-[9px] text-[#94A3B8] font-semibold mt-0.5 block">
-            Excel ₺{kasaBakiyesiInfo.excelSon.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} + program fişleri
-            {kasaBorcTutari > 0
-              ? ` · kasa borç ₺${kasaBorcTutari.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}`
-              : ''}
-          </span>
-        </div>
-      </div>
-
-      {/* Kim ne harcadı özeti */}
-      <div className="shrink-0 rounded-2xl border border-[#FED7AA] bg-white p-4 shadow-sm">
-        {/* Güncel kasa bakiyesi — Excel ~905 + program fişleri (eski 24.982 yerine) */}
-        <div
-          className={`mb-3 rounded-xl border-2 px-4 py-3 flex flex-wrap items-center justify-between gap-2 ${
-            kasaBakiyesiInfo.bakiye < 0
-              ? 'border-rose-400 bg-rose-50'
-              : 'border-emerald-400 bg-emerald-50'
-          }`}
-        >
           <div className="min-w-0">
-            <div className="text-[11px] font-black uppercase tracking-wider text-slate-700">
-              Kasa bakiyesi (güncel)
-            </div>
-            <p className="text-[10px] text-slate-500 font-semibold mt-0.5">
-              Excel ₺{kasaBakiyesiInfo.excelSon.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}{' '}
-              + program fişleri · eski ₺24.982 sabitinin yerine geçen net sonuç
+            <h1 className="text-sm font-black tracking-tight text-[#9A3412] leading-tight">
+              Haftalık Kasa
+            </h1>
+            <p className="text-[9px] text-slate-500 font-semibold truncate">
+              Excel ₺{kasaBakiyesiInfo.excelSon.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} + program · yeniden→eskiye
             </p>
-          </div>
-          <div className="text-right shrink-0">
-            <div
-              className={`text-2xl sm:text-3xl font-black font-mono tabular-nums ${
-                kasaBakiyesiInfo.bakiye < 0 ? 'text-rose-700' : 'text-emerald-700'
-              }`}
-            >
-              ₺{kasaBakiyesiInfo.bakiye.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
-            </div>
-            {kasaBorcTutari > 0 && (
-              <div className="text-[10px] font-bold text-amber-800 mt-0.5">
-                Kasa borç ₺{kasaBorcTutari.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
-              </div>
-            )}
           </div>
         </div>
+        <div className="flex flex-wrap items-center gap-1.5 text-[10px] font-mono font-bold">
+          <span className="bg-emerald-50 border border-emerald-200 text-emerald-800 px-2 py-1 rounded-lg">
+            Giriş ₺{totalIn.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
+          </span>
+          <span className="bg-[#FFF7ED] border border-[#FED7AA] text-[#9A3412] px-2 py-1 rounded-lg">
+            Harcama ₺{kasaHarcamaOut.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
+          </span>
+          <span
+            className={`px-2.5 py-1 rounded-lg border-2 text-sm ${
+              kasaBakiyesiInfo.bakiye < 0
+                ? 'bg-rose-600 border-rose-700 text-white'
+                : 'bg-emerald-600 border-emerald-700 text-white'
+            }`}
+            title="Kasa bakiyesi = Excel son bakiye + program fişleri"
+          >
+            KASA BAKİYESİ ₺{kasaBakiyesiInfo.bakiye.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
+          </span>
+        </div>
+      </div>
 
-        <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
-          <div>
-            <h3 className="text-[11px] font-black uppercase tracking-wider text-[#9A3412]">
-              Kim ne harcadı (program kayıtları)
-            </h3>
-            <p className="text-[10px] text-[#64748B] mt-0.5">
-              Excel defter satırları hariç · kişi / ödeme kırılımı
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-1.5 text-[10px] font-mono font-bold">
-            <span className="bg-amber-50 border border-amber-200 text-amber-900 px-2 py-1 rounded-lg">
+      {/* Kim ne harcadı — tek satır kompakt */}
+      <div className="shrink-0 rounded-xl border border-[#FED7AA] bg-white px-3 py-2 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-1.5">
+          <h3 className="text-[10px] font-black uppercase tracking-wider text-[#9A3412]">
+            Kim ne harcadı
+          </h3>
+          <div className="flex flex-wrap gap-1 text-[9px] font-mono font-bold">
+            <span className="bg-amber-50 border border-amber-200 text-amber-900 px-1.5 py-0.5 rounded">
               KASA BORÇ ₺{kasaBorcTutari.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
             </span>
-            <span className="bg-violet-50 border border-violet-200 text-violet-900 px-2 py-1 rounded-lg">
+            <span className="bg-violet-50 border border-violet-200 text-violet-900 px-1.5 py-0.5 rounded">
               PERSONEL ₺{odemeBazliOzet.totals.PERSONEL_ODEDI.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
             </span>
-            <span className="bg-[#FFEDD5] border border-[#FDBA74] text-[#9A3412] px-2 py-1 rounded-lg">
-              KASA ÖDEDİ ₺{odemeBazliOzet.totals.KASA_ODEDI.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
+            <span className="bg-[#FFEDD5] border border-[#FDBA74] text-[#9A3412] px-1.5 py-0.5 rounded">
+              KASA ₺{odemeBazliOzet.totals.KASA_ODEDI.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
             </span>
-            <span className="bg-slate-100 border border-slate-200 text-slate-700 px-2 py-1 rounded-lg">
-              KAYITLI BORÇ ₺{odemeBazliOzet.totals.BORC.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
+            <span className="bg-rose-50 border border-rose-200 text-rose-800 px-1.5 py-0.5 rounded">
+              TOPLAM ₺{odemeBazliOzet.genelToplam.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
             </span>
           </div>
         </div>
         {odemeBazliOzet.satirlar.length === 0 ? (
-          <p className="text-[11px] text-slate-400 italic">Bu aralıkta program çıkış / harcama yok.</p>
+          <p className="text-[10px] text-slate-400 italic">Program çıkış yok.</p>
         ) : (
-          <>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap gap-1">
             {odemeBazliOzet.satirlar.map((row) => (
               <div
                 key={row.key}
-                className={`inline-flex items-center gap-2 rounded-xl border px-3 py-2 ${
+                className={`inline-flex items-center gap-1.5 rounded-lg border px-2 py-1 ${
                   row.durum === 'KASA_ODEDI'
                     ? 'bg-[#FFEDD5] text-[#9A3412] border-[#FDBA74]'
                     : row.durum === 'BORC'
@@ -665,37 +595,24 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
                       : 'bg-violet-50 text-violet-950 border-violet-200'
                 }`}
               >
-                <span className="text-[10px] font-black uppercase tracking-wide opacity-90">
-                  {row.label}
-                </span>
-                <span className="text-[9px] font-bold opacity-75 tabular-nums">
-                  {row.kalem} kalem
-                </span>
-                <span className="text-sm font-black font-mono tabular-nums">
+                <span className="text-[9px] font-black uppercase">{row.label}</span>
+                <span className="text-[8px] opacity-70">{row.kalem}</span>
+                <span className="text-[11px] font-black font-mono">
                   ₺{row.tutar.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
                 </span>
               </div>
             ))}
           </div>
-          <div className="mt-3 pt-3 border-t border-[#FED7AA] flex items-center justify-between gap-3 flex-wrap">
-            <span className="text-[11px] font-black uppercase tracking-wider text-[#9A3412]">
-              Program harcama toplamı
-            </span>
-            <span className="text-lg font-black font-mono tabular-nums text-rose-700">
-              ₺{odemeBazliOzet.genelToplam.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
-            </span>
-          </div>
-          </>
         )}
       </div>
 
-      {/* Main split dashboard view — mobilde defter üstte (geçmiş işlemler görünür) */}
-      <div className="flex flex-col lg:flex-1 lg:flex-row gap-4 lg:gap-6 lg:min-h-0">
+      {/* Main split — kalan yükseklik form + defter */}
+      <div className="flex flex-col lg:flex-1 lg:flex-row gap-2 lg:min-h-0 min-h-0 overflow-hidden">
         
         {/* Left side Form creator */}
-        <div ref={formPanelRef} className="order-2 lg:order-1 w-full lg:w-[380px] lg:shrink-0 bg-white border border-[#FED7AA] rounded-2xl flex flex-col overflow-hidden shadow-sm lg:min-h-0 lg:max-h-full">
+        <div ref={formPanelRef} className="order-2 lg:order-1 w-full lg:w-[320px] xl:w-[340px] lg:shrink-0 bg-white border border-[#FED7AA] rounded-xl flex flex-col overflow-hidden shadow-sm lg:min-h-0 lg:max-h-full">
           
-          <div className="p-4 shrink-0 shadow-sm flex items-center justify-between text-white bg-gradient-to-r from-[#EA580C] to-[#C2410C]">
+          <div className="px-3 py-2 shrink-0 shadow-sm flex items-center justify-between text-white bg-gradient-to-r from-[#EA580C] to-[#C2410C]">
             <div className="flex items-center space-x-2">
               <Wallet size={16} />
               <h3 className="font-bold text-xs uppercase tracking-widest">
@@ -713,7 +630,7 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
             )}
           </div>
 
-          <form onSubmit={handleSaveKasaHareketi} className="lg:flex-grow overflow-y-auto p-5 space-y-4 text-xs max-h-[70vh] lg:max-h-none bg-[#FFFBF7]/50">
+          <form onSubmit={handleSaveKasaHareketi} className="lg:flex-grow overflow-y-auto p-3 space-y-2.5 text-xs max-h-[55vh] lg:max-h-none bg-[#FFFBF7]/50">
             
             {/* Tarih Row */}
             <div className="space-y-1">
@@ -950,7 +867,7 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
         </div>
 
         {/* Right side Table history — mobilde üstte + min yükseklik (geçmiş görünür) */}
-        <div className="order-1 lg:order-2 flex-1 min-w-0 min-h-[52vh] lg:min-h-0 bg-white border border-[#e2e8f0] rounded-2xl flex flex-col overflow-hidden shadow-sm">
+        <div className="order-1 lg:order-2 flex-1 min-w-0 min-h-[42vh] lg:min-h-0 bg-white border border-[#e2e8f0] rounded-xl flex flex-col overflow-hidden shadow-sm">
           
           {/* Header toolbar exactly matching screenshot style */}
           <div className="px-5 py-4 border-b border-[#e2e8f0] bg-slate-50/50 flex flex-wrap items-center justify-between gap-3 shrink-0">
