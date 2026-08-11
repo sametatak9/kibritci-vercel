@@ -45,6 +45,12 @@ import {
 } from '../lib/sekerVidanjorFaturaReset';
 import { isSekerVidanjorFirma } from '../lib/vidanjorUtils';
 import {
+  applyEntoMicirFaturaResetInMemory,
+  planEntoMicirFaturaReset,
+} from '../lib/entoMicirFaturaReset';
+import {
+  irsaliyeNoChainSortKey,
+  isEntoMadenFirma,
   malzemeTipiLabel,
   micirMalzemeTipiSortKey,
   resolveMicirMalzemeTipiFromIrsaliye,
@@ -104,6 +110,7 @@ type HistoryLog = {
   tonaj?: number;
   kiloKg?: number;
   plaka?: string;
+  irsaliyeNo?: string;
 };
 
 type GenericDetail = {
@@ -394,6 +401,7 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
               tonaj: Number(data.tonaj) || undefined,
               kiloKg: Number(data.kiloKg) || undefined,
               plaka: data.plaka ? String(data.plaka) : undefined,
+              irsaliyeNo: data.irsaliyeNo ? String(data.irsaliyeNo) : undefined,
             });
           }
         });
@@ -754,7 +762,7 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
           mk === '0000-00' || !y || !m
             ? 'Tarihsiz'
             : `${AY[Number(m)] || m} ${y}`;
-        // Mıcır / Taş Tozu / Stabilize grupları + tarih (yeni → eski)
+        // Mıcır / Taş Tozu / Stabilize → gün zinciri (eski→yeni) → irsaliye no
         const sorted = [...items].sort((a, b) => {
           const aMicir = a.malzemeTipi || a.kaynak === 'MICIR_STABILIZE_FIS';
           const bMicir = b.malzemeTipi || b.kaynak === 'MICIR_STABILIZE_FIS';
@@ -763,7 +771,12 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
             const bk = b.malzemeTipi != null ? micirMalzemeTipiSortKey(b.malzemeTipi) : bMicir ? 0 : 99;
             if (ak !== bk) return ak - bk;
           }
-          return (b.date || '').localeCompare(a.date || '') || String(b.id).localeCompare(String(a.id));
+          const d = (a.date || '').localeCompare(b.date || '');
+          if (d !== 0) return d;
+          const na = irsaliyeNoChainSortKey(a.irsaliyeNo || a.title);
+          const nb = irsaliyeNoChainSortKey(b.irsaliyeNo || b.title);
+          if (na !== nb) return na - nb;
+          return String(a.id).localeCompare(String(b.id));
         });
         const hizmetToplam = sorted.reduce((s, it) => s + (Number(it.hizmetMiktar) || 0), 0);
         const etiket =
@@ -973,6 +986,64 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
       alert(
         `Sıfırlandı.\n\n${plan.linkedIrsaliyeler.length} irsaliye faturasız\n${plan.faturalarToDelete.length} fatura silindi\n${plan.cariIslemIdsToDelete.length} cari işlem silindi\n\nŞimdi İRSALİYE sekmesinden mutabakat yapabilirsiniz.`
       );
+      void loadHistoryData('cari', selectedCari.id, selectedCari.unvan, selectedCari.kod || '');
+    } catch (err: any) {
+      console.error(err);
+      alert('Sıfırlama başarısız: ' + (err?.message || err));
+    }
+  };
+
+  const handleResetEntoMicirFaturaBaglari = async () => {
+    if (!selectedCari || !setFaturalar || !setIrsaliyeler) {
+      alert('Cari / fatura bağlantısı yok.');
+      return;
+    }
+    if (!isEntoMadenFirma(selectedCari.unvan)) {
+      alert('Bu işlem yalnızca Ento Maden (mıcır/stabilize) cari kartı için.');
+      return;
+    }
+    const plan = planEntoMicirFaturaReset({
+      cariKartlar,
+      irsaliyeler,
+      faturalar,
+      cariIslemGecmisi,
+      cariKartId: selectedCari.id,
+    });
+    if (plan.linkedIrsaliyeler.length === 0 && plan.faturalarToDelete.length === 0) {
+      alert(
+        `Sıfırlanacak dönüşüm / fatura bağı yok.\n\n${plan.ozet}\n\nİrsaliyeler zaten faturasız; mutabakata geçebilirsiniz.`
+      );
+      return;
+    }
+    const ok = window.confirm(
+      `Ento Maden dönüştürülmüş fatura bağları sıfırlansın mı?\n\n${plan.ozet}\n\n• Bağlı irsaliyelerin faturaNo temizlenir\n• Taslak/bağlı faturalar silinir\n• Cari geçmişteki ilgili FATURA işlemleri silinir\n\nİrsaliye evrakları yerinde kalır — yeniden eşleştirip mutabakat yapabilirsiniz.`
+    );
+    if (!ok) return;
+    try {
+      for (const ir of plan.linkedIrsaliyeler) {
+        await updateDoc(doc(db, 'irsaliyeler', ir.id), { faturaNo: deleteField() });
+      }
+      for (const ft of plan.faturalarToDelete) {
+        await removeDocument('faturalar', ft.id);
+      }
+      for (const id of plan.cariIslemIdsToDelete) {
+        await removeDocument('cariIslemGecmisi', id);
+      }
+      const next = applyEntoMicirFaturaResetInMemory({
+        irsaliyeler,
+        faturalar,
+        cariIslemGecmisi,
+        plan,
+      });
+      setIrsaliyeler(next.irsaliyeler);
+      setFaturalar(next.faturalar);
+      if (setCariIslemGecmisi) setCariIslemGecmisi(next.cariIslemGecmisi);
+      setSelectedIrsaliyeIds(new Set());
+      setHistoryFilter('İRSALİYE');
+      alert(
+        `Sıfırlandı.\n\n${plan.linkedIrsaliyeler.length} irsaliye faturasız\n${plan.faturalarToDelete.length} fatura silindi\n${plan.cariIslemIdsToDelete.length} cari işlem silindi\n\nEvraklar listede kaldı — zincir sırasıyla seçip mutabakat yapabilirsiniz.`
+      );
+      void loadHistoryData('cari', selectedCari.id, selectedCari.unvan, selectedCari.kod || '');
     } catch (err: any) {
       console.error(err);
       alert('Sıfırlama başarısız: ' + (err?.message || err));
@@ -2063,6 +2134,16 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
                       title="Vidanjör irsaliyelerindeki taslak fatura bağlarını temizle — mutabakat öncesi"
                     >
                       <RefreshCw size={12} /> Fatura Bağlarını Sıfırla (Mutabakat)
+                    </button>
+                  )}
+                  {selectedCari && isEntoMadenFirma(selectedCari.unvan) && (
+                    <button
+                      type="button"
+                      onClick={() => void handleResetEntoMicirFaturaBaglari()}
+                      className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-[10px] font-bold bg-rose-700 text-white cursor-pointer"
+                      title="Mıcır/Stabilize taslak fatura dönüşümlerini temizle — evraklar kalır"
+                    >
+                      <RefreshCw size={12} /> Dönüşüm Bağlarını Sıfırla
                     </button>
                   )}
                   {selectedIrsaliyeIds.size > 0 && (

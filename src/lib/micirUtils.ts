@@ -68,6 +68,12 @@ export function micirMalzemeTipiSortKey(tip?: MicirMalzemeTipi | string | null):
   return 2;
 }
 
+/** İrsaliye no içindeki ilk sayı (gün içi zincir sırası: 1, 2, 3…) */
+export function irsaliyeNoChainSortKey(no?: string | null): number {
+  const m = String(no || '').match(/(\d+)/);
+  return m ? Number(m[1]) : Number.MAX_SAFE_INTEGER;
+}
+
 /** İrsaliye / fiş / kalem adından malzeme tipi çıkar */
 export function resolveMicirMalzemeTipiFromIrsaliye(input?: {
   malzemeTipi?: string | null;

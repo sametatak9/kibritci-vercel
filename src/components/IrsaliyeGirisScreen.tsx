@@ -35,6 +35,7 @@ import { EvrakZincirBanner } from './EvrakZincirBanner';
 import { openEvrakZincirRaporu } from '../lib/evrakZincirRapor';
 import { resolveIrsaliyeProvenance } from '../lib/evrakProvenance';
 import {
+  irsaliyeNoChainSortKey,
   malzemeTipiLabel,
   micirMalzemeTipiSortKey,
   resolveMicirMalzemeTipiFromIrsaliye,
@@ -700,6 +701,12 @@ export const IrsaliyeGirisScreen: React.FC<IrsaliyeGirisScreenProps> = ({
           const ak = aTip != null ? micirMalzemeTipiSortKey(aTip) : aMicir ? 0 : 99;
           const bk = bTip != null ? micirMalzemeTipiSortKey(bTip) : bMicir ? 0 : 99;
           if (ak !== bk) return ak - bk;
+          const d = String(a.tarih || '').localeCompare(String(b.tarih || ''));
+          if (d !== 0) return d;
+          const na = irsaliyeNoChainSortKey(a.irsaliyeNo);
+          const nb = irsaliyeNoChainSortKey(b.irsaliyeNo);
+          if (na !== nb) return na - nb;
+          return String(a.id).localeCompare(String(b.id));
         }
         return (b.tarih || '').localeCompare(a.tarih || '');
       })
