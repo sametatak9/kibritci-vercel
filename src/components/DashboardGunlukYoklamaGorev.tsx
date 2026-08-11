@@ -19,6 +19,8 @@ const GRUP_ACCENT: Record<PersonelGorevGrup, string> = {
   DUZ_ISCI: 'ring-blue-100',
   USTA: 'ring-fuchsia-100',
   FORMEN: 'ring-purple-100',
+  TESISATCI: 'ring-orange-100',
+  MERMERCI: 'ring-rose-100',
   OPERATOR: 'ring-cyan-100',
   SOFOR: 'ring-indigo-100',
   SENOR: 'ring-teal-100',
@@ -94,10 +96,11 @@ export const DashboardGunlukYoklamaGorev: React.FC<Props> = ({
         </span>
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-2">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-9 gap-2">
         {ozet.map((g) => {
           const hasActivity = g.toplamKayit > 0;
           const inactive = g.kadro === 0;
+          const geldiIsimleri = g.geldiIsimleri || [];
           return (
             <button
               key={g.grup}
@@ -106,7 +109,9 @@ export const DashboardGunlukYoklamaGorev: React.FC<Props> = ({
               className={`text-left rounded-xl border p-3 transition hover:-translate-y-0.5 hover:shadow-sm cursor-pointer ring-1 ${GRUP_ACCENT[g.grup]} ${
                 inactive ? 'opacity-50 border-slate-100 bg-slate-50/50' : 'border-slate-100 bg-white'
               }`}
-              title={`${g.label}: ${g.geldi} geldi · ${g.yok} yok · ${g.kadro} kadro`}
+              title={`${g.label}: ${g.geldi} geldi · ${g.yok} yok · ${g.kadro} kadro${
+                geldiIsimleri.length ? ` · ${geldiIsimleri.join(', ')}` : ''
+              }`}
             >
               <span
                 className={`inline-block text-[9px] font-black uppercase tracking-wide px-2 py-0.5 rounded-md border mb-2 ${personelGorevGrupChipClass(g.grup, hasActivity && g.geldi > 0)}`}
@@ -126,6 +131,14 @@ export const DashboardGunlukYoklamaGorev: React.FC<Props> = ({
                   {g.izinli > 0 && `${g.izinli} izin`}
                   {g.girilmedi > 0 && (g.yok > 0 || g.izinli > 0) && ' · '}
                   {g.girilmedi > 0 && `${g.girilmedi} girilmedi`}
+                </p>
+              )}
+              {geldiIsimleri.length > 0 && (
+                <p className="text-[8px] text-emerald-700 font-semibold mt-1.5 leading-snug border-t border-emerald-100 pt-1.5">
+                  {geldiIsimleri.slice(0, 5).join(' · ')}
+                  {geldiIsimleri.length > 5 && (
+                    <span className="text-emerald-600/80"> +{geldiIsimleri.length - 5}</span>
+                  )}
                 </p>
               )}
             </button>

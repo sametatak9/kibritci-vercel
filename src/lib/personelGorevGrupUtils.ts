@@ -7,9 +7,11 @@ import {
   isFormenGorev,
   isIdariPersonel,
   isKampciGorev,
+  isMermerciGorev,
   isOperatorGorev,
   isSenorGorev,
   isSoforGorev,
+  isTesisatciGorev,
   isTaseronPersonel,
 } from './yoklamaUtils';
 
@@ -19,6 +21,8 @@ export type PersonelGorevGrup =
   | 'DUZ_ISCI'
   | 'USTA'
   | 'FORMEN'
+  | 'TESISATCI'
+  | 'MERMERCI'
   | 'OPERATOR'
   | 'SOFOR'
   | 'SENOR';
@@ -28,6 +32,8 @@ export const PERSONEL_GOREV_GRUP_ORDER: PersonelGorevGrup[] = [
   'DUZ_ISCI',
   'USTA',
   'FORMEN',
+  'TESISATCI',
+  'MERMERCI',
   'OPERATOR',
   'SOFOR',
   'SENOR',
@@ -43,6 +49,10 @@ export function personelGorevGrupLabel(grup: PersonelGorevGrup): string {
       return 'USTA';
     case 'FORMEN':
       return 'FORMEN';
+    case 'TESISATCI':
+      return 'TESİSATÇI';
+    case 'MERMERCI':
+      return 'MERMERCİ';
     case 'OPERATOR':
       return 'OPERATÖR';
     case 'SOFOR':
@@ -59,6 +69,8 @@ const GOREV_GRUP_CHIP_CLASS: Record<PersonelGorevGrup, string> = {
   DUZ_ISCI: 'bg-blue-50 text-blue-900 border-blue-200 hover:bg-blue-100',
   USTA: 'bg-fuchsia-50 text-fuchsia-900 border-fuchsia-200 hover:bg-fuchsia-100',
   FORMEN: 'bg-purple-50 text-purple-900 border-purple-200 hover:bg-purple-100',
+  TESISATCI: 'bg-orange-50 text-orange-900 border-orange-200 hover:bg-orange-100',
+  MERMERCI: 'bg-rose-50 text-rose-900 border-rose-200 hover:bg-rose-100',
   OPERATOR: 'bg-cyan-50 text-cyan-900 border-cyan-200 hover:bg-cyan-100',
   SOFOR: 'bg-indigo-50 text-indigo-900 border-indigo-200 hover:bg-indigo-100',
   SENOR: 'bg-teal-50 text-teal-900 border-teal-200 hover:bg-teal-100',
@@ -69,6 +81,8 @@ const GOREV_GRUP_ACTIVE_CLASS: Record<PersonelGorevGrup, string> = {
   DUZ_ISCI: 'bg-blue-600 text-white border-blue-700',
   USTA: 'bg-fuchsia-600 text-white border-fuchsia-700',
   FORMEN: 'bg-purple-600 text-white border-purple-700',
+  TESISATCI: 'bg-orange-600 text-white border-orange-700',
+  MERMERCI: 'bg-rose-600 text-white border-rose-700',
   OPERATOR: 'bg-cyan-600 text-white border-cyan-700',
   SOFOR: 'bg-indigo-600 text-white border-indigo-700',
   SENOR: 'bg-teal-600 text-white border-teal-700',
@@ -90,6 +104,8 @@ export function resolvePersonelGorevGrubuFromGorev(gorev?: string): PersonelGore
   if (isSenorGorev(gorev)) return 'SENOR';
   if (isOperatorGorev(gorev)) return 'OPERATOR';
   if (isSoforGorev(gorev)) return 'SOFOR';
+  if (isTesisatciGorev(gorev)) return 'TESISATCI';
+  if (isMermerciGorev(gorev)) return 'MERMERCI';
   if (isUstaGorev(gorev)) return 'USTA';
   if (isKampciGorev(gorev)) return 'DUZ_ISCI';
 
@@ -110,7 +126,25 @@ export type GorevGrupYoklamaOzet = {
   diger: number;
   girilmedi: number;
   toplamKayit: number;
+  /** Bugün «Geldi» işaretli personel kısa adları */
+  geldiIsimleri: string[];
 };
+
+function personelGeldiEtiketi(p: Personel): string {
+  const ad = String(p.ad || '').trim();
+  const soyad = String(p.soyad || '').trim();
+  if (ad && soyad) {
+    return `${ad} ${soyad.charAt(0).toLocaleUpperCase('tr-TR')}.`;
+  }
+  return `${ad} ${soyad}`.trim() || p.id;
+}
+
+function pushGeldiIsim(bucket: GorevGrupYoklamaOzet, p: Personel) {
+  const label = personelGeldiEtiketi(p);
+  if (label && !bucket.geldiIsimleri.includes(label)) {
+    bucket.geldiIsimleri.push(label);
+  }
+}
 
 function bumpDurum(bucket: GorevGrupYoklamaOzet, durum: YoklamaDurum | undefined) {
   if (!durum || durum === 'Girilmedi') {
@@ -162,6 +196,7 @@ export function buildGunlukYoklamaGorevOzeti(
       diger: 0,
       girilmedi: 0,
       toplamKayit: 0,
+      geldiIsimleri: [],
     });
   }
 
@@ -175,7 +210,21 @@ export function buildGunlukYoklamaGorevOzeti(
     bucket.kadro += 1;
 
     const dayData = getYoklamaDay(yoklamalar[p.id], year, month, day);
-    bumpDurum(bucket, dayData?.durum as YoklamaDurum | undefined);
+    let durum = dayData?.durum as YoklamaDurum | undefined;
+
+    // İdari kadro puantaj/yoklama ekranına girmez — ana sayfada varsayılan «Geldi»
+    if (grup === 'IDARI' && (!durum || durum === 'Girilmedi')) {
+      bucket.geldi += 1;
+      bucket.toplamKayit += 1;
+      pushGeldiIsim(bucket, p);
+      continue;
+    }
+
+    const prevGeldi = bucket.geldi;
+    bumpDurum(bucket, durum);
+    if (bucket.geldi > prevGeldi) {
+      pushGeldiIsim(bucket, p);
+    }
   }
 
   return PERSONEL_GOREV_GRUP_ORDER.map((grup) => buckets.get(grup)!);
