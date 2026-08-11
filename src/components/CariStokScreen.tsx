@@ -33,6 +33,7 @@ import {
 import {
   assertSameCariIrsaliyeler,
   buildFaturaFromIrsaliyeler,
+  findFaturalarForIrsaliye,
   irsaliyeHizmetMiktari,
   isTaslakMaliBagFatura,
   linkIrsaliyelerToFatura,
@@ -111,6 +112,9 @@ type HistoryLog = {
   kiloKg?: number;
   plaka?: string;
   irsaliyeNo?: string;
+  /** Taslak/gerçek faturaya bağlandıysa */
+  bagliFaturaNo?: string;
+  birlestirilmis?: boolean;
 };
 
 type GenericDetail = {
@@ -125,6 +129,7 @@ const TYPE_ICON: Record<string, React.ReactNode> = {
   'SATIN ALMA': <ClipboardList size={14} />,
   'İRSALİYE': <Truck size={14} />,
   'İRSALİYE GİRİŞİ': <Truck size={14} />,
+  'BİRLEŞTİRİLEN': <Receipt size={14} />,
   'FATURA': <Receipt size={14} />,
   'TASLAK BAĞ': <Receipt size={14} />,
   'LOJMAN KONAKLAMA': <Home size={14} />,
@@ -402,17 +407,28 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
               kiloKg: Number(data.kiloKg) || undefined,
               plaka: data.plaka ? String(data.plaka) : undefined,
               irsaliyeNo: data.irsaliyeNo ? String(data.irsaliyeNo) : undefined,
+              bagliFaturaNo: data.faturaNo ? String(data.faturaNo) : undefined,
+              birlestirilmis: Boolean(data.faturaNo),
             });
+            if (data.faturaNo) {
+              const last = logs[logs.length - 1];
+              last.desc = `${last.desc} · Birleşim: ${data.faturaNo}`;
+            }
           }
         });
 
         const invoicesSnap = await getDocs(collection(db, 'faturalar'));
+        const irToFaturaNo = new Map<string, string>();
         invoicesSnap.forEach((docSnap) => {
           const data = docSnap.data();
           if (firmaEslesir(String(data.cariUnvan || ''), name) || Boolean(data.cariKartId && data.cariKartId === id)) {
             const taslak = isTaslakMaliBagFatura(data as Fatura);
             const tarihKey = normalizeDateKey(data.tarih) || String(data.tarih || '');
             const bagliSayisi = Array.isArray(data.bagliIrsaliyeler) ? data.bagliIrsaliyeler.length : 0;
+            const faturaNo = String(data.faturaNo || '');
+            for (const ref of data.bagliIrsaliyeler || []) {
+              if (ref && faturaNo) irToFaturaNo.set(String(ref), faturaNo);
+            }
             logs.push({
               id: docSnap.id,
               type: taslak ? 'TASLAK BAĞ' : 'FATURA',
@@ -420,16 +436,40 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
                 ? `Taslak bağ (fatura değil): ${data.faturaNo || 'FAT-KOD'}`
                 : `Fatura: ${data.faturaNo || 'FAT-KOD'}`,
               desc: taslak
-                ? `${bagliSayisi} irsaliye · matrah ₺0 · gerçek fatura girişi bekleniyor · ${data.durum || ''}`
-                : `Matrah: ₺${Number(data.toplamTutar || data.genelToplam || 0).toLocaleString('tr-TR')} · ${data.durum}`,
+                ? `${bagliSayisi} irsaliye birleştirildi · matrah ₺0 · gerçek fatura girişi bekleniyor · ${data.durum || ''}`
+                : `Matrah: ₺${Number(data.toplamTutar || data.genelToplam || 0).toLocaleString('tr-TR')} · ${bagliSayisi} irsaliye · ${data.durum}`,
               date: tarihKey,
               badgeColor: taslak ? 'bg-slate-100 text-slate-700' : 'bg-stone-200 text-stone-800',
               collection: 'faturalar',
               kalemler: mapKalemler(data.kalemler),
               monthKey: tarihKey ? tarihKey.slice(0, 7) : undefined,
+              bagliFaturaNo: faturaNo || undefined,
             });
           }
         });
+
+        // İrsaliye → birleşim (fatura) işaretle — BİRLEŞTİRİLEN listesi için
+        for (const log of logs) {
+          if (log.collection !== 'irsaliyeler') continue;
+          const fromMap =
+            irToFaturaNo.get(log.id) ||
+            (log.irsaliyeNo ? irToFaturaNo.get(log.irsaliyeNo) : undefined);
+          const fromProps = findFaturalarForIrsaliye(
+            { id: log.id, irsaliyeNo: log.irsaliyeNo || '', faturaNo: undefined } as Irsaliye,
+            faturalar
+          )[0]?.faturaNo;
+          const faturaNo = fromMap || fromProps || undefined;
+          // irsaliye dokümanındaki faturaNo — waybill loop'ta saklanmadı; props'tan da bak
+          const live = irsaliyeler.find((ir) => ir.id === log.id);
+          const liveNo = live?.faturaNo || undefined;
+          const finalNo = faturaNo || liveNo;
+          if (!finalNo) continue;
+          log.bagliFaturaNo = finalNo;
+          log.birlestirilmis = true;
+          if (!String(log.desc || '').includes('Birleşim:')) {
+            log.desc = `${log.desc} · Birleşim: ${finalNo}`;
+          }
+        }
 
         const staysSnap = await getDocs(collection(db, 'kampKayitlari'));
         staysSnap.forEach((docSnap) => {
@@ -740,8 +780,21 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
 
   const filteredHistory = useMemo(() => {
     if (historyFilter === 'ALL') return historyList;
+    if (historyFilter === 'BİRLEŞTİRİLEN') {
+      return historyList.filter(
+        (h) => h.collection === 'irsaliyeler' && (h.birlestirilmis || Boolean(h.bagliFaturaNo))
+      );
+    }
     return historyList.filter((h) => h.type === historyFilter);
   }, [historyList, historyFilter]);
+
+  const birlestirilenCount = useMemo(
+    () =>
+      historyList.filter(
+        (h) => h.collection === 'irsaliyeler' && (h.birlestirilmis || Boolean(h.bagliFaturaNo))
+      ).length,
+    [historyList]
+  );
 
   const historyByMonth = useMemo(() => {
     const AY = ['', 'Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran', 'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'];
@@ -763,7 +816,13 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
             ? 'Tarihsiz'
             : `${AY[Number(m)] || m} ${y}`;
         // Mıcır / Taş Tozu / Stabilize → gün zinciri (eski→yeni) → irsaliye no
+        // BİRLEŞTİRİLEN sekmesinde önce fatura no (birleşim paketi) gruplanır
         const sorted = [...items].sort((a, b) => {
+          if (historyFilter === 'BİRLEŞTİRİLEN') {
+            const fa = String(a.bagliFaturaNo || '');
+            const fb = String(b.bagliFaturaNo || '');
+            if (fa !== fb) return fb.localeCompare(fa);
+          }
           const aMicir = a.malzemeTipi || a.kaynak === 'MICIR_STABILIZE_FIS';
           const bMicir = b.malzemeTipi || b.kaynak === 'MICIR_STABILIZE_FIS';
           if (aMicir || bMicir) {
@@ -790,7 +849,7 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
         }
         return { monthKey: mk, label, items: sorted, hizmetToplam, etiket, tipCounts };
       });
-  }, [filteredHistory]);
+  }, [filteredHistory, historyFilter]);
 
   const selectedIrsaliyePreview = useMemo(() => {
     if (selectedIrsaliyeIds.size === 0) return null;
@@ -902,7 +961,8 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
     }
 
     setFaturalar((prev) => [fatura, ...prev]);
-    setIrsaliyeler((prev) => linkIrsaliyelerToFatura(prev, fatura));
+    const nextIrs = linkIrsaliyelerToFatura(irsaliyeler, fatura);
+    setIrsaliyeler(nextIrs);
 
     if (fatura.cariKartId) {
       appendCariIslemOnce(
@@ -920,19 +980,58 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
       );
     }
 
+    const mergedIds = new Set(withKalem.map((ir) => ir.id));
+    setHistoryList((prev) => {
+      const next = prev.map((h) => {
+        if (!mergedIds.has(h.id) || h.collection !== 'irsaliyeler') return h;
+        return {
+          ...h,
+          birlestirilmis: true,
+          bagliFaturaNo: fatura.faturaNo,
+          desc: String(h.desc || '').includes('Birleşim:')
+            ? h.desc
+            : `${h.desc} · Birleşim: ${fatura.faturaNo}`,
+        };
+      });
+      if (!next.some((h) => h.id === fatura.id && h.collection === 'faturalar')) {
+        next.unshift({
+          id: fatura.id,
+          type: 'TASLAK BAĞ',
+          title: `Taslak bağ (fatura değil): ${fatura.faturaNo}`,
+          desc: `${withKalem.length} irsaliye birleştirildi · matrah ₺0`,
+          date: fatura.tarih || '',
+          badgeColor: 'bg-slate-100 text-slate-700',
+          collection: 'faturalar',
+          monthKey: String(fatura.tarih || '').slice(0, 7),
+          bagliFaturaNo: fatura.faturaNo,
+        });
+      }
+      return next;
+    });
     setSelectedIrsaliyeIds(new Set());
+    setHistoryFilter('BİRLEŞTİRİLEN');
+
     const openRapor = window.confirm(
-      `Taslak fatura oluşturuldu.\nNo: ${fatura.faturaNo}\nBirleştirilen irsaliye: ${withKalem.length}\n\nEvraklar düzenlenebilir kaldı.\n\nZincir raporunu açmak ister misiniz?`
+      `Taslak fatura oluşturuldu.\nNo: ${fatura.faturaNo}\nBirleştirilen irsaliye: ${withKalem.length}\n\nEvraklar «BİRLEŞTİRİLEN» listesinde birikir.\n\nZincir raporunu açmak ister misiniz?`
     );
     if (openRapor) {
-      const saId = fatura.saId || withKalem.find((ir) => ir.saId)?.saId;
+      const saIds = [...new Set(withKalem.map((ir) => ir.saId).filter(Boolean))];
+      const saId = saIds.length === 1 ? saIds[0] : undefined;
       const sa = saId ? satinAlmaTalepleri.find((s) => s.saId === saId) : undefined;
-      openEvrakZincirRaporu({
-        sa,
-        irsaliyeler,
-        faturalar: [fatura, ...faturalar],
-        focusIrsaliyeIds: withKalem.map((ir) => ir.id),
-      });
+      try {
+        openEvrakZincirRaporu(
+          {
+            sa,
+            irsaliyeler: nextIrs,
+            faturalar: [fatura, ...faturalar],
+            focusIrsaliyeIds: withKalem.map((ir) => ir.id),
+          },
+          { withExcel: withKalem.length <= 120 }
+        );
+      } catch (err: any) {
+        console.error(err);
+        alert('Zincir raporu açılamadı: ' + (err?.message || err));
+      }
     }
   };
 
@@ -1052,35 +1151,43 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
 
   const handleOpenZincirRaporuFromCari = () => {
     const selected = irsaliyeler.filter((ir) => selectedIrsaliyeIds.has(ir.id));
-    const focusIds = selected.length
-      ? selected.map((ir) => ir.id)
-      : historyList
-          .filter((h) => h.collection === 'irsaliyeler')
-          .map((h) => h.id);
-    const saId =
-      selected.find((ir) => ir.saId)?.saId ||
-      irsaliyeler.find((ir) => focusIds.includes(ir.id) && ir.saId)?.saId;
-    let sa = saId ? satinAlmaTalepleri.find((s) => s.saId === saId) : undefined;
-    if (!sa && selectedCariId) {
-      const cariSa = satinAlmaTalepleri
-        .filter(
-          (s) =>
-            s.cariKartId === selectedCariId ||
-            firmaEslesir(s.cariFirma || '', selectedCari?.unvan || '')
-        )
-        .sort((a, b) => String(b.tarih || '').localeCompare(String(a.tarih || '')));
-      sa = cariSa[0];
-    }
-    if (!sa && !focusIds.length) {
-      alert('Zincir raporu için bir satın alma veya irsaliye bulunamadı.');
+    const birlestirilenLogs = historyList.filter(
+      (h) => h.collection === 'irsaliyeler' && (h.birlestirilmis || Boolean(h.bagliFaturaNo))
+    );
+    let focusIds: string[] = [];
+    if (selected.length) {
+      focusIds = selected.map((ir) => ir.id);
+    } else if (historyFilter === 'BİRLEŞTİRİLEN' && birlestirilenLogs.length) {
+      focusIds = birlestirilenLogs.map((h) => h.id);
+    } else if (birlestirilenLogs.length) {
+      const ok = window.confirm(
+        `Seçim yok.\n\n${birlestirilenLogs.length} birleştirilmiş irsaliye için zincir raporu açılsın mı?\n(Tüm 205 irsaliye yerine yalnızca birleştirilenler.)`
+      );
+      if (!ok) return;
+      focusIds = birlestirilenLogs.map((h) => h.id);
+    } else {
+      alert('Zincir raporu için önce irsaliye seçin veya faturaya birleştirin.');
       return;
     }
-    openEvrakZincirRaporu({
-      sa,
-      irsaliyeler,
-      faturalar,
-      focusIrsaliyeIds: focusIds.length ? focusIds : undefined,
-    });
+    const focusSet = new Set(focusIds);
+    const focusIrs = irsaliyeler.filter((ir) => focusSet.has(ir.id));
+    const saIds = [...new Set(focusIrs.map((ir) => ir.saId).filter(Boolean))];
+    const saId = saIds.length === 1 ? saIds[0] : undefined;
+    const sa = saId ? satinAlmaTalepleri.find((s) => s.saId === saId) : undefined;
+    try {
+      openEvrakZincirRaporu(
+        {
+          sa,
+          irsaliyeler,
+          faturalar,
+          focusIrsaliyeIds: focusIds,
+        },
+        { withExcel: focusIds.length <= 120 }
+      );
+    } catch (err: any) {
+      console.error(err);
+      alert('Zincir raporu açılamadı: ' + (err?.message || err));
+    }
   };
 
   const resetCariForm = () => {
@@ -2179,33 +2286,37 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
                       void (async () => {
                         try {
                           const selected = irsaliyeler.filter((ir) => selectedIrsaliyeIds.has(ir.id));
-                          const focusIds = selected.length
-                            ? selected.map((ir) => ir.id)
-                            : historyList
-                                .filter((h) => h.collection === 'irsaliyeler')
-                                .map((h) => h.id);
-                          const saId =
-                            selected.find((ir) => ir.saId)?.saId ||
-                            irsaliyeler.find((ir) => focusIds.includes(ir.id) && ir.saId)?.saId;
-                          let sa = saId
+                          const birlestirilenLogs = historyList.filter(
+                            (h) =>
+                              h.collection === 'irsaliyeler' &&
+                              (h.birlestirilmis || Boolean(h.bagliFaturaNo))
+                          );
+                          let focusIds: string[] = [];
+                          if (selected.length) focusIds = selected.map((ir) => ir.id);
+                          else if (historyFilter === 'BİRLEŞTİRİLEN' && birlestirilenLogs.length) {
+                            focusIds = birlestirilenLogs.map((h) => h.id);
+                          } else if (birlestirilenLogs.length) {
+                            const ok = window.confirm(
+                              `${birlestirilenLogs.length} birleştirilmiş irsaliye için Excel üretilsin mi?`
+                            );
+                            if (!ok) return;
+                            focusIds = birlestirilenLogs.map((h) => h.id);
+                          } else {
+                            alert('Excel için önce irsaliye seçin veya birleştirin.');
+                            return;
+                          }
+                          const focusSet = new Set(focusIds);
+                          const focusIrs = irsaliyeler.filter((ir) => focusSet.has(ir.id));
+                          const saIds = [...new Set(focusIrs.map((ir) => ir.saId).filter(Boolean))];
+                          const saId = saIds.length === 1 ? saIds[0] : undefined;
+                          const sa = saId
                             ? satinAlmaTalepleri.find((s) => s.saId === saId)
                             : undefined;
-                          if (!sa && selectedCariId) {
-                            sa = satinAlmaTalepleri
-                              .filter(
-                                (s) =>
-                                  s.cariKartId === selectedCariId ||
-                                  firmaEslesir(s.cariFirma || '', selectedCari?.unvan || '')
-                              )
-                              .sort((a, b) =>
-                                String(b.tarih || '').localeCompare(String(a.tarih || ''))
-                              )[0];
-                          }
                           const result = await openEvrakZincirExcel({
                             sa,
                             irsaliyeler,
                             faturalar,
-                            focusIrsaliyeIds: focusIds.length ? focusIds : undefined,
+                            focusIrsaliyeIds: focusIds,
                           });
                           alert(
                             `Antetli Excel indirildi.\n${result.sevk} irsaliye · Toplam ağırlık: ${result.toplamAgirlik.toLocaleString('tr-TR')} ton\n${result.fileName}`
@@ -2249,6 +2360,20 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
                   }`}
                 >
                   Tümü ({historyList.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setHistoryFilter('BİRLEŞTİRİLEN')}
+                  className={`text-[10px] font-black px-2.5 py-1 rounded-lg border cursor-pointer ${
+                    historyFilter === 'BİRLEŞTİRİLEN'
+                      ? 'bg-violet-700 text-white border-violet-700'
+                      : birlestirilenCount > 0
+                        ? 'bg-violet-50 text-violet-800 border-violet-200'
+                        : 'bg-white text-slate-600 border-slate-200'
+                  }`}
+                  title="Faturaya birleştirilmiş irsaliyeler burada birikir"
+                >
+                  BİRLEŞTİRİLEN ({birlestirilenCount})
                 </button>
                 {Object.entries(historyTypeCounts).map(([type, count]) => (
                   <button
@@ -2333,18 +2458,42 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
                       </div>
                       {group.items.map((log, idx) => {
                         const prev = idx > 0 ? group.items[idx - 1] : null;
+                        const showBirlesimHeader =
+                          !!log.bagliFaturaNo &&
+                          (!prev || prev.bagliFaturaNo !== log.bagliFaturaNo);
                         const showTipHeader =
                           !!log.malzemeTipi &&
-                          (!prev || prev.malzemeTipi !== log.malzemeTipi);
+                          (!prev ||
+                            prev.malzemeTipi !== log.malzemeTipi ||
+                            (historyFilter === 'BİRLEŞTİRİLEN' &&
+                              prev.bagliFaturaNo !== log.bagliFaturaNo));
                         const tipBadgeClass =
                           log.malzemeTipi === 'STABILIZE'
                             ? 'bg-amber-100 text-amber-900'
                             : log.malzemeTipi === 'TAS_TOZU'
                               ? 'bg-stone-200 text-stone-800'
                               : 'bg-emerald-100 text-emerald-800';
+                        const birlesimCount = log.bagliFaturaNo
+                          ? group.items.filter((x) => x.bagliFaturaNo === log.bagliFaturaNo).length
+                          : 0;
+                        const birlesimTon = log.bagliFaturaNo
+                          ? group.items
+                              .filter((x) => x.bagliFaturaNo === log.bagliFaturaNo)
+                              .reduce((s, x) => s + (Number(x.hizmetMiktar) || 0), 0)
+                          : 0;
                         return (
                           <React.Fragment key={`${log.id}-${idx}`}>
-                            {showTipHeader && (
+                            {showBirlesimHeader && (
+                              <div className="pt-2 pb-0.5">
+                                <span className="text-[9px] font-black uppercase tracking-wider px-2 py-0.5 rounded bg-violet-100 text-violet-900 border border-violet-200">
+                                  Birleşim {log.bagliFaturaNo} · {birlesimCount} irsaliye
+                                  {birlesimTon > 0
+                                    ? ` · ${birlesimTon.toLocaleString('tr-TR')} ton`
+                                    : ''}
+                                </span>
+                              </div>
+                            )}
+                            {showTipHeader && historyFilter !== 'BİRLEŞTİRİLEN' && (
                               <div className="pt-1 pb-0.5">
                                 <span
                                   className={`text-[9px] font-black uppercase tracking-wider px-2 py-0.5 rounded ${tipBadgeClass}`}
@@ -2354,7 +2503,11 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
                               </div>
                             )}
                     <div
-                      className="flex gap-3 p-3.5 rounded-xl border border-slate-100 bg-slate-50/80 hover:border-slate-300 transition"
+                      className={`flex gap-3 p-3.5 rounded-xl border transition ${
+                        log.birlestirilmis || log.bagliFaturaNo
+                          ? 'border-violet-200 bg-violet-50/50 hover:border-violet-300'
+                          : 'border-slate-100 bg-slate-50/80 hover:border-slate-300'
+                      }`}
                     >
                       {log.collection === 'irsaliyeler' && (
                         <label className="shrink-0 self-center flex items-center cursor-pointer">
@@ -2368,7 +2521,9 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
                         </label>
                       )}
                       <div className="shrink-0 w-9 h-9 rounded-xl bg-white border border-slate-200 flex items-center justify-center text-slate-600">
-                        {TYPE_ICON[log.type] || <ClipboardList size={14} />}
+                        {TYPE_ICON[log.birlestirilmis ? 'BİRLEŞTİRİLEN' : log.type] || (
+                          <ClipboardList size={14} />
+                        )}
                       </div>
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-center gap-2">
@@ -2382,6 +2537,11 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
                               className={`text-[8px] font-black px-2 py-0.5 rounded uppercase tracking-wider ${tipBadgeClass}`}
                             >
                               {malzemeTipiLabel(log.malzemeTipi)}
+                            </span>
+                          )}
+                          {(log.birlestirilmis || log.bagliFaturaNo) && (
+                            <span className="text-[8px] font-black px-2 py-0.5 rounded uppercase tracking-wider bg-violet-100 text-violet-800">
+                              Birleşim{log.bagliFaturaNo ? `: ${log.bagliFaturaNo}` : ''}
                             </span>
                           )}
                           <span className="text-[10px] font-mono font-bold text-slate-400">

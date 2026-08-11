@@ -470,15 +470,28 @@ export function buildEvrakZincirRaporHtml(input: EvrakZincirRaporInput): string 
   });
 }
 
-export function openEvrakZincirRaporu(input: EvrakZincirRaporInput): Window | null {
-  const html = buildEvrakZincirRaporHtml(input);
-  const title = input.sa ? `Evrak Zinciri — ${input.sa.saId}` : 'Evrak Zinciri';
-  const win = openHtmlReportWindow(html, title);
-  // Antetli Excel (logo + toplam ağırlık + SA + irsaliyeler) — HTML ile birlikte
-  void import('./evrakZincirExcelExport')
-    .then(({ exportEvrakZincirExcel }) => exportEvrakZincirExcel(input))
-    .catch((err) => console.error('Evrak zinciri Excel üretilemedi:', err));
-  return win;
+export function openEvrakZincirRaporu(
+  input: EvrakZincirRaporInput,
+  opts?: { withExcel?: boolean }
+): Window | null {
+  try {
+    const html = buildEvrakZincirRaporHtml(input);
+    const title = input.sa ? `Evrak Zinciri — ${input.sa.saId}` : 'Evrak Zinciri';
+    const win = openHtmlReportWindow(html, title);
+    if (opts?.withExcel !== false) {
+      void import('./evrakZincirExcelExport')
+        .then(({ exportEvrakZincirExcel }) => exportEvrakZincirExcel(input))
+        .catch((err) => {
+          console.error('Evrak zinciri Excel üretilemedi:', err);
+          alert('HTML rapor açıldı; Excel üretilemedi: ' + (err?.message || err));
+        });
+    }
+    return win;
+  } catch (err: any) {
+    console.error(err);
+    alert('Zincir raporu açılamadı: ' + (err?.message || err));
+    return null;
+  }
 }
 
 export async function openEvrakZincirExcel(input: EvrakZincirRaporInput) {
