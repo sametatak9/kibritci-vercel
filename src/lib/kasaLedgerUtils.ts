@@ -235,11 +235,27 @@ export function computeKasaOdemeBazliOzet(
   genelToplam: number;
 } {
   const donemBazAktif = Boolean(opts?.donemBazAktif);
-  const buckets = new Map<string, KasaOdemeBazliOzetSatir>();
+  type Bucket = KasaOdemeBazliOzetSatir & {
+    w: Partial<Record<KasaOdemeDurumu, number>>;
+  };
+  const buckets = new Map<string, Bucket>();
   const totals: Record<KasaOdemeDurumu, number> = {
     BORC: 0,
     PERSONEL_ODEDI: 0,
     KASA_ODEDI: 0,
+  };
+
+  const dominantDurum = (w: Partial<Record<KasaOdemeDurumu, number>>): KasaOdemeDurumu => {
+    let best: KasaOdemeDurumu = 'KASA_ODEDI';
+    let bestV = -1;
+    for (const d of ['KASA_ODEDI', 'PERSONEL_ODEDI', 'BORC'] as const) {
+      const v = w[d] || 0;
+      if (v > bestV) {
+        bestV = v;
+        best = d;
+      }
+    }
+    return best;
   };
 
   const add = (key: string, label: string, durum: KasaOdemeDurumu, tutar: number) => {
@@ -247,8 +263,25 @@ export function computeKasaOdemeBazliOzet(
     if (t <= 0) return;
     totals[durum] = roundKasaMoney(totals[durum] + t);
     const prev = buckets.get(key);
-    if (prev) prev.tutar = roundKasaMoney(prev.tutar + t);
-    else buckets.set(key, { key, label, tutar: t, durum });
+    if (prev) {
+      prev.tutar = roundKasaMoney(prev.tutar + t);
+      prev.w[durum] = roundKasaMoney((prev.w[durum] || 0) + t);
+      prev.durum = dominantDurum(prev.w);
+    } else {
+      buckets.set(key, { key, label, tutar: t, durum, w: { [durum]: t } });
+    }
+  };
+
+  const addKisi = (
+    unvan: { key: string; label: string },
+    durum: KasaOdemeDurumu,
+    tutar: number
+  ) => {
+    if (unvan.label === KASA_ADSIZ_UNVAN && durum === 'KASA_ODEDI') {
+      add('kasa:anon', 'KASA', 'KASA_ODEDI', tutar);
+      return;
+    }
+    add(`kisi:${unvan.key}`, unvan.label, durum, tutar);
   };
 
   if (donemBazAktif) {
@@ -270,24 +303,12 @@ export function computeKasaOdemeBazliOzet(
       { personelId: kh.personelId, personelAdi: kh.personelAdi, surucu: kh.surucu },
       personeller
     );
-
-    if (durum === 'KASA_ODEDI') {
-      const label = unvan.label === KASA_ADSIZ_UNVAN ? 'KASA' : `${unvan.label} · KASA ÖDEDİ`;
-      add(`kasa:${unvan.key}`, label, 'KASA_ODEDI', tutar);
-      continue;
-    }
-    if (durum === 'BORC') {
-      add(`borc:${unvan.key}`, `BORÇ · ${unvan.label}`, 'BORC', tutar);
-      continue;
-    }
-    add(`podedi:${unvan.key}`, `${unvan.label} · PERSONEL ÖDEDİ`, 'PERSONEL_ODEDI', tutar);
+    addKisi(unvan, durum, tutar);
   }
 
-  const satirlar = [...buckets.values()].sort((a, b) => {
-    const order = { BORC: 0, PERSONEL_ODEDI: 1, KASA_ODEDI: 2 };
-    if (order[a.durum] !== order[b.durum]) return order[a.durum] - order[b.durum];
-    return b.tutar - a.tutar || a.label.localeCompare(b.label, 'tr');
-  });
+  const satirlar = [...buckets.values()]
+    .map(({ w: _w, ...row }) => row)
+    .sort((a, b) => b.tutar - a.tutar || a.label.localeCompare(b.label, 'tr'));
 
   const genelToplam =
     opts?.totalOut ??
