@@ -6,10 +6,8 @@ import {
 } from 'lucide-react';
 import { KasaHareketi, KasaOdemeDurumu, Personel, AylikYoklamaMap } from '../types/erp';
 import { ImageLightbox } from './ImageLightbox';
-import { exportKasaExcel, buildKasaExcelBuffer, exportKasaDefterExcel } from '../lib/kasaExcelExport';
-import {
-  exportArnavutkoyKasaDefterExcel,
-} from '../lib/arnavutkoyKasaDefterExport';
+import { exportKasaExcel, buildKasaExcelBuffer } from '../lib/kasaExcelExport';
+import { exportArnavutkoyKasaDefterExcel } from '../lib/arnavutkoyKasaDefterExport';
 import { saveDocument } from '../lib/firebase';
 import {
   ensureKasaFisFotoPersisted,
@@ -1486,70 +1484,32 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
                   if (exportingArnavutDefter) return;
                   setExportingArnavutDefter(true);
                   try {
-                    const end = appliedEndDate.slice(0, 10);
-                    if (end < '2026-08-11') {
-                      const go = window.confirm(
-                        `Mutabakat bakiyesi (kasa alacağı ₺24.982) 11.08.2026 için kilitlidir.\n\n` +
-                          `Şu an bitiş tarihiniz: ${appliedEndDate}\n\n` +
-                          'Tamam = yine de bu aralıkla rapor  |  İptal = vazgeç\n' +
-                          '(11.08.2026 ve sonrası seçilirse SON BAKİYE = ₺24.982 + sonraki hareketler)'
-                      );
-                      if (!go) return;
-                    }
-
-                    // Program kayıtlarından Arnavutköy defter — dönem baz mutabakat zorunlu
-                    await exportKasaDefterExcel(
-                      kasaHareketleri,
-                      appliedStartDate,
-                      appliedEndDate,
-                      personeller,
-                      kasaHareketleri
-                    );
-
-                    const { KASA_DONEM_BAZ } = await import('../lib/kasaLedgerUtils');
-                    const { prepareKasaLedgerExportData } = await import('../lib/kasaLedgerUtils');
-                    const { totals, donemBazAktif } = prepareKasaLedgerExportData(
+                    const result = await exportArnavutkoyKasaDefterExcel(
                       kasaHareketleri,
                       appliedStartDate,
                       appliedEndDate
                     );
                     alert(
                       `Arnavutköy Kasa Defteri indirildi.\n\n` +
-                        `Dönem: ${appliedStartDate} — ${appliedEndDate}\n` +
-                        `Dönem baz: ${donemBazAktif ? 'AÇIK' : 'kapalı'}\n` +
-                        `SON BAKİYE (kasa alacağı): ₺${totals.closing.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}\n` +
-                        (donemBazAktif
-                          ? `\n11.08.2026 mutabakat hedefi: ₺${KASA_DONEM_BAZ.netHedef.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}`
-                          : '')
+                        `Excel son bakiye: ₺${result.excelSonBakiye.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}\n` +
+                        `Excel satır: ${result.excelKalem}\n` +
+                        `Program satır: ${result.erpKalem}\n` +
+                        `SON BAKİYE: ₺${result.sonBakiye.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}\n\n` +
+                        `(Excel ~₺905 üzerine program fişleri işlendi — tablo formüllü)`
                     );
                   } catch (err) {
                     console.error('[arnavut-defter]', err);
-                    try {
-                      // Yedek yol — aynı mutabakat kilidiyle
-                      const result = await exportArnavutkoyKasaDefterExcel(
-                        kasaHareketleri,
-                        appliedStartDate,
-                        appliedEndDate
-                      );
-                      alert(
-                        `Arnavutköy Defter (yedek) indirildi.\n\n` +
-                          `SON BAKİYE: ₺${result.sonBakiye.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}`
-                      );
-                    } catch (err2) {
-                      alert(
-                        'Arnavutköy defter Excel oluşturulamadı:\n' +
-                          (err instanceof Error ? err.message : String(err)) +
-                          '\n' +
-                          (err2 instanceof Error ? err2.message : String(err2))
-                      );
-                    }
+                    alert(
+                      'Arnavutköy defter Excel oluşturulamadı:\n' +
+                        (err instanceof Error ? err.message : String(err))
+                    );
                   } finally {
                     setExportingArnavutDefter(false);
                   }
                 })();
               }}
               className="bg-[#1E4E78] hover:bg-[#163a5c] disabled:opacity-60 disabled:cursor-wait border border-[#163a5c] text-white text-[11px] font-bold py-2 px-4 rounded-xl flex items-center space-x-1.5 transition cursor-pointer shadow-sm"
-              title="11.08.2026 mutabakat: SON BAKİYE = kasa alacağı ₺24.982 (sonraki hareketler eklenir)"
+              title="ARNAVUTKÖY KASA YENİ formatı · Excel bakiyesinden devam · program kayıtları · formüllü BAKİYE · Kibritçi antet/logo"
             >
               <FileText size={12} />
               <span>

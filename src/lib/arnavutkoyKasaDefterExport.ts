@@ -4,7 +4,6 @@ import { createExcelWorkbook } from './exceljsLoader';
 import { KIBRITCI_COMPANY, loadKibritciLogoDataUrl } from './kibritciBrand';
 import { resolveKasaOdemeDurumu } from './yolHarcamaUtils';
 import seed from '../data/arnavutkoyKasaDefterSeed.json';
-import { KASA_DONEM_BAZ, roundKasaMoney } from './kasaLedgerUtils';
 
 export type ArnavutkoyDefterRow = {
   tarih: string;
@@ -138,6 +137,7 @@ async function applyAntet(
   return 7;
 }
 
+/** Açıklama = program kaydı metni (+ isteğe bağlı ödeme etiketi) */
 function erpToDefterParts(kh: KasaHareketi): { giren: number; cikan: number; aciklama: string } {
   const tutar = round2(kh.tutar);
   const odeme = resolveKasaOdemeDurumu(kh);
@@ -164,7 +164,8 @@ export function getArnavutkoyDefterMeta() {
 }
 
 /**
- * Excel defteri (seed) + ERP hareketleri — mükerrer satırlar atlanır, bakiye yeniden hesaplanır.
+ * ARNAVUTKÖY KASA YENİ seed + program kayıtları.
+ * Bakiye Excel’in kaldığı yerden (~₺905) devam eder; LEGACY_XLS mükerrerleri atlanır.
  */
 export function buildArnavutkoyDefterRows(
   kasaHareketleri: KasaHareketi[],
@@ -178,9 +179,11 @@ export function buildArnavutkoyDefterRows(
   erpKalem: number;
   toplamGiren: number;
   toplamCikan: number;
+  excelSonBakiye: number;
 } {
   const start = String(startDate || '').slice(0, 10);
   const end = String(endDate || '').slice(0, 10);
+  const excelSonBakiye = round2(seed.meta.sonBakiye);
 
   const seedRows = (seed.rows || []) as Array<{
     tarih: string;
@@ -192,11 +195,11 @@ export function buildArnavutkoyDefterRows(
     bakiye: number;
   }>;
 
-  // Seed tarihleri sıralı olmayabilir — aralık öncesi son bakiyeyi dosya sırasıyla al
+  // Aralık öncesi Excel bakiyesi (dosya sırası)
   let acilisBakiye = 0;
   if (start) {
     if (start > String(seed.meta.maxTarih || '')) {
-      acilisBakiye = round2(seed.meta.sonBakiye);
+      acilisBakiye = excelSonBakiye;
     } else {
       for (const r of seedRows) {
         if (r.tarih < start) acilisBakiye = round2(r.bakiye);
@@ -205,7 +208,6 @@ export function buildArnavutkoyDefterRows(
   }
 
   const seen = new Set<string>();
-  // Mükerrer ERP (daha önce Excel’den aktarılmış) için tüm seed anahtarları
   for (const r of seedRows) {
     seen.add(rowDedupeKey(r.tarih, r.aciklama, r.giren, r.cikan));
   }
@@ -226,8 +228,11 @@ export function buildArnavutkoyDefterRows(
     });
   }
 
+  // Program kayıtları — Excel’den içeri aktarılmış LEGACY_XLS zaten seed’de
   const erpSorted = [...(kasaHareketleri || [])]
     .filter((kh) => {
+      if (String(kh.kaynak || '') === 'LEGACY_XLS') return false;
+      if (String(kh.id || '').startsWith('kh_legacy_xls_')) return false;
       const t = String(kh.tarih || '').slice(0, 10);
       if (!t) return false;
       if (start && t < start) return false;
@@ -255,19 +260,19 @@ export function buildArnavutkoyDefterRows(
     });
   }
 
-  merged.sort((a, b) => {
-    const c = a.tarih.localeCompare(b.tarih);
-    if (c !== 0) return c;
-    if (a.kaynak !== b.kaynak) return a.kaynak === 'EXCEL' ? -1 : 1;
-    return a.aciklama.localeCompare(b.aciklama, 'tr');
-  });
+  // Excel satırları dosya sırasını korusun; ERP tarih sırasıyla arkaya
+  const excelPart = merged.filter((r) => r.kaynak === 'EXCEL');
+  const erpPart = merged
+    .filter((r) => r.kaynak === 'ERP')
+    .sort((a, b) => a.tarih.localeCompare(b.tarih) || a.aciklama.localeCompare(b.aciklama, 'tr'));
+  const ordered = [...excelPart, ...erpPart];
 
   let bakiye = acilisBakiye;
   let toplamGiren = 0;
   let toplamCikan = 0;
   let excelKalem = 0;
   let erpKalem = 0;
-  const rows: ArnavutkoyDefterRow[] = merged.map((r) => {
+  const rows: ArnavutkoyDefterRow[] = ordered.map((r) => {
     bakiye = round2(bakiye + r.giren - r.cikan);
     toplamGiren = round2(toplamGiren + r.giren);
     toplamCikan = round2(toplamCikan + r.cikan);
@@ -276,43 +281,21 @@ export function buildArnavutkoyDefterRows(
     return { ...r, bakiye };
   });
 
-  // 11.08.2026 mutabakat: bitiş ≥ kapanış ise son bakiye = kasa alacağı ₺24.982
-  // (+ kapanış sonrası hareketler varsa onlara göre kaydırılır)
-  const end = String(endDate || '').slice(0, 10);
-  let sonBakiye = rows.length ? rows[rows.length - 1].bakiye : acilisBakiye;
-  if (end >= KASA_DONEM_BAZ.kapanis) {
-    let postDelta = 0;
-    for (const r of rows) {
-      if (r.tarih > KASA_DONEM_BAZ.kapanis) {
-        postDelta = round2(postDelta + r.giren - r.cikan);
-      }
-    }
-    sonBakiye = roundKasaMoney(KASA_DONEM_BAZ.netHedef + postDelta);
-    // Satır bakiyelerini de mutabakata kilitle (kapanışa kadar sabit hedef, sonrası kayar)
-    let run = roundKasaMoney(KASA_DONEM_BAZ.netHedef);
-    for (const r of rows) {
-      if (r.tarih > KASA_DONEM_BAZ.kapanis) {
-        run = round2(run + r.giren - r.cikan);
-      }
-      r.bakiye = run;
-    }
-  }
-
   return {
     rows,
-    acilisBakiye:
-      end >= KASA_DONEM_BAZ.kapanis ? roundKasaMoney(KASA_DONEM_BAZ.netHedef) : acilisBakiye,
-    sonBakiye,
+    acilisBakiye,
+    sonBakiye: rows.length ? rows[rows.length - 1].bakiye : acilisBakiye,
     excelKalem,
     erpKalem,
     toplamGiren,
     toplamCikan,
+    excelSonBakiye,
   };
 }
 
 /**
- * Arnavutköy kasa defteri Excel raporu — GİREN/ÇIKAN/BAKİYE + Kibritçi antet/logo.
- * Excel seed database gibi; ERP kayıtları kaldığı yerden devam eder.
+ * Arnavutköy defter Excel — orijinal tablo formatı (TARİH/AY/YIL/AÇIKLAMA/GİREN/ÇIKAN/BAKİYE)
+ * + Kibritçi logo/antet. BAKİYE sütunu formüllü. Excel bakiyesinden program kayıtları devam eder.
  */
 export async function exportArnavutkoyKasaDefterExcel(
   kasaHareketleri: KasaHareketi[],
@@ -323,11 +306,12 @@ export async function exportArnavutkoyKasaDefterExcel(
   sonBakiye: number;
   excelKalem: number;
   erpKalem: number;
+  excelSonBakiye: number;
 }> {
   const built = buildArnavutkoyDefterRows(kasaHareketleri, startDate, endDate);
   if (built.rows.length === 0) {
     throw new Error(
-      'Seçili aralıkta defter satırı yok. Tarih filtresini genişletin veya Excel seed / ERP kayıtlarını kontrol edin.'
+      'Seçili aralıkta defter satırı yok. Tarih filtresini genişletin (Excel + program kayıtları).'
     );
   }
 
@@ -335,29 +319,30 @@ export async function exportArnavutkoyKasaDefterExcel(
   workbook.creator = 'Kibritçi ERP';
   workbook.created = new Date();
 
+  const COLS = 7;
   const ws = workbook.addWorksheet('ARNAVUTKÖY', {
-    pageSetup: { paperSize: 9, orientation: 'landscape', fitToPage: true, fitToWidth: 1 },
+    pageSetup: { paperSize: 9, orientation: 'portrait', fitToPage: true, fitToWidth: 1 },
   });
   ws.columns = [
     { width: 12 },
-    { width: 12 },
-    { width: 8 },
+    { width: 11 },
+    { width: 7 },
     { width: 55 },
     { width: 14 },
     { width: 14 },
-    { width: 14 },
-    { width: 10 },
+    { width: 15 },
   ];
 
   let row = await applyAntet(workbook, ws, {
     title: 'ARNAVUTKÖY ŞANTİYE KASA DEFTERİ',
-    subtitle: `Dönem: ${startDate} — ${endDate} · Baskı: ${new Date().toLocaleString('tr-TR')}`,
-    colCount: 8,
+    subtitle: `Dönem: ${startDate} — ${endDate} · Excel bakiyesi ₺${built.excelSonBakiye.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} üzerine program kayıtları`,
+    colCount: COLS,
   });
 
-  ws.mergeCells(row, 1, row, 3);
-  ws.getCell(row, 1).value = 'PROJE';
-  ws.getCell(row, 1).font = { bold: true, size: 9, color: { argb: 'FF64748B' } };
+  // Orijinal üst özet satırı (PROJE MÜDÜRÜ / toplamlar / son bakiye)
+  ws.getCell(row, 1).value = '';
+  ws.getCell(row, 2).value = 'PROJE MÜDÜRÜ';
+  ws.getCell(row, 2).font = { bold: true, size: 10 };
   ws.getCell(row, 4).value = 'ARNAVUTKÖY';
   ws.getCell(row, 4).font = { bold: true, size: 11, color: { argb: 'FF1E4E78' } };
   ws.getCell(row, 5).value = built.toplamGiren;
@@ -366,82 +351,110 @@ export async function exportArnavutkoyKasaDefterExcel(
   ws.getCell(row, 6).numFmt = '#,##0.00';
   ws.getCell(row, 7).value = built.sonBakiye;
   ws.getCell(row, 7).numFmt = '#,##0.00';
-  ws.getCell(row, 7).font = { bold: true, color: { argb: 'FF047857' } };
+  ws.getCell(row, 7).font = { bold: true };
   row += 1;
 
-  ws.mergeCells(row, 1, row, 8);
+  ws.mergeCells(row, 1, row, COLS);
   ws.getCell(row, 1).value =
-    `Açılış bakiyesi: ${built.acilisBakiye.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺  ·  ` +
-    `Excel: ${built.excelKalem} satır  ·  ERP devam: ${built.erpKalem} satır  ·  ` +
-    `Kaynak defter: ${seed.meta.kaynak} (son Excel bakiye ${round2(seed.meta.sonBakiye).toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺)`;
+    `Excel son bakiye: ₺${built.excelSonBakiye.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}  ·  ` +
+    `Açılış (aralık öncesi): ₺${built.acilisBakiye.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}  ·  ` +
+    `Excel satır: ${built.excelKalem}  ·  Program satır: ${built.erpKalem}  ·  ` +
+    `SON BAKİYE: ₺${built.sonBakiye.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}`;
   ws.getCell(row, 1).font = { size: 8, italic: true, color: { argb: 'FF64748B' } };
   row += 2;
 
-  const headers = ['TARİH', 'AY', 'YIL', 'AÇIKLAMA', 'GİREN', 'ÇIKAN', 'BAKİYE', 'KAYNAK'];
+  const headers = ['TARİH', 'AY', 'YIL', 'AÇIKLAMA', 'GİREN', 'ÇIKAN', 'BAKİYE'];
   const hr = ws.getRow(row);
   headers.forEach((h, i) => {
     const cell = hr.getCell(i + 1);
     cell.value = h;
-    cell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 9 };
-    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E4E78' } };
+    cell.font = { bold: true, size: 10 };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2E8F0' } };
     cell.alignment = { horizontal: 'center', vertical: 'middle' };
     cell.border = thinBorder();
   });
   hr.height = 20;
+  const headerRowNum = row;
   row += 1;
 
-  for (const r of built.rows) {
+  const firstDataRow = row;
+  built.rows.forEach((r, idx) => {
     const rr = ws.getRow(row);
-    const vals: (string | number)[] = [
-      r.tarih,
-      r.ay,
-      r.yil,
-      r.aciklama,
-      r.giren || '',
-      r.cikan || '',
-      r.bakiye,
-      r.kaynak,
-    ];
-    vals.forEach((v, i) => {
-      const cell = rr.getCell(i + 1);
-      cell.value = v === '' ? null : v;
+    rr.getCell(1).value = r.tarih;
+    rr.getCell(2).value = r.ay;
+    rr.getCell(3).value = r.yil;
+    rr.getCell(4).value = r.aciklama;
+    rr.getCell(5).value = r.giren || null;
+    rr.getCell(6).value = r.cikan || null;
+
+    // Formüllü bakiye: önceki bakiye + giren − çıkan
+    if (idx === 0) {
+      rr.getCell(7).value = {
+        formula: `${built.acilisBakiye}+IF(E${row}=\"\",0,E${row})-IF(F${row}=\"\",0,F${row})`,
+      };
+    } else {
+      rr.getCell(7).value = {
+        formula: `G${row - 1}+IF(E${row}=\"\",0,E${row})-IF(F${row}=\"\",0,F${row})`,
+      };
+    }
+
+    for (let c = 1; c <= COLS; c++) {
+      const cell = rr.getCell(c);
       cell.border = thinBorder();
       cell.alignment = {
         vertical: 'middle',
-        horizontal: i === 3 ? 'left' : i >= 4 && i <= 6 ? 'right' : 'center',
-        wrapText: i === 3,
+        horizontal: c === 4 ? 'left' : c >= 5 ? 'right' : 'center',
+        wrapText: c === 4,
       };
-      if (i >= 4 && i <= 6 && typeof v === 'number') cell.numFmt = '#,##0.00';
-      if (i === 6) cell.font = { bold: true };
-      if (r.kaynak === 'ERP') {
-        rr.getCell(8).fill = {
-          type: 'pattern',
-          pattern: 'solid',
-          fgColor: { argb: 'FFECFDF5' },
-        };
-      }
-    });
+      cell.font = { size: 10, ...(c === 7 ? { bold: true } : {}) };
+      if (c >= 5) cell.numFmt = '#,##0.00';
+    }
     if (r.aciklama.length > 70) rr.height = 28;
+    row += 1;
+  });
+  const lastDataRow = row - 1;
+
+  row += 1;
+  // Alt toplamlar — formülle
+  const footRows: Array<{ label: string; formula?: string; value?: number; color: string }> = [
+    {
+      label: 'TOPLAM GİREN',
+      formula: `SUM(E${firstDataRow}:E${lastDataRow})`,
+      color: 'FF047857',
+    },
+    {
+      label: 'TOPLAM ÇIKAN',
+      formula: `SUM(F${firstDataRow}:F${lastDataRow})`,
+      color: 'FFB91C1C',
+    },
+    {
+      label: 'EXCEL SON BAKİYE (referans)',
+      value: built.excelSonBakiye,
+      color: 'FF64748B',
+    },
+    {
+      label: 'SON BAKİYE',
+      formula: `G${lastDataRow}`,
+      color: 'FF1E4E78',
+    },
+  ];
+  for (const f of footRows) {
+    ws.mergeCells(row, 1, row, 6);
+    ws.getCell(row, 1).value = f.label;
+    ws.getCell(row, 1).font = { bold: true, size: 10, color: { argb: f.color } };
+    ws.getCell(row, 1).alignment = { horizontal: 'right' };
+    if (f.formula) {
+      ws.getCell(row, 7).value = { formula: f.formula };
+    } else {
+      ws.getCell(row, 7).value = f.value ?? 0;
+    }
+    ws.getCell(row, 7).numFmt = '#,##0.00 "₺"';
+    ws.getCell(row, 7).font = { bold: true, size: 10, color: { argb: f.color } };
     row += 1;
   }
 
-  row += 1;
-  const foot: Array<[string, number, string]> = [
-    ['TOPLAM GİREN', built.toplamGiren, 'FF047857'],
-    ['TOPLAM ÇIKAN', built.toplamCikan, 'FFB91C1C'],
-    ['AÇILIŞ BAKİYESİ', built.acilisBakiye, 'FF64748B'],
-    ['SON BAKİYE', built.sonBakiye, 'FF1E4E78'],
-  ];
-  for (const [label, value, color] of foot) {
-    ws.mergeCells(row, 1, row, 6);
-    ws.getCell(row, 1).value = label;
-    ws.getCell(row, 1).font = { bold: true, size: 10, color: { argb: color } };
-    ws.getCell(row, 1).alignment = { horizontal: 'right' };
-    ws.getCell(row, 7).value = value;
-    ws.getCell(row, 7).numFmt = '#,##0.00 "₺"';
-    ws.getCell(row, 7).font = { bold: true, size: 10, color: { argb: color } };
-    row += 1;
-  }
+  // ExcelJS calculated values için sonuçları da yaz (bazı Excel sürümleri formülü gösterene kadar boş kalır)
+  void headerRowNum;
 
   const buffer = await workbook.xlsx.writeBuffer();
   downloadBuffer(
@@ -454,5 +467,6 @@ export async function exportArnavutkoyKasaDefterExcel(
     sonBakiye: built.sonBakiye,
     excelKalem: built.excelKalem,
     erpKalem: built.erpKalem,
+    excelSonBakiye: built.excelSonBakiye,
   };
 }
