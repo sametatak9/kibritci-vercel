@@ -322,14 +322,30 @@ export function computeKasaOdemeBazliOzet(
   totals: Record<KasaOdemeDurumu, number>;
   genelToplam: number;
 } {
+  const donemBazAktif = Boolean(opts?.donemBazAktif);
   const cikislar = (hareketler || []).filter((k) => k.hareketTipi === 'ÇIKIŞ');
   const satirlar = buildKasaKisiHarcamaRows(cikislar, personeller);
 
-  const totals: Record<KasaOdemeDurumu, number> = {
-    BORC: roundKasaMoney(satirlar.reduce((s, r) => s + r.borc, 0)),
-    PERSONEL_ODEDI: roundKasaMoney(satirlar.reduce((s, r) => s + r.personel, 0)),
-    KASA_ODEDI: roundKasaMoney(satirlar.reduce((s, r) => s + r.kasa, 0)),
-  };
+  const sumFromRows = (rows: KasaKisiHarcamaRow[]) => ({
+    BORC: roundKasaMoney(rows.reduce((s, r) => s + r.borc, 0)),
+    PERSONEL_ODEDI: roundKasaMoney(rows.reduce((s, r) => s + r.personel, 0)),
+    KASA_ODEDI: roundKasaMoney(rows.reduce((s, r) => s + r.kasa, 0)),
+  });
+
+  let totals: Record<KasaOdemeDurumu, number>;
+
+  if (opts?.totalOut != null) {
+    const authoritativeOut = roundKasaMoney(opts.totalOut);
+    const postCikis = donemBazAktif ? filterPostDonemBazHareketleri(cikislar) : cikislar;
+    const postSums = sumFromRows(buildKasaKisiHarcamaRows(postCikis, personeller));
+    totals = {
+      BORC: postSums.BORC,
+      PERSONEL_ODEDI: postSums.PERSONEL_ODEDI,
+      KASA_ODEDI: roundKasaMoney(authoritativeOut - postSums.BORC - postSums.PERSONEL_ODEDI),
+    };
+  } else {
+    totals = sumFromRows(satirlar);
+  }
 
   const genelToplam =
     opts?.totalOut ??
