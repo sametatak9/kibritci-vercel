@@ -14,6 +14,11 @@ export const KASA_REPORT_FORMAT = {
     filePrefix: 'ARNAVUTKOY_KASA_DEFTER',
     accentLabel: 'Kasa Defter',
   },
+  icmalExcel: {
+    badge: 'Haftalık Kasa İcmali — aralık toplamları + defter',
+    filePrefix: 'Haftalik_Kasa_Icmali',
+    accentLabel: 'Kasa İcmali',
+  },
   html: {
     badge: 'HTML RAPORU — Yazdır / PDF / e-posta (Excel için «Kasa Excel» butonu)',
     filePrefix: 'Kibritci_Haftalik_Kasa_HTML',

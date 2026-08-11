@@ -4,9 +4,9 @@ import {
   Calendar, FileText, Search, Eye, Image as ImageIcon, AlertCircle,
   Pencil, Trash2, Mail, Upload, BookOpen,
 } from 'lucide-react';
-import { KasaHareketi, KasaOdemeDurumu, Personel } from '../types/erp';
+import { KasaHareketi, KasaOdemeDurumu, Personel, AylikYoklamaMap } from '../types/erp';
 import { ImageLightbox } from './ImageLightbox';
-import { exportKasaExcel, buildKasaExcelBuffer, exportKasaDefterExcel } from '../lib/kasaExcelExport';
+import { exportKasaExcel, buildKasaExcelBuffer, exportKasaDefterExcel, exportKasaHaftalikIcmalExcel } from '../lib/kasaExcelExport';
 import { saveDocument } from '../lib/firebase';
 import {
   ensureKasaFisFotoPersisted,
@@ -92,6 +92,7 @@ interface KasaScreenProps {
   setKasaHareketleri: React.Dispatch<React.SetStateAction<KasaHareketi[]>>;
   deleteKasaHareketi?: (id: string) => Promise<void>;
   personeller?: Personel[];
+  yoklamalar?: AylikYoklamaMap;
 }
 
 function defaultWeekRange(): { start: string; end: string } {
@@ -109,6 +110,7 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
   setKasaHareketleri,
   deleteKasaHareketi,
   personeller = [],
+  yoklamalar = {},
 }) => {
   const week0 = defaultWeekRange();
   // Exact layout filters matching top of table in the screenshot
@@ -142,6 +144,8 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
   // Weekly Cash Report Print Modal Toggle
   const [exportingKasaExcel, setExportingKasaExcel] = useState(false);
   const [exportingKasaDefter, setExportingKasaDefter] = useState(false);
+  const [exportingKasaIcmal, setExportingKasaIcmal] = useState(false);
+  const [printingGunlukRapor, setPrintingGunlukRapor] = useState(false);
   const [importingKasaDefter, setImportingKasaDefter] = useState(false);
   const [importProgress, setImportProgress] = useState('');
   const kasaDefterImportRef = useRef<HTMLInputElement>(null);
@@ -149,6 +153,31 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
   const [savingKasa, setSavingKasa] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const formPanelRef = useRef<HTMLDivElement>(null);
+
+  const handleGunlukYoklamaKasaRaporu = async () => {
+    if (printingGunlukRapor) return;
+    setPrintingGunlukRapor(true);
+    try {
+      const { buildGunlukYoklamaKasaRaporHtml, openGunlukYoklamaKasaRaporHtml } = await import(
+        '../lib/kasaGunlukRapor'
+      );
+      const today = todayDateKey();
+      const html = buildGunlukYoklamaKasaRaporHtml({
+        personeller,
+        yoklamalar,
+        kasaHareketleri,
+        dateKey: today,
+      });
+      openGunlukYoklamaKasaRaporHtml(html, `Bugünkü Yoklama + Kasa — ${today}`);
+    } catch (err) {
+      console.error('[kasa-gunluk-rapor]', err);
+      alert(
+        'Günlük rapor oluşturulamadı:\n' + (err instanceof Error ? err.message : String(err))
+      );
+    } finally {
+      setPrintingGunlukRapor(false);
+    }
+  };
 
   const buildAralikHarcamaBundle = async () => {
     const {
@@ -186,8 +215,16 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
       } = await import('../lib/kasaDefterImportExport');
 
       const parse = await parseKasaDefterWorkbook(buffer);
-      const previewPlan = buildLegacyKasaHareketleri(parse.rows, kasaHareketleri);
-      const summary = formatKasaDefterImportSummary(parse, previewPlan);
+      const importOpts = { minTarih: '2026-01-01' as string | undefined };
+      const only2026 = window.confirm(
+        `${file.name} dosyası okundu (${parse.rows.length} satır).\n\n` +
+          'Varsayılan: yalnızca 2026 ve sonrası kayıtlar aktarılır (mevcut kayıtlara dokunulmaz).\n\n' +
+          'Tamam = 2026+  |  İptal = tüm yıllar'
+      );
+      if (!only2026) importOpts.minTarih = undefined;
+
+      const previewPlan = buildLegacyKasaHareketleri(parse.rows, kasaHareketleri, importOpts);
+      const summary = formatKasaDefterImportSummary(parse, previewPlan, importOpts);
 
       if (previewPlan.toImport.length === 0) {
         alert(`İçe aktarılacak yeni kayıt yok.\n\n${summary}`);
@@ -202,11 +239,10 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
       if (!ok) return;
 
       setImportProgress(`0 / ${previewPlan.toImport.length}`);
-      const { plan, saved } = await importKasaDefterFromBuffer(
-        buffer,
-        kasaHareketleri,
-        (done, total) => setImportProgress(`${done} / ${total}`)
-      );
+      const { plan, saved } = await importKasaDefterFromBuffer(buffer, kasaHareketleri, {
+        ...importOpts,
+        onProgress: (done, total) => setImportProgress(`${done} / ${total}`),
+      });
 
       if (saved > 0) {
         setKasaHareketleri((prev) => {
@@ -221,8 +257,8 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
 
       alert(
         saved > 0
-          ? `${saved} geçmiş kasa hareketi aktarıldı.\n\n${formatKasaDefterImportSummary(parse, plan)}`
-          : `Yeni kayıt eklenmedi.\n\n${formatKasaDefterImportSummary(parse, plan)}`
+          ? `${saved} geçmiş kasa hareketi aktarıldı.\n\n${formatKasaDefterImportSummary(parse, plan, importOpts)}`
+          : `Yeni kayıt eklenmedi.\n\n${formatKasaDefterImportSummary(parse, plan, importOpts)}`
       );
     } catch (err) {
       console.error('[kasa-defter-import]', err);
@@ -1407,6 +1443,52 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
               <BookOpen size={12} />
               <span>
                 {exportingKasaDefter ? 'Defter hazırlanıyor…' : 'Kasa Defter Excel (Arnavutköy)'}
+              </span>
+            </button>
+            <button
+              type="button"
+              disabled={exportingKasaIcmal}
+              onClick={() => {
+                void (async () => {
+                  if (exportingKasaIcmal) return;
+                  setExportingKasaIcmal(true);
+                  try {
+                    await exportKasaHaftalikIcmalExcel(
+                      hareketlerInRange,
+                      appliedStartDate,
+                      appliedEndDate,
+                      personeller,
+                      kasaHareketleri
+                    );
+                  } catch (err) {
+                    console.error('[kasa-icmal-excel]', err);
+                    alert(
+                      'Haftalık Kasa İcmali oluşturulamadı:\n' +
+                        (err instanceof Error ? err.message : String(err))
+                    );
+                  } finally {
+                    setExportingKasaIcmal(false);
+                  }
+                })();
+              }}
+              className="bg-violet-700 hover:bg-violet-800 disabled:opacity-60 disabled:cursor-wait border border-violet-800 text-white text-[11px] font-bold py-2 px-4 rounded-xl flex items-center space-x-1.5 transition cursor-pointer shadow-sm"
+              title="Seçili aralık — toplam giren/çıkan/bakiye + defter satırları (Haftalık Kasa İcmali)"
+            >
+              <FileText size={12} />
+              <span>
+                {exportingKasaIcmal ? 'İcmal hazırlanıyor…' : 'Haftalık Kasa İcmali Excel'}
+              </span>
+            </button>
+            <button
+              type="button"
+              disabled={printingGunlukRapor}
+              onClick={() => void handleGunlukYoklamaKasaRaporu()}
+              className="bg-sky-700 hover:bg-sky-800 disabled:opacity-60 disabled:cursor-wait border border-sky-800 text-white text-[11px] font-bold py-2 px-4 rounded-xl flex items-center space-x-1.5 transition cursor-pointer shadow-sm"
+              title="Bugünün yoklama listesi + bugünkü kasa giriş/çıkışları — HTML yazdır"
+            >
+              <Calendar size={12} />
+              <span>
+                {printingGunlukRapor ? 'Rapor hazırlanıyor…' : 'Bugünkü Yoklama + Kasa (HTML)'}
               </span>
             </button>
             <button

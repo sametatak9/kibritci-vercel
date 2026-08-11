@@ -1,6 +1,6 @@
-import React, { useMemo } from 'react';
-import { CalendarCheck2, ChevronRight, ClipboardList } from 'lucide-react';
-import type { AylikYoklamaMap, Personel } from '../types/erp';
+import React, { useMemo, useState } from 'react';
+import { CalendarCheck2, ChevronRight, ClipboardList, Printer } from 'lucide-react';
+import type { AylikYoklamaMap, KasaHareketi, Personel } from '../types/erp';
 import { todayDateKey } from '../lib/dateKeyUtils';
 import {
   buildGunlukYoklamaGorevOzeti,
@@ -11,6 +11,7 @@ import {
 type Props = {
   personeller: Personel[];
   yoklamalar: AylikYoklamaMap;
+  kasaHareketleri?: KasaHareketi[];
   onNavigate: (tab: string) => void;
 };
 
@@ -29,8 +30,10 @@ const GRUP_ACCENT: Record<PersonelGorevGrup, string> = {
 export const DashboardGunlukYoklamaGorev: React.FC<Props> = ({
   personeller,
   yoklamalar,
+  kasaHareketleri = [],
   onNavigate,
 }) => {
+  const [printing, setPrinting] = useState(false);
   const today = todayDateKey();
   const todayLabel = useMemo(() => {
     try {
@@ -76,15 +79,47 @@ export const DashboardGunlukYoklamaGorev: React.FC<Props> = ({
             <p className="text-[11px] text-slate-500 mt-1 capitalize">{todayLabel}</p>
           </div>
         </div>
-        <button
-          type="button"
-          onClick={() => onNavigate('yoklama')}
-          className="inline-flex items-center gap-1.5 text-[11px] font-bold text-orange-600 hover:underline cursor-pointer self-start sm:self-auto"
-        >
-          <ClipboardList size={13} />
-          Yoklama ekranı
-          <ChevronRight size={13} />
-        </button>
+        <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
+          <button
+            type="button"
+            disabled={printing}
+            onClick={() => {
+              void (async () => {
+                if (printing) return;
+                setPrinting(true);
+                try {
+                  const { buildGunlukYoklamaKasaRaporHtml, openGunlukYoklamaKasaRaporHtml } =
+                    await import('../lib/kasaGunlukRapor');
+                  const html = buildGunlukYoklamaKasaRaporHtml({
+                    personeller,
+                    yoklamalar,
+                    kasaHareketleri,
+                    dateKey: today,
+                  });
+                  openGunlukYoklamaKasaRaporHtml(html, `Bugünkü Yoklama + Kasa — ${today}`);
+                } catch (err) {
+                  alert(err instanceof Error ? err.message : String(err));
+                } finally {
+                  setPrinting(false);
+                }
+              })();
+            }}
+            className="inline-flex items-center gap-1.5 text-[11px] font-bold text-white bg-sky-700 hover:bg-sky-800 disabled:opacity-60 px-3 py-1.5 rounded-lg cursor-pointer"
+            title="Bugünün yoklama listesi + kasa giriş/çıkış — HTML yazdır"
+          >
+            <Printer size={13} />
+            {printing ? 'Hazırlanıyor…' : 'Yazdır (HTML)'}
+          </button>
+          <button
+            type="button"
+            onClick={() => onNavigate('yoklama')}
+            className="inline-flex items-center gap-1.5 text-[11px] font-bold text-orange-600 hover:underline cursor-pointer"
+          >
+            <ClipboardList size={13} />
+            Yoklama ekranı
+            <ChevronRight size={13} />
+          </button>
+        </div>
       </div>
 
       <div className="mb-3 flex flex-wrap items-center gap-2 text-[10px] font-semibold text-slate-600">

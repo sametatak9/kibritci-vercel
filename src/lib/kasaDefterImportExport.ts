@@ -22,7 +22,13 @@ export interface KasaDefterImportPlan {
   duplicateContent: number;
   skippedMeta: number;
   skippedEmpty: number;
+  skippedDateFilter: number;
   totalParsed: number;
+}
+
+export interface KasaDefterImportOptions {
+  /** Yalnızca bu tarihten itibaren (yyyy-mm-dd). Boş = tüm satırlar */
+  minTarih?: string;
 }
 
 const SKIP_ACIKLAMA =
@@ -206,8 +212,14 @@ export async function parseKasaDefterWorkbook(buffer: ArrayBuffer): Promise<Kasa
  */
 export function buildLegacyKasaHareketleri(
   parsed: ParsedKasaDefterRow[],
-  existing: KasaHareketi[]
+  existing: KasaHareketi[],
+  opts?: KasaDefterImportOptions
 ): KasaDefterImportPlan {
+  const minTarih = String(opts?.minTarih || '').slice(0, 10);
+  const filtered = minTarih
+    ? parsed.filter((row) => String(row.tarih).slice(0, 10) >= minTarih)
+    : parsed;
+  const skippedDateFilter = parsed.length - filtered.length;
   const existingIds = new Set(existing.map((k) => k.id));
   const existingFingerprints = new Set(
     existing.map((k) =>
@@ -225,7 +237,7 @@ export function buildLegacyKasaHareketleri(
   let duplicateContent = 0;
   const seenImportFingerprints = new Set<string>();
 
-  for (const row of parsed) {
+  for (const row of filtered) {
     const id = legacyKasaId(row);
     if (existingIds.has(id)) {
       duplicateIds += 1;
@@ -260,22 +272,29 @@ export function buildLegacyKasaHareketleri(
     duplicateContent,
     skippedMeta: 0,
     skippedEmpty: 0,
+    skippedDateFilter,
     totalParsed: parsed.length,
   };
 }
 
 export function formatKasaDefterImportSummary(
   parse: KasaDefterParseResult,
-  plan: KasaDefterImportPlan
+  plan: KasaDefterImportPlan,
+  opts?: KasaDefterImportOptions
 ): string {
+  const minTarih = String(opts?.minTarih || '').slice(0, 10);
   return [
     `Sayfa: ${parse.sheetName}`,
+    minTarih ? `Tarih filtresi: ${minTarih} ve sonrası` : 'Tarih filtresi: yok (tüm satırlar)',
     `Okunan satır: ${parse.rows.length}`,
+    plan.skippedDateFilter > 0 ? `Tarih filtresiyle atlanan: ${plan.skippedDateFilter}` : '',
     `Atlanan (açılış/devir/boş): ${parse.skippedMeta}`,
     `Yeni aktarılacak: ${plan.toImport.length}`,
     `Zaten kayıtlı (id): ${plan.duplicateIds}`,
     `Zaten kayıtlı (içerik): ${plan.duplicateContent}`,
-  ].join('\n');
+  ]
+    .filter(Boolean)
+    .join('\n');
 }
 
 /**
@@ -284,10 +303,12 @@ export function formatKasaDefterImportSummary(
 export async function importKasaDefterFromBuffer(
   buffer: ArrayBuffer,
   existing: KasaHareketi[],
-  onProgress?: (saved: number, total: number) => void
+  opts?: KasaDefterImportOptions & {
+    onProgress?: (saved: number, total: number) => void;
+  }
 ): Promise<{ plan: KasaDefterImportPlan; parse: KasaDefterParseResult; saved: number }> {
   const parse = await parseKasaDefterWorkbook(buffer);
-  const plan = buildLegacyKasaHareketleri(parse.rows, existing);
+  const plan = buildLegacyKasaHareketleri(parse.rows, existing, opts);
   plan.skippedMeta = parse.skippedMeta;
   plan.skippedEmpty = parse.skippedEmpty;
 
@@ -296,6 +317,6 @@ export async function importKasaDefterFromBuffer(
   }
 
   const { saveDocumentsBatch } = await import('./firebase');
-  const saved = await saveDocumentsBatch('kasaHareketleri', plan.toImport, onProgress);
+  const saved = await saveDocumentsBatch('kasaHareketleri', plan.toImport, opts?.onProgress);
   return { plan, parse, saved };
 }

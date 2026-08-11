@@ -355,6 +355,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
         <DashboardGunlukYoklamaGorev
           personeller={personeller}
           yoklamalar={yoklamalar}
+          kasaHareketleri={kasaHareketleri}
           onNavigate={onNavigate}
         />
 
