@@ -22,6 +22,7 @@ import {
   resolveKasaOdemeDurumu,
 } from '../lib/yolHarcamaUtils';
 import { resolvePersonelUnvan } from '../lib/personelUnvanUtils';
+import { prepareKasaLedgerExportData } from '../lib/kasaLedgerUtils';
 
 type HarcamaKaynagi = 'KASA_HARCAMA' | 'PERSONEL_HARCAMA';
 
@@ -332,14 +333,14 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
     }
   };
 
-  // Filter records in range and search text keyword match
-  const hareketlerInRange = useMemo(
-    () =>
-      kasaHareketleri.filter(
-        (kh) => kh.tarih >= appliedStartDate && kh.tarih <= appliedEndDate
-      ),
+  // Filter records in range and search text keyword match (mükerrer legacy/program kayıtları ayıklanır)
+  const ledgerExport = useMemo(
+    () => prepareKasaLedgerExportData(kasaHareketleri, appliedStartDate, appliedEndDate),
     [kasaHareketleri, appliedStartDate, appliedEndDate]
   );
+
+  const hareketlerInRange = ledgerExport.inRange;
+  const openingBalance = ledgerExport.opening;
 
   const filteredHareketler = useMemo(
     () =>
@@ -731,7 +732,7 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
         {[
           { title: 'Giriş (aralık)', value: `₺${totalIn.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}`, card: 'border-emerald-200 bg-white text-emerald-800', icon: ArrowUpRight, iconBg: 'bg-emerald-50 text-emerald-700' },
           { title: 'Kasa harcaması', value: `₺${kasaHarcamaOut.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}`, card: 'border-[#FED7AA] bg-[#FFF7ED] text-[#9A3412]', icon: Wallet, iconBg: 'bg-[#FFEDD5] text-[#C2410C]', sub: `${cikisKayitSayisi} çıkış · borç + personel + kasa ödedi` },
-          { title: 'Net bakiye', value: `₺${(totalIn - totalOut).toLocaleString('tr-TR', { minimumFractionDigits: 2 })}`, card: 'border-[#FDBA74] bg-white text-[#9A3412] font-bold', icon: Wallet, iconBg: 'bg-[#FFF7ED] text-[#EA580C]' },
+          { title: 'Kapanış bakiyesi', value: `₺${(openingBalance + totalIn - totalOut).toLocaleString('tr-TR', { minimumFractionDigits: 2 })}`, card: 'border-[#FDBA74] bg-white text-[#9A3412] font-bold', icon: Wallet, iconBg: 'bg-[#FFF7ED] text-[#EA580C]', sub: `Devreden: ₺${openingBalance.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} · dönem net: ₺${(totalIn - totalOut).toLocaleString('tr-TR', { minimumFractionDigits: 2 })}` },
         ].map((item, idx) => {
           const Icon = item.icon;
           return (

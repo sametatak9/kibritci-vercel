@@ -562,15 +562,11 @@ function tarihAyYilParts(iso: string): { ay: string; yil: string } {
   return { ay: TR_AY_UPPER[mi], yil: y || '' };
 }
 
-function computeKasaNetBalance(hareketler: KasaHareketi[]): number {
-  let bal = 0;
-  for (const kh of hareketler) {
-    const t = Number(kh.tutar) || 0;
-    if (kh.hareketTipi === 'GİRİŞ') bal += t;
-    else bal -= t;
-  }
-  return bal;
-}
+import {
+  computeKasaNetBalance,
+  computeKasaOpeningBalance,
+  prepareKasaLedgerExportData,
+} from './kasaLedgerUtils';
 
 function applyDefterMoneyCell(cell: {
   numFmt?: string;
@@ -649,7 +645,7 @@ function addHaftalikKasaDefterSheet(
   });
 
   const beforeRange = allHareketler.filter((k) => String(k.tarih) < startDate);
-  let balance = computeKasaNetBalance(beforeRange);
+  let balance = computeKasaOpeningBalance(allHareketler, startDate);
 
   let row = headerRow + 1;
   const carry = sheet.getRow(row);
@@ -754,7 +750,7 @@ function addArnavutkoyKasaDefterSheet(
     else totalOut += t;
   }
   const beforeRange = allHareketler.filter((k) => String(k.tarih) < startDate);
-  let balance = computeKasaNetBalance(beforeRange);
+  let balance = computeKasaOpeningBalance(allHareketler, startDate);
   const closingBalance = balance + totalIn - totalOut;
 
   const meta = sheet.getRow(1);
@@ -853,11 +849,8 @@ export async function buildKasaDefterOnlyExcelBuffer(
   personeller: Array<Pick<Personel, 'id' | 'ad' | 'soyad' | 'eposta' | 'tcNo'>> = [],
   allKasaHareketleri?: KasaHareketi[]
 ): Promise<ArrayBuffer> {
-  const inRange = (kasaHareketleri || []).filter(
-    (k) => k.tarih >= startDate && k.tarih <= endDate
-  );
   const all = allKasaHareketleri ?? kasaHareketleri ?? [];
-  const opening = computeKasaNetBalance(all.filter((k) => String(k.tarih) < startDate));
+  const { inRange, opening } = prepareKasaLedgerExportData(all, startDate, endDate);
 
   if (inRange.length === 0 && opening === 0) {
     throw new Error('Seçili aralıkta dışa aktarılacak kasa hareketi yok. Tarih filtresini kontrol edin.');
@@ -926,8 +919,7 @@ function addHaftalikKasaIcmalSheet(
     if (kh.hareketTipi === 'GİRİŞ') totalIn += t;
     else totalOut += t;
   }
-  const beforeRange = allHareketler.filter((k) => String(k.tarih) < startDate);
-  const opening = computeKasaNetBalance(beforeRange);
+  const opening = computeKasaOpeningBalance(allHareketler, startDate);
   let balance = opening;
   const closing = opening + totalIn - totalOut;
 
@@ -942,7 +934,7 @@ function addHaftalikKasaIcmalSheet(
   meta.height = 22;
   meta.getCell(2).value = 'PROJE MÜDÜRÜ';
   meta.getCell(2).font = { bold: true, size: 10 };
-  meta.getCell(4).value = `Açılış: ${opening.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺`;
+  meta.getCell(4).value = 'DÖNEM TOPLAMLARI';
   meta.getCell(4).font = { bold: true, size: 10 };
   meta.getCell(5).value = totalIn;
   meta.getCell(6).value = totalOut;
@@ -965,7 +957,7 @@ function addHaftalikKasaIcmalSheet(
   let row = headerRow + 1;
   const carry = sheet.getRow(row);
   carry.height = 18;
-  carry.getCell(4).value = 'GEÇEN HAFTADAN DEVREDEN';
+  carry.getCell(4).value = 'DÖNEM BAŞI DEVREDEN BAKİYE';
   carry.getCell(4).font = { bold: true, size: 10 };
   carry.getCell(5).value = 0;
   carry.getCell(6).value = 0;
@@ -1039,11 +1031,8 @@ export async function buildKasaHaftalikIcmalExcelBuffer(
   personeller: Array<Pick<Personel, 'id' | 'ad' | 'soyad' | 'eposta' | 'tcNo'>> = [],
   allKasaHareketleri?: KasaHareketi[]
 ): Promise<ArrayBuffer> {
-  const inRange = (kasaHareketleri || []).filter(
-    (k) => k.tarih >= startDate && k.tarih <= endDate
-  );
   const all = allKasaHareketleri ?? kasaHareketleri ?? [];
-  const opening = computeKasaNetBalance(all.filter((k) => String(k.tarih) < startDate));
+  const { inRange, opening } = prepareKasaLedgerExportData(all, startDate, endDate);
   if (inRange.length === 0 && opening === 0) {
     throw new Error('Seçili aralıkta icmal raporu için kasa hareketi yok.');
   }
@@ -1086,11 +1075,8 @@ export async function buildKasaExcelBuffer(
   personeller: Array<Pick<Personel, 'id' | 'ad' | 'soyad' | 'eposta' | 'tcNo'>> = [],
   allKasaHareketleri?: KasaHareketi[]
 ): Promise<ArrayBuffer> {
-  const inRange = (kasaHareketleri || []).filter(
-    (k) => k.tarih >= startDate && k.tarih <= endDate
-  );
   const all = allKasaHareketleri ?? kasaHareketleri ?? [];
-  const opening = computeKasaNetBalance(all.filter((k) => String(k.tarih) < startDate));
+  const { inRange, opening } = prepareKasaLedgerExportData(all, startDate, endDate);
 
   if (inRange.length === 0 && opening === 0) {
     throw new Error('Seçili aralıkta dışa aktarılacak kasa hareketi yok. Tarih filtresini kontrol edin.');
