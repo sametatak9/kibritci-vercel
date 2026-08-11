@@ -139,15 +139,27 @@ export function downloadReportHtmlFile(html: string, fileName: string): void {
 export function getReportEmailToolbarHtml(options?: {
   subject?: string;
   fileName?: string;
+  /** Açık turuncu Kibritçi tema (varsayılan) */
+  variant?: 'light' | 'dark';
 }): string {
   const subject = (options?.subject || 'Kibritçi Rapor').replace(/"/g, '&quot;');
   const fileName = (options?.fileName || 'Kibritci_Rapor.html').replace(/"/g, '&quot;');
+  const light = (options?.variant || 'light') === 'light';
+  const barBg = light ? '#FFF7ED' : '#0f172a';
+  const barText = light ? '#9A3412' : '#fff';
+  const barBorder = light ? '#FDBA74' : 'transparent';
+  const btnPrint = light ? '#EA580C' : '#334155';
+  const btnEmail = light ? '#047857' : '#10b981';
+  const btnDlBg = light ? '#FFFBF7' : '#1e293b';
+  const btnDlText = light ? '#9A3412' : '#fff';
+  const btnDlBorder = light ? '#FDBA74' : '#475569';
+
   return `
-<div id="kibritci-report-email-bar" class="kibritci-no-print" style="position:sticky;top:0;z-index:9999;display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:flex-end;padding:10px 14px;margin:-8px -8px 16px;background:#0f172a;color:#fff;font-family:system-ui,sans-serif;font-size:12px;border-radius:10px">
-  <span style="margin-right:auto;font-weight:700;letter-spacing:.04em;text-transform:uppercase;opacity:.85">Rapor</span>
-  <button type="button" onclick="window.print()" style="cursor:pointer;background:#334155;color:#fff;border:0;border-radius:8px;padding:8px 12px;font-weight:700">Yazdır / PDF</button>
-  <button type="button" onclick="window.__kibritciEmailFromReportWindow && window.__kibritciEmailFromReportWindow()" style="cursor:pointer;background:#10b981;color:#fff;border:0;border-radius:8px;padding:8px 12px;font-weight:700">E-posta ile Gönder</button>
-  <button type="button" onclick="window.__kibritciDownloadFromReportWindow && window.__kibritciDownloadFromReportWindow()" style="cursor:pointer;background:#1e293b;color:#fff;border:1px solid #475569;border-radius:8px;padding:8px 12px;font-weight:700">HTML İndir</button>
+<div id="kibritci-report-email-bar" class="kibritci-no-print" style="position:sticky;top:0;z-index:9999;display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:flex-end;padding:10px 14px;margin:-8px -8px 16px;background:${barBg};color:${barText};font-family:system-ui,sans-serif;font-size:12px;border-radius:10px;border:1px solid ${barBorder};box-shadow:0 2px 10px rgba(234,88,12,.08)">
+  <span style="margin-right:auto;font-weight:800;letter-spacing:.04em;text-transform:uppercase;opacity:.9">Rapor</span>
+  <button type="button" onclick="window.print()" style="cursor:pointer;background:${btnPrint};color:#fff;border:0;border-radius:8px;padding:8px 12px;font-weight:700">Yazdır / PDF</button>
+  <button type="button" onclick="window.__kibritciEmailFromReportWindow && window.__kibritciEmailFromReportWindow()" style="cursor:pointer;background:${btnEmail};color:#fff;border:0;border-radius:8px;padding:8px 12px;font-weight:700">E-posta ile Gönder</button>
+  <button type="button" onclick="window.__kibritciDownloadFromReportWindow && window.__kibritciDownloadFromReportWindow()" style="cursor:pointer;background:${btnDlBg};color:${btnDlText};border:1px solid ${btnDlBorder};border-radius:8px;padding:8px 12px;font-weight:700">HTML İndir</button>
 </div>
 <style>@media print{.kibritci-no-print,#kibritci-report-email-bar{display:none!important}}</style>
 <script>
@@ -164,6 +176,19 @@ export function getReportEmailToolbarHtml(options?: {
   function fullHtml(){
     return '<!DOCTYPE html>\\n' + document.documentElement.outerHTML;
   }
+  function openEmailComposer(payload){
+    if (typeof window.__kibritciOpenReportEmail === 'function') {
+      window.__kibritciOpenReportEmail(payload);
+      return true;
+    }
+    try {
+      if (window.opener && typeof window.opener.__kibritciOpenReportEmail === 'function') {
+        window.opener.__kibritciOpenReportEmail(payload);
+        return true;
+      }
+    } catch (e) {}
+    return false;
+  }
   window.__kibritciDownloadFromReportWindow = function(){
     try {
       var blob = new Blob([fullHtml()], {type:'text/html;charset=utf-8'});
@@ -175,16 +200,7 @@ export function getReportEmailToolbarHtml(options?: {
   };
   window.__kibritciEmailFromReportWindow = function(){
     var payload = { subject: SUBJECT, body: plainFromDoc(), html: fullHtml(), fileName: FILENAME };
-    try {
-      if (window.opener && typeof window.opener.__kibritciOpenReportEmail === 'function') {
-        window.opener.__kibritciOpenReportEmail(payload);
-        return;
-      }
-    } catch (e) {}
-    if (typeof window.__kibritciOpenReportEmail === 'function') {
-      window.__kibritciOpenReportEmail(payload);
-      return;
-    }
+    if (openEmailComposer(payload)) return;
     var to = prompt('Alıcı e-posta (boş bırakılabilir):', '') || '';
     var body = encodeURIComponent('Sayın Yetkili,\\n\\n' + (payload.body || '') + '\\n\\n---\\nKibritçi ERP');
     window.open('mailto:' + encodeURIComponent(to).replace(/%40/g,'@') + '?subject=' + encodeURIComponent(SUBJECT) + '&body=' + body, '_blank');
@@ -200,7 +216,7 @@ function ensureComposerStyles(): void {
   style.textContent = `
     #kibritci-report-email-overlay{position:fixed;inset:0;z-index:2147483000;background:rgba(15,23,42,.55);display:flex;align-items:center;justify-content:center;padding:16px;font-family:system-ui,sans-serif}
     #kibritci-report-email-card{width:100%;max-width:480px;background:#fff;border-radius:20px;box-shadow:0 25px 50px rgba(0,0,0,.25);overflow:hidden}
-    #kibritci-report-email-card header{padding:14px 18px;background:#0f172a;color:#fff;font-size:13px;font-weight:800;display:flex;justify-content:space-between;align-items:center}
+    #kibritci-report-email-card header{padding:14px 18px;background:#FFF7ED;color:#9A3412;border-bottom:1px solid #FDBA74;font-size:13px;font-weight:800;display:flex;justify-content:space-between;align-items:center}
     #kibritci-report-email-card .body{padding:16px 18px;display:flex;flex-direction:column;gap:10px}
     #kibritci-report-email-card label{font-size:10px;font-weight:800;color:#64748b;text-transform:uppercase;letter-spacing:.04em}
     #kibritci-report-email-card input,#kibritci-report-email-card textarea{width:100%;border:1px solid #e2e8f0;border-radius:10px;padding:10px;font-size:12px;font-weight:600;color:#0f172a;background:#f8fafc}
@@ -257,8 +273,8 @@ export function openReportEmailComposer(payload: ReportEmailPayload): void {
           <textarea id="kibritci-mail-body"></textarea>
         </div>
         <p class="hint">
-          Bilgisayarınızdaki varsayılan posta uygulaması, Gmail veya Outlook açılır.
-          İstediğiniz kişiye gönderebilirsiniz. ${downloadUrlHint}
+          Varsayılan posta, Gmail veya Outlook açılır. HTML rapor «Gönder»e basınca otomatik indirilir — e-postanıza ek dosya olarak ekleyin.
+          ${downloadUrlHint}
         </p>
       </div>
       <div class="actions">
@@ -297,11 +313,17 @@ export function openReportEmailComposer(payload: ReportEmailPayload): void {
         (overlay.querySelector('#kibritci-mail-body') as HTMLTextAreaElement)?.value || body0;
       const provider = act as ReportMailProvider;
       if (provider === 'default' || provider === 'gmail' || provider === 'outlook') {
-        // Bağlantı yoksa yerel HTML indirerek eklemeyi kolaylaştır
         if (payload.html && !payload.downloadUrl) {
           downloadReportHtmlFile(payload.html, fileName);
         }
         openMailCompose(provider, to, subject, body);
+        if (payload.html && !payload.downloadUrl) {
+          setTimeout(() => {
+            alert(
+              'HTML rapor indirildi.\n\nPosta penceresinde indirilen .html dosyasını ek (attachment) olarak ekleyin — böylece alıcı tam raporu görür.'
+            );
+          }, 400);
+        }
         close();
       }
     });
@@ -325,8 +347,21 @@ export function openHtmlReportWindow(html: string, title?: string): Window | nul
     alert('Pop-up engellendi. Tarayıcıda pencere izni verin.');
     return null;
   }
+  const bridge = openReportEmailComposer;
+  try {
+    (w as Window & { __kibritciOpenReportEmail?: typeof openReportEmailComposer }).__kibritciOpenReportEmail =
+      bridge;
+  } catch {
+    /* no-op */
+  }
   w.document.write(html);
   w.document.close();
   if (title) w.document.title = title;
+  try {
+    (w as Window & { __kibritciOpenReportEmail?: typeof openReportEmailComposer }).__kibritciOpenReportEmail =
+      bridge;
+  } catch {
+    /* no-op */
+  }
   return w;
 }

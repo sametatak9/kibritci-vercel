@@ -2,7 +2,7 @@ import React, { useMemo, useState, useRef } from 'react';
 import { 
   Wallet, ArrowUpRight, ArrowDownRight, Printer,
   Calendar, FileText, Search, Eye, Image as ImageIcon, AlertCircle,
-  Pencil, Trash2,
+  Pencil, Trash2, Mail,
 } from 'lucide-react';
 import { KasaHareketi, KasaOdemeDurumu, Personel } from '../types/erp';
 import { ImageLightbox } from './ImageLightbox';
@@ -172,6 +172,19 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
     const bundle = await buildAralikHarcamaBundle();
     if (!bundle) return;
     openSoforMasrafIadeReport(bundle.html, 'Kasa Harcama Raporu');
+  };
+
+  const handleAralikHarcamaEmail = async () => {
+    const { emailKasaHarcamaAralikReport } = await import('../lib/yolHarcamaUtils');
+    const bundle = await buildAralikHarcamaBundle();
+    if (!bundle) return;
+    emailKasaHarcamaAralikReport({
+      html: bundle.html,
+      startDate: bundle.start,
+      endDate: bundle.end,
+      toplam: bundle.toplam,
+      items: bundle.rows,
+    });
   };
 
   // Filter records in range and search text keyword match
@@ -1224,6 +1237,15 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
 
           {/* Raporlar — yalnızca HTML + Excel */}
           <div className="p-3 border-t border-[#FED7AA] bg-[#FFF7ED]/80 flex flex-wrap justify-end gap-2 shrink-0 select-none">
+            <button
+              type="button"
+              onClick={() => void handleAralikHarcamaEmail()}
+              className="bg-[#047857] hover:bg-[#065f46] border border-[#065f46] text-white text-[11px] font-bold py-2 px-4 rounded-xl flex items-center space-x-1.5 transition cursor-pointer shadow-sm"
+              title="HTML raporu e-posta ile gönder (ek dosya otomatik indirilir)"
+            >
+              <Mail size={12} />
+              <span>E-posta ile Gönder</span>
+            </button>
             <button
               type="button"
               onClick={() => void handleAralikHarcamaRaporu()}
