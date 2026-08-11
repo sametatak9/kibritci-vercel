@@ -90,19 +90,30 @@ export function computeKasaOpeningBalance(
   return computeKasaNetBalance(before);
 }
 
+export interface KasaLedgerExportOptions {
+  /**
+   * true (varsayılan): yalnızca seçili tarih aralığı — açılış bakiyesi 0.
+   * false: dönem öncesi tüm geçmiş devreden bakiyeye dahil.
+   */
+  periodOnly?: boolean;
+}
+
 export function prepareKasaLedgerExportData(
   allHareketler: KasaHareketi[],
   startDate: string,
-  endDate: string
+  endDate: string,
+  opts?: KasaLedgerExportOptions
 ): {
   dedupedAll: KasaHareketi[];
   inRange: KasaHareketi[];
   opening: number;
+  periodOnly: boolean;
 } {
+  const periodOnly = opts?.periodOnly !== false;
   const dedupedAll = dedupeKasaHareketleriForLedger(allHareketler);
   const inRange = dedupedAll.filter((k) => k.tarih >= startDate && k.tarih <= endDate);
-  const opening = computeKasaNetBalance(
-    dedupedAll.filter((k) => String(k.tarih) < startDate)
-  );
-  return { dedupedAll, inRange, opening };
+  const opening = periodOnly
+    ? 0
+    : computeKasaNetBalance(dedupedAll.filter((k) => String(k.tarih) < startDate));
+  return { dedupedAll, inRange, opening, periodOnly };
 }

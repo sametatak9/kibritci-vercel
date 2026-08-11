@@ -340,7 +340,6 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
   );
 
   const hareketlerInRange = ledgerExport.inRange;
-  const openingBalance = ledgerExport.opening;
 
   const filteredHareketler = useMemo(
     () =>
@@ -375,6 +374,8 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
       .filter((k) => k.hareketTipi === 'ÇIKIŞ')
       .reduce((sum, current) => sum + roundKasaMoney(current.tutar), 0)
   );
+
+  const periodNet = roundKasaMoney(totalIn - totalOut);
 
   /** Tüm kasa çıkışları — tek “Kasa Harcaması” kartı (BORÇ + Personel + Kasa ödedi) */
   const kasaHarcamaOut = totalOut;
@@ -736,7 +737,7 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
         {[
           { title: 'Giriş (aralık)', value: `₺${totalIn.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}`, card: 'border-emerald-200 bg-white text-emerald-800', icon: ArrowUpRight, iconBg: 'bg-emerald-50 text-emerald-700' },
           { title: 'Kasa harcaması', value: `₺${kasaHarcamaOut.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}`, card: 'border-[#FED7AA] bg-[#FFF7ED] text-[#9A3412]', icon: Wallet, iconBg: 'bg-[#FFEDD5] text-[#C2410C]', sub: `${cikisKayitSayisi} çıkış · borç + personel + kasa ödedi` },
-          { title: 'Kapanış bakiyesi', value: `₺${(openingBalance + totalIn - totalOut).toLocaleString('tr-TR', { minimumFractionDigits: 2 })}`, card: 'border-[#FDBA74] bg-white text-[#9A3412] font-bold', icon: Wallet, iconBg: 'bg-[#FFF7ED] text-[#EA580C]', sub: `Devreden: ₺${openingBalance.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} · dönem net: ₺${(totalIn - totalOut).toLocaleString('tr-TR', { minimumFractionDigits: 2 })}` },
+          { title: 'Dönem net', value: `₺${periodNet.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}`, card: 'border-[#FDBA74] bg-white text-[#9A3412] font-bold', icon: Wallet, iconBg: 'bg-[#FFF7ED] text-[#EA580C]', sub: `Giren − çıkan · ${appliedStartDate} — ${appliedEndDate}` },
         ].map((item, idx) => {
           const Icon = item.icon;
           return (

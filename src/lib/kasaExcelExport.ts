@@ -11,7 +11,6 @@ import {
 } from './kasaReportTheme';
 import {
   computeKasaNetBalance,
-  computeKasaOpeningBalance,
   prepareKasaLedgerExportData,
   roundKasaMoney,
 } from './kasaLedgerUtils';
@@ -616,7 +615,7 @@ function addHaftalikKasaDefterSheet(
   inRange: KasaHareketi[],
   startDate: string,
   endDate: string,
-  allHareketler: KasaHareketi[],
+  openingBalance: number,
   personeller: Array<Pick<Personel, 'id' | 'ad' | 'soyad' | 'eposta' | 'tcNo'>>
 ): void {
   const COLS = 7;
@@ -655,13 +654,13 @@ function addHaftalikKasaDefterSheet(
     cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2E8F0' } };
   });
 
-  const beforeRange = allHareketler.filter((k) => String(k.tarih) < startDate);
-  let balance = computeKasaOpeningBalance(allHareketler, startDate);
+  let balance = openingBalance;
 
   let row = headerRow + 1;
   const carry = sheet.getRow(row);
   carry.height = 18;
-  carry.getCell(4).value = 'GEÇEN HAFTADAN DEVREDEN';
+  carry.getCell(4).value =
+    openingBalance === 0 ? 'DÖNEM BAŞI BAKİYE (0)' : 'GEÇEN HAFTADAN DEVREDEN';
   carry.getCell(4).font = { bold: true, size: 10 };
   carry.getCell(4).alignment = { vertical: 'middle', wrapText: true };
   setDefterMoneyValue(carry.getCell(5), 0);
@@ -733,7 +732,7 @@ function addArnavutkoyKasaDefterSheet(
   inRange: KasaHareketi[],
   startDate: string,
   endDate: string,
-  allHareketler: KasaHareketi[],
+  openingBalance: number,
   personeller: Array<Pick<Personel, 'id' | 'ad' | 'soyad' | 'eposta' | 'tcNo'>>
 ): void {
   const COLS = 7;
@@ -760,8 +759,7 @@ function addArnavutkoyKasaDefterSheet(
   }
   totalIn = roundKasaMoney(totalIn);
   totalOut = roundKasaMoney(totalOut);
-  const beforeRange = allHareketler.filter((k) => String(k.tarih) < startDate);
-  let balance = computeKasaOpeningBalance(allHareketler, startDate);
+  let balance = openingBalance;
   const closingBalance = roundKasaMoney(balance + totalIn - totalOut);
 
   const meta = sheet.getRow(1);
@@ -788,7 +786,8 @@ function addArnavutkoyKasaDefterSheet(
   let row = headerRow + 1;
   const carry = sheet.getRow(row);
   carry.height = 18;
-  carry.getCell(4).value = 'GEÇEN HAFTADAN DEVREDEN';
+  carry.getCell(4).value =
+    openingBalance === 0 ? 'DÖNEM BAŞI BAKİYE (0)' : 'GEÇEN HAFTADAN DEVREDEN';
   carry.getCell(4).font = { bold: true, size: 10 };
   carry.getCell(4).alignment = { vertical: 'middle', wrapText: true };
   setDefterMoneyValue(carry.getCell(5), 0);
@@ -867,7 +866,7 @@ export async function buildKasaDefterOnlyExcelBuffer(
   const workbook = await createExcelWorkbook();
   workbook.creator = 'Kibritçi ERP';
   workbook.created = new Date();
-  addArnavutkoyKasaDefterSheet(workbook, inRange, startDate, endDate, all, personeller);
+  addArnavutkoyKasaDefterSheet(workbook, inRange, startDate, endDate, opening, personeller);
   return (await workbook.xlsx.writeBuffer()) as ArrayBuffer;
 }
 
@@ -902,7 +901,7 @@ function addHaftalikKasaIcmalSheet(
   inRange: KasaHareketi[],
   startDate: string,
   endDate: string,
-  allHareketler: KasaHareketi[],
+  openingBalance: number,
   personeller: Array<Pick<Personel, 'id' | 'ad' | 'soyad' | 'eposta' | 'tcNo'>>
 ): void {
   const COLS = 7;
@@ -929,7 +928,7 @@ function addHaftalikKasaIcmalSheet(
   }
   totalIn = roundKasaMoney(totalIn);
   totalOut = roundKasaMoney(totalOut);
-  const opening = computeKasaOpeningBalance(allHareketler, startDate);
+  const opening = openingBalance;
   let balance = opening;
   const closing = roundKasaMoney(opening + totalIn - totalOut);
 
@@ -966,7 +965,8 @@ function addHaftalikKasaIcmalSheet(
   let row = headerRow + 1;
   const carry = sheet.getRow(row);
   carry.height = 18;
-  carry.getCell(4).value = 'DÖNEM BAŞI DEVREDEN BAKİYE';
+  carry.getCell(4).value =
+    openingBalance === 0 ? 'DÖNEM BAŞI BAKİYE (0)' : 'DÖNEM BAŞI DEVREDEN BAKİYE';
   carry.getCell(4).font = { bold: true, size: 10 };
   setDefterMoneyValue(carry.getCell(5), 0);
   setDefterMoneyValue(carry.getCell(6), 0);
@@ -1045,7 +1045,7 @@ export async function buildKasaHaftalikIcmalExcelBuffer(
   const workbook = await createExcelWorkbook();
   workbook.creator = 'Kibritçi ERP';
   workbook.created = new Date();
-  addHaftalikKasaIcmalSheet(workbook, inRange, startDate, endDate, all, personeller);
+  addHaftalikKasaIcmalSheet(workbook, inRange, startDate, endDate, opening, personeller);
   return (await workbook.xlsx.writeBuffer()) as ArrayBuffer;
 }
 
@@ -1092,7 +1092,7 @@ export async function buildKasaExcelBuffer(
   workbook.creator = 'Kibritçi ERP';
   workbook.created = new Date();
 
-  addHaftalikKasaDefterSheet(workbook, inRange, startDate, endDate, all, personeller);
+  addHaftalikKasaDefterSheet(workbook, inRange, startDate, endDate, opening, personeller);
 
   const cikislar = inRange.filter((k) => k.hareketTipi === 'ÇIKIŞ');
   const girisler = inRange.filter((k) => k.hareketTipi === 'GİRİŞ');
