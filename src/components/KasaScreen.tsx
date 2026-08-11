@@ -186,10 +186,13 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
       let excelBuffer: ArrayBuffer | null = null;
       try {
         excelBuffer = await buildKasaExcelBuffer(
-          bundle.rows,
+          hareketlerInRange.filter(
+            (kh) => kh.tarih >= bundle.start && kh.tarih <= bundle.end
+          ),
           bundle.start,
           bundle.end,
-          personeller
+          personeller,
+          kasaHareketleri
         );
       } catch (err) {
         console.warn('[kasa-email-excel]', err);
@@ -204,7 +207,15 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
         excelFileName: `${KASA_REPORT_FORMAT.excel.filePrefix}_${bundle.start}_${bundle.end}.xlsx`,
         downloadExcel: excelBuffer
           ? () =>
-              exportKasaExcel(bundle.rows, bundle.start, bundle.end, personeller)
+              exportKasaExcel(
+                hareketlerInRange.filter(
+                  (kh) => kh.tarih >= bundle.start && kh.tarih <= bundle.end
+                ),
+                bundle.start,
+                bundle.end,
+                personeller,
+                kasaHareketleri
+              )
           : undefined,
       });
     } catch (err) {
@@ -218,12 +229,17 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
   };
 
   // Filter records in range and search text keyword match
+  const hareketlerInRange = useMemo(
+    () =>
+      kasaHareketleri.filter(
+        (kh) => kh.tarih >= appliedStartDate && kh.tarih <= appliedEndDate
+      ),
+    [kasaHareketleri, appliedStartDate, appliedEndDate]
+  );
+
   const filteredHareketler = useMemo(
     () =>
-      kasaHareketleri.filter((kh) => {
-        const isWithinDate = kh.tarih >= appliedStartDate && kh.tarih <= appliedEndDate;
-        if (!isWithinDate) return false;
-
+      hareketlerInRange.filter((kh) => {
         if (searchKeyword.trim()) {
           const kw = searchKeyword.toLowerCase();
           const matchDesc = kh.aciklama.toLowerCase().includes(kw);
@@ -239,7 +255,7 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
         }
         return true;
       }),
-    [kasaHareketleri, appliedStartDate, appliedEndDate, searchKeyword]
+    [hareketlerInRange, searchKeyword]
   );
 
   // KPI: seçili aralık (filtre) üzerinden — şoför onaylı çıkışlar eksi bakiyeye yansır
@@ -1295,10 +1311,11 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
                   setExportingKasaExcel(true);
                   try {
                     await exportKasaExcel(
-                      filteredHareketler,
+                      hareketlerInRange,
                       appliedStartDate,
                       appliedEndDate,
-                      personeller
+                      personeller,
+                      kasaHareketleri
                     );
                   } catch (err) {
                     console.error('[kasa-excel]', err);
@@ -1312,7 +1329,7 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
                 })();
               }}
               className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 disabled:cursor-wait border border-emerald-700 text-white text-[11px] font-bold py-2 px-4 rounded-xl flex items-center space-x-1.5 transition cursor-pointer shadow-sm"
-              title="Kibritçi antetli Excel — özet + kalem + 2'li evrak sayfası"
+              title="Excel — 1. sayfa sade defter (Giren/Çıkan/Bakiye) + özet + fiş evrakları"
             >
               <FileText size={12} />
               <span>{exportingKasaExcel ? 'Excel hazırlanıyor…' : 'Kasa Excel'}</span>

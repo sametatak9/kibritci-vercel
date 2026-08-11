@@ -532,6 +532,196 @@ function groupByPersonel(
   return [...map.values()].sort((a, b) => b.toplam - a.toplam);
 }
 
+const TR_AY_UPPER = [
+  'OCAK',
+  'ŞUBAT',
+  'MART',
+  'NİSAN',
+  'MAYIS',
+  'HAZİRAN',
+  'TEMMUZ',
+  'AĞUSTOS',
+  'EYLÜL',
+  'EKİM',
+  'KASIM',
+  'ARALIK',
+] as const;
+
+const DEFTER_GIRIS_FILL = 'FFC6EFCE';
+const DEFTER_NUM_FMT = '#.##0,00';
+
+function formatTarihDdMmYyyy(iso: string): string {
+  const [y, m, d] = String(iso || '').slice(0, 10).split('-');
+  if (!y || !m || !d) return String(iso || '');
+  return `${d.padStart(2, '0')}.${m.padStart(2, '0')}.${y}`;
+}
+
+function tarihAyYilParts(iso: string): { ay: string; yil: string } {
+  const [, m, y] = String(iso || '').slice(0, 10).split('-');
+  const mi = Math.max(0, Math.min(11, (Number(m) || 1) - 1));
+  return { ay: TR_AY_UPPER[mi], yil: y || '' };
+}
+
+function computeKasaNetBalance(hareketler: KasaHareketi[]): number {
+  let bal = 0;
+  for (const kh of hareketler) {
+    const t = Number(kh.tutar) || 0;
+    if (kh.hareketTipi === 'GİRİŞ') bal += t;
+    else bal -= t;
+  }
+  return bal;
+}
+
+function applyDefterMoneyCell(cell: {
+  numFmt?: string;
+  alignment?: unknown;
+}): void {
+  cell.numFmt = DEFTER_NUM_FMT;
+  cell.alignment = { horizontal: 'right', vertical: 'middle' };
+}
+
+function buildDefterAciklama(
+  kh: KasaHareketi,
+  personeller: Array<Pick<Personel, 'id' | 'ad' | 'soyad' | 'eposta' | 'tcNo'>>
+): string {
+  const raw = String(kh.aciklama || '').trim();
+  if (raw) return raw.toLocaleUpperCase('tr-TR');
+
+  const unvan = resolvePersonelUnvan(
+    { personelId: kh.personelId, personelAdi: kh.personelAdi, surucu: kh.surucu },
+    personeller
+  );
+  if (kh.hareketTipi === 'GİRİŞ') {
+    if (unvan.label !== KASA_ADSIZ_UNVAN) {
+      return `${unvan.label} TARAFINDAN YAPILAN GİRİŞ`;
+    }
+    return 'KASA GİRİŞİ';
+  }
+  if (unvan.label !== KASA_ADSIZ_UNVAN) {
+    return `${unvan.label} — KASA ÇIKIŞI`;
+  }
+  return 'ADSIZ KASA HARCAMASI';
+}
+
+/** Sade kayıt defteri — Tarih · Ay · Yıl · Açıklama · Giren · Çıkan · Bakiye */
+function addHaftalikKasaDefterSheet(
+  workbook: Workbook,
+  inRange: KasaHareketi[],
+  startDate: string,
+  endDate: string,
+  allHareketler: KasaHareketi[],
+  personeller: Array<Pick<Personel, 'id' | 'ad' | 'soyad' | 'eposta' | 'tcNo'>>
+): void {
+  const COLS = 7;
+  const sheet = workbook.addWorksheet('Haftalik Defter', {
+    pageSetup: { paperSize: 9, orientation: 'portrait', fitToPage: true, fitToWidth: 1 },
+    views: [{ showGridLines: true }],
+  });
+  sheet.columns = [
+    { width: 12 },
+    { width: 11 },
+    { width: 7 },
+    { width: 52 },
+    { width: 14 },
+    { width: 14 },
+    { width: 15 },
+  ];
+
+  const title = `ARNAVUTKÖY HAFTALIK KASA HARCAMASI ${formatTarihDdMmYyyy(endDate)}`;
+  sheet.mergeCells(1, 1, 1, COLS);
+  const titleCell = sheet.getCell(1, 1);
+  titleCell.value = title;
+  titleCell.font = { bold: true, size: 12 };
+  titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
+  sheet.getRow(1).height = 24;
+
+  const headerRow = 3;
+  const headers = ['TARİH', 'AY', 'YIL', 'AÇIKLAMA', 'GİREN', 'ÇIKAN', 'BAKİYE'];
+  const hr = sheet.getRow(headerRow);
+  hr.height = 20;
+  headers.forEach((h, i) => {
+    const cell = hr.getCell(i + 1);
+    cell.value = h;
+    cell.font = { bold: true, size: 10 };
+    cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+    cell.border = thinBorder();
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2E8F0' } };
+  });
+
+  const beforeRange = allHareketler.filter((k) => String(k.tarih) < startDate);
+  let balance = computeKasaNetBalance(beforeRange);
+
+  let row = headerRow + 1;
+  const carry = sheet.getRow(row);
+  carry.height = 18;
+  carry.getCell(4).value = 'GEÇEN HAFTADAN DEVREDEN';
+  carry.getCell(4).font = { bold: true, size: 10 };
+  carry.getCell(4).alignment = { vertical: 'middle', wrapText: true };
+  carry.getCell(5).value = 0;
+  carry.getCell(6).value = 0;
+  carry.getCell(7).value = balance;
+  for (let c = 1; c <= COLS; c++) {
+    const cell = carry.getCell(c);
+    cell.border = thinBorder();
+    cell.font = { size: 10, ...(c === 4 ? { bold: true } : {}) };
+    if (c >= 5) applyDefterMoneyCell(cell);
+  }
+  row += 1;
+
+  const sorted = [...inRange].sort((a, b) => {
+    const dc = String(a.tarih).localeCompare(String(b.tarih));
+    if (dc !== 0) return dc;
+    if (a.hareketTipi !== b.hareketTipi) {
+      return a.hareketTipi === 'GİRİŞ' ? -1 : 1;
+    }
+    return String(a.id).localeCompare(String(b.id));
+  });
+
+  for (const kh of sorted) {
+    const t = Number(kh.tutar) || 0;
+    const isGiris = kh.hareketTipi === 'GİRİŞ';
+    const { ay, yil } = tarihAyYilParts(kh.tarih);
+    const r = sheet.getRow(row);
+    r.height = 18;
+
+    r.getCell(1).value = formatTarihDdMmYyyy(kh.tarih);
+    r.getCell(1).alignment = { horizontal: 'center', vertical: 'middle' };
+    r.getCell(2).value = ay;
+    r.getCell(2).alignment = { horizontal: 'center', vertical: 'middle' };
+    r.getCell(3).value = yil;
+    r.getCell(3).alignment = { horizontal: 'center', vertical: 'middle' };
+    r.getCell(4).value = buildDefterAciklama(kh, personeller);
+    r.getCell(4).alignment = { vertical: 'middle', wrapText: true };
+    r.getCell(5).value = isGiris ? t : 0;
+    r.getCell(6).value = isGiris ? 0 : t;
+    if (isGiris) balance += t;
+    else balance -= t;
+    r.getCell(7).value = balance;
+
+    for (let c = 1; c <= COLS; c++) {
+      const cell = r.getCell(c);
+      cell.border = thinBorder();
+      cell.font = { size: 10 };
+      if (c >= 5) applyDefterMoneyCell(cell);
+      if (isGiris) {
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: DEFTER_GIRIS_FILL } };
+      }
+    }
+    row += 1;
+  }
+
+  for (let i = 0; i < 10; i++) {
+    const r = sheet.getRow(row);
+    r.height = 18;
+    for (let c = 1; c <= COLS; c++) {
+      r.getCell(c).border = thinBorder();
+    }
+    row += 1;
+  }
+
+  sheet.pageSetup.printArea = `A1:G${row - 1}`;
+}
+
 /**
  * Haftalık Kasa Excel — Kibritçi antetli, kişi bazlı masraf özeti + kalem kalem + fiş fotoğrafları.
  * @returns xlsx binary buffer (e-posta paylaşımı / indirme için)
@@ -540,9 +730,16 @@ export async function buildKasaExcelBuffer(
   kasaHareketleri: KasaHareketi[],
   startDate: string,
   endDate: string,
-  personeller: Array<Pick<Personel, 'id' | 'ad' | 'soyad' | 'eposta' | 'tcNo'>> = []
+  personeller: Array<Pick<Personel, 'id' | 'ad' | 'soyad' | 'eposta' | 'tcNo'>> = [],
+  allKasaHareketleri?: KasaHareketi[]
 ): Promise<ArrayBuffer> {
-  if (!Array.isArray(kasaHareketleri) || kasaHareketleri.length === 0) {
+  const inRange = (kasaHareketleri || []).filter(
+    (k) => k.tarih >= startDate && k.tarih <= endDate
+  );
+  const all = allKasaHareketleri ?? kasaHareketleri ?? [];
+  const opening = computeKasaNetBalance(all.filter((k) => String(k.tarih) < startDate));
+
+  if (inRange.length === 0 && opening === 0) {
     throw new Error('Seçili aralıkta dışa aktarılacak kasa hareketi yok. Tarih filtresini kontrol edin.');
   }
 
@@ -550,8 +747,10 @@ export async function buildKasaExcelBuffer(
   workbook.creator = 'Kibritçi ERP';
   workbook.created = new Date();
 
-  const cikislar = kasaHareketleri.filter((k) => k.hareketTipi === 'ÇIKIŞ');
-  const girisler = kasaHareketleri.filter((k) => k.hareketTipi === 'GİRİŞ');
+  addHaftalikKasaDefterSheet(workbook, inRange, startDate, endDate, all, personeller);
+
+  const cikislar = inRange.filter((k) => k.hareketTipi === 'ÇIKIŞ');
+  const girisler = inRange.filter((k) => k.hareketTipi === 'GİRİŞ');
   const buckets = groupByPersonel(cikislar, personeller);
 
   // Fiş URL’leri — yalnızca hazır https (Storage upload export’u kilitlemesin)
@@ -569,7 +768,7 @@ export async function buildKasaExcelBuffer(
   let borc = 0;
   let personelOdedi = 0;
   let kasaOdedi = 0;
-  for (const kh of kasaHareketleri) {
+  for (const kh of inRange) {
     const t = Number(kh.tutar) || 0;
     if (kh.hareketTipi === 'GİRİŞ') totalIn += t;
     else {
@@ -940,9 +1139,16 @@ export async function exportKasaExcel(
   kasaHareketleri: KasaHareketi[],
   startDate: string,
   endDate: string,
-  personeller: Array<Pick<Personel, 'id' | 'ad' | 'soyad' | 'eposta' | 'tcNo'>> = []
+  personeller: Array<Pick<Personel, 'id' | 'ad' | 'soyad' | 'eposta' | 'tcNo'>> = [],
+  allKasaHareketleri?: KasaHareketi[]
 ): Promise<void> {
-  const buffer = await buildKasaExcelBuffer(kasaHareketleri, startDate, endDate, personeller);
+  const buffer = await buildKasaExcelBuffer(
+    kasaHareketleri,
+    startDate,
+    endDate,
+    personeller,
+    allKasaHareketleri
+  );
   downloadBuffer(
     buffer,
     `${KASA_REPORT_FORMAT.excel.filePrefix}_${startDate}_${endDate}.xlsx`

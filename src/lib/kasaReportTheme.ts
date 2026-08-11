@@ -5,7 +5,7 @@ import type { KibritciReportAssets } from './kibritciBrand';
 /** Haftalık Kasa raporları — Excel ve HTML karışmasın diye ayrı format etiketleri */
 export const KASA_REPORT_FORMAT = {
   excel: {
-    badge: 'EXCEL RAPORU — Haftalık Kasa (1: özet+imza+kalem · 2: fiş foto)',
+    badge: 'EXCEL RAPORU — 1: Defter · 2: özet+kalem · 3: fiş foto',
     filePrefix: 'Kibritci_Haftalik_Kasa_EXCEL',
     accentLabel: 'Excel',
   },
