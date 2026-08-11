@@ -493,39 +493,49 @@ export async function exportArnavutkoyKasaDefterExcel(
     const raw = trimmed[r];
     const rowNum = r + 1;
     const giren = cellToNumber(raw[4]);
-    const cikan = cellToNumber(raw[5]);
+    const isGirenRow = r >= 2 && giren > 0;
 
     let fillArgb = XLS_WHITE;
     if (r === 0) fillArgb = XLS_RED;
     else if (r === 1) fillArgb = XLS_CYAN;
-    else if (giren > 0) fillArgb = XLS_GREEN;
+    else if (isGirenRow) fillArgb = XLS_GREEN;
 
-    const isTop = r === 0;
-    const isColHeader = r === 1;
     const fill = solidFill(fillArgb);
 
     for (let c = 0; c < 7; c++) {
       const cell = excelWs.getCell(rowNum, c + 1);
-      let val: unknown = raw[c];
+      const val: unknown = raw[c];
       if (val === '' || val == null) {
         cell.value = null;
       } else if (c === 0 && r >= 2) {
         const iso = cellToIsoDate(val);
-        cell.value = iso ? isoToExcelDate(iso) : val;
-        cell.numFmt = 'yyyy-mm-dd';
+        if (iso) {
+          cell.value = isoToExcelDate(iso);
+          // Orijinal: m/d/yy (xlrd format 14)
+          cell.numFmt = 'm/d/yy';
+        } else if (typeof val === 'number' || typeof val === 'string') {
+          cell.value = val;
+        } else {
+          cell.value = String(val);
+        }
       } else if (c >= 4 && (typeof val === 'number' || (typeof val === 'string' && val !== ''))) {
         const num = typeof val === 'number' ? val : cellToNumber(val);
         cell.value = num;
-        cell.numFmt = '#,##0.00';
+        // Orijinal: GİREN/ÇIKAN → 0.00, BAKİYE / üst özet → #,##0.00
+        cell.numFmt = c === 6 || r <= 1 ? '#,##0.00' : '0.00';
       } else if (c === 2 && r >= 2) {
-        cell.value = Number(val) || val;
+        const yil = Number(val);
+        cell.value = Number.isFinite(yil) && yil > 0 ? yil : typeof val === 'string' ? val : String(val ?? '');
+      } else if (typeof val === 'string' || typeof val === 'number' || typeof val === 'boolean') {
+        cell.value = val;
       } else {
-        cell.value = val as string | number;
+        cell.value = String(val);
       }
 
+      // Orijinal: üst/başlık bold değil; yeşil GİREN satırında tarih+açıklama+giren+çıkan bold
       cell.font = {
         ...fontBase,
-        bold: isTop || isColHeader || (r >= 2 && giren > 0 && (c === 0 || c === 3 || c === 4)),
+        bold: isGirenRow && (c === 0 || c === 3 || c === 4 || c === 5),
       };
       cell.fill = fill;
       cell.border = border;
