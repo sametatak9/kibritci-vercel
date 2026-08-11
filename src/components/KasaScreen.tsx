@@ -1172,11 +1172,7 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
                       personeller
                     );
                     alert(
-                      `Arnavutköy Kasa Defteri indirildi.\n\n` +
-                        `Excel son bakiye: ₺${result.excelSonBakiye.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}\n` +
-                        `Excel satır: ${result.excelKalem}\n` +
-                        `Program satır: ${result.erpKalem}\n` +
-                        `KASA BAKİYESİ: ₺${result.sonBakiye.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}`
+                      `Arnavutköy Kasa Defteri indirildi.\n\nKASA BAKİYESİ: ₺${result.sonBakiye.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}`
                     );
                   } catch (err) {
                     console.error('[arnavut-defter]', err);

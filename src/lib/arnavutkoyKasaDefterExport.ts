@@ -479,7 +479,7 @@ export async function exportArnavutkoyKasaDefterExcel(
   });
 
   ozetWs.mergeCells(orow, 1, orow, 5);
-  ozetWs.getCell(orow, 1).value = 'KASA BAKİYESİ (Excel bakiyesi + program fişleri)';
+  ozetWs.getCell(orow, 1).value = 'KASA BAKİYESİ';
   ozetWs.getCell(orow, 1).font = { bold: true, size: 11, color: { argb: 'FFFFFFFF' } };
   ozetWs.getCell(orow, 1).fill = {
     type: 'pattern',
@@ -495,16 +495,6 @@ export async function exportArnavutkoyKasaDefterExcel(
     fgColor: { argb: built.sonBakiye < 0 ? 'FFB91C1C' : 'FF047857' },
   };
   ozetWs.getRow(orow).height = 26;
-  orow += 2;
-
-  ozetWs.getCell(orow, 1).value = 'Excel son bakiye';
-  ozetWs.getCell(orow, 2).value = built.excelSonBakiye;
-  ozetWs.getCell(orow, 2).numFmt = '#,##0.00" ₺"';
-  ozetWs.getCell(orow, 3).value = 'Kasa borç';
-  ozetWs.getCell(orow, 4).value = built.sonBakiye < 0 ? round2(Math.abs(built.sonBakiye)) : 0;
-  ozetWs.getCell(orow, 4).numFmt = '#,##0.00" ₺"';
-  ozetWs.getCell(orow, 5).value = 'Program satır';
-  ozetWs.getCell(orow, 6).value = built.erpKalem;
   orow += 2;
 
   const erpOnly = (kasaHareketleri || []).filter(

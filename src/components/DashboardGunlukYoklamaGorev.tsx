@@ -96,7 +96,7 @@ export const DashboardGunlukYoklamaGorev: React.FC<Props> = ({
                     kasaHareketleri,
                     dateKey: today,
                   });
-                  openGunlukYoklamaKasaRaporHtml(html, `Bugünkü Yoklama + Kasa — ${today}`);
+                  openGunlukYoklamaKasaRaporHtml(html, `Bugünkü Yoklama — ${today}`);
                 } catch (err) {
                   alert(err instanceof Error ? err.message : String(err));
                 } finally {
@@ -105,7 +105,7 @@ export const DashboardGunlukYoklamaGorev: React.FC<Props> = ({
               })();
             }}
             className="inline-flex items-center gap-1.5 text-[11px] font-bold text-white bg-sky-700 hover:bg-sky-800 disabled:opacity-60 px-3 py-1.5 rounded-lg cursor-pointer"
-            title="Bugünün yoklama listesi + kasa giriş/çıkış — HTML yazdır"
+            title="Bugünün yoklama listesi — HTML yazdır"
           >
             <Printer size={13} />
             {printing ? 'Hazırlanıyor…' : 'Yazdır (HTML)'}
