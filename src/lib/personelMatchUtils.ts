@@ -48,7 +48,7 @@ export function parsePersonelName(rawName: string): { ad: string; soyad: string 
 
 export function findPersonelByTcInList(personeller: Personel[], tcRaw: string): Personel | undefined {
   const tc = digitsOnly(tcRaw);
-  if (!validateTC(tc)) return undefined;
+  if (tc.length !== 11) return undefined;
   return personeller.find((p) => digitsOnly(p.tcNo || '') === tc);
 }
 
@@ -177,7 +177,7 @@ export function resolvePersonelForGirisOnay(
   }
 
   const tc = digitsOnly(item.tcNo || '');
-  if (validateTC(tc)) {
+  if (tc.length === 11) {
     const byTc = findPersonelByTcInList(personeller, tc);
     if (byTc) return byTc;
   }
@@ -255,6 +255,28 @@ export async function upsertPersonelAvoidDuplicate(
       })
     )?.personel;
 
+  const tc = digitsOnly(matchOpts.tcNo ?? candidate.tcNo);
+  if (tc.length === 11) {
+    const byTc = findPersonelByTcInList(merged, tc);
+    if (byTc && byTc.id !== candidate.id) {
+      const next: Personel = {
+        ...byTc,
+        ...candidate,
+        id: byTc.id,
+        ad: candidate.ad || byTc.ad,
+        soyad: candidate.soyad || byTc.soyad,
+        tcNo: tc || byTc.tcNo,
+        telefonNo: candidate.telefonNo?.trim() || byTc.telefonNo,
+        firmaAdi: candidate.firmaAdi || byTc.firmaAdi,
+        firmaTipi: candidate.firmaTipi || byTc.firmaTipi,
+        gorev: candidate.gorev || byTc.gorev,
+        durum: candidate.durum !== undefined ? candidate.durum : byTc.durum,
+      };
+      await saveDocument('personeller', next);
+      return { personel: next, created: false, merged: true };
+    }
+  }
+
   if (existing) {
     const next: Personel = {
       ...existing,
@@ -273,8 +295,7 @@ export async function upsertPersonelAvoidDuplicate(
     return { personel: next, created: false, merged: true };
   }
 
-  const tc = digitsOnly(candidate.tcNo || '');
-  if (validateTC(tc)) {
+  if (tc.length === 11) {
     const dupTc = findPersonelByTcInList(merged, tc);
     if (dupTc) {
       throw new Error(

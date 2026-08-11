@@ -876,12 +876,26 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
 
     setListeSaving(true);
     try {
+      let created = 0;
+      let merged = 0;
+      let dedupList = await loadPersonellerForDedup(personeller);
       for (const p of listePreview.toSave) {
-        await saveDocument('personeller', leanPersonelForFirestore(p) as Personel);
+        const result = await upsertPersonelAvoidDuplicate(dedupList, p, {
+          rawName: `${p.ad} ${p.soyad}`.trim(),
+          tcNo: p.tcNo,
+          telefonNo: p.telefonNo,
+          firmaAdi: p.firmaAdi,
+          firmaTipi: p.firmaTipi === 'TASERON' ? 'TASERON' : 'ANA_FIRMA',
+        });
+        dedupList = dedupList.some((x) => x.id === result.personel.id)
+          ? dedupList.map((x) => (x.id === result.personel.id ? result.personel : x))
+          : [...dedupList, result.personel];
+        if (result.created) created += 1;
+        else if (result.merged) merged += 1;
       }
-      setPersoneller(listePreview.list);
+      setPersoneller(dedupList);
       alert(
-        `Taşeron liste güncellendi.\nYeni: ${listePreview.created.length} · Pasif: ${listePreview.deactivated.length}`
+        `Taşeron liste güncellendi.\nYeni: ${created} · Birleştirilen: ${merged} · Pasif: ${listePreview.deactivated.length}`
       );
       setListeModalOpen(false);
       setListePreview(null);
