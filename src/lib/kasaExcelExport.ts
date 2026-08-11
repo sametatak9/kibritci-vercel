@@ -11,8 +11,12 @@ import {
 } from './kasaReportTheme';
 import {
   computeKasaLedgerTotals,
+  computeKasaOdemeBazliOzet,
+  filterPostDonemBazHareketleri,
+  KASA_DONEM_BAZ,
   prepareKasaLedgerExportData,
   roundKasaMoney,
+  shouldApplyDonemBazToBalance,
   type KasaLedgerTotals,
 } from './kasaLedgerUtils';
 
@@ -609,8 +613,10 @@ function appendKasaMasrafOzetBlock(
   totals?: KasaLedgerTotals
 ): number {
   let row = startRow;
+  const donemBazAktif = Boolean(totals?.donemBazAktif);
   const cikislar = inRange.filter((k) => k.hareketTipi === 'ÇIKIŞ');
   const girisler = inRange.filter((k) => k.hareketTipi === 'GİRİŞ');
+  const postGirisler = donemBazAktif ? filterPostDonemBazHareketleri(girisler) : girisler;
   const effectiveTotals = totals ?? computeKasaLedgerTotals(inRange);
   const totalOut = effectiveTotals.totalOut;
   const totalIn = effectiveTotals.totalIn;
@@ -628,26 +634,38 @@ function appendKasaMasrafOzetBlock(
   );
   row += 2;
 
-  if (girisler.length > 0) {
+  if (girisler.length > 0 || donemBazAktif) {
     writeOzetBaslik(sheet, row, cols, 'KASA GİRİŞLERİ (EFT / TAHSİLAT)', 'FFC6EFCE');
     row += 1;
     writeOzetTabloBaslik(sheet, row);
     row += 1;
-    girisler
+    if (donemBazAktif) {
+      writeOzetSatir(
+        sheet,
+        row,
+        1,
+        `Dönem baz giriş (${KASA_DONEM_BAZ.baslangic} — ${KASA_DONEM_BAZ.kapanis})`,
+        1,
+        KASA_DONEM_BAZ.giren
+      );
+      row += 1;
+    }
+    postGirisler
       .slice()
       .sort((a, b) => String(a.tarih).localeCompare(String(b.tarih)))
       .forEach((kh, i) => {
         writeOzetSatir(
           sheet,
           row,
-          i + 1,
+          donemBazAktif ? i + 2 : i + 1,
           `${formatTarihDdMmYyyy(kh.tarih)} · ${buildDefterAciklama(kh, personeller)}`,
           1,
           roundKasaMoney(kh.tutar)
         );
         row += 1;
       });
-    writeOzetSatir(sheet, row, 0, 'GİRİŞ TOPLAMI', girisler.length, totalIn, true);
+    const girisKalem = donemBazAktif ? 1 + postGirisler.length : girisler.length;
+    writeOzetSatir(sheet, row, 0, 'GİRİŞ TOPLAMI', girisKalem, totalIn, true);
     row += 2;
   }
 
@@ -660,12 +678,15 @@ function appendKasaMasrafOzetBlock(
   row += 1;
   writeOzetTabloBaslik(sheet, row);
   row += 1;
-  const kisiBuckets = groupByPersonel(cikislar, personeller);
-  kisiBuckets.forEach((b, i) => {
-    writeOzetSatir(sheet, row, i + 1, b.label, b.kalemler.length, roundKasaMoney(b.toplam));
+  const kisiOzet = computeKasaOdemeBazliOzet(cikislar, personeller, {
+    donemBazAktif,
+    totalOut,
+  });
+  kisiOzet.satirlar.forEach((b, i) => {
+    writeOzetSatir(sheet, row, i + 1, b.label, 1, roundKasaMoney(b.tutar));
     row += 1;
   });
-  if (kisiBuckets.length === 0) {
+  if (kisiOzet.satirlar.length === 0) {
     writeOzetSatir(sheet, row, 1, 'Bu dönemde kasa çıkışı yok', 0, 0);
     row += 1;
   } else {
@@ -800,7 +821,14 @@ function addHaftalikKasaDefterSheet(
   row += 1;
 
   let balance = openingBalance;
-  writeDefterCarryRow(sheet, row, COLS, openingBalance);
+  const donemBazAktif = Boolean(totals?.donemBazAktif);
+  writeDefterCarryRow(
+    sheet,
+    row,
+    COLS,
+    openingBalance,
+    donemBazAktif ? KASA_DONEM_BAZ.carryLabel : undefined
+  );
   row += 1;
 
   const sorted = [...inRange].sort((a, b) => {
@@ -829,7 +857,9 @@ function addHaftalikKasaDefterSheet(
     r.getCell(4).alignment = { vertical: 'middle', wrapText: true };
     setDefterMoneyValue(r.getCell(5), isGiris ? t : 0);
     setDefterMoneyValue(r.getCell(6), isGiris ? 0 : t);
-    balance = roundKasaMoney(isGiris ? balance + t : balance - t);
+    if (shouldApplyDonemBazToBalance(kh, donemBazAktif)) {
+      balance = roundKasaMoney(isGiris ? balance + t : balance - t);
+    }
     setDefterMoneyValue(r.getCell(7), balance);
 
     for (let c = 1; c <= COLS; c++) {
@@ -860,12 +890,14 @@ function writeDefterCarryRow(
   sheet: Worksheet,
   row: number,
   cols: number,
-  openingBalance: number
+  openingBalance: number,
+  carryLabel?: string
 ): void {
   const carry = sheet.getRow(row);
   carry.height = 18;
   carry.getCell(4).value =
-    openingBalance === 0 ? 'DÖNEM BAŞI BAKİYE (0)' : 'GEÇEN HAFTADAN DEVREDEN';
+    carryLabel ||
+    (openingBalance === 0 ? 'DÖNEM BAŞI BAKİYE (0)' : 'GEÇEN HAFTADAN DEVREDEN');
   setDefterMoneyValue(carry.getCell(5), 0);
   setDefterMoneyValue(carry.getCell(6), 0);
   setDefterMoneyValue(carry.getCell(7), openingBalance);
@@ -918,6 +950,7 @@ function addArnavutkoyKasaDefterSheet(
     closingBalance = roundKasaMoney(openingBalance + totalIn - totalOut);
   }
   let balance = openingBalance;
+  const donemBazAktif = Boolean(totals?.donemBazAktif);
 
   sheet.mergeCells(1, 1, 1, COLS);
   const titleCell = sheet.getCell(1, 1);
@@ -940,7 +973,13 @@ function addArnavutkoyKasaDefterSheet(
     cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2E8F0' } };
   });
   row += 1;
-  writeDefterCarryRow(sheet, row, COLS, openingBalance);
+  writeDefterCarryRow(
+    sheet,
+    row,
+    COLS,
+    openingBalance,
+    donemBazAktif ? KASA_DONEM_BAZ.carryLabel : undefined
+  );
   row += 1;
 
   const sorted = [...inRange].sort((a, b) => {
@@ -971,7 +1010,9 @@ function addArnavutkoyKasaDefterSheet(
     r.getCell(4).alignment = { vertical: 'middle', wrapText: true };
     setDefterMoneyValue(r.getCell(5), isGiris ? t : 0);
     setDefterMoneyValue(r.getCell(6), isGiris ? 0 : t);
-    balance = roundKasaMoney(isGiris ? balance + t : balance - t);
+    if (shouldApplyDonemBazToBalance(kh, donemBazAktif)) {
+      balance = roundKasaMoney(isGiris ? balance + t : balance - t);
+    }
     setDefterMoneyValue(r.getCell(7), balance);
 
     for (let c = 1; c <= COLS; c++) {
@@ -1124,7 +1165,14 @@ function addHaftalikKasaIcmalSheet(
     cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2E8F0' } };
   });
   row += 1;
-  writeDefterCarryRow(sheet, row, COLS, openingBalance);
+  const donemBazAktif = Boolean(totals?.donemBazAktif);
+  writeDefterCarryRow(
+    sheet,
+    row,
+    COLS,
+    openingBalance,
+    donemBazAktif ? KASA_DONEM_BAZ.carryLabel : undefined
+  );
   row += 1;
 
   const sorted = [...inRange].sort((a, b) => {
@@ -1149,7 +1197,9 @@ function addHaftalikKasaIcmalSheet(
     r.getCell(4).value = buildDefterAciklama(kh, personeller);
     setDefterMoneyValue(r.getCell(5), isGiris ? t : 0);
     setDefterMoneyValue(r.getCell(6), isGiris ? 0 : t);
-    balance = roundKasaMoney(isGiris ? balance + t : balance - t);
+    if (shouldApplyDonemBazToBalance(kh, donemBazAktif)) {
+      balance = roundKasaMoney(isGiris ? balance + t : balance - t);
+    }
     setDefterMoneyValue(r.getCell(7), balance);
     for (let c = 1; c <= COLS; c++) {
       const cell = r.getCell(c);

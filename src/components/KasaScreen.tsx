@@ -22,7 +22,7 @@ import {
   resolveKasaOdemeDurumu,
 } from '../lib/yolHarcamaUtils';
 import { resolvePersonelUnvan, KASA_ADSIZ_UNVAN } from '../lib/personelUnvanUtils';
-import { prepareKasaLedgerExportData, roundKasaMoney } from '../lib/kasaLedgerUtils';
+import { prepareKasaLedgerExportData, roundKasaMoney, computeKasaOdemeBazliOzet } from '../lib/kasaLedgerUtils';
 
 type HarcamaKaynagi = 'KASA_HARCAMA' | 'PERSONEL_HARCAMA';
 
@@ -370,68 +370,14 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
   const cikisKayitSayisi = ledgerExport.totals.cikisKalem;
 
   /** Seçili aralık — BORÇ / Personel Ödedi / Kasa Ödedi + kişi kırılımı */
-  const odemeBazliOzet = useMemo(() => {
-    type Row = {
-      key: string;
-      label: string;
-      tutar: number;
-      durum: KasaOdemeDurumu;
-    };
-    const buckets = new Map<string, Row>();
-    const totals: Record<KasaOdemeDurumu, number> = {
-      BORC: 0,
-      PERSONEL_ODEDI: 0,
-      KASA_ODEDI: 0,
-    };
-
-    const add = (key: string, label: string, durum: KasaOdemeDurumu, tutar: number) => {
-      totals[durum] += tutar;
-      const prev = buckets.get(key);
-      if (prev) prev.tutar += tutar;
-      else buckets.set(key, { key, label, tutar, durum });
-    };
-
-    for (const kh of filteredHareketler) {
-      if (kh.hareketTipi !== 'ÇIKIŞ') continue;
-      const tutar = Number(kh.tutar) || 0;
-      if (tutar <= 0) continue;
-      const durum = resolveOdemeDurumu(kh) || 'KASA_ODEDI';
-
-      const unvan = resolvePersonelUnvan(
-        {
-          personelId: kh.personelId,
-          personelAdi: kh.personelAdi,
-          surucu: kh.surucu,
-        },
-        personeller
-      );
-
-      if (durum === 'KASA_ODEDI') {
-        const label =
-          unvan.label === KASA_ADSIZ_UNVAN ? 'KASA' : `${unvan.label} · KASA ÖDEDİ`;
-        add(`kasa:${unvan.key}`, label, 'KASA_ODEDI', tutar);
-        continue;
-      }
-      if (durum === 'BORC') {
-        add(`borc:${unvan.key}`, `BORÇ · ${unvan.label}`, 'BORC', tutar);
-        continue;
-      }
-      add(
-        `podedi:${unvan.key}`,
-        `${unvan.label} · PERSONEL ÖDEDİ`,
-        'PERSONEL_ODEDI',
-        tutar
-      );
-    }
-
-    const satirlar = [...buckets.values()].sort((a, b) => {
-      const order = { BORC: 0, PERSONEL_ODEDI: 1, KASA_ODEDI: 2 };
-      if (order[a.durum] !== order[b.durum]) return order[a.durum] - order[b.durum];
-      return b.tutar - a.tutar || a.label.localeCompare(b.label, 'tr');
-    });
-
-    return { satirlar, totals, genelToplam: kasaHarcamaOut };
-  }, [filteredHareketler, personeller, kasaHarcamaOut]);
+  const odemeBazliOzet = useMemo(
+    () =>
+      computeKasaOdemeBazliOzet(filteredHareketler, personeller, {
+        donemBazAktif: ledgerExport.donemBazAktif,
+        totalOut: kasaHarcamaOut,
+      }),
+    [filteredHareketler, personeller, kasaHarcamaOut, ledgerExport.donemBazAktif]
+  );
 
   const openFisLightbox = (url?: string | null, title?: string) => {
     const u = String(url || '').trim();
