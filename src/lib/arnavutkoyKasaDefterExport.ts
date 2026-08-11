@@ -295,10 +295,17 @@ export function buildArnavutkoyDefterRows(
   };
 }
 
+function isoToExcelDate(iso: string): Date {
+  const [y, m, d] = String(iso || '').slice(0, 10).split('-').map(Number);
+  return new Date(Date.UTC(y || 2000, (m || 1) - 1, d || 1));
+}
+
 /**
- * Arnavutköy defter Excel — orijinal tablo birebir
- * (TARİH/AY/YIL/AÇIKLAMA/GİREN/ÇIKAN/BAKİYE, eski→yeni).
- * Ekstra: Kibritçi antet/logo, bakıye vurgusu, ÖZET sayfası.
+ * Arnavutköy defter Excel — orijinal ARNAVUTKÖY KASA YENİ.xls birebir:
+ *   Satır1: PROJE MÜDÜRÜ | ARNAVUTKÖY | GİREN | ÇIKAN | BAKİYE
+ *   Satır2: TARİH | AY | YIL | AÇIKLAMA | GİREN | ÇIKAN | BAKİYE
+ *   Satır3+: veri (eski→yeni), boş hücre = 0 giren/çıkan
+ * Ekstra (tabloya karışmaz): sağda Kibritçi logo, ÖZET sayfası.
  */
 export async function exportArnavutkoyKasaDefterExcel(
   kasaHareketleri: KasaHareketi[],
@@ -323,9 +330,8 @@ export async function exportArnavutkoyKasaDefterExcel(
   workbook.creator = 'Kibritçi ERP';
   workbook.created = new Date();
 
-  const COLS = 7;
   const ws = workbook.addWorksheet('ARNAVUTKÖY', {
-    pageSetup: { paperSize: 9, orientation: 'portrait', fitToPage: true, fitToWidth: 1 },
+    pageSetup: { paperSize: 9, orientation: 'landscape', fitToPage: true, fitToWidth: 1 },
   });
   ws.columns = [
     { width: 12 },
@@ -334,58 +340,73 @@ export async function exportArnavutkoyKasaDefterExcel(
     { width: 55 },
     { width: 14 },
     { width: 14 },
-    { width: 15 },
+    { width: 14 },
+    { width: 18 },
   ];
 
-  // Sadece Kibritçi antet + logo (tabloya dokunmadan)
-  let row = await applyAntet(workbook, ws, {
-    title: 'ARNAVUTKÖY ŞANTİYE KASA DEFTERİ',
-    subtitle: KIBRITCI_COMPANY.legalName,
-    colCount: COLS,
-  });
+  // Logo — tablo satırlarını kaydırmadan sağda
+  const logoDataUrl = await loadKibritciLogoDataUrl();
+  const logoBase64 = logoDataUrl?.replace(/^data:image\/png;base64,/i, '') || null;
+  if (logoBase64) {
+    const logoId = workbook.addImage({ base64: logoBase64, extension: 'png' });
+    ws.addImage(logoId, { tl: { col: 7.05, row: 0.05 }, ext: { width: 120, height: 46 } });
+  }
 
-  // Orijinal üst satır
-  ws.getCell(row, 2).value = 'PROJE MÜDÜRÜ';
-  ws.getCell(row, 2).font = { bold: true, size: 10 };
-  ws.getCell(row, 4).value = 'ARNAVUTKÖY';
-  ws.getCell(row, 4).font = { bold: true, size: 11, color: { argb: 'FF1E4E78' } };
-  ws.getCell(row, 5).value = built.toplamGiren;
-  ws.getCell(row, 5).numFmt = '#,##0.00';
-  ws.getCell(row, 6).value = built.toplamCikan;
-  ws.getCell(row, 6).numFmt = '#,##0.00';
-  ws.getCell(row, 7).value = built.sonBakiye;
-  ws.getCell(row, 7).numFmt = '#,##0.00';
-  ws.getCell(row, 7).font = {
+  // —— Satır 1: orijinal üst özet ——
+  ws.getCell(1, 1).value = 31;
+  ws.getCell(1, 2).value = 'PROJE MÜDÜRÜ';
+  ws.getCell(1, 2).font = { bold: true, size: 11 };
+  ws.getCell(1, 4).value = 'ARNAVUTKÖY';
+  ws.getCell(1, 4).font = { bold: true, size: 12, color: { argb: 'FF1E4E78' } };
+  ws.getCell(1, 5).value = built.toplamGiren;
+  ws.getCell(1, 5).numFmt = '#,##0.00';
+  ws.getCell(1, 6).value = built.toplamCikan;
+  ws.getCell(1, 6).numFmt = '#,##0.00';
+  // KASA BAKİYESİ — orijinal G1, vurgulu
+  ws.getCell(1, 7).value = built.sonBakiye;
+  ws.getCell(1, 7).numFmt = '#,##0.00';
+  ws.getCell(1, 7).font = {
     bold: true,
-    size: 12,
+    size: 13,
+    color: { argb: 'FFFFFFFF' },
+  };
+  ws.getCell(1, 7).fill = {
+    type: 'pattern',
+    pattern: 'solid',
+    fgColor: { argb: built.sonBakiye < 0 ? 'FFB91C1C' : 'FF047857' },
+  };
+  ws.getCell(1, 8).value = 'KASA BAKİYESİ';
+  ws.getCell(1, 8).font = {
+    bold: true,
+    size: 10,
     color: { argb: built.sonBakiye < 0 ? 'FFB91C1C' : 'FF047857' },
   };
-  row += 2;
+  ws.getRow(1).height = 22;
 
+  // —— Satır 2: başlıklar ——
   const headers = ['TARİH', 'AY', 'YIL', 'AÇIKLAMA', 'GİREN', 'ÇIKAN', 'BAKİYE'];
-  const hr = ws.getRow(row);
   headers.forEach((h, i) => {
-    const cell = hr.getCell(i + 1);
+    const cell = ws.getCell(2, i + 1);
     cell.value = h;
     cell.font = { bold: true, size: 10 };
-    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2E8F0' } };
     cell.alignment = { horizontal: 'center', vertical: 'middle' };
-    cell.border = thinBorder();
   });
-  hr.height = 20;
-  row += 1;
+  ws.getRow(2).height = 18;
 
+  // —— Satır 3+: veri (eski → yeni), orijinal gibi ——
   built.rows.forEach((r, idx) => {
+    const row = 3 + idx;
     const rr = ws.getRow(row);
-    rr.getCell(1).value = r.tarih;
+    rr.getCell(1).value = isoToExcelDate(r.tarih);
+    rr.getCell(1).numFmt = 'YYYY-MM-DD';
     rr.getCell(2).value = r.ay;
     rr.getCell(3).value = r.yil;
     rr.getCell(4).value = r.aciklama;
-    rr.getCell(5).value = r.giren || null;
-    rr.getCell(6).value = r.cikan || null;
+    rr.getCell(5).value = r.giren ? r.giren : null;
+    rr.getCell(6).value = r.cikan ? r.cikan : null;
     if (idx === 0) {
       rr.getCell(7).value = {
-        formula: `${built.acilisBakiye}+IF(E${row}=\"\",0,E${row})-IF(F${row}=\"\",0,F${row})`,
+        formula: `IF(E${row}=\"\",0,E${row})-IF(F${row}=\"\",0,F${row})`,
         result: r.bakiye,
       };
     } else {
@@ -394,71 +415,11 @@ export async function exportArnavutkoyKasaDefterExcel(
         result: r.bakiye,
       };
     }
-
-    for (let c = 1; c <= COLS; c++) {
-      const cell = rr.getCell(c);
-      cell.border = thinBorder();
-      cell.alignment = {
-        vertical: 'middle',
-        horizontal: c === 4 ? 'left' : c >= 5 ? 'right' : 'center',
-        wrapText: c === 4,
-      };
-      cell.font = { size: 10, ...(c === 7 ? { bold: true } : {}) };
-      if (c >= 5) cell.numFmt = '#,##0.00';
+    for (let c = 5; c <= 7; c++) {
+      rr.getCell(c).numFmt = '#,##0.00';
     }
-    if (r.aciklama.length > 70) rr.height = 28;
-    row += 1;
+    rr.getCell(7).font = { bold: true, size: 10 };
   });
-
-  row += 1;
-  const footRows: Array<{
-    label: string;
-    value: number;
-    color: string;
-    emphasize?: boolean;
-  }> = [
-    { label: 'TOPLAM GİREN', value: built.toplamGiren, color: 'FF047857' },
-    { label: 'TOPLAM ÇIKAN', value: built.toplamCikan, color: 'FFB91C1C' },
-    {
-      label: 'EXCEL SON BAKİYE (referans)',
-      value: built.excelSonBakiye,
-      color: 'FF64748B',
-    },
-    {
-      label: 'KASA BAKİYESİ',
-      value: built.sonBakiye,
-      color: built.sonBakiye < 0 ? 'FFB91C1C' : 'FF047857',
-      emphasize: true,
-    },
-  ];
-  for (const f of footRows) {
-    ws.getCell(row, 6).value = f.label;
-    ws.getCell(row, 6).font = {
-      bold: true,
-      size: f.emphasize ? 12 : 10,
-      color: { argb: f.emphasize ? 'FFFFFFFF' : f.color },
-    };
-    ws.getCell(row, 6).alignment = { horizontal: 'right', vertical: 'middle' };
-    ws.getCell(row, 7).value = f.value;
-    ws.getCell(row, 7).numFmt = '#,##0.00" ₺"';
-    ws.getCell(row, 7).font = {
-      bold: true,
-      size: f.emphasize ? 14 : 11,
-      color: { argb: f.emphasize ? 'FFFFFFFF' : f.color },
-    };
-    ws.getCell(row, 7).border = thinBorder();
-    if (f.emphasize) {
-      const fill = {
-        type: 'pattern' as const,
-        pattern: 'solid' as const,
-        fgColor: { argb: f.color },
-      };
-      ws.getCell(row, 6).fill = fill;
-      ws.getCell(row, 7).fill = fill;
-      ws.getRow(row).height = 26;
-    }
-    row += 1;
-  }
 
   // —— ÖZET sayfa (bizim ek) ——
   const ozetWs = workbook.addWorksheet('ÖZET', {
@@ -474,7 +435,7 @@ export async function exportArnavutkoyKasaDefterExcel(
   ];
   let orow = await applyAntet(workbook, ozetWs, {
     title: 'KASA HARCAMA ÖZETİ',
-    subtitle: `Kimlere ne harcandı · KASA BAKİYESİ ₺${built.sonBakiye.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}`,
+    subtitle: KIBRITCI_COMPANY.legalName,
     colCount: 6,
   });
 
@@ -519,8 +480,7 @@ export async function exportArnavutkoyKasaDefterExcel(
   });
   orow += 1;
 
-  const kisiRows = [...ozet.satirlar].sort((a, b) => b.tutar - a.tutar);
-  for (const s of kisiRows) {
+  for (const s of [...ozet.satirlar].sort((a, b) => b.tutar - a.tutar)) {
     const rr = ozetWs.getRow(orow);
     rr.getCell(1).value = s.label;
     rr.getCell(2).value = s.borc || null;
@@ -532,7 +492,6 @@ export async function exportArnavutkoyKasaDefterExcel(
       const cell = rr.getCell(c);
       cell.border = thinBorder();
       if (c >= 2 && c <= 5) cell.numFmt = '#,##0.00';
-      cell.alignment = { horizontal: c === 1 ? 'left' : 'right', vertical: 'middle' };
     }
     orow += 1;
   }
@@ -550,16 +509,14 @@ export async function exportArnavutkoyKasaDefterExcel(
   }
   orow += 2;
 
-  ozetWs.getCell(orow, 1).value = 'DETAY — program çıkış kayıtları (yeni → eski)';
+  ozetWs.getCell(orow, 1).value = 'DETAY — program çıkışları (yeni → eski)';
   ozetWs.getCell(orow, 1).font = { bold: true, size: 11, color: { argb: 'FF9A3412' } };
   ozetWs.mergeCells(orow, 1, orow, 6);
   orow += 1;
 
-  const detayHeaders = ['TARİH', 'KİŞİ', 'ÖDEME', 'AÇIKLAMA', 'TUTAR', ''];
-  const dhr = ozetWs.getRow(orow);
-  detayHeaders.forEach((h, i) => {
-    const cell = dhr.getCell(i + 1);
-    cell.value = h || null;
+  ['TARİH', 'KİŞİ', 'ÖDEME', 'AÇIKLAMA', 'TUTAR'].forEach((h, i) => {
+    const cell = ozetWs.getCell(orow, i + 1);
+    cell.value = h;
     cell.font = { bold: true, size: 9 };
     cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFEDD5' } };
     cell.border = thinBorder();
@@ -596,14 +553,13 @@ export async function exportArnavutkoyKasaDefterExcel(
       rr.getCell(c).border = thinBorder();
       rr.getCell(c).font = { size: 9 };
     }
-    if (String(kh.aciklama || '').length > 60) rr.height = 26;
     orow += 1;
   }
 
   const buffer = await workbook.xlsx.writeBuffer();
   downloadBuffer(
     buffer as ArrayBuffer,
-    `Kibritci_Arnavutkoy_Kasa_Defteri_${startDate}_${endDate}.xlsx`
+    `ARNAVUTKOY_KASA_YENI_${startDate}_${endDate}.xlsx`
   );
 
   return {
