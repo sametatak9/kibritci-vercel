@@ -83,7 +83,6 @@ export type MaasMesaiRow = {
   gunHakedis: number;
   mesaiHakedis: number;
   toplam: number;
-  idariSabit: boolean;
 };
 
 export function buildAktifPersonelMaasMesaiRows(opts: {
@@ -98,6 +97,7 @@ export function buildAktifPersonelMaasMesaiRows(opts: {
 
   const aktif = personeller
     .filter(isAktif)
+    .filter((p) => !isIdari(p))
     .slice()
     .sort((a, b) =>
       `${a.ad} ${a.soyad}`.localeCompare(`${b.ad} ${b.soyad}`, 'tr', { sensitivity: 'base' })
@@ -130,10 +130,9 @@ export function buildAktifPersonelMaasMesaiRows(opts: {
 
     const yevmiye = resolveYevmiye(p, daysInMonth);
     const aylikMaasKart = Number(p.maas || 0) || 0;
-    const idariSabit = isIdari(p);
-    const gunHakedis = idariSabit ? 0 : yevmiye * hakedisGun;
-    const mesaiHakedis = idariSabit ? 0 : mesaiSaat * (yevmiye / 7.5) * 1.5;
-    const toplam = idariSabit ? aylikMaasKart : gunHakedis + mesaiHakedis;
+    const gunHakedis = yevmiye * hakedisGun;
+    const mesaiHakedis = mesaiSaat * (yevmiye / 7.5) * 1.5;
+    const toplam = gunHakedis + mesaiHakedis;
 
     return {
       personel: p,
@@ -146,7 +145,6 @@ export function buildAktifPersonelMaasMesaiRows(opts: {
       gunHakedis: Number(gunHakedis.toFixed(2)),
       mesaiHakedis: Number(mesaiHakedis.toFixed(2)),
       toplam: Number(toplam.toFixed(2)),
-      idariSabit,
     };
   });
 }
@@ -183,6 +181,7 @@ export async function exportAktifPersonelMaasMesaiExcel(opts: {
   const wb = await createExcelWorkbook();
   const ws = wb.addWorksheet('Maas Mesai');
 
+  // Artık idari satır üretilmez; Not sütunu boş kalabilir (eski şablon uyumu)
   const headers = [
     'Sıra',
     'Ad Soyad',
@@ -199,7 +198,6 @@ export async function exportAktifPersonelMaasMesaiExcel(opts: {
     'Gün Hakediş',
     'Mesai Hakediş',
     'Toplam',
-    'Not',
   ];
   const colCount = headers.length;
 
@@ -248,7 +246,7 @@ export async function exportAktifPersonelMaasMesaiExcel(opts: {
   ws.mergeCells(6, 1, 6, colCount);
   ws.getCell(6, 1).value =
     `Dönem: ${monthLabel} · Basım: ${new Date().toLocaleString('tr-TR')} · ` +
-    `Aktif: ${rows.length} kişi · Hesap: gün hakediş + mesai×1,5 (idari: sabit aylık maaş)`;
+    `Aktif (idari hariç): ${rows.length} kişi · Hesap: gün hakediş + mesai×1,5`;
   ws.getCell(6, 1).font = { size: 9, color: { argb: 'FF475569' } };
   ws.getCell(6, 1).fill = {
     type: 'pattern',
@@ -292,7 +290,6 @@ export async function exportAktifPersonelMaasMesaiExcel(opts: {
       row.gunHakedis,
       row.mesaiHakedis,
       row.toplam,
-      row.idariSabit ? 'İdari — sabit aylık' : '',
     ];
     values.forEach((v, c) => {
       const cell = ws.getCell(r, c + 1);
@@ -336,7 +333,6 @@ export async function exportAktifPersonelMaasMesaiExcel(opts: {
     Number(sumGunHak.toFixed(2)),
     Number(sumMesaiHak.toFixed(2)),
     Number(sumToplam.toFixed(2)),
-    '',
   ];
   totalValues.forEach((v, c) => {
     const cell = ws.getCell(r, c + 1);
@@ -352,10 +348,10 @@ export async function exportAktifPersonelMaasMesaiExcel(opts: {
 
   ws.mergeCells(r, 1, r, colCount);
   ws.getCell(r, 1).value =
-    'Not: Gün hakediş = yevmiye × (Geldi+İzinli+Pazar+Tatil). Mesai hakediş = mesai saat × (yevmiye/7,5) × 1,5. İdari kadro yoklamaya girmez; toplam = karttaki aylık maaş.';
+    'Not: İdari kadro bu rapora dahil edilmez. Gün hakediş = yevmiye × (Geldi+İzinli+Pazar+Tatil). Mesai hakediş = mesai saat × (yevmiye/7,5) × 1,5.';
   ws.getCell(r, 1).font = { size: 8, italic: true, color: { argb: 'FF64748B' } };
 
-  const widths = [6, 22, 13, 28, 18, 16, 10, 11, 10, 10, 10, 10, 12, 12, 12, 16];
+  const widths = [6, 22, 13, 28, 18, 16, 10, 11, 10, 10, 10, 10, 12, 12, 12];
   widths.forEach((w, i) => {
     ws.getColumn(i + 1).width = w;
   });

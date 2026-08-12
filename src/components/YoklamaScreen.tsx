@@ -858,7 +858,7 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
     if (
       !window.confirm(
         `${periodLabel} için AKTİF personel maaş/mesai Excel indirilsin mi?\n` +
-          `Kişi: ${aktif.length}\n` +
+          `Kişi: ${aktif.length} (idari kadro hariç)\n` +
           `İçerik: TC, IBAN, görev, geldiği gün, mesai, maaş hesabı (Kibritçi antet).`
       )
     ) {
