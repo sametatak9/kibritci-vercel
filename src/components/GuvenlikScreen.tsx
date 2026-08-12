@@ -140,6 +140,7 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
   const [uploadQueue, setUploadQueue] = useState<any[]>([]);
   const [loadingIrsaliye, setLoadingIrsaliye] = useState(false);
   const sendInFlightRef = useRef(false);
+  const sendGenerationRef = useRef(0);
   const [gelenEvraklar, setGelenEvraklar] = useState<any[]>([]);
   const [cariKartlarLive, setCariKartlarLive] = useState<CariKart[]>([]);
   const [stokKartlarLive, setStokKartlarLive] = useState<StokKart[]>([]);
@@ -683,6 +684,9 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
           faturaUrl && faturaUrl !== kalemUrl && faturaUrl !== firmaUrl
             ? await parseSingleFoto(faturaUrl, 'fatura')
             : null;
+        // Kapı `tarih` = işlem/giriş günü (liste filtresi). Belge tarihi ayrı tutulur.
+        const belgeTarihi =
+          parsedKalem?.tarih || parsedFirma?.tarih || parsedFaturaExtra?.tarih || '';
         parsed = {
           ...(parsedKalem || {}),
           firma:
@@ -692,7 +696,8 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
             parsedFaturaExtra?.cariUnvan ||
             '',
           irsaliyeNo: existingNo || parsedKalem?.irsaliyeNo || parsedFirma?.irsaliyeNo || '',
-          tarih: parsedKalem?.tarih || parsedFirma?.tarih || existing.tarih || '',
+          tarih: existing.tarih || '',
+          belgeTarihi,
           kalemler: hasManualKalem
             ? existingKalemler
             : parsedKalem?.kalemler?.length
@@ -718,7 +723,9 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
         if (evrakTuru === 'FATURA') {
           updates.evrakNo = existingNo || parsed.faturaNo || '';
           updates.firma = existingFirma || parsed.cariUnvan || '';
-          updates.tarih = parsed.tarih || existing.tarih || '';
+          // Kapı listesi `tarih` ile filtrelenir — YZ belge tarihini üzerine yazmasın
+          updates.tarih = existing.tarih || '';
+          if (parsed.tarih) updates.belgeTarihi = parsed.tarih;
           updates.toplamTutar = parsed.toplamTutar || 0;
           updates.kdvTutar = parsed.kdvTutar || 0;
           updates.genelToplam = parsed.genelToplam || 0;
@@ -745,7 +752,11 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
         } else if (evrakTuru === 'İRSALİYE') {
           updates.evrakNo = existingNo || parsed.irsaliyeNo || '';
           updates.firma = existingFirma || parsed.firma || '';
-          updates.tarih = parsed.tarih || existing.tarih || '';
+          // Kapı işlem tarihi korunur; belge tarihi ayrı alan
+          updates.tarih = existing.tarih || '';
+          if (parsed.belgeTarihi || parsed.tarih) {
+            updates.belgeTarihi = parsed.belgeTarihi || parsed.tarih;
+          }
           const aiKalem = usableKalemler(parsed.kalemler);
           updates.kalemler = hasManualKalem
             ? existingKalemler
@@ -775,11 +786,15 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
               }
             }
 
+            const kapiTarih =
+              normalizeDateKey(existing.tarih) ||
+              normalizeDateKey(updates.tarih) ||
+              new Date().toISOString().split('T')[0];
             const { irsaliye, summary } = await upsertKapiDraftIrsaliye({
               guvenlikEvrakId: docId,
               firma: firmaForMatch,
               irsaliyeNo: updates.evrakNo || docId,
-              tarih: updates.tarih || new Date().toISOString().split('T')[0],
+              tarih: kapiTarih,
               fotoUrl,
               kalemler: updates.kalemler,
               cariKartlar: liveCari,
@@ -825,7 +840,8 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
         } else if (evrakTuru === 'MAKBUZ') {
           updates.evrakNo = existingNo || parsed.referansId || '';
           updates.firma = existingFirma || parsed.firma || '';
-          updates.tarih = parsed.tarih || existing.tarih || '';
+          updates.tarih = existing.tarih || '';
+          if (parsed.tarih) updates.belgeTarihi = parsed.tarih;
           updates.tutar = parsed.tutar || 0;
           updates.aciklama = parsed.aciklama || existing.aciklama || '';
           updates.hareketTipi = parsed.hareketTipi || 'ÇIKIŞ';
@@ -1033,14 +1049,18 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
     const savedIds = new Set<string>();
     const failures: string[] = [];
     const queueSnapshot = [...uploadQueue];
+    const sendGeneration = (sendGenerationRef.current = (sendGenerationRef.current || 0) + 1);
     const watchdog = window.setTimeout(() => {
+      if (sendGenerationRef.current !== sendGeneration) return;
+      if (!sendInFlightRef.current) return;
+      // Sadece UI kilidini aç — arka plandaki yazım devam edebilir; kayıt silinmez
       sendInFlightRef.current = false;
       setLoadingIrsaliye(false);
       showStatus(
         'error',
-        'Gönderim uzun sürdü. Buton açıldı — kayıt listede yoksa tekrar deneyin.'
+        'Gönderim uzun sürüyor. Bağlantı yavaş olabilir — listeyi yenileyip kontrol edin; kayıt oluştuysa tekrar göndermeyin.'
       );
-    }, 12000);
+    }, 90000);
 
     try {
       await ensureFirestoreAuth();
@@ -1049,17 +1069,18 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
         const uniqueId = `EVR-${islemTarihi.replace(/-/g, '')}-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
         try {
           let prepared = await withTimeout(
-            prepareGuvenlikFotoPaketForSave({
-              evrakFotolar: item.evrakFotolar || [],
-              kalemFotolar: item.kalemFotolar || [],
-              firmaFotolar: item.firmaFotolar || [],
-              faturaFotolar: item.faturaFotolar || [],
-              scanPdfUrl: item.scanPdfUrl,
-            }),
-            8000
+            () =>
+              prepareGuvenlikFotoPaketForSave({
+                evrakFotolar: item.evrakFotolar || [],
+                kalemFotolar: item.kalemFotolar || [],
+                firmaFotolar: item.firmaFotolar || [],
+                faturaFotolar: item.faturaFotolar || [],
+                scanPdfUrl: item.scanPdfUrl,
+              }),
+            25000
           );
 
-          prepared = await withTimeout(uploadGuvenlikFotoPaket(uniqueId, prepared), 35000);
+          prepared = await withTimeout(() => uploadGuvenlikFotoPaket(uniqueId, prepared), 45000);
 
           const lean = buildLeanGuvenlikEvrakFotoFields(prepared);
           const primarySlot =
@@ -1182,8 +1203,8 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
           });
 
           await withTimeout(
-            setDoc(doc(db, 'guvenlikGelenEvraklar', uniqueId), newEvrak),
-            10000
+            () => setDoc(doc(db, 'guvenlikGelenEvraklar', uniqueId), newEvrak),
+            25000
           );
           savedIds.add(item.id);
 
@@ -2004,11 +2025,24 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
   const handleDeleteEvrak = async (evrakId: string) => {
     if (!window.confirm('Bu evrak kaydını tamamen silmek istediğinize emin misiniz?')) return;
     try {
-      await deleteDoc(doc(db, 'guvenlikGelenEvraklar', evrakId));
+      let linkedIrsaliyeId = '';
       try {
-        await deleteDoc(doc(db, 'irsaliyeler', evrakId));
+        const snap = await getDoc(doc(db, 'guvenlikGelenEvraklar', evrakId));
+        if (snap.exists()) {
+          const data = snap.data() as Record<string, unknown>;
+          linkedIrsaliyeId = String(data.irsaliyeId || '').trim();
+        }
       } catch {
-        /* taslak yoksa sorun değil */
+        /* ignore */
+      }
+      await deleteDoc(doc(db, 'guvenlikGelenEvraklar', evrakId));
+      const irsaliyeIds = Array.from(new Set([linkedIrsaliyeId, evrakId].filter(Boolean)));
+      for (const id of irsaliyeIds) {
+        try {
+          await deleteDoc(doc(db, 'irsaliyeler', id));
+        } catch {
+          /* taslak yoksa sorun değil */
+        }
       }
       if (addNotification) addNotification('Evrak kaydı silindi.');
     } catch (e) {
