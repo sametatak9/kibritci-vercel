@@ -483,27 +483,45 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
   };
 
   const handleSelectPersonel = (p: Personel) => {
+    openPersonelForEdit(p);
+  };
+
+  /** Liste filtreleri (pasif / taşeron / kampçı) yüzünden görünmeyen kaydı düzenlemeye açar */
+  const openPersonelForEdit = (p: Personel, overrides?: Partial<Personel>) => {
     const corrected: Personel = {
       ...p,
-      id: p.id, // Firestore doc id korunur
-      gorev: resolveAkvizyonGorev(p.firmaAdi, p.gorev),
+      ...overrides,
+      id: p.id,
+      gorev: resolveAkvizyonGorev(
+        overrides?.firmaAdi ?? p.firmaAdi,
+        overrides?.gorev ?? p.gorev
+      ),
     };
+    if (!personeller.some((x) => x.id === p.id)) {
+      setPersoneller((prev) => [...prev, p]);
+    }
+    if (!is_aktif_status(corrected.durum)) setShowOnlyActive(false);
+    const asTaseron =
+      corrected.firmaTipi === 'TASERON' ||
+      (corrected.firmaTipi !== 'ANA_FIRMA' && isTaseronPersonel(corrected));
+    switchKadroMode(asTaseron ? 'taseron' : 'ana_firma');
+    setSearchTerm(String(corrected.tcNo || `${corrected.ad} ${corrected.soyad}`).trim());
     setSelectedPersonel(corrected);
     setFormData(corrected);
     setRegMethod('manual');
     setScreenView('kayit');
-    if (p.firmaTipi === 'TASERON') {
+    if (asTaseron) {
       const match = taseronCariList.find(
         (c) =>
-          c.unvan === p.firmaAdi ||
-          normalizeCardName(c.unvan) === normalizeCardName(p.firmaAdi || '')
+          c.unvan === corrected.firmaAdi ||
+          normalizeCardName(c.unvan) === normalizeCardName(corrected.firmaAdi || '')
       );
       if (match) {
         setTaseronKaynak(match.id);
         setManuelTaseronAdi('');
       } else {
         setTaseronKaynak(TASERON_MANUEL_KEY);
-        setManuelTaseronAdi(p.firmaAdi || '');
+        setManuelTaseronAdi(corrected.firmaAdi || '');
       }
     } else {
       setTaseronKaynak('');
@@ -951,30 +969,43 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
       );
       if (duplicateTc) {
         const durumLabel = is_aktif_status(duplicateTc.durum) ? 'Aktif' : 'Pasif';
+        const isTas = isTaseronPersonel(duplicateTc);
         const firmaLabel =
-          duplicateTc.firmaAdi ||
-          (isTaseronPersonel(duplicateTc) ? 'Taşeron' : 'Ana firma');
+          duplicateTc.firmaAdi || (isTas ? 'Taşeron' : 'Ana firma');
+        const wantsAna = !isTaseronForm;
+        if (isTas && wantsAna) {
+          const migrate = window.confirm(
+            `Bu TC taşeron kadrosunda kayıtlı: ${duplicateTc.ad} ${duplicateTc.soyad}\n` +
+              `Firma: ${firmaLabel} · ${durumLabel}\n\n` +
+              `Aynı kişiyi ana firmaya taşımak için mevcut kaydı açayım mı?\n` +
+              `(Yeni ikinci kayıt açılmaz — taşeron → ana firma güncellemesi yapılır.)`
+          );
+          if (migrate) {
+            openPersonelForEdit(duplicateTc, {
+              firmaTipi: 'ANA_FIRMA',
+              firmaAdi: CANONICAL_ANA_FIRMA_ADI,
+              tcNo: normalizedTc,
+              ad: formData.ad || duplicateTc.ad,
+              soyad: formData.soyad || duplicateTc.soyad,
+              gorev: formData.gorev || duplicateTc.gorev,
+              durum: formData.durum || duplicateTc.durum,
+            });
+          }
+          return;
+        }
         const hiddenHint = isHiddenPendingKampci(duplicateTc)
           ? '\nNot: Kampçı onay bekleyen kayıt — listede gizleniyordu.'
           : !is_aktif_status(duplicateTc.durum)
             ? '\nNot: Pasif kayıt — «Sadece Aktifler» filtresi kapalıyken görünür.'
-            : isTaseronPersonel(duplicateTc)
-              ? '\nNot: Taşeron kadrosunda olabilir.'
+            : isTas
+              ? '\nNot: Taşeron kadrosunda.'
               : '';
         const openExisting = window.confirm(
           `Bu TC kimlik numarası zaten kayıtlı: ${duplicateTc.ad} ${duplicateTc.soyad}\n` +
             `Durum: ${durumLabel} · ${firmaLabel}${hiddenHint}\n\n` +
             `Mevcut kaydı açıp güncellemek ister misiniz?\n(Yeni mükerrer kayıt açılmaz.)`
         );
-        if (openExisting) {
-          if (!personeller.some((p) => p.id === duplicateTc.id)) {
-            setPersoneller((prev) => [...prev, duplicateTc]);
-          }
-          if (!is_aktif_status(duplicateTc.durum)) setShowOnlyActive(false);
-          switchKadroMode(isTaseronPersonel(duplicateTc) ? 'taseron' : 'ana_firma');
-          setSearchTerm(String(duplicateTc.tcNo || normalizedTc));
-          handleSelectPersonel(duplicateTc);
-        }
+        if (openExisting) openPersonelForEdit(duplicateTc);
         return;
       }
     }
@@ -989,25 +1020,56 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
         })
       );
       if (nameFirmaMatch && nameFirmaMatch.score <= AUTO_MERGE_SCORE_MAX) {
-        alert(
-          `Bu personel zaten kayıtlı: ${nameFirmaMatch.personel.ad} ${nameFirmaMatch.personel.soyad} (${nameFirmaMatch.personel.firmaAdi || 'Taşeron'}). Mevcut kaydı düzenleyin — yeni kayıt açılmaz.`
+        const p = nameFirmaMatch.personel;
+        const openExisting = window.confirm(
+          `Bu personel zaten kayıtlı: ${p.ad} ${p.soyad} (${p.firmaAdi || 'Taşeron'}).\n\n` +
+            `Mevcut kaydı açıp güncellemek ister misiniz?\n(Yeni kayıt açılmaz.)`
         );
+        if (openExisting) openPersonelForEdit(p);
         return;
       }
     }
 
-    if (!isEdit && !isTaseronForm && normalizedTc) {
-      const exactNameMatch = pickBestPersonelMatch(
-        findPersonelMatches(dedupList, {
-          rawName: `${formData.ad} ${formData.soyad}`.trim(),
-          tcNo: normalizedTc,
-          firmaTipi: 'ANA_FIRMA',
-        })
-      );
-      if (exactNameMatch && exactNameMatch.score <= 2) {
-        alert(
-          `Bu isim zaten kayıtlı: ${exactNameMatch.personel.ad} ${exactNameMatch.personel.soyad}. Mevcut kaydı düzenleyin.`
+    // Ana firma: aynı isim/telefon taşeron veya ana kadroda varsa yeni kayıt açma —
+    // özellikle taşeron→ana firma geçişinde eski kayıt “yok” gibi görünür (yanlış kadro sekmesi).
+    if (!isEdit && !isTaseronForm) {
+      const nameMatches = findPersonelMatches(dedupList, {
+        rawName: `${formData.ad} ${formData.soyad}`.trim(),
+        tcNo: normalizedTc,
+        telefonNo: formData.telefonNo,
+        firmaTipi: 'ANA_FIRMA',
+      }).filter((m) => m.score <= 2 && m.reason !== 'TC');
+      const exactNameMatch = pickBestPersonelMatch(nameMatches);
+      if (exactNameMatch) {
+        const p = exactNameMatch.personel;
+        const isTas = isTaseronPersonel(p);
+        if (isTas) {
+          const migrate = window.confirm(
+            `"${p.ad} ${p.soyad}" taşeron firmada kayıtlı (${p.firmaAdi || 'Taşeron'}).\n` +
+              `Eski mimar/taşeron kaydı ana firma listesinde görünmez.\n\n` +
+              `Ana firmaya taşımak için bu kaydı açayım mı?\n` +
+              `(Yeni mükerrer personel oluşturulmaz.)`
+          );
+          if (migrate) {
+            openPersonelForEdit(p, {
+              firmaTipi: 'ANA_FIRMA',
+              firmaAdi: CANONICAL_ANA_FIRMA_ADI,
+              tcNo: normalizedTc || p.tcNo,
+              ad: formData.ad || p.ad,
+              soyad: formData.soyad || p.soyad,
+              gorev: formData.gorev || p.gorev,
+              telefonNo: formData.telefonNo || p.telefonNo,
+              durum: formData.durum || p.durum,
+            });
+          }
+          return;
+        }
+        const openExisting = window.confirm(
+          `Bu isim zaten kayıtlı: ${p.ad} ${p.soyad}` +
+            `${p.firmaAdi ? ` (${p.firmaAdi})` : ''}.\n\n` +
+            `Mevcut kaydı açıp güncellemek ister misiniz?`
         );
+        if (openExisting) openPersonelForEdit(p);
         return;
       }
     }
