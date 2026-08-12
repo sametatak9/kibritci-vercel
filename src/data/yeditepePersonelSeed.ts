@@ -22,7 +22,7 @@ const ROWS: YeditepeRow[] = [
   { ad: 'FERHAT', soyad: 'YAVUZKILIÇ', tcNo: '58909575716', iseGirisTarihi: trDate('12.07.2026') },
   { ad: 'HAKAN', soyad: 'DEMİRBOĞA', tcNo: '43510979862', iseGirisTarihi: trDate('12.07.2026') },
   { ad: 'HAYRETTİN', soyad: 'ALDEMİR', tcNo: '39494118830', iseGirisTarihi: trDate('18.07.2026') },
-  { ad: 'OLCAY', soyad: 'DÜZENLİ', tcNo: '46366841604', iseGirisTarihi: trDate('17.07.2026') },
+  // OLCAY DÜZENLİ (46366841604) — YEDİTEPE'den Kibritçi idari (Peyzaj Mimarı) kadrosuna geçti
   { ad: 'EMRAH', soyad: 'ALTAN', tcNo: '38114180332', iseGirisTarihi: trDate('20.07.2026') },
   { ad: 'HAMİT', soyad: 'ZENGİN', tcNo: '41537031914', iseGirisTarihi: trDate('21.07.2026') },
 ];

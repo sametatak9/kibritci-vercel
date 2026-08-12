@@ -39,6 +39,8 @@ const ROWS: IdariRow[] = [
   { ad: 'SEZER', soyad: 'ÇİLİNGER', tcNo: '41948110840', iseGirisTarihi: trDate('29.09.2025'), gorev: 'Makine Mühendisi' },
   { ad: 'PINAR', soyad: 'DEMİRAĞ', tcNo: '56266133136', iseGirisTarihi: trDate('06.10.2025'), gorev: 'Mimar', cinsiyet: 'Kadın' },
   { ad: 'EMRE YUNUS', soyad: 'BOZYİĞİT', tcNo: '18158908178', iseGirisTarihi: trDate('27.10.2025'), gorev: 'İnşaat Mühendisi' },
+  // YEDİTEPE taşeron → Kibritçi idari transfer
+  { ad: 'OLCAY', soyad: 'DÜZENLİ', tcNo: '46366841604', iseGirisTarihi: trDate('12.08.2026'), gorev: 'Peyzaj Mimarı' },
 ];
 
 function toPersonel(row: IdariRow, index: number): Personel {
@@ -111,13 +113,17 @@ export function mergeIdariIntoPersonelList(
       toSave.push(s);
       continue;
     }
+    const wasTaseron =
+      found.firmaTipi === 'TASERON' ||
+      (found.personelGrubu !== 'IDARI' && found.departman !== 'İDARİ');
     const needsPatch =
       found.personelGrubu !== 'IDARI' ||
       found.departman !== 'İDARİ' ||
       found.firmaTipi !== 'ANA_FIRMA' ||
       (found.ad || '') !== s.ad ||
       (found.soyad || '') !== s.soyad ||
-      // Görev: yalnızca boşsa seed’den doldur — kullanıcı düzenlemesini ezme
+      // Taşeron→idari geçişte görev seed’den alınır; aksi halde yalnızca boşsa doldur
+      (wasTaseron && !!(s.gorev || '').trim() && (found.gorev || '').trim() !== s.gorev) ||
       (!(found.gorev || '').trim() && !!(s.gorev || '').trim());
 
     if (needsPatch) {
@@ -128,12 +134,13 @@ export function mergeIdariIntoPersonelList(
           s.soyad.startsWith('KAYIT-') && found.soyad && !found.soyad.startsWith('KAYIT-')
             ? found.soyad
             : s.soyad,
-        gorev: (found.gorev || '').trim() || s.gorev,
+        gorev: wasTaseron ? s.gorev || found.gorev : (found.gorev || '').trim() || s.gorev,
         iseGirisTarihi: found.iseGirisTarihi || s.iseGirisTarihi,
         departman: 'İDARİ',
         personelGrubu: 'IDARI',
         firmaTipi: 'ANA_FIRMA',
-        firmaAdi: found.firmaAdi || 'Kibritçi İnşaat',
+        firmaAdi: 'Kibritçi İnşaat',
+        ucretTipi: found.ucretTipi || 'Aylık',
         durum: found.durum !== false,
       };
       const idx = next.findIndex((p) => p.id === found.id);
