@@ -31,6 +31,10 @@ import {
   exportSeciliPersonelExcel,
   openPersonelListeRaporu,
 } from '../lib/taseronPersonelExcelExport';
+import {
+  exportAktifPersonelMaasMesaiExcel,
+  promptMaasMesaiDonemi,
+} from '../lib/aktifPersonelMaasMesaiExcel';
 import { findPersonelMatches, findPersonelByTcInList, loadPersonellerForDedup, pickBestPersonelMatch, upsertPersonelAvoidDuplicate, AUTO_MERGE_SCORE_MAX } from '../lib/personelMatchUtils';
 import {
   applyPersonelDuplicateMerge,
@@ -181,7 +185,7 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
   const [sortMode, setSortMode] = useState<'NAME_ASC' | 'NAME_DESC' | 'DATE_NEWEST' | 'DATE_OLDEST'>('NAME_ASC');
   const [repairingKampTaseron, setRepairingKampTaseron] = useState(false);
   const [repairingDuplicates, setRepairingDuplicates] = useState(false);
-  const [exportingListe, setExportingListe] = useState<'excel' | 'html' | null>(null);
+  const [exportingListe, setExportingListe] = useState<'excel' | 'html' | 'maas' | null>(null);
   const [screenView, setScreenView] = useState<PersonelScreenView>('liste');
 
   // SGK PDF parsing states
@@ -1617,6 +1621,38 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
     }
   };
 
+  const handleExportMaasMesaiExcel = async () => {
+    const aktifListe = (visiblePersonel.length > 0 ? visiblePersonel : kadroPool).filter((p) =>
+      is_aktif_status(p.durum)
+    );
+    if (aktifListe.length === 0) {
+      alert('Aktif personel yok. Filtreleri kontrol edin veya «Sadece Aktifler» açıkken deneyin.');
+      return;
+    }
+    const donem = promptMaasMesaiDonemi();
+    if (!donem) return;
+    setExportingListe('maas');
+    try {
+      const count = await exportAktifPersonelMaasMesaiExcel({
+        personeller: aktifListe,
+        yoklamalar,
+        year: donem.year,
+        month: donem.month,
+        scopeLabel:
+          kadroMode === 'taseron'
+            ? 'Taşeron Kadrosu (aktif)'
+            : `${CANONICAL_ANA_FIRMA_ADI} — Aktif Kadro`,
+      });
+      alert(
+        `${count} aktif personel için ${donem.year}-${String(donem.month).padStart(2, '0')} maaş/mesai Excel indirildi.`
+      );
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Maaş/mesai Excel oluşturulamadı.');
+    } finally {
+      setExportingListe(null);
+    }
+  };
+
   const handleShowHistory = (p: Personel) => {
     setHistoryPersonel(p);
     setShowHistoryModal(true);
@@ -2524,6 +2560,21 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
                     <Download size={12} />
                   )}
                   Liste Excel
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => void handleExportMaasMesaiExcel()}
+                  disabled={exportingListe !== null}
+                  className="inline-flex items-center gap-1.5 text-[10px] font-bold px-3 py-2 rounded-xl border cursor-pointer bg-emerald-600 text-white border-emerald-700 hover:bg-emerald-500 disabled:opacity-50 shadow-sm"
+                  title="Aktif personel için seçili ayın maaş, geldiği gün, mesai, TC, IBAN, görev Excel raporu (Kibritçi antet/logo)"
+                >
+                  {exportingListe === 'maas' ? (
+                    <Loader2 size={12} className="animate-spin" />
+                  ) : (
+                    <DollarSign size={12} />
+                  )}
+                  Maaş Mesai Excel
                 </button>
 
                 <button
