@@ -221,7 +221,9 @@ export function cleanUndefined(obj: any): any {
  */
 export async function saveDocument<T extends { id: string }>(collectionName: string, item: T): Promise<void> {
   const docRef = doc(db, collectionName, item.id);
-  await withTimeout(setDoc(docRef, cleanUndefined(item), { merge: true }), 15000);
+  const cleaned = cleanUndefined(item);
+  // Thunk: timeout sonrası gerçek yeniden deneme (Promise formunda retry yok)
+  await withTimeout(() => setDoc(docRef, cleaned, { merge: true }), 30000);
 }
 
 /** Çoklu kayıt — Firestore 500 işlem sınırına göre parçalı batch */
@@ -235,11 +237,13 @@ export async function saveDocumentsBatch<T extends { id: string }>(
   let saved = 0;
   for (let i = 0; i < items.length; i += CHUNK) {
     const chunk = items.slice(i, i + CHUNK);
-    const batch = writeBatch(db);
-    for (const item of chunk) {
-      batch.set(doc(db, collectionName, item.id), cleanUndefined(item), { merge: true });
-    }
-    await withTimeout(batch.commit(), 60000);
+    await withTimeout(() => {
+      const batch = writeBatch(db);
+      for (const item of chunk) {
+        batch.set(doc(db, collectionName, item.id), cleanUndefined(item), { merge: true });
+      }
+      return batch.commit();
+    }, 60000);
     saved += chunk.length;
     onProgress?.(saved, items.length);
   }

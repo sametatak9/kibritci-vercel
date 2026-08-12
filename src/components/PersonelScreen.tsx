@@ -31,7 +31,7 @@ import {
   exportSeciliPersonelExcel,
   openPersonelListeRaporu,
 } from '../lib/taseronPersonelExcelExport';
-import { findPersonelMatches, loadPersonellerForDedup, pickBestPersonelMatch, upsertPersonelAvoidDuplicate, AUTO_MERGE_SCORE_MAX } from '../lib/personelMatchUtils';
+import { findPersonelMatches, findPersonelByTcInList, loadPersonellerForDedup, pickBestPersonelMatch, upsertPersonelAvoidDuplicate, AUTO_MERGE_SCORE_MAX } from '../lib/personelMatchUtils';
 import {
   applyPersonelDuplicateMerge,
   planPersonelDuplicateMerge,
@@ -945,13 +945,36 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
     const dedupList = await loadPersonellerForDedup(personeller);
 
     if (normalizedTc) {
-      const duplicateTc = dedupList.find((p) => {
-        const existingTc = String(p.tcNo || '').trim();
-        if (isEdit && p.id === editingId) return false;
-        return existingTc.length > 0 && existingTc === normalizedTc;
-      });
+      const duplicateTc = findPersonelByTcInList(
+        dedupList.filter((p) => !(isEdit && p.id === editingId)),
+        normalizedTc
+      );
       if (duplicateTc) {
-        alert(`Bu TC kimlik numarası zaten kayıtlı: ${duplicateTc.ad} ${duplicateTc.soyad}`);
+        const durumLabel = is_aktif_status(duplicateTc.durum) ? 'Aktif' : 'Pasif';
+        const firmaLabel =
+          duplicateTc.firmaAdi ||
+          (isTaseronPersonel(duplicateTc) ? 'Taşeron' : 'Ana firma');
+        const hiddenHint = isHiddenPendingKampci(duplicateTc)
+          ? '\nNot: Kampçı onay bekleyen kayıt — listede gizleniyordu.'
+          : !is_aktif_status(duplicateTc.durum)
+            ? '\nNot: Pasif kayıt — «Sadece Aktifler» filtresi kapalıyken görünür.'
+            : isTaseronPersonel(duplicateTc)
+              ? '\nNot: Taşeron kadrosunda olabilir.'
+              : '';
+        const openExisting = window.confirm(
+          `Bu TC kimlik numarası zaten kayıtlı: ${duplicateTc.ad} ${duplicateTc.soyad}\n` +
+            `Durum: ${durumLabel} · ${firmaLabel}${hiddenHint}\n\n` +
+            `Mevcut kaydı açıp güncellemek ister misiniz?\n(Yeni mükerrer kayıt açılmaz.)`
+        );
+        if (openExisting) {
+          if (!personeller.some((p) => p.id === duplicateTc.id)) {
+            setPersoneller((prev) => [...prev, duplicateTc]);
+          }
+          if (!is_aktif_status(duplicateTc.durum)) setShowOnlyActive(false);
+          switchKadroMode(isTaseronPersonel(duplicateTc) ? 'taseron' : 'ana_firma');
+          setSearchTerm(String(duplicateTc.tcNo || normalizedTc));
+          handleSelectPersonel(duplicateTc);
+        }
         return;
       }
     }
@@ -1380,7 +1403,21 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
   const filteredPersonel = useMemo(
     () =>
       personeller.filter((p) => {
-        if (isHiddenPendingKampci(p)) return false;
+        const term = searchTerm.toLowerCase().trim();
+        const digitsTerm = term.replace(/\D/g, '');
+        const fullName = `${p.ad} ${p.soyad}`.toLowerCase();
+        const tcDigits = String(p.tcNo || '').replace(/\D/g, '');
+        const matchesSearch =
+          !term ||
+          fullName.includes(term) ||
+          String(p.tcNo || '').toLowerCase().includes(term) ||
+          (digitsTerm.length >= 5 && tcDigits.includes(digitsTerm)) ||
+          displayPersonelGorev(p).toLowerCase().includes(term);
+
+        // Kampçı onay bekleyen kayıtlar varsayılan listede gizli; TC/isim aramasında bulunur
+        if (isHiddenPendingKampci(p)) {
+          return Boolean(term) && matchesSearch;
+        }
 
         if (kadroMode === 'ana_firma') {
           if (isTaseronPersonel(p)) return false;
@@ -1400,13 +1437,7 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
           return false;
         }
 
-        const term = searchTerm.toLowerCase();
-        const fullName = `${p.ad} ${p.soyad}`.toLowerCase();
-        return (
-          fullName.includes(term) ||
-          p.tcNo.includes(term) ||
-          displayPersonelGorev(p).toLowerCase().includes(term)
-        );
+        return matchesSearch;
       }),
     [
       personeller,
