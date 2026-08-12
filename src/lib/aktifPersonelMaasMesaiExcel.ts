@@ -1,7 +1,7 @@
 /**
- * Personel Yönetimi / Yoklama — aktif çalışan alacak maaş Excel.
- * Formül: (Maaş/30) × çalıştığı gün + mesai hakedişi = alacak maaş.
- * Mesai hakediş = mesai saat × (günlük/7,5) × 1,5
+ * SADECE «Alacak Maaş Excel» butonu (Yoklama ekranı).
+ * Formül: (Kart Maaş÷30) × Çalıştığı Gün(Geldi) + Mesai Hakediş.
+ * Modern Excel / yoklama yevmiye / maaş kartı hesaplarına DOKUNMAZ.
  */
 import type { AylikYoklamaMap, Personel, YoklamaDurum } from '../types/erp';
 import type { Workbook, Worksheet } from 'exceljs';

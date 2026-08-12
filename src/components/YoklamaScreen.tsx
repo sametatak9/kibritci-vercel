@@ -1010,8 +1010,8 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
             <button
               type="button"
               onClick={() => void handleExportMaasMesaiExcel()}
-              className="text-[11px] bg-teal-600 hover:bg-teal-700 text-white rounded-lg px-3 py-1.5 font-bold cursor-pointer transition flex items-center space-x-1 shadow-sm border border-teal-800"
-              title="Alacak maaş: (Maaş÷30)×çalıştığı gün + mesai hakediş — TC/IBAN/görev + tarih cetveli (Kibritçi antet)"
+              className="text-[11px] bg-amber-600 hover:bg-amber-700 text-white rounded-lg px-3 py-1.5 font-bold cursor-pointer transition flex items-center space-x-1 shadow-sm border border-amber-800"
+              title="SADECE bu buton: Alacak = (Maaş÷30)×Geldi gün + mesai×1,5. Modern Excel / diğer hesaplar değişmez."
             >
               <DollarSign size={13} />
               <span>
