@@ -349,12 +349,14 @@ export type MaasMesaiRow = {
   /** Maaş / 30 */
   gunlukUcret: number;
   aylikMaasKart: number;
-  /** Günlük × çalıştığı gün (Geldi) */
+  /** Günlük × min(çalıştığı gün, 30) */
   gunHakedis: number;
   /** Mesai saat × (günlük/7.5) × 1.5 */
   mesaiHakedis: number;
   /** Alacak maaş */
   toplam: number;
+  /** Yevmiye hesabına giren gün (max 30) */
+  calismaGunHesap: number;
 };
 
 export function buildAktifPersonelMaasMesaiRows(opts: {
@@ -402,8 +404,9 @@ export function buildAktifPersonelMaasMesaiRows(opts: {
 
     const aylikMaasKart = Number(p.maas || 0) || 0;
     const gunlukUcret = resolveGunlukUcret(p);
-    // Çalıştığı gün = Geldi günleri
-    const gunHakedis = gunlukUcret * geldiGun;
+    // Ay 31 gün olsa bile yevmiye en fazla 30 gün — 30.000 maaş → en fazla 30.000 gün ücreti
+    const calismaGunHesap = Math.min(geldiGun, 30);
+    const gunHakedis = gunlukUcret * calismaGunHesap;
     const mesaiHakedis = mesaiSaat * (gunlukUcret / 7.5) * 1.5;
     const toplam = gunHakedis + mesaiHakedis;
 
@@ -418,6 +421,8 @@ export function buildAktifPersonelMaasMesaiRows(opts: {
       gunHakedis: Number(gunHakedis.toFixed(2)),
       mesaiHakedis: Number(mesaiHakedis.toFixed(2)),
       toplam: Number(toplam.toFixed(2)),
+      /** Hesaba giren gün (max 30) */
+      calismaGunHesap,
     };
   });
 }
@@ -454,7 +459,7 @@ export async function exportAktifPersonelMaasMesaiExcel(opts: {
   const wb = await createExcelWorkbook();
   const metaLine =
     `Dönem: ${monthLabel} · Basım: ${new Date().toLocaleString('tr-TR')} · ` +
-    `Aktif (idari hariç): ${rows.length} kişi · Formül: (Maaş/30)×Çalıştığı Gün + Mesai Hakediş = Alacak`;
+    `Aktif (idari hariç): ${rows.length} kişi · Formül: (Maaş/30)×min(Geldi,30) + Mesai = Alacak`;
 
   // ── Sayfa 1: Özet maaş / mesai ──
   const ws = wb.addWorksheet('Alacak Maas');
@@ -468,6 +473,7 @@ export async function exportAktifPersonelMaasMesaiExcel(opts: {
     'Kart Maaş',
     'Günlük Ücret (Maaş/30)',
     'Çalıştığı Gün',
+    'Hesap Günü (max 30)',
     'Mesai Saat',
     'Gün Ücreti Hakediş',
     'Mesai Hakediş',
@@ -476,7 +482,7 @@ export async function exportAktifPersonelMaasMesaiExcel(opts: {
   const colCount = headers.length;
 
   const headRow = await applyWorkbookAntet(wb, ws, {
-    title: 'ALACAK MAAŞ RAPORU — Maaş/30 Formülü',
+    title: 'ALACAK MAAŞ RAPORU — Maaş/30 · Max 30 Yevmiye',
     subtitle: `${scopeLabel} · ${monthLabel}`,
     metaLine,
     colCount,
@@ -510,6 +516,7 @@ export async function exportAktifPersonelMaasMesaiExcel(opts: {
       row.aylikMaasKart,
       row.gunlukUcret,
       row.geldiGun,
+      row.calismaGunHesap,
       row.mesaiSaat,
       row.gunHakedis,
       row.mesaiHakedis,
@@ -529,15 +536,15 @@ export async function exportAktifPersonelMaasMesaiExcel(opts: {
         cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } };
       }
     });
-    for (const moneyCol of [7, 8, 11, 12, 13]) {
+    for (const moneyCol of [7, 8, 12, 13, 14]) {
       ws.getCell(r, moneyCol).numFmt = '#,##0.00';
     }
-    // Alacak sütunu vurgusu
-    ws.getCell(r, 13).font = { bold: true, size: 9, color: { argb: 'FF065F46' } };
+    ws.getCell(r, 14).font = { bold: true, size: 9, color: { argb: 'FF065F46' } };
     r++;
   }
 
   const sumGeldi = rows.reduce((s, x) => s + x.geldiGun, 0);
+  const sumHesapGun = rows.reduce((s, x) => s + x.calismaGunHesap, 0);
   const sumMesai = rows.reduce((s, x) => s + x.mesaiSaat, 0);
   const sumGunHak = rows.reduce((s, x) => s + x.gunHakedis, 0);
   const sumMesaiHak = rows.reduce((s, x) => s + x.mesaiHakedis, 0);
@@ -552,6 +559,7 @@ export async function exportAktifPersonelMaasMesaiExcel(opts: {
     '',
     '',
     sumGeldi,
+    sumHesapGun,
     Number(sumMesai.toFixed(2)),
     Number(sumGunHak.toFixed(2)),
     Number(sumMesaiHak.toFixed(2)),
@@ -564,17 +572,17 @@ export async function exportAktifPersonelMaasMesaiExcel(opts: {
     cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFCCFBF1' } };
     cell.border = thinBorder();
   });
-  for (const moneyCol of [11, 12, 13]) {
+  for (const moneyCol of [12, 13, 14]) {
     ws.getCell(r, moneyCol).numFmt = '#,##0.00';
   }
   r += 2;
 
   ws.mergeCells(r, 1, r, colCount);
   ws.getCell(r, 1).value =
-    'Formül: Günlük Ücret = Kart Maaş ÷ 30 · Gün Ücreti Hakediş = Günlük × Çalıştığı Gün (Geldi) · Mesai Hakediş = Mesai Saat × (Günlük÷7,5) × 1,5 · Alacak Maaş = Gün Ücreti Hakediş + Mesai Hakediş. İdari kadro dahil değil. Günlük durum: «Tarih Cetveli» sayfası.';
+    'Formül: Günlük = Kart Maaş ÷ 30 · Hesap Günü = min(Çalıştığı Gün, 30) · Gün Ücreti Hakediş = Günlük × Hesap Günü · Mesai Hakediş = Mesai Saat × (Günlük÷7,5) × 1,5 · Alacak = Gün Ücreti + Mesai. Ay 31 gün olsa bile yevmiye en fazla 30 gündür (ör. 30.000 maaş → en fazla 30.000 gün ücreti). İdari dahil değil.';
   ws.getCell(r, 1).font = { size: 8, italic: true, color: { argb: 'FF64748B' } };
 
-  const widths = [5, 20, 13, 26, 16, 14, 11, 14, 10, 10, 13, 12, 12];
+  const widths = [5, 20, 13, 26, 16, 14, 11, 14, 10, 12, 10, 13, 12, 12];
   widths.forEach((w, i) => {
     ws.getColumn(i + 1).width = w;
   });

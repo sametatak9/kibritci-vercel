@@ -858,7 +858,8 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
     if (
       !window.confirm(
         `${periodLabel} için ALACAK MAAŞ Excel indirilsin mi?\n` +
-          `Formül: (Maaş÷30) × Çalıştığı Gün + Mesai Hakediş\n` +
+          `Formül: (Maaş÷30) × min(Geldi,30) + Mesai Hakediş\n` +
+          `(Ay 31 gün olsa bile yevmiye en fazla 30 gündür)\n` +
           `Kişi: ${aktif.length} (idari hariç)\n` +
           `Sayfalar: Alacak Maaş + Tarih Cetveli`
       )
@@ -1011,7 +1012,7 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
               type="button"
               onClick={() => void handleExportMaasMesaiExcel()}
               className="text-[11px] bg-amber-600 hover:bg-amber-700 text-white rounded-lg px-3 py-1.5 font-bold cursor-pointer transition flex items-center space-x-1 shadow-sm border border-amber-800"
-              title="SADECE bu buton: Alacak = (Maaş÷30)×Geldi gün + mesai×1,5. Modern Excel / diğer hesaplar değişmez."
+              title="SADECE bu buton: Alacak = (Maaş÷30)×min(Geldi,30) + mesai×1,5. Max 30 yevmiye. Modern Excel değişmez."
             >
               <DollarSign size={13} />
               <span>
