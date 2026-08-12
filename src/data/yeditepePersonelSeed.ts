@@ -118,8 +118,8 @@ export function ensureYeditepeCari(existing: CariKart[]): CariKart | null {
 /**
  * Mevcut listeye YEDİTEPE taşeron personelini TC ile birleştirir.
  * - TC yoksa ekler
- * - TC varsa firmaTipi/firmaAdi/ad/soyad/giriş tarihini YEDİTEPE'ye bağlar (mükerrer oluşturmaz)
- * - TC yok ama isim eşleşirse mevcut kaydı YEDİTEPE'ye bağlar (TC doldurulur)
+ * - TC YEDİTEPE'deyse ad/soyad/giriş tarihini tamamlar
+ * - TC ana firmada veya başka taşeronda ise dokunmaz (zorla YEDİTEPE'ye geri çekmez)
  */
 export function mergeYeditepeIntoPersonelList(existing: Personel[]): {
   list: Personel[];
@@ -143,8 +143,10 @@ export function mergeYeditepeIntoPersonelList(existing: Personel[]): {
 
     const byTcHit = byTc.get(tc);
     if (byTcHit) {
+      // Ana firmaya / başka firmaya taşınmış kaydı seed ile geri alma
+      if (!isYeditepeFirma(byTcHit)) continue;
+
       const needsPatch =
-        !isYeditepeFirma(byTcHit) ||
         (byTcHit.ad || '') !== s.ad ||
         (byTcHit.soyad || '') !== s.soyad ||
         (!byTcHit.iseGirisTarihi && !!s.iseGirisTarihi);
@@ -172,6 +174,11 @@ export function mergeYeditepeIntoPersonelList(existing: Personel[]): {
 
     const byNameHit = byName.get(nameKey(s.ad, s.soyad));
     if (byNameHit) {
+      // İsim eşleşmesi de yalnızca boş/YEDİTEPE kaydı tamamlar; ana firma kişisini çalmaz
+      if (byNameHit.firmaTipi === 'ANA_FIRMA' || (!isYeditepeFirma(byNameHit) && String(byNameHit.firmaAdi || '').trim())) {
+        continue;
+      }
+
       const patched: Personel = {
         ...byNameHit,
         tcNo: tc || byNameHit.tcNo || '',

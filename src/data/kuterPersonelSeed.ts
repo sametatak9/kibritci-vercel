@@ -147,8 +147,10 @@ export function mergeKuterIntoPersonelList(existing: Personel[]): {
 
     const byTcHit = byTc.get(tc);
     if (byTcHit) {
+      // Ana firmaya / başka firmaya taşınmış kaydı seed ile geri alma
+      if (!isKuterFirma(byTcHit)) continue;
+
       const needsPatch =
-        !isKuterFirma(byTcHit) ||
         (byTcHit.ad || '') !== s.ad ||
         (byTcHit.soyad || '') !== s.soyad ||
         (!byTcHit.iseGirisTarihi && !!s.iseGirisTarihi);
@@ -176,6 +178,10 @@ export function mergeKuterIntoPersonelList(existing: Personel[]): {
 
     const byNameHit = byName.get(nameKey(s.ad, s.soyad));
     if (byNameHit) {
+      if (byNameHit.firmaTipi === 'ANA_FIRMA' || (!isKuterFirma(byNameHit) && String(byNameHit.firmaAdi || '').trim())) {
+        continue;
+      }
+
       const patched: Personel = {
         ...byNameHit,
         tcNo: tc || byNameHit.tcNo || '',

@@ -188,14 +188,15 @@ export function mergeDeltaKapiIntoPersonelList(existing: Personel[]): {
 
     const byTcHit = byTc.get(tc);
     if (byTcHit) {
+      // Ana firmaya / başka firmaya taşınmış kaydı seed ile geri alma
+      if (!isDeltaKapiFirma(byTcHit)) continue;
+
       const needsPatch =
-        !isDeltaKapiFirma(byTcHit) ||
         (byTcHit.ad || '') !== s.ad ||
         (byTcHit.soyad || '') !== s.soyad ||
         (!byTcHit.iseGirisTarihi && !!s.iseGirisTarihi) ||
         (s.istenCikisTarihi && byTcHit.istenCikisTarihi !== s.istenCikisTarihi) ||
         (s.istenCikisTarihi && byTcHit.durum !== false) ||
-        // Görev / maaş yalnızca boşsa seed’den — kullanıcı düzenlemesini ezme
         (!(byTcHit.gorev || '').trim() && !!(s.gorev || '').trim()) ||
         (!(Number(byTcHit.maas) > 0) && Number(s.maas) > 0);
 
@@ -207,7 +208,6 @@ export function mergeDeltaKapiIntoPersonelList(existing: Personel[]): {
         soyad: s.soyad,
         tcNo: tc,
         gorev: (byTcHit.gorev || '').trim() || s.gorev,
-        // Mevcut maaş/ücret tipini koru; yalnızca 0/boşsa seed doldurur
         maas: Number(byTcHit.maas) > 0 ? Number(byTcHit.maas) : s.maas,
         ucretTipi: byTcHit.ucretTipi || 'Aylık',
         firmaTipi: 'TASERON',
@@ -229,8 +229,11 @@ export function mergeDeltaKapiIntoPersonelList(existing: Personel[]): {
 
     const byNameHit = byName.get(nameKey(s.ad, s.soyad));
     if (byNameHit) {
+      if (byNameHit.firmaTipi === 'ANA_FIRMA' || (!isDeltaKapiFirma(byNameHit) && String(byNameHit.firmaAdi || '').trim())) {
+        continue;
+      }
+
       const needsPatch =
-        !isDeltaKapiFirma(byNameHit) ||
         digits(byNameHit.tcNo) !== tc ||
         (byNameHit.ad || '') !== s.ad ||
         (byNameHit.soyad || '') !== s.soyad ||
