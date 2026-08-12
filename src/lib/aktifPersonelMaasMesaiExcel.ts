@@ -1,6 +1,7 @@
 /**
- * Personel Yönetimi — aktif çalışanlar için aylık maaş / geldi gün / mesai Excel.
- * Kibritçi logo + antet; Yoklama ile aynı yevmiye ve mesai (×1.5) hesabı.
+ * Personel Yönetimi / Yoklama — aktif çalışan alacak maaş Excel.
+ * Formül: (Maaş/30) × çalıştığı gün + mesai hakedişi = alacak maaş.
+ * Mesai hakediş = mesai saat × (günlük/7,5) × 1,5
  */
 import type { AylikYoklamaMap, Personel, YoklamaDurum } from '../types/erp';
 import type { Workbook, Worksheet } from 'exceljs';
@@ -332,25 +333,11 @@ function writeTarihCetveliSheet(
   ws.views = [{ state: 'frozen', xSplit: baseCols, ySplit: startRow + 1 }];
 }
 
-/** YoklamaScreen / modernPuantaj ile aynı yevmiye kuralı */
-function resolveYevmiye(p: Personel, daysInMonth: number): number {
+/** Bu rapor formülü: günlük ücret = kart maaşı / 30 */
+function resolveGunlukUcret(p: Personel): number {
   const maas = Number(p.maas || 0);
   if (!Number.isFinite(maas) || maas <= 0) return 0;
-
-  const tip = String(p.ucretTipi || 'Aylık')
-    .trim()
-    .toLocaleLowerCase('tr-TR')
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '');
-
-  const gunSayisi = Math.max(daysInMonth, 1);
-
-  if (tip === 'saatlik') return maas * 7.5;
-  if (tip === 'gunluk') {
-    if (maas > 7500) return maas / gunSayisi;
-    return maas;
-  }
-  return maas / gunSayisi;
+  return maas / 30;
 }
 
 export type MaasMesaiRow = {
@@ -359,10 +346,14 @@ export type MaasMesaiRow = {
   yokGun: number;
   hakedisGun: number;
   mesaiSaat: number;
-  yevmiye: number;
+  /** Maaş / 30 */
+  gunlukUcret: number;
   aylikMaasKart: number;
+  /** Günlük × çalıştığı gün (Geldi) */
   gunHakedis: number;
+  /** Mesai saat × (günlük/7.5) × 1.5 */
   mesaiHakedis: number;
+  /** Alacak maaş */
   toplam: number;
 };
 
@@ -409,10 +400,11 @@ export function buildAktifPersonelMaasMesaiRows(opts: {
       mesaiSaat += Number(d.mesaiSaati || 0);
     }
 
-    const yevmiye = resolveYevmiye(p, daysInMonth);
     const aylikMaasKart = Number(p.maas || 0) || 0;
-    const gunHakedis = yevmiye * hakedisGun;
-    const mesaiHakedis = mesaiSaat * (yevmiye / 7.5) * 1.5;
+    const gunlukUcret = resolveGunlukUcret(p);
+    // Çalıştığı gün = Geldi günleri
+    const gunHakedis = gunlukUcret * geldiGun;
+    const mesaiHakedis = mesaiSaat * (gunlukUcret / 7.5) * 1.5;
     const toplam = gunHakedis + mesaiHakedis;
 
     return {
@@ -421,7 +413,7 @@ export function buildAktifPersonelMaasMesaiRows(opts: {
       yokGun,
       hakedisGun,
       mesaiSaat: Number(mesaiSaat.toFixed(2)),
-      yevmiye: Number(yevmiye.toFixed(2)),
+      gunlukUcret: Number(gunlukUcret.toFixed(2)),
       aylikMaasKart,
       gunHakedis: Number(gunHakedis.toFixed(2)),
       mesaiHakedis: Number(mesaiHakedis.toFixed(2)),
@@ -462,10 +454,10 @@ export async function exportAktifPersonelMaasMesaiExcel(opts: {
   const wb = await createExcelWorkbook();
   const metaLine =
     `Dönem: ${monthLabel} · Basım: ${new Date().toLocaleString('tr-TR')} · ` +
-    `Aktif (idari hariç): ${rows.length} kişi · Hesap: gün hakediş + mesai×1,5`;
+    `Aktif (idari hariç): ${rows.length} kişi · Formül: (Maaş/30)×Çalıştığı Gün + Mesai Hakediş = Alacak`;
 
   // ── Sayfa 1: Özet maaş / mesai ──
-  const ws = wb.addWorksheet('Ozet Maas Mesai');
+  const ws = wb.addWorksheet('Alacak Maas');
   const headers = [
     'Sıra',
     'Ad Soyad',
@@ -473,20 +465,18 @@ export async function exportAktifPersonelMaasMesaiExcel(opts: {
     'IBAN',
     'Görev',
     'Firma',
-    'Ücret Tipi',
     'Kart Maaş',
-    'Geldiği Gün',
-    'Hakediş Gün',
+    'Günlük Ücret (Maaş/30)',
+    'Çalıştığı Gün',
     'Mesai Saat',
-    'Yevmiye',
-    'Gün Hakediş',
+    'Gün Ücreti Hakediş',
     'Mesai Hakediş',
-    'Toplam',
+    'Alacak Maaş',
   ];
   const colCount = headers.length;
 
   const headRow = await applyWorkbookAntet(wb, ws, {
-    title: 'AKTİF PERSONEL AYLIK MAAŞ & MESAİ RAPORU',
+    title: 'ALACAK MAAŞ RAPORU — Maaş/30 Formülü',
     subtitle: `${scopeLabel} · ${monthLabel}`,
     metaLine,
     colCount,
@@ -500,7 +490,7 @@ export async function exportAktifPersonelMaasMesaiExcel(opts: {
     cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
     cell.border = thinBorder();
   });
-  ws.getRow(headRow).height = 28;
+  ws.getRow(headRow).height = 32;
 
   let r = headRow + 1;
   for (let i = 0; i < rows.length; i++) {
@@ -517,12 +507,10 @@ export async function exportAktifPersonelMaasMesaiExcel(opts: {
       iban && iban !== 'TR' ? iban : '—',
       displayPersonelGorev(p) || p.gorev || '—',
       firma,
-      p.ucretTipi || 'Aylık',
       row.aylikMaasKart,
+      row.gunlukUcret,
       row.geldiGun,
-      row.hakedisGun,
       row.mesaiSaat,
-      row.yevmiye,
       row.gunHakedis,
       row.mesaiHakedis,
       row.toplam,
@@ -533,7 +521,7 @@ export async function exportAktifPersonelMaasMesaiExcel(opts: {
       cell.border = thinBorder();
       cell.alignment = {
         vertical: 'middle',
-        horizontal: c === 0 || c >= 7 ? 'center' : 'left',
+        horizontal: c === 0 || c >= 6 ? 'center' : 'left',
         wrapText: true,
       };
       cell.font = { size: 9 };
@@ -541,9 +529,11 @@ export async function exportAktifPersonelMaasMesaiExcel(opts: {
         cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } };
       }
     });
-    for (const moneyCol of [8, 12, 13, 14, 15]) {
+    for (const moneyCol of [7, 8, 11, 12, 13]) {
       ws.getCell(r, moneyCol).numFmt = '#,##0.00';
     }
+    // Alacak sütunu vurgusu
+    ws.getCell(r, 13).font = { bold: true, size: 9, color: { argb: 'FF065F46' } };
     r++;
   }
 
@@ -562,9 +552,7 @@ export async function exportAktifPersonelMaasMesaiExcel(opts: {
     '',
     '',
     sumGeldi,
-    '',
     Number(sumMesai.toFixed(2)),
-    '',
     Number(sumGunHak.toFixed(2)),
     Number(sumMesaiHak.toFixed(2)),
     Number(sumToplam.toFixed(2)),
@@ -576,17 +564,17 @@ export async function exportAktifPersonelMaasMesaiExcel(opts: {
     cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFCCFBF1' } };
     cell.border = thinBorder();
   });
-  for (const moneyCol of [13, 14, 15]) {
+  for (const moneyCol of [11, 12, 13]) {
     ws.getCell(r, moneyCol).numFmt = '#,##0.00';
   }
   r += 2;
 
   ws.mergeCells(r, 1, r, colCount);
   ws.getCell(r, 1).value =
-    'Not: İdari kadro bu rapora dahil edilmez. Gün hakediş = yevmiye × (Geldi+İzinli+Pazar+Tatil). Mesai hakediş = mesai saat × (yevmiye/7,5) × 1,5. Günlük durum için «Tarih Cetveli» sayfasına bakın.';
+    'Formül: Günlük Ücret = Kart Maaş ÷ 30 · Gün Ücreti Hakediş = Günlük × Çalıştığı Gün (Geldi) · Mesai Hakediş = Mesai Saat × (Günlük÷7,5) × 1,5 · Alacak Maaş = Gün Ücreti Hakediş + Mesai Hakediş. İdari kadro dahil değil. Günlük durum: «Tarih Cetveli» sayfası.';
   ws.getCell(r, 1).font = { size: 8, italic: true, color: { argb: 'FF64748B' } };
 
-  const widths = [6, 22, 13, 28, 18, 16, 10, 11, 10, 10, 10, 10, 12, 12, 12];
+  const widths = [5, 20, 13, 26, 16, 14, 11, 14, 10, 10, 13, 12, 12];
   widths.forEach((w, i) => {
     ws.getColumn(i + 1).width = w;
   });
@@ -619,7 +607,7 @@ export async function exportAktifPersonelMaasMesaiExcel(opts: {
   });
 
   const buffer = await wb.xlsx.writeBuffer();
-  const fileName = `Kibritci_Aktif_Maas_Mesai_${year}-${String(month).padStart(2, '0')}.xlsx`;
+  const fileName = `Kibritci_Alacak_Maas_${year}-${String(month).padStart(2, '0')}.xlsx`;
   downloadBuffer(buffer as ArrayBuffer, fileName);
   return rows.length;
 }

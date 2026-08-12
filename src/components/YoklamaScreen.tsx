@@ -857,9 +857,10 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
     });
     if (
       !window.confirm(
-        `${periodLabel} için AKTİF personel maaş/mesai Excel indirilsin mi?\n` +
-          `Kişi: ${aktif.length} (idari kadro hariç)\n` +
-          `İçerik: TC, IBAN, görev, geldiği gün, mesai, maaş hesabı (Kibritçi antet).`
+        `${periodLabel} için ALACAK MAAŞ Excel indirilsin mi?\n` +
+          `Formül: (Maaş÷30) × Çalıştığı Gün + Mesai Hakediş\n` +
+          `Kişi: ${aktif.length} (idari hariç)\n` +
+          `Sayfalar: Alacak Maaş + Tarih Cetveli`
       )
     ) {
       return;
@@ -1010,11 +1011,11 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
               type="button"
               onClick={() => void handleExportMaasMesaiExcel()}
               className="text-[11px] bg-teal-600 hover:bg-teal-700 text-white rounded-lg px-3 py-1.5 font-bold cursor-pointer transition flex items-center space-x-1 shadow-sm border border-teal-800"
-              title="Aktif personel: TC, IBAN, görev, geldiği gün, mesai, maaş hesabı — Kibritçi logo/antetli Excel"
+              title="Alacak maaş: (Maaş÷30)×çalıştığı gün + mesai hakediş — TC/IBAN/görev + tarih cetveli (Kibritçi antet)"
             >
               <DollarSign size={13} />
               <span>
-                Maaş Mesai Excel —{' '}
+                Alacak Maaş Excel —{' '}
                 {new Date(selectedYear, selectedMonth - 1, 1).toLocaleDateString('tr-TR', {
                   month: 'long',
                   year: 'numeric',

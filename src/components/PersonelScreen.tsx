@@ -2567,14 +2567,14 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
                   onClick={() => void handleExportMaasMesaiExcel()}
                   disabled={exportingListe !== null}
                   className="inline-flex items-center gap-1.5 text-[10px] font-bold px-3 py-2 rounded-xl border cursor-pointer bg-emerald-600 text-white border-emerald-700 hover:bg-emerald-500 disabled:opacity-50 shadow-sm"
-                  title="Aktif personel için seçili ayın maaş, geldiği gün, mesai, TC, IBAN, görev Excel raporu (Kibritçi antet/logo)"
+                  title="Alacak maaş Excel: (Maaş÷30)×çalıştığı gün + mesai — TC, IBAN, görev + tarih cetveli"
                 >
                   {exportingListe === 'maas' ? (
                     <Loader2 size={12} className="animate-spin" />
                   ) : (
                     <DollarSign size={12} />
                   )}
-                  Maaş Mesai Excel
+                  Alacak Maaş Excel
                 </button>
 
                 <button
