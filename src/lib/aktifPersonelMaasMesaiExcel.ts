@@ -3,6 +3,7 @@
  * Kibritçi logo + antet; Yoklama ile aynı yevmiye ve mesai (×1.5) hesabı.
  */
 import type { AylikYoklamaMap, Personel, YoklamaDurum } from '../types/erp';
+import type { Workbook, Worksheet } from 'exceljs';
 import { createExcelWorkbook } from './exceljsLoader';
 import { KIBRITCI_COMPANY, loadKibritciLogoDataUrl } from './kibritciBrand';
 import { displayPersonelGorev } from './guvenlikHelpers';
@@ -49,6 +50,286 @@ function isAktif(p: Personel): boolean {
 
 function isIdari(p: Personel): boolean {
   return p.personelGrubu === 'IDARI' || String(p.departman || '').toLocaleUpperCase('tr-TR') === 'İDARİ';
+}
+
+function dayOfWeekAbbreviation(year: number, month: number, day: number): string {
+  return ['Pa', 'Pt', 'Sa', 'Ça', 'Pe', 'Cu', 'Ct'][new Date(year, month - 1, day).getDay()];
+}
+
+function toStatusSymbol(durum: YoklamaDurum): string {
+  if (durum === 'Geldi') return 'G';
+  if (durum === 'Yok') return 'Y';
+  if (durum === 'İzinli') return 'İ';
+  if (durum === 'Raporlu') return 'R';
+  if (durum === 'Pazar') return 'P';
+  if (durum === 'Tatil') return 'T';
+  return '-';
+}
+
+async function applyWorkbookAntet(
+  wb: Workbook,
+  ws: Worksheet,
+  opts: { title: string; subtitle: string; metaLine: string; colCount: number }
+): Promise<number> {
+  const colCount = Math.max(4, opts.colCount);
+  ws.getRow(1).height = 52;
+  ws.getRow(2).height = 16;
+  ws.getRow(3).height = 14;
+  ws.mergeCells(1, 1, 3, 2);
+
+  const logoDataUrl = await loadKibritciLogoDataUrl();
+  const logoBase64 = logoDataUrl?.replace(/^data:image\/png;base64,/i, '') || null;
+  if (logoBase64) {
+    const logoId = wb.addImage({ base64: logoBase64, extension: 'png' });
+    ws.addImage(logoId, { tl: { col: 0.05, row: 0.08 }, ext: { width: 150, height: 58 } });
+  } else {
+    ws.getCell(1, 1).value = KIBRITCI_COMPANY.shortName;
+    ws.getCell(1, 1).font = { bold: true, size: 13, color: { argb: 'FF1E4E78' } };
+  }
+
+  ws.mergeCells(1, 3, 1, colCount);
+  ws.getCell(1, 3).value = opts.title;
+  ws.getCell(1, 3).font = { bold: true, size: 13, color: { argb: 'FF0F172A' } };
+  ws.getCell(1, 3).alignment = { horizontal: 'right', vertical: 'middle' };
+
+  ws.mergeCells(2, 3, 2, colCount);
+  ws.getCell(2, 3).value = opts.subtitle;
+  ws.getCell(2, 3).font = { size: 9, color: { argb: 'FF64748B' } };
+  ws.getCell(2, 3).alignment = { horizontal: 'right', vertical: 'middle' };
+
+  ws.mergeCells(3, 3, 3, colCount);
+  ws.getCell(3, 3).value = `${KIBRITCI_COMPANY.legalName} · ${KIBRITCI_COMPANY.phone}`;
+  ws.getCell(3, 3).font = { size: 8, color: { argb: 'FF64748B' } };
+  ws.getCell(3, 3).alignment = { horizontal: 'right', vertical: 'middle' };
+
+  ws.mergeCells(4, 1, 4, colCount);
+  ws.getCell(4, 1).fill = {
+    type: 'pattern',
+    pattern: 'solid',
+    fgColor: { argb: 'FF99F6E4' },
+  };
+  ws.getRow(4).height = 4;
+
+  ws.mergeCells(5, 1, 5, colCount);
+  ws.getCell(5, 1).value = KIBRITCI_COMPANY.address;
+  ws.getCell(5, 1).font = { size: 8, italic: true, color: { argb: 'FF64748B' } };
+
+  ws.mergeCells(6, 1, 6, colCount);
+  ws.getCell(6, 1).value = opts.metaLine;
+  ws.getCell(6, 1).font = { size: 9, color: { argb: 'FF475569' } };
+  ws.getCell(6, 1).fill = {
+    type: 'pattern',
+    pattern: 'solid',
+    fgColor: { argb: 'FFF8FAFC' },
+  };
+  ws.getRow(6).height = 22;
+
+  return 8;
+}
+
+/** Günlük tarih cetveli: her personel için DURUM + MESAİ satırı */
+function writeTarihCetveliSheet(
+  ws: Worksheet,
+  rows: MaasMesaiRow[],
+  opts: {
+    year: number;
+    month: number;
+    yoklamalar: AylikYoklamaMap;
+    startRow: number;
+  }
+) {
+  const { year, month, yoklamalar, startRow } = opts;
+  const daysInMonth = new Date(year, month, 0).getDate();
+  const dayIndexes = Array.from({ length: daysInMonth }, (_, i) => i + 1);
+  const baseCols = 5;
+
+  const dayHeaderRow = startRow;
+  const dowHeaderRow = startRow + 1;
+  ws.getCell(dayHeaderRow, 1).value = 'Sıra';
+  ws.getCell(dayHeaderRow, 2).value = 'Ad Soyad';
+  ws.getCell(dayHeaderRow, 3).value = 'TC';
+  ws.getCell(dayHeaderRow, 4).value = 'Görev';
+  ws.getCell(dayHeaderRow, 5).value = 'Satır';
+  for (let c = 1; c <= baseCols; c++) {
+    for (const rr of [dayHeaderRow, dowHeaderRow]) {
+      const cell = ws.getCell(rr, c);
+      cell.font = { bold: true, size: 8, color: { argb: 'FFFFFFFF' } };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0F766E' } };
+      cell.border = thinBorder();
+      cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+    }
+  }
+  ws.mergeCells(dayHeaderRow, 1, dowHeaderRow, 1);
+  ws.mergeCells(dayHeaderRow, 2, dowHeaderRow, 2);
+  ws.mergeCells(dayHeaderRow, 3, dowHeaderRow, 3);
+  ws.mergeCells(dayHeaderRow, 4, dowHeaderRow, 4);
+  ws.mergeCells(dayHeaderRow, 5, dowHeaderRow, 5);
+
+  dayIndexes.forEach((day, idx) => {
+    const col = baseCols + idx + 1;
+    const dayCell = ws.getCell(dayHeaderRow, col);
+    dayCell.value = day;
+    dayCell.font = { bold: true, size: 8, color: { argb: 'FF1E3A8A' } };
+    dayCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE0E7FF' } };
+    dayCell.alignment = { horizontal: 'center', vertical: 'middle' };
+    dayCell.border = thinBorder();
+
+    const dowCell = ws.getCell(dowHeaderRow, col);
+    dowCell.value = dayOfWeekAbbreviation(year, month, day);
+    dowCell.font = { bold: true, size: 7, color: { argb: 'FF4338CA' } };
+    dowCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEEF2FF' } };
+    dowCell.alignment = { horizontal: 'center', vertical: 'middle' };
+    dowCell.border = thinBorder();
+    if (new Date(year, month - 1, day).getDay() === 0) {
+      dayCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFEF3C7' } };
+      dowCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFDE68A' } };
+    }
+  });
+
+  const summaryLabels = ['G', 'Y', 'Mesai', 'Hak.Gün'];
+  const summaryStart = baseCols + daysInMonth + 1;
+  summaryLabels.forEach((label, i) => {
+    const col = summaryStart + i;
+    ws.mergeCells(dayHeaderRow, col, dowHeaderRow, col);
+    const cell = ws.getCell(dayHeaderRow, col);
+    cell.value = label;
+    cell.font = { bold: true, size: 8, color: { argb: 'FFFFFFFF' } };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF134E4A' } };
+    cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+    cell.border = thinBorder();
+  });
+
+  ws.getRow(dayHeaderRow).height = 18;
+  ws.getRow(dowHeaderRow).height = 16;
+
+  let r = startRow + 2;
+  rows.forEach((row, i) => {
+    const p = row.personel;
+    const map = yoklamalar[p.id] || {};
+    const statusRow = r;
+    const mesaiRow = r + 1;
+
+    for (let c = 1; c <= 4; c++) {
+      ws.mergeCells(statusRow, c, mesaiRow, c);
+    }
+    ws.getCell(statusRow, 1).value = i + 1;
+    ws.getCell(statusRow, 2).value = `${p.ad} ${p.soyad}`.trim();
+    ws.getCell(statusRow, 3).value = p.tcNo || '—';
+    ws.getCell(statusRow, 4).value = displayPersonelGorev(p) || p.gorev || '—';
+    for (let c = 1; c <= 4; c++) {
+      const cell = ws.getCell(statusRow, c);
+      cell.font = { size: 8 };
+      cell.border = thinBorder();
+      cell.alignment = {
+        vertical: 'middle',
+        horizontal: c === 1 ? 'center' : 'left',
+        wrapText: true,
+      };
+    }
+
+    ws.getCell(statusRow, 5).value = 'DURUM';
+    ws.getCell(mesaiRow, 5).value = 'MESAİ';
+    for (const rr of [statusRow, mesaiRow]) {
+      const tip = ws.getCell(rr, 5);
+      tip.font = { bold: true, size: 7 };
+      tip.alignment = { horizontal: 'center', vertical: 'middle' };
+      tip.border = thinBorder();
+      tip.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: rr === statusRow ? 'FFECFDF5' : 'FFFFF7ED' },
+      };
+    }
+
+    dayIndexes.forEach((day, idx) => {
+      const col = baseCols + idx + 1;
+      const active = isDayActiveForPersonel(p, year, month, day, map);
+      const d =
+        getYoklamaDay(map, year, month, day) ||
+        ({ durum: 'Girilmedi' as YoklamaDurum, mesaiSaati: 0 });
+      const mesai = Number(d.mesaiSaati || 0);
+      const statusCell = ws.getCell(statusRow, col);
+      const mesaiCell = ws.getCell(mesaiRow, col);
+      statusCell.border = thinBorder();
+      mesaiCell.border = thinBorder();
+      statusCell.alignment = { horizontal: 'center', vertical: 'middle' };
+      mesaiCell.alignment = { horizontal: 'center', vertical: 'middle' };
+      statusCell.font = { bold: true, size: 8 };
+      mesaiCell.font = { size: 7 };
+
+      if (!active) {
+        statusCell.value = '·';
+        mesaiCell.value = '·';
+        statusCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF1F5F9' } };
+        mesaiCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } };
+        return;
+      }
+
+      statusCell.value = toStatusSymbol(d.durum);
+      if (d.durum === 'Geldi') {
+        statusCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDCFCE7' } };
+      } else if (d.durum === 'Yok') {
+        statusCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFEE2E2' } };
+      } else if (d.durum === 'İzinli' || d.durum === 'Raporlu') {
+        statusCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE0E7FF' } };
+      } else if (d.durum === 'Pazar' || d.durum === 'Tatil') {
+        statusCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFEF3C7' } };
+      }
+
+      if (mesai > 0) {
+        mesaiCell.value = mesai;
+        mesaiCell.numFmt = '0.0';
+        mesaiCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFEDD5' } };
+      } else {
+        mesaiCell.value = '';
+      }
+    });
+
+    const ozet = [row.geldiGun, row.yokGun, row.mesaiSaat, row.hakedisGun];
+    ozet.forEach((v, oi) => {
+      const col = summaryStart + oi;
+      ws.mergeCells(statusRow, col, mesaiRow, col);
+      const cell = ws.getCell(statusRow, col);
+      cell.value = v;
+      cell.font = { bold: true, size: 8 };
+      cell.alignment = { horizontal: 'center', vertical: 'middle' };
+      cell.border = thinBorder();
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF0FDFA' } };
+      if (oi === 2) cell.numFmt = '0.0';
+    });
+
+    ws.getRow(statusRow).height = 15;
+    ws.getRow(mesaiRow).height = 14;
+    r += 2;
+  });
+
+  r += 1;
+  const legendCols = baseCols + daysInMonth + summaryLabels.length;
+  ws.mergeCells(r, 1, r, legendCols);
+  ws.getCell(r, 1).value =
+    'Lejant: G=Geldi · Y=Yok · İ=İzinli · R=Raporlu · P=Pazar · T=Tatil · -=Girilmedi · ·=işe giriş/çıkış dışı. Alt satır = fazla mesai saati.';
+  ws.getCell(r, 1).font = { size: 8, italic: true, color: { argb: 'FF64748B' } };
+
+  ws.getColumn(1).width = 5;
+  ws.getColumn(2).width = 20;
+  ws.getColumn(3).width = 12;
+  ws.getColumn(4).width = 14;
+  ws.getColumn(5).width = 7;
+  for (let d = 1; d <= daysInMonth; d++) {
+    ws.getColumn(baseCols + d).width = 3.2;
+  }
+  for (let i = 0; i < summaryLabels.length; i++) {
+    ws.getColumn(summaryStart + i).width = 7;
+  }
+
+  ws.pageSetup = {
+    orientation: 'landscape',
+    fitToPage: true,
+    fitToWidth: 1,
+    fitToHeight: 0,
+    paperSize: 8,
+  };
+  ws.views = [{ state: 'frozen', xSplit: baseCols, ySplit: startRow + 1 }];
 }
 
 /** YoklamaScreen / modernPuantaj ile aynı yevmiye kuralı */
@@ -173,15 +454,18 @@ export async function exportAktifPersonelMaasMesaiExcel(opts: {
   const { personeller, yoklamalar, year, month } = opts;
   const rows = buildAktifPersonelMaasMesaiRows({ personeller, yoklamalar, year, month });
   if (rows.length === 0) {
-    throw new Error('Aktif personel bulunamadı.');
+    throw new Error('Aktif personel bulunamadı (idari hariç).');
   }
 
   const monthLabel = `${AY_ADLARI[month - 1] || month} ${year}`;
   const scopeLabel = opts.scopeLabel || CANONICAL_ANA_FIRMA_ADI;
   const wb = await createExcelWorkbook();
-  const ws = wb.addWorksheet('Maas Mesai');
+  const metaLine =
+    `Dönem: ${monthLabel} · Basım: ${new Date().toLocaleString('tr-TR')} · ` +
+    `Aktif (idari hariç): ${rows.length} kişi · Hesap: gün hakediş + mesai×1,5`;
 
-  // Artık idari satır üretilmez; Not sütunu boş kalabilir (eski şablon uyumu)
+  // ── Sayfa 1: Özet maaş / mesai ──
+  const ws = wb.addWorksheet('Ozet Maas Mesai');
   const headers = [
     'Sıra',
     'Ad Soyad',
@@ -201,61 +485,13 @@ export async function exportAktifPersonelMaasMesaiExcel(opts: {
   ];
   const colCount = headers.length;
 
-  ws.getRow(1).height = 52;
-  ws.getRow(2).height = 16;
-  ws.getRow(3).height = 14;
-  ws.mergeCells(1, 1, 3, 2);
+  const headRow = await applyWorkbookAntet(wb, ws, {
+    title: 'AKTİF PERSONEL AYLIK MAAŞ & MESAİ RAPORU',
+    subtitle: `${scopeLabel} · ${monthLabel}`,
+    metaLine,
+    colCount,
+  });
 
-  const logoDataUrl = await loadKibritciLogoDataUrl();
-  const logoBase64 = logoDataUrl?.replace(/^data:image\/png;base64,/i, '') || null;
-  if (logoBase64) {
-    const logoId = wb.addImage({ base64: logoBase64, extension: 'png' });
-    ws.addImage(logoId, { tl: { col: 0.05, row: 0.08 }, ext: { width: 150, height: 58 } });
-  } else {
-    ws.getCell(1, 1).value = KIBRITCI_COMPANY.shortName;
-    ws.getCell(1, 1).font = { bold: true, size: 13, color: { argb: 'FF1E4E78' } };
-  }
-
-  ws.mergeCells(1, 3, 1, colCount);
-  ws.getCell(1, 3).value = 'AKTİF PERSONEL AYLIK MAAŞ & MESAİ RAPORU';
-  ws.getCell(1, 3).font = { bold: true, size: 13, color: { argb: 'FF0F172A' } };
-  ws.getCell(1, 3).alignment = { horizontal: 'right', vertical: 'middle' };
-
-  ws.mergeCells(2, 3, 2, colCount);
-  ws.getCell(2, 3).value = `${scopeLabel} · ${monthLabel}`;
-  ws.getCell(2, 3).font = { size: 9, color: { argb: 'FF64748B' } };
-  ws.getCell(2, 3).alignment = { horizontal: 'right', vertical: 'middle' };
-
-  ws.mergeCells(3, 3, 3, colCount);
-  ws.getCell(3, 3).value = `${KIBRITCI_COMPANY.legalName} · ${KIBRITCI_COMPANY.phone}`;
-  ws.getCell(3, 3).font = { size: 8, color: { argb: 'FF64748B' } };
-  ws.getCell(3, 3).alignment = { horizontal: 'right', vertical: 'middle' };
-
-  ws.mergeCells(4, 1, 4, colCount);
-  ws.getCell(4, 1).fill = {
-    type: 'pattern',
-    pattern: 'solid',
-    fgColor: { argb: 'FF99F6E4' },
-  };
-  ws.getRow(4).height = 4;
-
-  ws.mergeCells(5, 1, 5, colCount);
-  ws.getCell(5, 1).value = KIBRITCI_COMPANY.address;
-  ws.getCell(5, 1).font = { size: 8, italic: true, color: { argb: 'FF64748B' } };
-
-  ws.mergeCells(6, 1, 6, colCount);
-  ws.getCell(6, 1).value =
-    `Dönem: ${monthLabel} · Basım: ${new Date().toLocaleString('tr-TR')} · ` +
-    `Aktif (idari hariç): ${rows.length} kişi · Hesap: gün hakediş + mesai×1,5`;
-  ws.getCell(6, 1).font = { size: 9, color: { argb: 'FF475569' } };
-  ws.getCell(6, 1).fill = {
-    type: 'pattern',
-    pattern: 'solid',
-    fgColor: { argb: 'FFF8FAFC' },
-  };
-  ws.getRow(6).height = 22;
-
-  const headRow = 8;
   headers.forEach((h, i) => {
     const cell = ws.getCell(headRow, i + 1);
     cell.value = h;
@@ -311,7 +547,6 @@ export async function exportAktifPersonelMaasMesaiExcel(opts: {
     r++;
   }
 
-  // Toplam satırı
   const sumGeldi = rows.reduce((s, x) => s + x.geldiGun, 0);
   const sumMesai = rows.reduce((s, x) => s + x.mesaiSaat, 0);
   const sumGunHak = rows.reduce((s, x) => s + x.gunHakedis, 0);
@@ -348,7 +583,7 @@ export async function exportAktifPersonelMaasMesaiExcel(opts: {
 
   ws.mergeCells(r, 1, r, colCount);
   ws.getCell(r, 1).value =
-    'Not: İdari kadro bu rapora dahil edilmez. Gün hakediş = yevmiye × (Geldi+İzinli+Pazar+Tatil). Mesai hakediş = mesai saat × (yevmiye/7,5) × 1,5.';
+    'Not: İdari kadro bu rapora dahil edilmez. Gün hakediş = yevmiye × (Geldi+İzinli+Pazar+Tatil). Mesai hakediş = mesai saat × (yevmiye/7,5) × 1,5. Günlük durum için «Tarih Cetveli» sayfasına bakın.';
   ws.getCell(r, 1).font = { size: 8, italic: true, color: { argb: 'FF64748B' } };
 
   const widths = [6, 22, 13, 28, 18, 16, 10, 11, 10, 10, 10, 10, 12, 12, 12];
@@ -363,6 +598,25 @@ export async function exportAktifPersonelMaasMesaiExcel(opts: {
     fitToHeight: 0,
     paperSize: 9,
   };
+
+  // ── Sayfa 2: Tarih cetveli (geldi/gelmedi + mesai) ──
+  const cetvelWs = wb.addWorksheet('Tarih Cetveli');
+  const daysInMonth = new Date(year, month, 0).getDate();
+  const cetvelCols = 5 + daysInMonth + 4;
+  const cetvelStart = await applyWorkbookAntet(wb, cetvelWs, {
+    title: 'TARİH CETVELİ — GELDİ / GELMEDİ / MESAİ',
+    subtitle: `${scopeLabel} · ${monthLabel}`,
+    metaLine:
+      metaLine +
+      ' · Her personelde üst satır = durum (G/Y/İ/R/P/T), alt satır = mesai saati',
+    colCount: Math.min(cetvelCols, 20),
+  });
+  writeTarihCetveliSheet(cetvelWs, rows, {
+    year,
+    month,
+    yoklamalar,
+    startRow: cetvelStart,
+  });
 
   const buffer = await wb.xlsx.writeBuffer();
   const fileName = `Kibritci_Aktif_Maas_Mesai_${year}-${String(month).padStart(2, '0')}.xlsx`;
