@@ -4,6 +4,8 @@ export interface YoklamaGunKaydi {
   durum: YoklamaDurum;
   mesaiSaati: number;
   gonderen?: string;
+  /** O gün yapılan iş / meslek grubu (görevden bağımsız etiket) */
+  isEtiketi?: string;
 }
 
 type PersonelYoklamaMap = GunlukYoklama | Record<string, YoklamaGunKaydi>;

@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import { Calendar, Trash2, ShieldAlert, CheckCircle, FileText, ChevronRight, RefreshCw, Database, Undo2, Redo2, Camera, DollarSign } from 'lucide-react';
+import { Calendar, Trash2, ShieldAlert, CheckCircle, FileText, ChevronRight, RefreshCw, Database, Undo2, Redo2, Camera, DollarSign, Tag } from 'lucide-react';
 import { Personel, AylikYoklamaMap, YoklamaDurum, SahaFaaliyeti, KampFaaliyet } from '../types/erp';
 import { normalizeDateKey, formatDateLabelTr } from '../lib/dateKeyUtils';
 import {
@@ -38,6 +38,14 @@ import {
 } from '../lib/yoklamaGunRaporu';
 import { db } from '../lib/firebase';
 import { collection, onSnapshot } from 'firebase/firestore';
+import {
+  buildYoklamaEtiketOzeti,
+  normalizeYoklamaEtiketi,
+  yoklamaEtiketBadgeClass,
+  yoklamaEtiketOptionsWithCustom,
+  YOKLAMA_ETIKETSIZ,
+  YOKLAMA_MESLEK_ETIKETLERI,
+} from '../lib/yoklamaEtiketUtils';
 
 /** Seçili ayda Girilmedi dışı dolu hücre sayısı */
 function countFilledDaysInMonth(map: AylikYoklamaMap, year: number, month: number): number {
@@ -102,6 +110,8 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
     return now.getDate();
   });
   const [overtimeHours, setOvertimeHours] = useState<number>(2);
+  const [overtimeEtiket, setOvertimeEtiket] = useState<string>('');
+  const [overtimeEtiketCustom, setOvertimeEtiketCustom] = useState<string>('');
 
   // AI Daily Yoklama state variables
   const [showAiUpload, setShowAiUpload] = useState(false);
@@ -420,6 +430,7 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
           ? rec.durum as YoklamaDurum
           : 'Geldi';
         updated[emp.id] = setYoklamaDay(updated[emp.id], pYear, pMonth, pDay, {
+          ...getYoklamaDay(updated[emp.id], pYear, pMonth, pDay),
           durum: validDurum,
           mesaiSaati: Number(rec.mesaiSaati) || 0
         });
@@ -725,6 +736,7 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
         const isSunday = new Date(selectedYear, selectedMonth - 1, d).getDay() === 0;
         const existing = getYoklamaDay(personMap, selectedYear, selectedMonth, d);
         personMap = setYoklamaDay(personMap, selectedYear, selectedMonth, d, {
+          ...existing,
           durum: isSunday ? 'Pazar' : status,
           mesaiSaati: existing?.mesaiSaati || 0
         });
@@ -757,6 +769,11 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
 
   const gunRaporGruplari = useMemo(
     () => groupGunlukYoklamaSatirlariByGorev(gunRaporSatirlari),
+    [gunRaporSatirlari]
+  );
+
+  const gunRaporEtiketOzeti = useMemo(
+    () => buildYoklamaEtiketOzeti(gunRaporSatirlari),
     [gunRaporSatirlari]
   );
 
@@ -890,6 +907,7 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
         const isSunday = new Date(selectedYear, selectedMonth - 1, d).getDay() === 0;
         const existing = getYoklamaDay(personMap, selectedYear, selectedMonth, d);
         personMap = setYoklamaDay(personMap, selectedYear, selectedMonth, d, {
+          ...existing,
           durum: existing?.durum || (isSunday ? 'Pazar' : 'Geldi'),
           mesaiSaati: hours
         });
@@ -922,6 +940,7 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
         const targetDurum = (dayData.durum === 'Girilmedi' || dayData.durum === 'Yok') ? 'Geldi' : dayData.durum;
         
         updated[pid] = setYoklamaDay(currentPersonelMap, selectedYear, selectedMonth, overtimeDay, {
+          ...dayData,
           durum: targetDurum,
           mesaiSaati: overtimeHours
         });
@@ -944,6 +963,80 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
         const p = personeller.find(emp => emp.id === overtimeStaffId);
         addNotification(`${p ? maskName(`${p.ad} ${p.soyad}`) : 'Personel'} için ${overtimeDay}. güne +${overtimeHours} saat mesai yazıldı.`);
       }
+    }
+  };
+
+  const resolvedOvertimeEtiket = () => {
+    if (overtimeEtiket === '__CUSTOM__') {
+      return normalizeYoklamaEtiketi(overtimeEtiketCustom);
+    }
+    return normalizeYoklamaEtiketi(overtimeEtiket);
+  };
+
+  const applyIsEtiketiToPersonDay = (personelId: string, day: number, etiket: string) => {
+    updateDraftYoklama((prev) => {
+      const p = personeller.find((emp) => emp.id === personelId);
+      if (!p || !isEmployeeVisibleInMonth(p) || !isDayActiveForEmployee(p, day)) return prev;
+      const dayData = getYoklamaDay(prev[personelId], selectedYear, selectedMonth, day) || {
+        durum: 'Girilmedi' as YoklamaDurum,
+        mesaiSaati: 0,
+      };
+      const nextEtiket = normalizeYoklamaEtiketi(etiket);
+      if (normalizeYoklamaEtiketi(dayData.isEtiketi) === nextEtiket) return prev;
+      return {
+        ...prev,
+        [personelId]: setYoklamaDay(prev[personelId], selectedYear, selectedMonth, day, {
+          ...dayData,
+          isEtiketi: nextEtiket || undefined,
+        }),
+      };
+    });
+  };
+
+  const handleQuickEtiketSubmit = () => {
+    if (overtimeDay < 1 || overtimeDay > daysInMonth) {
+      alert(`Lütfen geçerli bir gün seçin (1-${daysInMonth}).`);
+      return;
+    }
+    const etiket = resolvedOvertimeEtiket();
+    if (overtimeEtiket === '__CUSTOM__' && !etiket) {
+      alert('Özel meslek grubu yazın veya listeden bir etiket seçin.');
+      return;
+    }
+
+    const targetIds =
+      overtimeStaffId === 'ALL' ? monthPersoneller.map((p) => p.id) : [overtimeStaffId];
+    const eligibleIds = targetIds.filter((pid) => {
+      const p = personeller.find((emp) => emp.id === pid);
+      if (!p || !isEmployeeVisibleInMonth(p) || !isDayActiveForEmployee(p, overtimeDay)) return false;
+      const dayData = getYoklamaDay(draftYoklamalar[pid], selectedYear, selectedMonth, overtimeDay);
+      return !!dayData && dayData.durum !== 'Girilmedi';
+    });
+
+    if (eligibleIds.length === 0) {
+      alert(
+        `${overtimeDay}. günde yoklaması girilmiş personel bulunamadı. Önce yoklamayı alın, sonra meslek grubu etiketleyin.`
+      );
+      return;
+    }
+
+    updateDraftYoklama((prev) => {
+      const updated = { ...prev };
+      for (const pid of eligibleIds) {
+        const dayData = getYoklamaDay(updated[pid], selectedYear, selectedMonth, overtimeDay);
+        if (!dayData || dayData.durum === 'Girilmedi') continue;
+        updated[pid] = setYoklamaDay(updated[pid], selectedYear, selectedMonth, overtimeDay, {
+          ...dayData,
+          isEtiketi: etiket || undefined,
+        });
+      }
+      return updated;
+    });
+
+    const label = etiket || 'etiket kaldırıldı';
+    alert(`${overtimeDay}. gün yoklamasına ${eligibleIds.length} kişi için «${label}» işlendi. Kaydet ile veritabanına gönderin.`);
+    if (addNotification) {
+      addNotification(`${overtimeDay}. gün yoklaması meslek grubu: ${label} (${eligibleIds.length} kişi).`);
     }
   };
 
@@ -1513,6 +1606,61 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
           </div>
         </div>
 
+        <div className="bg-violet-50/70 rounded-xl border border-violet-200/80 p-3 flex flex-wrap items-center gap-3 justify-between">
+          <div className="flex items-center space-x-2">
+            <span className="bg-violet-100 text-violet-800 text-[10px] font-extrabold px-2 py-0.5 rounded uppercase inline-flex items-center gap-1">
+              <Tag size={10} /> MESLEK GRUBU ETİKETİ
+            </span>
+            <span className="text-[11px] text-slate-600 font-medium font-sans">
+              Seçili günün yoklamasına ne iş yaptıklarını yazın, sonra «Günü Raporla»:
+            </span>
+          </div>
+
+          <div className="flex items-center space-x-3 flex-wrap text-xs">
+            <div className="flex items-center space-x-1">
+              <span className="text-slate-500 font-bold text-[10px]">Etiket:</span>
+              <select
+                value={overtimeEtiket}
+                onChange={(e) => setOvertimeEtiket(e.target.value)}
+                className="text-[11px] font-bold bg-white border border-slate-200 rounded p-1 max-w-[220px]"
+              >
+                <option value="">— Etiket yok / kaldır —</option>
+                {YOKLAMA_MESLEK_ETIKETLERI.map((etiket) => (
+                  <option key={etiket} value={etiket}>
+                    {etiket}
+                  </option>
+                ))}
+                <option value="__CUSTOM__">Özel yaz…</option>
+              </select>
+            </div>
+            {overtimeEtiket === '__CUSTOM__' && (
+              <input
+                type="text"
+                value={overtimeEtiketCustom}
+                onChange={(e) => setOvertimeEtiketCustom(e.target.value)}
+                placeholder="Örn. İZOLASYON"
+                className="w-36 text-[11px] font-bold bg-white border border-slate-200 rounded p-1 uppercase"
+              />
+            )}
+            <button
+              type="button"
+              onClick={handleQuickEtiketSubmit}
+              className="bg-violet-600 hover:bg-violet-700 active:scale-95 text-white font-bold text-[10px] px-3.5 py-1 rounded transition duration-100 shadow-sm cursor-pointer inline-flex items-center gap-1"
+            >
+              <Tag size={12} />
+              Günü Etiketle
+            </button>
+            <button
+              type="button"
+              onClick={handleOpenGunRapor}
+              className="bg-slate-800 hover:bg-slate-900 text-white font-bold text-[10px] px-3.5 py-1 rounded transition duration-100 shadow-sm cursor-pointer inline-flex items-center gap-1"
+            >
+              <Calendar size={12} />
+              Etiketli Rapor
+            </button>
+          </div>
+        </div>
+
       {yoklamaLoadStats.thisMonth === 0 && (
         <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 flex flex-wrap items-center justify-between gap-3 shrink-0">
           <div className="space-y-1 min-w-0">
@@ -1820,6 +1968,20 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
                           <div className="flex flex-col">
                             <span className="font-semibold text-slate-800">{p.ad} {p.soyad}</span>
                             <span className="text-[9px] text-[#2563EB] font-bold">{p.gorev} · {p.departman}</span>
+                            {(() => {
+                              const dayEtiket = normalizeYoklamaEtiketi(
+                                getYoklamaDay(personYoklama, selectedYear, selectedMonth, overtimeDay)?.isEtiketi
+                              );
+                              if (!dayEtiket) return null;
+                              return (
+                                <span
+                                  className={`mt-0.5 self-start text-[8px] font-black uppercase tracking-wide px-1.5 py-0.5 rounded-full border ${yoklamaEtiketBadgeClass(dayEtiket)}`}
+                                  title={`${overtimeDay}. gün meslek grubu`}
+                                >
+                                  {dayEtiket}
+                                </span>
+                              );
+                            })()}
                             <div className="text-[8px] font-mono mt-0.5 space-y-0.5 leading-none">
                               <div className="text-emerald-700 font-semibold">Giriş: {p.iseGirisTarihi || '-'}</div>
                               {p.istenCikisTarihi && (
@@ -2051,7 +2213,7 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
 
       {printModal === 'GUN_RAPORU' && (
         <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/80 flex items-start justify-center p-6 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl w-full max-w-4xl shadow-2xl flex flex-col overflow-hidden my-4">
+          <div className="bg-white rounded-2xl w-full max-w-5xl shadow-2xl flex flex-col overflow-hidden my-4">
             <div className="bg-amber-600 text-white p-4 flex flex-wrap justify-between items-center gap-3 px-6 shrink-0 print:hidden">
               <div className="flex flex-wrap items-center gap-2">
                 <Calendar size={18} />
@@ -2136,6 +2298,9 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
                     {gunRaporOzet.toplam} kayıt · {gunRaporOzet.geldi} geldi · {gunRaporOzet.yok} yok ·{' '}
                     {gunRaporOzet.mesaiToplam} saat mesai
                   </p>
+                  <p className="text-[10px] text-violet-700 font-semibold mt-1 print:hidden">
+                    Görev yanındaki «İş / Meslek» sütunundan o gün ne iş yaptıklarını etiketleyin; Yazdır / PDF rapora işler.
+                  </p>
                 </div>
 
                 <div className="grid grid-cols-3 sm:grid-cols-7 gap-2 mb-4">
@@ -2158,7 +2323,7 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
                   ))}
                 </div>
 
-                <div className="flex flex-wrap gap-2 mb-4">
+                <div className="flex flex-wrap gap-2 mb-2">
                   {gunRaporGruplari.map((g) => (
                     <span
                       key={g.grup}
@@ -2168,6 +2333,21 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
                     </span>
                   ))}
                 </div>
+                {gunRaporEtiketOzeti.length > 0 && (
+                  <div className="flex flex-wrap items-center gap-2 mb-4">
+                    <span className="text-[9px] font-black uppercase tracking-wider text-violet-800">
+                      Meslek grupları
+                    </span>
+                    {gunRaporEtiketOzeti.map((e) => (
+                      <span
+                        key={e.etiket}
+                        className={`text-[10px] font-bold px-2.5 py-1 rounded-full border ${yoklamaEtiketBadgeClass(e.etiket === YOKLAMA_ETIKETSIZ ? '' : e.etiket)}`}
+                      >
+                        {e.etiket === YOKLAMA_ETIKETSIZ ? 'Etiketsiz' : e.etiket}: {e.adet} · {e.geldi} geldi
+                      </span>
+                    ))}
+                  </div>
+                )}
 
                 <div className="space-y-4">
                   {gunRaporGruplari.map((grup) => (
@@ -2186,6 +2366,7 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
                             <th className="p-2 text-left border-b border-slate-200 w-8">#</th>
                             <th className="p-2 text-left border-b border-slate-200">Ad Soyad</th>
                             <th className="p-2 text-left border-b border-slate-200">Görev</th>
+                            <th className="p-2 text-left border-b border-slate-200">İş / Meslek</th>
                             <th className="p-2 text-left border-b border-slate-200 hidden sm:table-cell">Departman</th>
                             <th className="p-2 text-center border-b border-slate-200 w-24">Durum</th>
                             <th className="p-2 text-center border-b border-slate-200 w-16">Mesai</th>
@@ -2197,6 +2378,31 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
                               <td className="p-2 text-slate-400 font-mono">{idx + 1}</td>
                               <td className="p-2 font-bold text-slate-900">{row.adSoyad}</td>
                               <td className="p-2 text-slate-600">{row.gorev}</td>
+                              <td className="p-2">
+                                <select
+                                  value={row.isEtiketi}
+                                  onChange={(e) =>
+                                    applyIsEtiketiToPersonDay(row.personelId, overtimeDay, e.target.value)
+                                  }
+                                  className="w-full max-w-[160px] text-[10px] font-bold bg-white border border-slate-200 rounded px-1 py-1 print:hidden"
+                                >
+                                  <option value="">—</option>
+                                  {yoklamaEtiketOptionsWithCustom(row.isEtiketi).map((etiket) => (
+                                    <option key={etiket} value={etiket}>
+                                      {etiket}
+                                    </option>
+                                  ))}
+                                </select>
+                                {row.isEtiketi ? (
+                                  <span
+                                    className={`hidden print:inline-block text-[9px] font-black uppercase px-2 py-0.5 rounded-full border ${yoklamaEtiketBadgeClass(row.isEtiketi)}`}
+                                  >
+                                    {row.isEtiketi}
+                                  </span>
+                                ) : (
+                                  <span className="hidden print:inline text-slate-400">—</span>
+                                )}
+                              </td>
                               <td className="p-2 text-slate-500 hidden sm:table-cell">{row.departman}</td>
                               <td className="p-2 text-center">
                                 <span

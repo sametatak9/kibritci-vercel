@@ -42,6 +42,8 @@ export interface GunlukYoklama {
   [gunNo: number]: {
     durum: YoklamaDurum;
     mesaiSaati: number;
+    gonderen?: string;
+    isEtiketi?: string;
   };
 }
 

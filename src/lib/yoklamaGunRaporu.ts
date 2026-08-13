@@ -14,6 +14,11 @@ import {
 } from './yoklamaUtils';
 import { resolveStubPersonelFromLegacyId } from './legacyYoklamaImport';
 import { formatDateLabelTr } from './dateKeyUtils';
+import {
+  buildYoklamaEtiketOzeti,
+  normalizeYoklamaEtiketi,
+  YOKLAMA_ETIKETSIZ,
+} from './yoklamaEtiketUtils';
 
 export interface GunlukYoklamaSatir {
   personelId: string;
@@ -23,6 +28,8 @@ export interface GunlukYoklamaSatir {
   tcNo: string;
   durum: YoklamaDurum;
   mesaiSaati: number;
+  /** O gün yapılan iş / meslek grubu */
+  isEtiketi: string;
 }
 
 export interface GunlukYoklamaOzet {
@@ -151,6 +158,7 @@ export function buildGunlukYoklamaSatirlari(
       tcNo: String(p.tcNo || '—'),
       durum,
       mesaiSaati: Number(dayData?.mesaiSaati) || 0,
+      isEtiketi: normalizeYoklamaEtiketi(dayData?.isEtiketi),
     });
   }
 
@@ -229,6 +237,7 @@ function renderSatirRows(satirlar: GunlukYoklamaSatir[]): string {
         <td>${i + 1}</td>
         <td><strong>${escapeHtml(r.adSoyad)}</strong></td>
         <td>${escapeHtml(r.gorev)}</td>
+        <td>${r.isEtiketi ? `<span style="display:inline-block;padding:1px 8px;border-radius:999px;background:#f8fafc;border:1px solid #e2e8f0;font-size:10px;font-weight:800">${escapeHtml(r.isEtiketi)}</span>` : '<span style="color:#94a3b8">—</span>'}</td>
         <td>${escapeHtml(r.departman)}</td>
         <td style="font-family:monospace;font-size:11px">${escapeHtml(r.tcNo)}</td>
         <td style="font-weight:800;color:${DURUM_COLOR[r.durum] || '#64748b'}">${escapeHtml(r.durum)}</td>
@@ -245,7 +254,7 @@ function renderGrupSection(grup: GunlukYoklamaGorevGrubu, index: number): string
     <table style="width:100%;border-collapse:collapse;font-size:12px;margin:${index === 0 ? '0' : '16px'} 0 0">
       <thead>
         <tr>
-          <th colspan="7" style="background:${bg};color:#fff;padding:6px 10px;text-align:left;font-size:11px;font-weight:800;letter-spacing:0.04em;text-transform:uppercase;border:1px solid ${bg}">
+          <th colspan="8" style="background:${bg};color:#fff;padding:6px 10px;text-align:left;font-size:11px;font-weight:800;letter-spacing:0.04em;text-transform:uppercase;border:1px solid ${bg}">
             ${escapeHtml(grup.label)}
             <span style="float:right;font-size:10px;font-weight:700;background:rgba(255,255,255,0.15);padding:2px 8px;border-radius:999px;text-transform:none">
               ${grup.satirlar.length} kişi · ${grup.ozet.geldi} geldi · ${grup.ozet.mesaiToplam}s mesai
@@ -256,6 +265,7 @@ function renderGrupSection(grup: GunlukYoklamaGorevGrubu, index: number): string
           <th style="padding:8px;border-bottom:2px solid #cbd5e1;text-transform:uppercase;font-size:10px;width:32px">#</th>
           <th style="padding:8px;border-bottom:2px solid #cbd5e1;text-transform:uppercase;font-size:10px">Ad Soyad</th>
           <th style="padding:8px;border-bottom:2px solid #cbd5e1;text-transform:uppercase;font-size:10px">Görev</th>
+          <th style="padding:8px;border-bottom:2px solid #cbd5e1;text-transform:uppercase;font-size:10px">İş / Meslek</th>
           <th style="padding:8px;border-bottom:2px solid #cbd5e1;text-transform:uppercase;font-size:10px">Departman</th>
           <th style="padding:8px;border-bottom:2px solid #cbd5e1;text-transform:uppercase;font-size:10px">TC</th>
           <th style="padding:8px;border-bottom:2px solid #cbd5e1;text-transform:uppercase;font-size:10px">Durum</th>
@@ -288,6 +298,12 @@ export function buildGunlukYoklamaRaporHtml(
         `<span style="display:inline-block;margin:2px 6px 2px 0;padding:2px 8px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:6px;font-size:10px"><strong>${escapeHtml(g.label)}</strong>: ${g.satirlar.length}</span>`
     )
     .join('');
+  const etiketOzet = buildYoklamaEtiketOzeti(rows)
+    .map(
+      (e) =>
+        `<span style="display:inline-block;margin:2px 6px 2px 0;padding:2px 8px;background:#fff7ed;border:1px solid #fed7aa;border-radius:6px;font-size:10px"><strong>${escapeHtml(e.etiket === YOKLAMA_ETIKETSIZ ? 'Etiketsiz' : e.etiket)}</strong>: ${e.adet} kişi · ${e.geldi} geldi</span>`
+    )
+    .join('');
 
   const sections =
     gruplar.length > 0
@@ -311,7 +327,7 @@ export function buildGunlukYoklamaRaporHtml(
   </style></head><body>
   <span class="badge">KİBRİTÇİ İNŞAAT · PUANTAJ</span>
   <h1>Günlük Personel Yoklama Raporu</h1>
-  <p class="meta">${escapeHtml(monthLabel)} · ${escapeHtml(dateLabel)} · ${ozet.toplam} kayıt · görev grupları ayrı listelenir</p>
+  <p class="meta">${escapeHtml(monthLabel)} · ${escapeHtml(dateLabel)} · ${ozet.toplam} kayıt · görev + meslek grubu etiketleri</p>
   <div class="ozet">
     <div><strong style="color:#059669">${ozet.geldi}</strong>Geldi</div>
     <div><strong style="color:#e11d48">${ozet.yok}</strong>Yok</div>
@@ -321,9 +337,10 @@ export function buildGunlukYoklamaRaporHtml(
     <div><strong style="color:#7c3aed">${ozet.tatil}</strong>Tatil</div>
     <div><strong>${ozet.mesaiToplam}</strong>Top. Mesai (saat)</div>
   </div>
-  <div style="margin:0 0 12px;line-height:1.4">${grupOzet}</div>
+  <div style="margin:0 0 8px;line-height:1.4">${grupOzet}</div>
+  ${etiketOzet ? `<div style="margin:0 0 12px;line-height:1.4"><span style="font-size:10px;font-weight:800;color:#9a3412;margin-right:6px">MESLEK GRUPLARI</span>${etiketOzet}</div>` : ''}
   ${sections}
-  <p class="meta" style="margin-top:28px">Rapor yalnızca Girilmedi dışındaki yoklama kayıtlarını listeler. FORMEN · USTA · ŞENÖR · KAMP · DÜZ İŞÇİ grupları ayrı tablolardır.</p>
+  <p class="meta" style="margin-top:28px">Rapor yalnızca Girilmedi dışındaki yoklama kayıtlarını listeler. Görev grupları (FORMEN · USTA · ŞENÖR · KAMP · DÜZ İŞÇİ) ayrı tablolardır; meslek etiketleri o gün yapılan işi belirtir.</p>
   </body></html>`;
 }
 

@@ -245,6 +245,7 @@ export function ensureGeldiForPersoneller(
     next = {
       ...next,
       [personelId]: setYoklamaDay(next[personelId], y, m, d, {
+        ...dayData,
         durum: 'Geldi',
         mesaiSaati: normalizeMesaiHours(Number(dayData?.mesaiSaati) || 0),
         gonderen,
