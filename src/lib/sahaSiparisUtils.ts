@@ -10,6 +10,8 @@ import {
 import { fetchApiJson } from './apiClient';
 import { auth, db, saveDocument } from './firebase';
 import { linkSatinAlmaKalemler, resolveCariKartId } from './evrakCariStokSync';
+import { levenshteinDistance, normalizeStockCompareName } from './duplicateNameUtils';
+import { normalizeMatchText } from './evrakBatchImportUtils';
 
 export const SAHA_SIPARIS_COLLECTION = 'sahaSiparisleri';
 
@@ -30,6 +32,104 @@ export type SiparisKatalog = {
   stoklar: SiparisKatalogStok[];
   tedarikciler: SiparisKatalogTedarikci[];
 };
+
+export type SiparisEslesme = 'TAM' | 'ICERIR' | 'BENZER';
+
+export type SiparisStokOneri = SiparisKatalogStok & { eslesme: SiparisEslesme };
+export type SiparisTedarikciOneri = SiparisKatalogTedarikci & { eslesme: SiparisEslesme };
+
+export function siparisEslesmeEtiketi(eslesme: SiparisEslesme): string {
+  if (eslesme === 'TAM') return 'Tam eşleşme';
+  if (eslesme === 'ICERIR') return 'İsim içerir';
+  return 'Benzer isim';
+}
+
+export function suggestSiparisStoklar(
+  query: string,
+  stoklar: SiparisKatalogStok[],
+  limit = 8
+): SiparisStokOneri[] {
+  const q = normalizeStockCompareName(query);
+  if (q.length < 2) return [];
+  const scored: Array<SiparisStokOneri & { score: number }> = [];
+  for (const s of stoklar) {
+    const name = normalizeStockCompareName(s.stokAdi);
+    const kod = normalizeStockCompareName(s.stokKodu);
+    const kat = normalizeStockCompareName(s.kategori);
+    if (!name && !kod) continue;
+    let eslesme: SiparisEslesme | null = null;
+    let score = 99;
+    if (name === q || (kod && kod === q)) {
+      eslesme = 'TAM';
+      score = 0;
+    } else if (
+      (name && (name.includes(q) || (q.length >= 4 && q.includes(name)))) ||
+      (kod && kod.includes(q)) ||
+      (kat && kat.includes(q))
+    ) {
+      eslesme = 'ICERIR';
+      score = 1 + Math.abs((name || '').length - q.length);
+    } else if (name) {
+      const dist = levenshteinDistance(q, name);
+      const maxDist = q.length <= 4 ? 1 : 2;
+      if (dist <= maxDist) {
+        eslesme = 'BENZER';
+        score = 10 + dist;
+      }
+    }
+    if (eslesme) scored.push({ ...s, eslesme, score });
+  }
+  scored.sort((a, b) => a.score - b.score || a.stokAdi.localeCompare(b.stokAdi, 'tr'));
+  const seen = new Set<string>();
+  const out: SiparisStokOneri[] = [];
+  for (const row of scored) {
+    if (seen.has(row.id)) continue;
+    seen.add(row.id);
+    out.push({
+      id: row.id,
+      stokKodu: row.stokKodu,
+      stokAdi: row.stokAdi,
+      birim: row.birim,
+      kategori: row.kategori,
+      eslesme: row.eslesme,
+    });
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
+export function suggestSiparisTedarikciler(
+  query: string,
+  tedarikciler: SiparisKatalogTedarikci[],
+  limit = 6
+): SiparisTedarikciOneri[] {
+  const q = normalizeMatchText(query);
+  if (q.length < 2) return [];
+  const scored: Array<SiparisTedarikciOneri & { score: number }> = [];
+  for (const t of tedarikciler) {
+    const name = normalizeMatchText(t.unvan);
+    if (!name) continue;
+    let eslesme: SiparisEslesme | null = null;
+    let score = 99;
+    if (name === q) {
+      eslesme = 'TAM';
+      score = 0;
+    } else if (name.includes(q) || (q.length >= 4 && q.includes(name))) {
+      eslesme = 'ICERIR';
+      score = 1 + Math.abs(name.length - q.length);
+    } else {
+      const dist = levenshteinDistance(q, name);
+      const maxDist = q.length <= 5 ? 1 : 2;
+      if (dist <= maxDist) {
+        eslesme = 'BENZER';
+        score = 10 + dist;
+      }
+    }
+    if (eslesme) scored.push({ ...t, eslesme, score });
+  }
+  scored.sort((a, b) => a.score - b.score || a.unvan.localeCompare(b.unvan, 'tr'));
+  return scored.slice(0, limit).map(({ score: _s, ...rest }) => rest);
+}
 
 export function buildPublicSiparisUrl(): string {
   if (typeof window === 'undefined') return '/?siparis=1';

@@ -8,9 +8,12 @@ import {
   buildPublicSiparisUrl,
   fetchSiparisKatalog,
   katalogFromErp,
+  siparisEslesmeEtiketi,
   submitSahaSiparis,
+  suggestSiparisStoklar,
+  suggestSiparisTedarikciler,
   type SiparisKatalog,
-  type SiparisKatalogStok,
+  type SiparisStokOneri,
 } from '../lib/sahaSiparisUtils';
 
 interface SiparisFormuScreenProps {
@@ -46,7 +49,7 @@ export const SiparisFormuScreen: React.FC<SiparisFormuScreenProps> = ({
   const [miktar, setMiktar] = useState('1');
   const [birim, setBirim] = useState('ADET');
   const [marka, setMarka] = useState('');
-  const [seciliStok, setSeciliStok] = useState<SiparisKatalogStok | null>(null);
+  const [seciliStok, setSeciliStok] = useState<SiparisStokOneri | null>(null);
   const [saving, setSaving] = useState(false);
   const [sonSiparisNo, setSonSiparisNo] = useState('');
   const [linkKopyalandi, setLinkKopyalandi] = useState(false);
@@ -73,27 +76,22 @@ export const SiparisFormuScreen: React.FC<SiparisFormuScreenProps> = ({
     };
   }, [fromErp.stoklar.length, fromErp.tedarikciler.length]);
 
-  const stokOneriler = useMemo(() => {
-    const q = urunArama.trim().toLowerCase();
-    if (q.length < 2) return [];
-    return erpKatalog.stoklar
-      .filter(
-        (s) =>
-          s.stokAdi.toLowerCase().includes(q) ||
-          s.stokKodu.toLowerCase().includes(q) ||
-          s.kategori.toLowerCase().includes(q)
-      )
-      .slice(0, 8);
-  }, [erpKatalog.stoklar, urunArama]);
+  const stokOneriler = useMemo(
+    () => suggestSiparisStoklar(urunArama, erpKatalog.stoklar, 8),
+    [erpKatalog.stoklar, urunArama]
+  );
 
-  const tedarikciOneriler = useMemo(() => {
-    const q = cariFirma.trim().toLowerCase();
-    if (q.length < 2) return [];
-    return erpKatalog.tedarikciler.filter((t) => t.unvan.toLowerCase().includes(q)).slice(0, 6);
-  }, [erpKatalog.tedarikciler, cariFirma]);
+  const tedarikciOneriler = useMemo(
+    () => suggestSiparisTedarikciler(cariFirma, erpKatalog.tedarikciler, 6),
+    [erpKatalog.tedarikciler, cariFirma]
+  );
 
   const addKalem = () => {
-    const ad = (seciliStok?.stokAdi || urunArama).trim();
+    const autoStok =
+      seciliStok ||
+      stokOneriler.find((s) => s.eslesme === 'TAM') ||
+      (stokOneriler[0]?.eslesme === 'ICERIR' ? stokOneriler[0] : undefined);
+    const ad = (autoStok?.stokAdi || urunArama).trim();
     const qty = Number(String(miktar).replace(',', '.'));
     if (!ad) {
       alert('Malzeme adı girin veya stok listesinden seçin.');
@@ -109,9 +107,9 @@ export const SiparisFormuScreen: React.FC<SiparisFormuScreenProps> = ({
         id: `sipk_${Date.now()}`,
         urunAdi: ad,
         miktar: qty,
-        birim: birim || seciliStok?.birim || 'ADET',
+        birim: birim || autoStok?.birim || 'ADET',
         marka: marka.trim(),
-        stokKartId: seciliStok?.id,
+        stokKartId: autoStok?.id,
         kullanilacakYer: kullanilacakYer.trim(),
       },
     ]);
@@ -125,13 +123,19 @@ export const SiparisFormuScreen: React.FC<SiparisFormuScreenProps> = ({
     e.preventDefault();
     setSaving(true);
     try {
+      const autoCari =
+        cariKartId
+          ? { id: cariKartId, unvan: cariFirma }
+          : suggestSiparisTedarikciler(cariFirma, erpKatalog.tedarikciler, 1).find(
+              (t) => t.eslesme === 'TAM' || t.eslesme === 'ICERIR'
+            );
       const result = await submitSahaSiparis({
         personelAdSoyad,
         personelGorev,
         telefon,
         kullanilacakYer,
-        cariFirma,
-        cariKartId,
+        cariFirma: autoCari?.unvan || cariFirma,
+        cariKartId: autoCari?.id || '',
         aciklama,
         kalemler,
         olusturanEmail: currentUser?.email || '',
@@ -195,7 +199,8 @@ export const SiparisFormuScreen: React.FC<SiparisFormuScreenProps> = ({
           </h1>
           <p className={`text-[12px] leading-relaxed ${isPublic ? 'text-slate-400' : 'text-slate-500'}`}>
             Personel adını ve malzemenin nerede kullanılacağını yazın. Sipariş Onay Havuzu → Satın
-            Alma kuyruğuna düşer; onaylanırsa içeride satın alma talebi oluşur.
+            Alma kuyruğuna düşer; onaylanırsa içeride satın alma talebi oluşur. Malzeme yazınca
+            mevcut stok kartları ve benzer isimler önerilir.
             {katalogYukleniyor ? ' Katalog yükleniyor…' : ''}
           </p>
           {!isPublic && (
@@ -326,9 +331,12 @@ export const SiparisFormuScreen: React.FC<SiparisFormuScreenProps> = ({
                             setCariFirma(t.unvan);
                             setCariKartId(t.id);
                           }}
-                          className="w-full text-left px-3 py-2 text-[11px] font-bold hover:bg-emerald-50 cursor-pointer"
+                          className="w-full text-left px-3 py-2 text-[11px] font-bold hover:bg-emerald-50 cursor-pointer flex justify-between gap-2"
                         >
-                          {t.unvan}
+                          <span>{t.unvan}</span>
+                          <span className="text-[9px] font-black uppercase text-emerald-700 shrink-0">
+                            {siparisEslesmeEtiketi(t.eslesme)}
+                          </span>
                         </button>
                       ))}
                     </div>
@@ -397,6 +405,9 @@ export const SiparisFormuScreen: React.FC<SiparisFormuScreenProps> = ({
                           <span className="font-black">{s.stokAdi}</span>
                           <span className="text-slate-400 ml-1">
                             {s.stokKodu} · {s.birim}
+                          </span>
+                          <span className="block text-[9px] font-black uppercase text-sky-700">
+                            {siparisEslesmeEtiketi(s.eslesme)}
                           </span>
                         </button>
                       ))}

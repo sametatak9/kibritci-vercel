@@ -1156,6 +1156,11 @@ ${kalemOzet || '—'}${more}`,
                             Dönüştürüldü · {linkedIrs.length} irsaliye
                           </span>
                         )}
+                        {sa.kaynak === 'SIPARIS_FORMU' && (
+                          <span className="text-[9px] font-black px-2 py-0.5 rounded-full uppercase border bg-sky-50 text-sky-800 border-sky-200">
+                            Saha siparişi
+                          </span>
+                        )}
                       </div>
                       <h5 className="font-bold text-slate-950 mt-1">
                         {sa.cariFirma} · {sa.tarih}
