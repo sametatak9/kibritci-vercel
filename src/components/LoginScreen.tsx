@@ -1002,7 +1002,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
           </button>
           <div className="mt-3">
             <a
-              href={`${typeof window !== 'undefined' ? window.location.origin : ''}/?siparis=1`}
+              href="/siparis"
               className="text-[11px] text-emerald-400 hover:underline font-bold"
             >
               Üyeliksiz malzeme siparişi ver →

@@ -132,14 +132,16 @@ export function suggestSiparisTedarikciler(
 }
 
 export function buildPublicSiparisUrl(): string {
-  if (typeof window === 'undefined') return '/?siparis=1';
-  return `${window.location.origin}/?siparis=1`;
+  if (typeof window === 'undefined') return '/siparis';
+  return `${window.location.origin}/siparis`;
 }
 
-/** Üyeliksiz sipariş formu — query veya hash. ERP bootstrap çalışmamalı. */
+/** Üyeliksiz sipariş formu — /siparis, query veya hash. ERP bootstrap çalışmamalı. */
 export function isPublicSiparisRoute(): boolean {
   if (typeof window === 'undefined') return false;
   try {
+    const path = String(window.location.pathname || '').replace(/\/+$/, '') || '/';
+    if (path === '/siparis' || path.endsWith('/siparis.html')) return true;
     const search = new URLSearchParams(window.location.search);
     if (search.has('siparis') || search.get('view') === 'siparis') return true;
     const hash = String(window.location.hash || '');
@@ -149,8 +151,8 @@ export function isPublicSiparisRoute(): boolean {
       const hp = new URLSearchParams(hashQuery);
       if (hp.has('siparis') || hp.get('view') === 'siparis') return true;
     }
-    const path = hash.replace(/^#\/?/, '').split('?')[0].replace(/\/$/, '');
-    return path === 'siparis';
+    const hashPath = hash.replace(/^#\/?/, '').split('?')[0].replace(/\/$/, '');
+    return hashPath === 'siparis';
   } catch {
     return false;
   }

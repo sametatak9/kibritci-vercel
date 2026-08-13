@@ -218,7 +218,7 @@ app.post('/api/public/saha-siparis', async (req, res) => {
       kalemler,
       durum: 'ONAY_BEKLIYOR',
       kaynak: 'SIPARIS_FORMU',
-      olusturanEmail: String(body.olusturanEmail || ''),
+      olusturanEmail: 'siparis-link@kibritci.com',
       olusturulma: now,
     };
 

@@ -4460,26 +4460,10 @@ function App() {
   );
 }
 
-function PublicSiparisShell() {
-  const close = () => {
-    window.location.assign(`${window.location.origin}/`);
-  };
-  return (
-    <Suspense
-      fallback={
-        <div className="min-h-screen bg-slate-950 flex items-center justify-center text-slate-100">
-          <KibritciLogo size="lg" className="h-14" />
-        </div>
-      }
-    >
-      <SiparisFormuScreen isPublic onClose={close} />
-    </Suspense>
-  );
-}
-
 export default function AppRoot() {
   if (isPublicSiparisRoute()) {
-    return <PublicSiparisShell />;
+    window.location.replace('/siparis');
+    return null;
   }
   return <App />;
 }

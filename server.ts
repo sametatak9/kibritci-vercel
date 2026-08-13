@@ -1,5 +1,6 @@
 import express from "express";
 import path from "path";
+import fs from "fs";
 import dotenv from "dotenv";
 import { registerApiRoutes } from "./src/server/registerApiRoutes";
 
@@ -14,6 +15,20 @@ app.use(express.urlencoded({ limit: "50mb", extended: true }));
 
 registerApiRoutes(app);
 
+function wantsSiparisPage(req: express.Request): boolean {
+  const p = String(req.path || "").toLowerCase().replace(/\/+$/, "") || "/";
+  return p === "/siparis" || p === "/siparis.html";
+}
+
+function siparisQueryRedirect(req: express.Request, res: express.Response, next: express.NextFunction) {
+  if (req.path === "/" && Object.prototype.hasOwnProperty.call(req.query, "siparis")) {
+    return res.redirect(302, "/siparis");
+  }
+  return next();
+}
+
+app.use(siparisQueryRedirect);
+
 async function startServer() {
   app.use("/api", (req, res) => {
     res.status(404).json({
@@ -25,7 +40,17 @@ async function startServer() {
     const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
       server: { middlewareMode: true },
-      appType: "spa",
+      appType: "mpa",
+    });
+    app.get(["/siparis", "/siparis.html"], async (req, res, next) => {
+      try {
+        const htmlPath = path.resolve(process.cwd(), "siparis.html");
+        const raw = fs.readFileSync(htmlPath, "utf-8");
+        const html = await vite.transformIndexHtml("/siparis.html", raw);
+        res.status(200).set({ "Content-Type": "text/html; charset=utf-8" }).end(html);
+      } catch (err) {
+        next(err);
+      }
     });
     app.use((req, res, next) => {
       if (req.path.startsWith("/api")) {
@@ -41,6 +66,7 @@ async function startServer() {
       const normPath = req.path.toLowerCase();
       const isHtmlOrSwOrManifest =
         normPath === "/" ||
+        wantsSiparisPage(req) ||
         normPath.endsWith(".html") ||
         normPath === "/index.html" ||
         normPath === "/sw.js" ||
@@ -51,6 +77,11 @@ async function startServer() {
         res.setHeader("Expires", "0");
       }
       next();
+    });
+
+    app.get(["/siparis", "/siparis.html"], (req, res) => {
+      res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+      res.sendFile(path.join(distPath, "siparis.html"));
     });
 
     app.use(

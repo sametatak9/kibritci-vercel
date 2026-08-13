@@ -19,6 +19,10 @@ export default defineConfig(() => {
         include: [/node_modules/],
       },
       rollupOptions: {
+        input: {
+          main: path.resolve(__dirname, 'index.html'),
+          siparis: path.resolve(__dirname, 'siparis.html'),
+        },
         output: {
           // Büyük vendor kütüphanelerini ayrı paketlere böl: tarayıcı bunları önbelleğe alır,
           // uygulama kodu güncellense bile tekrar indirilmez.

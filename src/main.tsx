@@ -1,6 +1,5 @@
 import { Component, StrictMode, Suspense, type ReactNode } from 'react';
 import {createRoot} from 'react-dom/client';
-import App from './App.tsx';
 import './index.css';
 import { ToastProvider } from './components/ToastProvider';
 import { SoundProvider } from './components/SoundProvider';
@@ -111,19 +110,44 @@ const FullScreenLoader = () => (
   </div>
 );
 
-createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    <RootErrorBoundary>
-      <SoundProvider />
-      <ContextMenuProvider />
-      <KeyboardNavProvider />
-      <ConfettiProvider />
-      <EasterEggProvider />
-      <ToastProvider />
-      <NetworkProvider />
-      <Suspense fallback={<FullScreenLoader />}>
-        <App />
-      </Suspense>
-    </RootErrorBoundary>
-  </StrictMode>,
-);
+function isStandaloneSiparisPath(): boolean {
+  const path = String(window.location.pathname || '').replace(/\/+$/, '') || '/';
+  if (path === '/siparis' || path.endsWith('/siparis.html')) return true;
+  try {
+    return new URLSearchParams(window.location.search).has('siparis');
+  } catch {
+    return false;
+  }
+}
+
+async function boot() {
+  if (isStandaloneSiparisPath()) {
+    const path = String(window.location.pathname || '').replace(/\/+$/, '') || '/';
+    if (path === '/' || path === '/index.html') {
+      window.location.replace('/siparis');
+      return;
+    }
+    await import('./siparis-main.tsx');
+    return;
+  }
+
+  const { default: App } = await import('./App.tsx');
+  createRoot(document.getElementById('root')!).render(
+    <StrictMode>
+      <RootErrorBoundary>
+        <SoundProvider />
+        <ContextMenuProvider />
+        <KeyboardNavProvider />
+        <ConfettiProvider />
+        <EasterEggProvider />
+        <ToastProvider />
+        <NetworkProvider />
+        <Suspense fallback={<FullScreenLoader />}>
+          <App />
+        </Suspense>
+      </RootErrorBoundary>
+    </StrictMode>,
+  );
+}
+
+void boot();
