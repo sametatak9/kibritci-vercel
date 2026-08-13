@@ -7,8 +7,10 @@ import {
   getYoklamaDay,
   isFaaliyetPersonelKapsaminda,
   isFormenGorev,
+  isIdariPersonel,
   isKampciGorev,
   isPersonelVisibleInMonth,
+  isTaseronPersonel,
   normalizeTurkishName,
   asYoklamaGunMap,
 } from './yoklamaUtils';
@@ -688,9 +690,12 @@ export function buildDayPersonelRaporu(
   const yokPersoneller: DayPersonelRaporu['yokPersoneller'] = [];
   if (y && m && d) {
     for (const p of personeller) {
-      if (!shouldIncludeFaaliyetPersonel(p)) continue;
+      // Yok listesi yoklama ile eşleşsin: Formen dahil (faaliyet çalışanı olmasalar da).
+      // Taşeron / idari / işten çıkmış hariç — Geldi havuzu ile aynı havuz.
+      if (isTaseronPersonel(p) || isIdariPersonel(p)) continue;
       const isAktif = p.durum === true || String(p.durum).toLowerCase() === 'true';
       if (!isAktif) continue;
+      if (String(p.istenCikisTarihi || '').trim()) continue;
       const cell = getYoklamaDay(yoklamalar[p.id], y, m, d);
       if (cell?.durum !== 'Yok') continue;
       yokPersoneller.push({
