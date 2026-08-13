@@ -46,6 +46,7 @@ import { AcilOnayBadge } from './AcilOnayBadge';
 import { VidanjorFisOnayPanel } from './VidanjorFisOnayPanel';
 import { YildirimTankerFisOnayPanel } from './YildirimTankerFisOnayPanel';
 import { MicirFisOnayPanel } from './MicirFisOnayPanel';
+import { MobilFaaliyetGecmisPanel } from './MobilFaaliyetGecmisPanel';
 import { KibritciLogo } from './KibritciLogo';
 import {
   doubleCheckKapiMatch,
@@ -3094,6 +3095,13 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
                   )}
                 </div>
               )}
+
+              <MobilFaaliyetGecmisPanel
+                title="Kampçı faaliyet geçmişi"
+                kind="kamp"
+                collectionName="kampGunlukFaaliyetleri"
+                items={kampFaaliyetler}
+              />
             </div>
           )}
 
@@ -3181,6 +3189,19 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
                   )
                 )
               )}
+
+              <MobilFaaliyetGecmisPanel
+                title="Tesisatçı faaliyet geçmişi"
+                kind="tesisatci"
+                collectionName="tesisatciFaaliyetleri"
+                items={tesisatciFaaliyetler}
+              />
+              <MobilFaaliyetGecmisPanel
+                title="Mermerci faaliyet geçmişi"
+                kind="mermerci"
+                collectionName="mermerciFaaliyetleri"
+                items={mermerciFaaliyetler}
+              />
             </div>
           )}
 
@@ -3765,6 +3786,15 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
                     </div>
                   </div>
                 )
+              )}
+
+              {isGoturuOnayTab && (
+                <MobilFaaliyetGecmisPanel
+                  title="Götürü / Seramik faaliyet geçmişi"
+                  kind="seramik"
+                  collectionName="seramikFaaliyetleri"
+                  items={seramikFaaliyetler}
+                />
               )}
 
               {/* Subtabs for Personnel Management */}

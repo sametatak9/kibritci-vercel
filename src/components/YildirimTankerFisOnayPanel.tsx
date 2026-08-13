@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
-  Truck, Check, X, Pencil, RefreshCw, Camera, AlertTriangle, ZoomIn
+  Truck, Check, X, Pencil, RefreshCw, Camera, AlertTriangle, ZoomIn, History, Search, Trash2
 } from 'lucide-react';
 import { collection, onSnapshot } from 'firebase/firestore';
 import { CariKart, CariKartIslem, Fatura, Irsaliye, SatinAlmaTalebi, YildirimTankerFis } from '../types/erp';
@@ -13,6 +13,7 @@ import {
   rejectYildirimTankerFis,
 } from '../lib/yildirimTankerOnayUtils';
 import { findMatchingYildirimSatinAlma } from '../lib/tankerEvrakDonusum';
+import { deleteYildirimTankerFisCascade, fisDurumLabel } from '../lib/fisGecmisUtils';
 
 interface YildirimTankerFisOnayPanelProps {
   currentUser: any;
@@ -47,6 +48,8 @@ export const YildirimTankerFisOnayPanel: React.FC<YildirimTankerFisOnayPanelProp
   const [sanayiSuyuAdet, setSanayiSuyuAdet] = useState('');
   const [damacaAdet, setDamacaAdet] = useState('');
   const [saving, setSaving] = useState(false);
+  const [listMode, setListMode] = useState<'bekleyen' | 'gecmis'>('bekleyen');
+  const [gecmisArama, setGecmisArama] = useState('');
 
   const yildirimCari = useMemo(() => findYildirimTankerCari(cariKartlar), [cariKartlar]);
 
@@ -61,6 +64,19 @@ export const YildirimTankerFisOnayPanel: React.FC<YildirimTankerFisOnayPanelProp
   }, []);
 
   const pending = useMemo(() => fisler.filter((f) => isYildirimFisPending(f)), [fisler]);
+  const gecmis = useMemo(() => fisler.filter((f) => !isYildirimFisPending(f)), [fisler]);
+  const filteredGecmis = useMemo(() => {
+    const q = gecmisArama.trim().toLowerCase();
+    if (!q) return gecmis;
+    return gecmis.filter((f) =>
+      [f.fisNo, f.tarih, f.kaydeden, f.firmaUnvan, f.durum]
+        .map((x) => String(x || '').toLowerCase())
+        .join(' ')
+        .includes(q)
+    );
+  }, [gecmis, gecmisArama]);
+  const visibleList = listMode === 'bekleyen' ? pending : filteredGecmis;
+  const editingApproved = editing?.durum === 'ONAYLANDI';
 
   const openEdit = (f: YildirimTankerFis) => {
     setEditing(f);
@@ -87,7 +103,9 @@ export const YildirimTankerFisOnayPanel: React.FC<YildirimTankerFisOnayPanelProp
     }
     if (
       !window.confirm(
-        'Onaylanınca Yıldırım Tanker irsaliyesi + cari oluşur; SA varsa soft bağlanır. Devam?'
+        editingApproved
+          ? 'Onaylı kayıt güncellenecek. İrsaliye ve cari geçmişi de yazılır. Devam?'
+          : 'Onaylanınca Yıldırım Tanker irsaliyesi + cari oluşur; SA varsa soft bağlanır. Devam?'
       )
     ) {
       return;
@@ -139,9 +157,11 @@ export const YildirimTankerFisOnayPanel: React.FC<YildirimTankerFisOnayPanelProp
       );
 
       alert(
-        `Onaylandı — irsaliye olarak kaydedildi.\n\n1) İrsaliye: ${result.irsaliye.irsaliyeNo}\n2) Cari: ${result.fis.firmaUnvan}${
-          result.saMatch ? `\n3) SA: ${result.saMatch.sa.saId}` : ''
-        }\n\nFatura için: Cari Kartlar → ${result.fis.firmaUnvan || 'Yıldırım Tanker'} → Geçmiş İrsaliyeler listesinden bir veya birden fazla irsaliye seçip faturaya dönüştürebilirsiniz.`
+        editingApproved
+          ? `Güncellendi — irsaliye: ${result.irsaliye.irsaliyeNo}`
+          : `Onaylandı — irsaliye olarak kaydedildi.\n\n1) İrsaliye: ${result.irsaliye.irsaliyeNo}\n2) Cari: ${result.fis.firmaUnvan}${
+              result.saMatch ? `\n3) SA: ${result.saMatch.sa.saId}` : ''
+            }\n\nFatura için: Cari Kartlar → ${result.fis.firmaUnvan || 'Yıldırım Tanker'} → Geçmiş İrsaliyeler listesinden bir veya birden fazla irsaliye seçip faturaya dönüştürebilirsiniz.`
       );
       setEditing(null);
     } catch (err: any) {
@@ -149,6 +169,32 @@ export const YildirimTankerFisOnayPanel: React.FC<YildirimTankerFisOnayPanelProp
       alert('Onay başarısız: ' + (err?.message || ''));
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleDelete = async (f: YildirimTankerFis) => {
+    const extra =
+      f.durum === 'ONAYLANDI'
+        ? '\n\nOnaylı irsaliye ve cari kaydı da silinecek.'
+        : '';
+    if (!window.confirm(`${f.fisNo} nolu fiş silinsin mi?${extra}`)) return;
+    try {
+      await deleteYildirimTankerFisCascade({
+        fis: f,
+        irsaliyeler,
+        setIrsaliyeler,
+        setCariIslemGecmisi,
+      });
+      await addNotification?.(
+        `Yıldırım Tanker fişi silindi: ${f.fisNo}`,
+        {
+          tip: 'YILDIRIM_TANKER_FIS_SILINDI',
+          yildirimTankerFisId: f.id,
+        }
+      );
+      if (editing?.id === f.id) setEditing(null);
+    } catch (err: any) {
+      alert('Silinemedi: ' + (err?.message || ''));
     }
   };
 
@@ -194,6 +240,26 @@ export const YildirimTankerFisOnayPanel: React.FC<YildirimTankerFisOnayPanelProp
             {pending.length} bekleyen
           </span>
         </div>
+        <div className="flex gap-1.5 mt-3">
+          <button
+            type="button"
+            onClick={() => { setListMode('bekleyen'); setEditing(null); }}
+            className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wide cursor-pointer ${
+              listMode === 'bekleyen' ? 'bg-white text-sky-950' : 'bg-sky-900/60 text-sky-100'
+            }`}
+          >
+            Bekleyen ({pending.length})
+          </button>
+          <button
+            type="button"
+            onClick={() => { setListMode('gecmis'); setEditing(null); }}
+            className={`inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wide cursor-pointer ${
+              listMode === 'gecmis' ? 'bg-white text-sky-950' : 'bg-sky-900/60 text-sky-100'
+            }`}
+          >
+            <History size={11} /> Geçmiş ({gecmis.length})
+          </button>
+        </div>
       </div>
 
       {!yildirimCari && (
@@ -206,15 +272,39 @@ export const YildirimTankerFisOnayPanel: React.FC<YildirimTankerFisOnayPanelProp
         </div>
       )}
 
-      {pending.length === 0 ? (
+      {listMode === 'gecmis' && (
+        <div className="relative">
+          <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+          <input
+            value={gecmisArama}
+            onChange={(e) => setGecmisArama(e.target.value)}
+            placeholder="Fiş no, tarih, kaydeden…"
+            className="w-full bg-white border border-slate-200 rounded-xl pl-8 pr-3 py-2 text-[11px] font-semibold"
+          />
+        </div>
+      )}
+
+      {visibleList.length === 0 ? (
         <div className="bg-slate-50 rounded-2xl p-10 text-center border border-slate-200">
-          <p className="text-sm font-bold text-slate-600">Onay bekleyen Yıldırım Tanker fişi yok.</p>
-          <p className="text-xs text-slate-400 mt-1">Tesisatçı yeni fiş gönderince burada listelenir.</p>
+          <p className="text-sm font-bold text-slate-600">
+            {listMode === 'bekleyen'
+              ? 'Onay bekleyen Yıldırım Tanker fişi yok.'
+              : gecmis.length === 0
+                ? 'Henüz geçmiş fiş yok.'
+                : 'Aramaya uyan geçmiş fiş yok.'}
+          </p>
+          <p className="text-xs text-slate-400 mt-1">
+            {listMode === 'bekleyen'
+              ? 'Tesisatçı yeni fiş gönderince burada listelenir.'
+              : 'Onaylanan ve reddedilen fişler Geçmiş sekmesinde görünür.'}
+          </p>
         </div>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <div className="space-y-2 max-h-[520px] overflow-y-auto pr-1">
-            {pending.map((f) => (
+            {visibleList.map((f) => {
+              const badge = fisDurumLabel(f.durum);
+              return (
               <div
                 key={f.id}
                 className={`bg-white border rounded-xl p-3 flex gap-3 ${
@@ -243,32 +333,50 @@ export const YildirimTankerFisOnayPanel: React.FC<YildirimTankerFisOnayPanelProp
                   </div>
                 )}
                 <div className="min-w-0 flex-1">
-                  <p className="text-xs font-black text-slate-900 truncate">{f.fisNo}</p>
+                  <p className="text-xs font-black text-slate-900 truncate flex items-center gap-1.5 flex-wrap">
+                    {f.fisNo}
+                    {listMode === 'gecmis' && (
+                      <span className={`text-[8px] font-black px-1.5 py-0.5 rounded-full ${badge.className}`}>
+                        {badge.text}
+                      </span>
+                    )}
+                  </p>
                   <p className="text-[10px] text-slate-500 mt-0.5">
                     {f.tarih} · İçme: <strong>{f.icmeSuyuAdet} ton</strong> · Sanayi:{' '}
                     <strong>{f.sanayiSuyuAdet} ton</strong> · Damacana: <strong>{f.damacaAdet || 0} adet</strong>
                   </p>
                   <p className="text-[9px] text-slate-400 truncate">{f.firmaUnvan}</p>
                   <p className="text-[9px] text-slate-400">Kaydeden: {f.kaydeden || '—'}</p>
-                  <div className="flex gap-1.5 mt-2">
+                  <div className="flex gap-1.5 mt-2 flex-wrap">
                     <button
                       type="button"
                       onClick={() => openEdit(f)}
                       className="inline-flex items-center gap-1 text-[9px] font-black px-2.5 py-1 rounded-lg bg-sky-600 text-white cursor-pointer"
                     >
-                      <Pencil size={11} /> Düzelt / Onayla
+                      <Pencil size={11} /> {listMode === 'gecmis' ? 'Düzelt' : 'Düzelt / Onayla'}
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => handleReject(f)}
-                      className="inline-flex items-center gap-1 text-[9px] font-black px-2.5 py-1 rounded-lg bg-rose-50 text-rose-700 border border-rose-200 cursor-pointer"
-                    >
-                      <X size={11} /> Reddet
-                    </button>
+                    {listMode === 'bekleyen' ? (
+                      <button
+                        type="button"
+                        onClick={() => handleReject(f)}
+                        className="inline-flex items-center gap-1 text-[9px] font-black px-2.5 py-1 rounded-lg bg-rose-50 text-rose-700 border border-rose-200 cursor-pointer"
+                      >
+                        <X size={11} /> Reddet
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => handleDelete(f)}
+                        className="inline-flex items-center gap-1 text-[9px] font-black px-2.5 py-1 rounded-lg bg-rose-50 text-rose-700 border border-rose-200 cursor-pointer"
+                      >
+                        <Trash2 size={11} /> Sil
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>
-            ))}
+              );
+            })}
           </div>
 
           <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm">
@@ -355,8 +463,10 @@ export const YildirimTankerFisOnayPanel: React.FC<YildirimTankerFisOnayPanelProp
                   </div>
                 </div>
                 <p className="text-[10px] text-slate-500 bg-slate-50 border border-slate-100 rounded-xl px-3 py-2">
-                  Kaydet → <strong>İrsaliye</strong> + <strong>Cari kart altına irsaliye geçmişi</strong>{' '}
-                  oluşur ({yildirimCari?.unvan || YILDIRIM_TANKER_UNVAN}).
+                  {editingApproved
+                    ? 'Kaydet → mevcut irsaliye ve cari kaydı güncellenir.'
+                    : <>Kaydet → <strong>İrsaliye</strong> + <strong>Cari kart altına irsaliye geçmişi</strong>{' '}
+                      oluşur ({yildirimCari?.unvan || YILDIRIM_TANKER_UNVAN}).</>}
                 </p>
                 <div className="flex gap-2 pt-1">
                   <button
@@ -365,7 +475,7 @@ export const YildirimTankerFisOnayPanel: React.FC<YildirimTankerFisOnayPanelProp
                     className="flex-1 inline-flex items-center justify-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-[10px] py-3 rounded-xl disabled:opacity-50 cursor-pointer"
                   >
                     {saving ? <RefreshCw size={13} className="animate-spin" /> : <Check size={13} />}
-                    ONAYLA &amp; İRSALİYE OLUŞTUR
+                    {editingApproved ? 'KAYDET' : 'ONAYLA & İRSALİYE OLUŞTUR'}
                   </button>
                   <button
                     type="button"

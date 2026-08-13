@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
-  Truck, Check, X, Pencil, RefreshCw, Camera, AlertTriangle
+  Truck, Check, X, Pencil, RefreshCw, Camera, AlertTriangle, History, Search, Trash2
 } from 'lucide-react';
 import { collection, onSnapshot } from 'firebase/firestore';
 import { CariKart, CariKartIslem, Irsaliye, MicirStabilizeFis, SatinAlmaTalebi } from '../types/erp';
@@ -23,6 +23,7 @@ import {
   listMatchingMicirSatinAlma,
   rejectMicirFis,
 } from '../lib/micirOnayUtils';
+import { deleteMicirFisCascade, fisDurumLabel } from '../lib/fisGecmisUtils';
 
 interface MicirFisOnayPanelProps {
   currentUser: any;
@@ -54,6 +55,8 @@ export const MicirFisOnayPanel: React.FC<MicirFisOnayPanelProps> = ({
   const [malzemeTipi, setMalzemeTipi] = useState<MicirMalzemeTipi>('MICIR');
   const [selectedSaId, setSelectedSaId] = useState('');
   const [saving, setSaving] = useState(false);
+  const [listMode, setListMode] = useState<'bekleyen' | 'gecmis'>('bekleyen');
+  const [gecmisArama, setGecmisArama] = useState('');
 
   const entoCari = useMemo(() => findEntoMadenCari(cariKartlar), [cariKartlar]);
 
@@ -68,6 +71,19 @@ export const MicirFisOnayPanel: React.FC<MicirFisOnayPanelProps> = ({
   }, []);
 
   const pending = useMemo(() => fisler.filter((f) => isMicirFisPending(f)), [fisler]);
+  const gecmis = useMemo(() => fisler.filter((f) => !isMicirFisPending(f)), [fisler]);
+  const filteredGecmis = useMemo(() => {
+    const q = gecmisArama.trim().toLowerCase();
+    if (!q) return gecmis;
+    return gecmis.filter((f) =>
+      [f.irsaliyeNo, f.plaka, f.tarih, f.kaydeden, f.firmaUnvan, f.malzemeTipi, f.durum]
+        .map((x) => String(x || '').toLowerCase())
+        .join(' ')
+        .includes(q)
+    );
+  }, [gecmis, gecmisArama]);
+  const visibleList = listMode === 'bekleyen' ? pending : filteredGecmis;
+  const editingApproved = editing?.durum === 'ONAYLANDI';
 
   const saCandidates = useMemo(() => {
     if (!editing) return [];
@@ -114,11 +130,13 @@ export const MicirFisOnayPanel: React.FC<MicirFisOnayPanelProps> = ({
     }
     if (
       !window.confirm(
-        `Onaylanınca:\n1) İrsaliyeler sekmesine kayıt\n2) ${ENTO_MADEN_UNVAN} cari kart altına irsaliye geçmişi${
-          editingSaMatch
-            ? `\n3) Satın alma ${editingSaMatch.sa.saId} ile bağlanır (${editingSaMatch.kalem.urunAdi})`
-            : '\n3) Eşleşen açık SA bulunamazsa irsaliye SA’sız oluşur'
-        }\n\noluşacak. Devam?`
+        editingApproved
+          ? `Onaylı kayıt güncellenecek. İrsaliye ve cari geçmişi de yazılır. Devam?`
+          : `Onaylanınca:\n1) İrsaliyeler sekmesine kayıt\n2) ${ENTO_MADEN_UNVAN} cari kart altına irsaliye geçmişi${
+              editingSaMatch
+                ? `\n3) Satın alma ${editingSaMatch.sa.saId} ile bağlanır (${editingSaMatch.kalem.urunAdi})`
+                : '\n3) Eşleşen açık SA bulunamazsa irsaliye SA’sız oluşur'
+            }\n\noluşacak. Devam?`
       )
     ) {
       return;
@@ -165,11 +183,13 @@ export const MicirFisOnayPanel: React.FC<MicirFisOnayPanelProps> = ({
       );
 
       alert(
-        `Onaylandı.\n\nİrsaliye: ${result.irsaliye.irsaliyeNo}\nCari: ${result.fis.firmaUnvan}\nMiktar: ${formatMicirMiktarLabel(result.fis.tonaj, result.fis.kiloKg)}${
-          result.saMatch
-            ? `\nSatın alma: ${result.saMatch.sa.saId} (${result.saMatch.kalem.urunAdi})`
-            : '\nSatın alma: bağlanamadı (açık mıcır/stabilize SA yok)'
-        }`
+        editingApproved
+          ? `Güncellendi.\n\nİrsaliye: ${result.irsaliye.irsaliyeNo}\nMiktar: ${formatMicirMiktarLabel(result.fis.tonaj, result.fis.kiloKg)}`
+          : `Onaylandı.\n\nİrsaliye: ${result.irsaliye.irsaliyeNo}\nCari: ${result.fis.firmaUnvan}\nMiktar: ${formatMicirMiktarLabel(result.fis.tonaj, result.fis.kiloKg)}${
+              result.saMatch
+                ? `\nSatın alma: ${result.saMatch.sa.saId} (${result.saMatch.kalem.urunAdi})`
+                : '\nSatın alma: bağlanamadı (açık mıcır/stabilize SA yok)'
+            }`
       );
       setEditing(null);
     } catch (err: any) {
@@ -184,6 +204,29 @@ export const MicirFisOnayPanel: React.FC<MicirFisOnayPanelProps> = ({
       }
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleDelete = async (f: MicirStabilizeFis) => {
+    const extra =
+      f.durum === 'ONAYLANDI'
+        ? '\n\nOnaylı irsaliye ve cari kaydı da silinecek.'
+        : '';
+    if (!window.confirm(`${f.irsaliyeNo} nolu kayıt silinsin mi?${extra}`)) return;
+    try {
+      await deleteMicirFisCascade({
+        fis: f,
+        irsaliyeler,
+        setIrsaliyeler,
+        setCariIslemGecmisi,
+      });
+      await addNotification?.(
+        `Mıcır/Stabilize kaydı silindi: ${f.irsaliyeNo}`,
+        { tip: 'MICIR_FIS_SILINDI', micirFisId: f.id }
+      );
+      if (editing?.id === f.id) setEditing(null);
+    } catch (err: any) {
+      alert('Silinemedi: ' + (err?.message || ''));
     }
   };
 
@@ -224,6 +267,30 @@ export const MicirFisOnayPanel: React.FC<MicirFisOnayPanelProps> = ({
             {pending.length} bekleyen
           </span>
         </div>
+        <div className="flex gap-1.5 mt-3">
+          <button
+            type="button"
+            onClick={() => { setListMode('bekleyen'); setEditing(null); }}
+            className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wide cursor-pointer ${
+              listMode === 'bekleyen'
+                ? 'bg-[#0F6C5C] text-white'
+                : 'bg-[#E3F2EE] text-[#0F6C5C] border border-[#B9DBD2]'
+            }`}
+          >
+            Bekleyen ({pending.length})
+          </button>
+          <button
+            type="button"
+            onClick={() => { setListMode('gecmis'); setEditing(null); }}
+            className={`inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wide cursor-pointer ${
+              listMode === 'gecmis'
+                ? 'bg-[#0F6C5C] text-white'
+                : 'bg-[#E3F2EE] text-[#0F6C5C] border border-[#B9DBD2]'
+            }`}
+          >
+            <History size={11} /> Geçmiş ({gecmis.length})
+          </button>
+        </div>
       </div>
 
       {!entoCari && (
@@ -236,17 +303,39 @@ export const MicirFisOnayPanel: React.FC<MicirFisOnayPanelProps> = ({
         </div>
       )}
 
-      {pending.length === 0 ? (
+      {listMode === 'gecmis' && (
+        <div className="relative">
+          <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+          <input
+            value={gecmisArama}
+            onChange={(e) => setGecmisArama(e.target.value)}
+            placeholder="İrsaliye no, plaka, tarih, kaydeden…"
+            className="w-full bg-white border border-[#D5DEE3] rounded-xl pl-8 pr-3 py-2 text-[11px] font-semibold"
+          />
+        </div>
+      )}
+
+      {visibleList.length === 0 ? (
         <div className="bg-white rounded-2xl p-10 text-center border border-[#D5DEE3]">
-          <p className="text-sm font-bold text-slate-700">Onay bekleyen mıcır/stabilize irsaliyesi yok.</p>
+          <p className="text-sm font-bold text-slate-700">
+            {listMode === 'bekleyen'
+              ? 'Onay bekleyen mıcır/stabilize irsaliyesi yok.'
+              : gecmis.length === 0
+                ? 'Henüz geçmiş irsaliye yok.'
+                : 'Aramaya uyan geçmiş kayıt yok.'}
+          </p>
           <p className="text-xs text-slate-500 mt-1">
-            Güvenlik kapıdan yeni {ENTO_MADEN_UNVAN} irsaliyesi gönderince burada listelenir.
+            {listMode === 'bekleyen'
+              ? `Güvenlik kapıdan yeni ${ENTO_MADEN_UNVAN} irsaliyesi gönderince burada listelenir.`
+              : 'Onaylanan ve reddedilen kayıtlar Geçmiş sekmesinde görünür.'}
           </p>
         </div>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <div className="space-y-2 max-h-[520px] overflow-y-auto pr-1">
-            {pending.map((f) => (
+            {visibleList.map((f) => {
+              const badge = fisDurumLabel(f.durum);
+              return (
               <div
                 key={f.id}
                 className={`bg-white border rounded-xl p-3 flex gap-3 ${
@@ -271,8 +360,13 @@ export const MicirFisOnayPanel: React.FC<MicirFisOnayPanelProps> = ({
                   </div>
                 )}
                 <div className="min-w-0 flex-1">
-                  <p className="text-xs font-black text-slate-900 truncate">
+                  <p className="text-xs font-black text-slate-900 truncate flex items-center gap-1.5 flex-wrap">
                     {f.irsaliyeNo} · {f.plaka}
+                    {listMode === 'gecmis' && (
+                      <span className={`text-[8px] font-black px-1.5 py-0.5 rounded-full ${badge.className}`}>
+                        {badge.text}
+                      </span>
+                    )}
                   </p>
                   <p className="text-[10px] text-slate-500 mt-0.5">
                     {f.tarih} · {malzemeTipiLabel(f.malzemeTipi)} ·{' '}
@@ -280,25 +374,36 @@ export const MicirFisOnayPanel: React.FC<MicirFisOnayPanelProps> = ({
                   </p>
                   <p className="text-[9px] text-slate-500 truncate">{f.firmaUnvan || ENTO_MADEN_UNVAN}</p>
                   <p className="text-[9px] text-slate-400">Kaydeden: {f.kaydeden || '—'}</p>
-                  <div className="flex gap-1.5 mt-2">
+                  <div className="flex gap-1.5 mt-2 flex-wrap">
                     <button
                       type="button"
                       onClick={() => openEdit(f)}
                       className="inline-flex items-center gap-1 text-[9px] font-black px-2.5 py-1 rounded-lg bg-[#0F6C5C] text-white cursor-pointer"
                     >
-                      <Pencil size={11} /> Düzelt / Onayla
+                      <Pencil size={11} /> {listMode === 'gecmis' ? 'Düzelt' : 'Düzelt / Onayla'}
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => handleReject(f)}
-                      className="inline-flex items-center gap-1 text-[9px] font-black px-2.5 py-1 rounded-lg bg-rose-50 text-rose-700 border border-rose-200 cursor-pointer"
-                    >
-                      <X size={11} /> Reddet
-                    </button>
+                    {listMode === 'bekleyen' ? (
+                      <button
+                        type="button"
+                        onClick={() => handleReject(f)}
+                        className="inline-flex items-center gap-1 text-[9px] font-black px-2.5 py-1 rounded-lg bg-rose-50 text-rose-700 border border-rose-200 cursor-pointer"
+                      >
+                        <X size={11} /> Reddet
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => handleDelete(f)}
+                        className="inline-flex items-center gap-1 text-[9px] font-black px-2.5 py-1 rounded-lg bg-rose-50 text-rose-700 border border-rose-200 cursor-pointer"
+                      >
+                        <Trash2 size={11} /> Sil
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>
-            ))}
+              );
+            })}
           </div>
 
           <div className="bg-white border border-[#D5DEE3] rounded-2xl p-4">
@@ -433,7 +538,7 @@ export const MicirFisOnayPanel: React.FC<MicirFisOnayPanelProps> = ({
                     className="flex-1 inline-flex items-center justify-center gap-1.5 bg-[#0F6C5C] hover:bg-[#0C584B] text-white font-black text-[10px] py-3 rounded-xl disabled:opacity-50 cursor-pointer"
                   >
                     {saving ? <RefreshCw size={13} className="animate-spin" /> : <Check size={13} />}
-                    ONAYLA &amp; CARİYE KAYDET
+                    {editingApproved ? 'KAYDET' : 'ONAYLA & CARİYE KAYDET'}
                   </button>
                   <button
                     type="button"
