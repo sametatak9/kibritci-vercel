@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo, useRef } from 'react';
-import { Calendar, Trash2, ShieldAlert, CheckCircle, FileText, ChevronRight, RefreshCw, Database, Undo2, Redo2, Camera, DollarSign, Tag } from 'lucide-react';
+import { Calendar, Trash2, ShieldAlert, CheckCircle, FileText, ChevronRight, RefreshCw, Database, Undo2, Redo2, Camera, DollarSign, Tag, Save } from 'lucide-react';
 import { Personel, AylikYoklamaMap, YoklamaDurum, SahaFaaliyeti, KampFaaliyet } from '../types/erp';
 import { normalizeDateKey, formatDateLabelTr } from '../lib/dateKeyUtils';
 import {
@@ -309,8 +309,9 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
     });
   };
 
-  const handleSaveYoklamaToDb = async () => {
-    if (!hasPendingChanges || savingDraft) return;
+  const handleSaveYoklamaToDb = async (): Promise<boolean> => {
+    if (!hasPendingChanges) return true;
+    if (savingDraft) return false;
     setSavingDraft(true);
     try {
       if (saveYoklamalarNow) {
@@ -331,12 +332,23 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
         collectUsedYoklamaEtiketleri(draftYoklamalar),
         kayitliEtiketler
       );
+      return true;
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Yoklama kaydedilemedi';
       alert(`Kayıt başarısız — veriler korundu:\n${msg}`);
+      return false;
     } finally {
       setTimeout(() => setSavingDraft(false), 300);
     }
+  };
+
+  const ensureGunRaporuKayitli = async (): Promise<boolean> => {
+    if (!hasPendingChanges) return true;
+    const kaydet = window.confirm(
+      'Bu günün etiket ve açıklamaları henüz kaydedilmedi.\n\nKaydetmeden yazdırırsanız başka gün bu tarihi açınca etiketler görünmeyebilir.\n\nŞimdi kaydedilsin mi?'
+    );
+    if (!kaydet) return true;
+    return handleSaveYoklamaToDb();
   };
 
   const loadArchiveList = async () => {
@@ -2354,22 +2366,40 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
                 </div>
                 <button
                   type="button"
+                  onClick={() => void handleSaveYoklamaToDb()}
+                  disabled={!hasPendingChanges || savingDraft}
+                  className="bg-violet-600 hover:bg-violet-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold text-xs px-4 py-2 rounded-xl transition shadow cursor-pointer inline-flex items-center gap-1.5"
+                  title="İş / meslek etiketleri ve açıklamaları veritabanına yazar. Sonra geçmiş gün seçip Yazdır / PDF alabilirsiniz."
+                >
+                  <Save size={13} />
+                  {savingDraft
+                    ? 'Kaydediliyor…'
+                    : hasPendingChanges
+                      ? 'Günün etiketlerini kaydet'
+                      : 'Etiketler kayıtlı'}
+                </button>
+                <button
+                  type="button"
                   onClick={() => {
-                    const html = buildGunlukYoklamaRaporHtml(
-                      gunRaporSatirlari,
-                      gunRaporOzet,
-                      selectedYear,
-                      selectedMonth,
-                      overtimeDay
-                    );
-                    void import('../lib/reportEmail').then(({ openReportEmailComposer }) => {
-                      openReportEmailComposer({
-                        subject: `Kibritçi — Günlük Yoklama (${gunRaporLabel})`,
-                        body: `${gunRaporLabel} günlük yoklama listesi ekte.`,
-                        html,
-                        fileName: `Kibritci_Yoklama_${gunRaporDateKey}.html`,
+                    void (async () => {
+                      const ok = await ensureGunRaporuKayitli();
+                      if (!ok) return;
+                      const html = buildGunlukYoklamaRaporHtml(
+                        gunRaporSatirlari,
+                        gunRaporOzet,
+                        selectedYear,
+                        selectedMonth,
+                        overtimeDay
+                      );
+                      void import('../lib/reportEmail').then(({ openReportEmailComposer }) => {
+                        openReportEmailComposer({
+                          subject: `Kibritçi — Günlük Yoklama (${gunRaporLabel})`,
+                          body: `${gunRaporLabel} günlük yoklama listesi ekte.`,
+                          html,
+                          fileName: `Kibritci_Yoklama_${gunRaporDateKey}.html`,
+                        });
                       });
-                    });
+                    })();
                   }}
                   className="bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs px-4 py-2 rounded-xl transition shadow cursor-pointer"
                 >
@@ -2378,14 +2408,18 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
                 <button
                   type="button"
                   onClick={() => {
-                    const html = buildGunlukYoklamaRaporHtml(
-                      gunRaporSatirlari,
-                      gunRaporOzet,
-                      selectedYear,
-                      selectedMonth,
-                      overtimeDay
-                    );
-                    openGunlukYoklamaRaporHtml(html, `Günlük Yoklama — ${gunRaporLabel}`);
+                    void (async () => {
+                      const ok = await ensureGunRaporuKayitli();
+                      if (!ok) return;
+                      const html = buildGunlukYoklamaRaporHtml(
+                        gunRaporSatirlari,
+                        gunRaporOzet,
+                        selectedYear,
+                        selectedMonth,
+                        overtimeDay
+                      );
+                      openGunlukYoklamaRaporHtml(html, `Günlük Yoklama — ${gunRaporLabel}`);
+                    })();
                   }}
                   className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-4 py-2 rounded-xl transition shadow cursor-pointer"
                 >
@@ -2414,7 +2448,13 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
                   </p>
                   <p className="text-[10px] text-violet-700 font-semibold mt-1 print:hidden">
                     Görev yanındaki «İş / Meslek» etiketi ve «Açıklama» birbirinden bağımsızdır. Yazdır / PDF ikisini de alır.
+                    Üstteki gün numarasını değiştirerek geçmiş tarihi açıp yazdırabilirsiniz.
                   </p>
+                  {hasPendingChanges && (
+                    <p className="text-[10px] text-amber-800 font-bold mt-1 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1 print:hidden">
+                      Etiket/açıklama henüz taslak. Geçmiş günde tekrar görmek ve yazdırmak için «Günün etiketlerini kaydet»e basın.
+                    </p>
+                  )}
                 </div>
 
                 <div className="grid grid-cols-3 sm:grid-cols-7 gap-2 mb-4">
