@@ -636,7 +636,7 @@ app.get("/api/gemini-health", async (_req, res) => {
       message: 'Gemini API bağlantısı çalışıyor.',
     });
   }
-  return res.status(503).json({
+  return res.status(200).json({
     success: false,
     keyFormat: result.keyInfo.format,
     keyPreview: result.keyInfo.preview,

@@ -12,7 +12,7 @@ services:
     plan: free
     buildCommand: npm install && npm run build
     startCommand: npm start
-    healthCheckPath: /api/gemini-health
+    healthCheckPath: /api/health
     envVars:
       - key: NODE_ENV
         value: production

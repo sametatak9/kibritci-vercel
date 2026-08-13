@@ -18,6 +18,11 @@ const PORT = Number(process.env.PORT) || 3000;
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ limit: "50mb", extended: true }));
 
+/** Render sağlık kontrolü — Gemini/Firebase'e bağlanmaz, deploy'u düşürmez */
+app.get("/api/health", (_req, res) => {
+  res.status(200).json({ ok: true, service: "kibritci-erp" });
+});
+
 registerApiRoutes(app);
 
 app.get("/api/public/siparis-health", (_req, res) => {
