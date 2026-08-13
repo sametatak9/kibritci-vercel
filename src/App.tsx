@@ -14,7 +14,7 @@ import { pushRecentTab } from './lib/navPreferences';
 import { countChromePendingOnay } from './lib/onayInboxUtils';
 
 import { queueArrayStateSync } from './lib/collectionSyncQueue';
-import { isPublicSiparisRoute } from './lib/sahaSiparisUtils';
+import { isPublicSiparisRoute } from './lib/sahaSiparisPublic';
 
 // Core Screens — kod bölme (code splitting): her ekran ilk açıldığında ayrı paket olarak yüklenir,
 // böylece ana paket küçülür ve uygulama ilk açılışta çok daha hızlı gelir.
@@ -667,7 +667,6 @@ function App() {
 
   // 1. Core Synchronization Sync Loader
   useEffect(() => {
-    if (isPublicSiparisRoute()) return;
     if (authLoading || !currentUser || bootstrapDoneRef.current) return;
 
     async function setupCloudDatabase(attempt = 1) {
@@ -1128,7 +1127,6 @@ function App() {
 
   // 1.5 Real-time Synchronization for core collections when in synced mode
   useEffect(() => {
-    if (isPublicSiparisRoute()) return;
     if (dbStatus !== 'synced' || !currentUser) return;
 
     const dashboardSnapshots = new Set<string>();
@@ -1373,15 +1371,31 @@ function App() {
     }
 
     const unsubPersonel = onSnapshot(collection(db, 'personeller'), (snapshot) => {
+      const fromCache = Boolean(snapshot.metadata?.fromCache);
       const list: Personel[] = [];
       snapshot.forEach((docSnap) => {
         const data = docSnap.data() as Record<string, unknown>;
         // doc.id her zaman kazanır — data içindeki bozuk/eksik id alanı mükerrer kayıt üretmesin
         list.push({ ...data, id: docSnap.id } as Personel);
       });
-      setPersoneller(list);
+      // Boş IndexedDB önbelleği kadroyu 0 göstermesin; sunucu listesi gelene kadar bekle
+      if (fromCache && list.length === 0) {
+        return;
+      }
+      setPersoneller((prev) => {
+        if (prev.length >= 20 && list.length < Math.max(5, Math.floor(prev.length * 0.25))) {
+          console.warn('[personel] Zayıf snapshot yok sayıldı', {
+            fromCache,
+            prev: prev.length,
+            next: list.length,
+          });
+          return prev;
+        }
+        return list;
+      });
       markDashboardSnapshot('personeller');
-      if (list.length >= 20) markProductionLive();
+      if (list.length < 20) return;
+      markProductionLive();
 
       // Eksik idari kadro TC'leri bir kez tamamla (snapshot üzerine yazılmaz; sadece eksikler kaydedilir)
       if (!idariPersonelSeedRef.current) {

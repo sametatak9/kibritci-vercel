@@ -14,7 +14,7 @@ import {
   suggestSiparisTedarikciler,
   type SiparisKatalog,
   type SiparisStokOneri,
-} from '../lib/sahaSiparisUtils';
+} from '../lib/sahaSiparisPublic';
 
 interface SiparisFormuScreenProps {
   isPublic?: boolean;
