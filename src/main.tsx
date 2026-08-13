@@ -124,7 +124,7 @@ async function boot() {
   if (isStandaloneSiparisPath()) {
     const path = String(window.location.pathname || '').replace(/\/+$/, '') || '/';
     if (path === '/' || path === '/index.html') {
-      window.location.replace('/siparis');
+      window.location.replace('/siparis.html');
       return;
     }
     await import('./siparis-main.tsx');

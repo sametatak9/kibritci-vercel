@@ -10,6 +10,14 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
     <title>Kibritçi İnşaat ERP</title>
+    <script>
+      (function () {
+        var p = String(location.pathname || '').replace(/\/+$/, '') || '/';
+        if (p === '/siparis') {
+          location.replace('/siparis.html');
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

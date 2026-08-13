@@ -3,6 +3,11 @@ import path from "path";
 import fs from "fs";
 import dotenv from "dotenv";
 import { registerApiRoutes } from "./src/server/registerApiRoutes";
+import {
+  isSiparisRequestPath,
+  sendSiparisHtml,
+  siparisPageMiddleware,
+} from "./src/server/siparisPage";
 
 dotenv.config({ path: path.resolve(process.cwd(), ".env.local") });
 dotenv.config({ path: path.resolve(process.cwd(), ".env") });
@@ -15,14 +20,9 @@ app.use(express.urlencoded({ limit: "50mb", extended: true }));
 
 registerApiRoutes(app);
 
-function wantsSiparisPage(req: express.Request): boolean {
-  const p = String(req.path || "").toLowerCase().replace(/\/+$/, "") || "/";
-  return p === "/siparis" || p === "/siparis.html";
-}
-
 function siparisQueryRedirect(req: express.Request, res: express.Response, next: express.NextFunction) {
   if (req.path === "/" && Object.prototype.hasOwnProperty.call(req.query, "siparis")) {
-    return res.redirect(302, "/siparis");
+    return res.redirect(302, "/siparis.html");
   }
   return next();
 }
@@ -42,7 +42,7 @@ async function startServer() {
       server: { middlewareMode: true },
       appType: "mpa",
     });
-    app.get(["/siparis", "/siparis.html"], async (req, res, next) => {
+    app.get(["/siparis", "/siparis/", "/siparis.html"], async (req, res, next) => {
       try {
         const htmlPath = path.resolve(process.cwd(), "siparis.html");
         const raw = fs.readFileSync(htmlPath, "utf-8");
@@ -56,17 +56,19 @@ async function startServer() {
       if (req.path.startsWith("/api")) {
         return next();
       }
+      if (isSiparisRequestPath(req.path)) {
+        return next();
+      }
       return vite.middlewares(req, res, next);
     });
   } else {
     const distPath = path.join(process.cwd(), "dist");
 
-    // Intercept html, service worker, and manifest requests to disable browser caching
     app.use((req, res, next) => {
       const normPath = req.path.toLowerCase();
       const isHtmlOrSwOrManifest =
         normPath === "/" ||
-        wantsSiparisPage(req) ||
+        isSiparisRequestPath(req.path) ||
         normPath.endsWith(".html") ||
         normPath === "/index.html" ||
         normPath === "/sw.js" ||
@@ -79,10 +81,8 @@ async function startServer() {
       next();
     });
 
-    app.get(["/siparis", "/siparis.html"], (req, res) => {
-      res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
-      res.sendFile(path.join(distPath, "siparis.html"));
-    });
+    // SPA fallback'den ÖNCE — /siparis asla index.html (giriş ekranı) olmasın
+    app.use(siparisPageMiddleware(distPath));
 
     app.use(
       express.static(distPath, {
@@ -93,6 +93,10 @@ async function startServer() {
     );
 
     app.get("*", (req, res) => {
+      if (isSiparisRequestPath(req.path)) {
+        sendSiparisHtml(res, distPath);
+        return;
+      }
       res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
       res.setHeader("Pragma", "no-cache");
       res.setHeader("Expires", "0");

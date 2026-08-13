@@ -4,6 +4,7 @@ import './index.css';
 import { SiparisFormuScreen } from './components/SiparisFormuScreen';
 
 /** Bu sayfa ERP App.tsx'i hiç yüklemez — üyeliksiz sipariş linki. */
+document.title = 'Kibritçi · Malzeme Siparişi';
 if ('serviceWorker' in navigator) {
   void navigator.serviceWorker.getRegistrations().then((regs) => {
     regs.forEach((r) => {

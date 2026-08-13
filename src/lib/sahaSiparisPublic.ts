@@ -137,8 +137,8 @@ export function suggestSiparisTedarikciler(
 }
 
 export function buildPublicSiparisUrl(): string {
-  if (typeof window === 'undefined') return '/siparis';
-  return `${window.location.origin}/siparis`;
+  if (typeof window === 'undefined') return '/siparis.html';
+  return `${window.location.origin}/siparis.html`;
 }
 
 /** Üyeliksiz sipariş formu — /siparis, query veya hash. ERP bootstrap çalışmamalı. */

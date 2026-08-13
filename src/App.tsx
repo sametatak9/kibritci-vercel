@@ -4526,7 +4526,7 @@ function App() {
 
 export default function AppRoot() {
   if (isPublicSiparisRoute()) {
-    window.location.replace('/siparis');
+    window.location.replace('/siparis.html');
     return null;
   }
   return <App />;
