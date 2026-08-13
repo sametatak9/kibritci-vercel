@@ -33,7 +33,7 @@ import { KIBRITCI_LOGO_PATH } from '../lib/kibritciBrand';
 import type { SahaFaaliyetSaveSource } from '../lib/sahaFaaliyetPersistence';
 import { FAALIYET_ETIKET_ONSETLERI, normalizeFaaliyetEtiketi } from '../lib/faaliyetEtiketUtils';
 import { AylikPuantajMobilPanel } from './AylikPuantajMobilPanel';
-import { FormenEtiketliYoklamaTab, YoklamaMeslekEtiketBar } from './FormenEtiketliYoklamaTab';
+import { FormenEtiketliYoklamaTab } from './FormenEtiketliYoklamaTab';
 import {
   collectUsedYoklamaEtiketleri,
   mergeYoklamaEtiketKatalogu,
@@ -1692,17 +1692,6 @@ ${satirlar
                       <strong className="text-sm font-black text-rose-600 block">{absentIds.length}</strong>
                     </div>
                   </div>
-
-                  <YoklamaMeslekEtiketBar
-                    compact
-                    etiket={bulkEtiket}
-                    customEtiket={bulkEtiketCustom}
-                    katalog={etiketKatalogu}
-                    onEtiketChange={setBulkEtiket}
-                    onCustomChange={setBulkEtiketCustom}
-                    onApply={handleBulkEtiketApply}
-                    onReport={handleEtiketliRapor}
-                  />
 
                   {/* 1. THE SPOTLIGHT SINGLE STAFF CARD FOR EXTREME TACTILE SPEED */}
                   {spotlightStaff ? (
