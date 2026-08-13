@@ -1,15 +1,22 @@
 /**
- * Kibritçi İnşaat T cetveli — şantiyeye gelen (giriş) ve giden (çıkış) evrak defteri.
+ * Kibritçi İnşaat gelen evrak defteri — irsaliye ve alış faturası (kalem / hizmet takibi).
  */
-import type { CariKart, Fatura, HazirTutanak, Irsaliye } from '../types/erp';
+import type { CariKart, Fatura, FaturaItem, HazirTutanak, Irsaliye, IrsaliyeItem } from '../types/erp';
 import { formatDateLabelTr, normalizeDateKey } from './dateKeyUtils';
 import { irsaliyeHizmetMiktari, isTaslakMaliBagFatura } from './evrakDonusum';
 
 export type TCetveliYon = 'GIRIS' | 'CIKIS';
 
-export type TCetveliEvrakTipi = 'İRSALİYE' | 'FATURA' | 'TESLİM' | 'SEVK';
+export type TCetveliEvrakTipi = 'İRSALİYE' | 'FATURA';
 
-export type TCetveliKaynak = 'irsaliye' | 'fatura' | 'tutanak';
+export type TCetveliKaynak = 'irsaliye' | 'fatura';
+
+export type TCetveliKalem = {
+  id: string;
+  urunAdi: string;
+  miktar: number;
+  birim: string;
+};
 
 export type TCetveliSatir = {
   id: string;
@@ -24,9 +31,18 @@ export type TCetveliSatir = {
   tutar: number;
   miktar: number;
   miktarEtiket: string;
+  plaka: string;
+  durum: string;
+  faturaNo: string;
+  saId: string;
+  kaynakEtiket: string;
+  malzemeTipi: string;
+  kalemler: TCetveliKalem[];
+  hizmetOzet: string;
 };
 
 export type TCetveliDefter = {
+  evraklar: TCetveliSatir[];
   giris: TCetveliSatir[];
   cikis: TCetveliSatir[];
   girisAdet: number;
@@ -45,7 +61,10 @@ function inRange(tarih: string, start?: string, end?: string): boolean {
 
 function matchesQuery(row: TCetveliSatir, q: string): boolean {
   if (!q) return true;
-  const hay = `${row.belgeNo} ${row.muhatap} ${row.ozet} ${row.evrakTipi}`.toLocaleLowerCase('tr-TR');
+  const kalem = row.kalemler.map((k) => `${k.urunAdi} ${k.miktar} ${k.birim}`).join(' ');
+  const hay = `${row.belgeNo} ${row.muhatap} ${row.ozet} ${row.evrakTipi} ${row.plaka} ${row.durum} ${row.faturaNo} ${row.hizmetOzet} ${row.kaynakEtiket} ${row.malzemeTipi} ${kalem}`.toLocaleLowerCase(
+    'tr-TR'
+  );
   return hay.includes(q);
 }
 
@@ -62,9 +81,104 @@ function cariTipi(cariKartlar: CariKart[], id?: string): CariKart['kartTipi'] | 
   return cariKartlar.find((c) => c.id === id)?.kartTipi || '';
 }
 
+export function malzemeTipiEtiket(raw?: string): string {
+  const u = String(raw || '').toUpperCase();
+  if (u === 'MICIR') return 'Mıcır';
+  if (u === 'STABILIZE') return 'Stabilize';
+  if (u === 'TAS_TOZU') return 'Taş tozu';
+  return String(raw || '').trim();
+}
+
+export function irsaliyeKaynakEtiket(ir: Irsaliye): string {
+  if (ir.kaynak === 'VIDANJOR_FIS') return 'Vidanjör fişi';
+  if (ir.kaynak === 'YILDIRIM_TANKER_FIS') return 'Yıldırım tanker';
+  if (ir.kaynak === 'MICIR_STABILIZE_FIS') return 'Mıcır / stabilize';
+  if (ir.kaynak === 'KAPI_EVRAK') return 'Kapı evrakı';
+  return 'İrsaliye';
+}
+
+function mapIrsaliyeKalem(k: IrsaliyeItem): TCetveliKalem {
+  return {
+    id: k.id,
+    urunAdi: String(k.urunAdi || '').trim(),
+    miktar: Number(k.miktar) || 0,
+    birim: String(k.birim || '').trim(),
+  };
+}
+
+function mapFaturaKalem(k: FaturaItem): TCetveliKalem {
+  return {
+    id: k.id,
+    urunAdi: String(k.urunAdi || '').trim(),
+    miktar: Number(k.miktar) || 0,
+    birim: String(k.birim || '').trim(),
+  };
+}
+
+export function irsaliyeKalemListesi(ir: Irsaliye): TCetveliKalem[] {
+  const fromItems = (ir.kalemler || []).map(mapIrsaliyeKalem).filter((k) => k.urunAdi || k.miktar);
+  if (fromItems.length) return fromItems;
+
+  const extra: TCetveliKalem[] = [];
+  const malzeme = malzemeTipiEtiket(ir.malzemeTipi);
+  const ton =
+    Number(ir.tonaj) > 0
+      ? Number(ir.tonaj)
+      : Number(ir.kiloKg) > 0
+        ? Math.round((Number(ir.kiloKg) / 1000) * 1000) / 1000
+        : 0;
+  if (ton > 0) {
+    extra.push({
+      id: `${ir.id}-tonaj`,
+      urunAdi: malzeme || 'Malzeme',
+      miktar: ton,
+      birim: 'ton',
+    });
+  }
+  if (Number(ir.cekimAdedi) > 0) {
+    extra.push({
+      id: `${ir.id}-cekim`,
+      urunAdi: 'Vidanjör çekim',
+      miktar: Number(ir.cekimAdedi),
+      birim: 'çekim',
+    });
+  }
+  if (Number(ir.icmeSuyuAdet) > 0) {
+    extra.push({
+      id: `${ir.id}-icme`,
+      urunAdi: 'İçme suyu',
+      miktar: Number(ir.icmeSuyuAdet),
+      birim: 'adet',
+    });
+  }
+  if (Number(ir.sanayiSuyuAdet) > 0) {
+    extra.push({
+      id: `${ir.id}-sanayi`,
+      urunAdi: 'Sanayi suyu',
+      miktar: Number(ir.sanayiSuyuAdet),
+      birim: 'adet',
+    });
+  }
+  if (Number(ir.damacaAdet) > 0) {
+    extra.push({
+      id: `${ir.id}-damaca`,
+      urunAdi: 'Damacana',
+      miktar: Number(ir.damacaAdet),
+      birim: 'adet',
+    });
+  }
+  return extra;
+}
+
+function kalemOzetSatir(k: TCetveliKalem): string {
+  const miktar = k.miktar ? `${k.miktar.toLocaleString('tr-TR')} ${k.birim}`.trim() : k.birim;
+  return [k.urunAdi, miktar].filter(Boolean).join(' · ');
+}
+
 function irsaliyeSatir(ir: Irsaliye): TCetveliSatir {
   const h = irsaliyeHizmetMiktari(ir);
-  const kalem = (ir.kalemler || []).length;
+  const kalemler = irsaliyeKalemListesi(ir);
+  const hizmetOzet = kalemler.map(kalemOzetSatir).join(' | ') || (h.miktar > 0 ? `${h.miktar.toLocaleString('tr-TR')} ${h.etiket}` : '');
   return {
     id: `ir:${ir.id}`,
     kaynak: 'irsaliye',
@@ -77,56 +191,53 @@ function irsaliyeSatir(ir: Irsaliye): TCetveliSatir {
     ozet: [
       ir.onayDurumu,
       ir.plaka,
-      h.miktar > 0 ? `${h.miktar.toLocaleString('tr-TR')} ${h.etiket}` : '',
-      kalem ? `${kalem} kalem` : '',
+      ir.faturaNo ? `Fatura ${ir.faturaNo}` : '',
+      hizmetOzet,
     ]
       .filter(Boolean)
       .join(' · '),
     tutar: 0,
     miktar: h.miktar || 0,
     miktarEtiket: h.etiket || '',
+    plaka: String(ir.plaka || ''),
+    durum: String(ir.onayDurumu || ''),
+    faturaNo: String(ir.faturaNo || ''),
+    saId: String(ir.saId || ''),
+    kaynakEtiket: irsaliyeKaynakEtiket(ir),
+    malzemeTipi: malzemeTipiEtiket(ir.malzemeTipi),
+    kalemler,
+    hizmetOzet,
   };
 }
 
-function faturaSatir(ft: Fatura, yon: TCetveliYon): TCetveliSatir {
+function faturaSatir(ft: Fatura): TCetveliSatir {
+  const kalemler = (ft.kalemler || []).map(mapFaturaKalem).filter((k) => k.urunAdi || k.miktar);
+  const hizmetOzet = kalemler.map(kalemOzetSatir).join(' | ');
   return {
     id: `ft:${ft.id}`,
     kaynak: 'fatura',
     kaynakId: ft.id,
-    yon,
+    yon: 'GIRIS',
     tarih: normalizeDateKey(ft.tarih) || String(ft.tarih || ''),
     evrakTipi: 'FATURA',
     belgeNo: String(ft.faturaNo || ft.id),
     muhatap: String(ft.cariUnvan || '—'),
-    ozet: `${(ft.kalemler || []).length} kalem · ${ft.durum || ''}`.trim(),
+    ozet: [ft.durum, hizmetOzet].filter(Boolean).join(' · '),
     tutar: Number(ft.genelToplam ?? ft.toplamTutar ?? 0) || 0,
-    miktar: 0,
-    miktarEtiket: '',
+    miktar: kalemler.reduce((s, k) => s + (k.miktar || 0), 0),
+    miktarEtiket: kalemler[0]?.birim || 'kalem',
+    plaka: '',
+    durum: String(ft.durum || ''),
+    faturaNo: String(ft.faturaNo || ''),
+    saId: String(ft.saId || ''),
+    kaynakEtiket: 'Alış faturası',
+    malzemeTipi: '',
+    kalemler,
+    hizmetOzet,
   };
 }
 
-function tutanakSatir(t: HazirTutanak): TCetveliSatir | null {
-  const tip = String(t.tutanakTipi || '').toLocaleUpperCase('tr-TR');
-  if (tip !== 'TESLİM' && tip !== 'TESLIM' && tip !== 'SEVK') return null;
-  const evrakTipi: TCetveliEvrakTipi = tip === 'SEVK' ? 'SEVK' : 'TESLİM';
-  const kalem = (t.kalemler || []).length;
-  return {
-    id: `tt:${t.id}`,
-    kaynak: 'tutanak',
-    kaynakId: t.id,
-    yon: 'CIKIS',
-    tarih: normalizeDateKey(t.tarih) || String(t.tarih || ''),
-    evrakTipi,
-    belgeNo: String(t.belgeNo || t.id),
-    muhatap: String(t.taseronAdi || t.muhatapPersonel || t.teslimAlan || '—'),
-    ozet: [t.konu, kalem ? `${kalem} kalem` : '', t.durum].filter(Boolean).join(' · '),
-    tutar: Number(t.cezaTutari) || 0,
-    miktar: kalem,
-    miktarEtiket: kalem ? 'kalem' : '',
-  };
-}
-
-/** Kibritçi T cetveli: giriş = gelen irsaliye/alış faturası · çıkış = teslim/sevk + satış faturası */
+/** Gelen evrak: irsaliyeler + alış faturaları (satış / tutanak yok). */
 export function buildTCetveliDefteri(input: {
   irsaliyeler?: Irsaliye[];
   faturalar?: Fatura[];
@@ -141,41 +252,31 @@ export function buildTCetveliDefteri(input: {
   const start = input.startDate ? normalizeDateKey(input.startDate) : '';
   const end = input.endDate ? normalizeDateKey(input.endDate) : '';
 
-  const giris: TCetveliSatir[] = [];
-  const cikis: TCetveliSatir[] = [];
+  const evraklar: TCetveliSatir[] = [];
 
   for (const ir of input.irsaliyeler || []) {
     const row = irsaliyeSatir(ir);
     if (!inRange(row.tarih, start, end) || !matchesQuery(row, q)) continue;
-    giris.push(row);
+    evraklar.push(row);
   }
 
   for (const ft of input.faturalar || []) {
     if (isTaslakMaliBagFatura(ft)) continue;
-    const tip = cariTipi(cariler, ft.cariKartId);
-    const yon: TCetveliYon = tip === 'ALICI' ? 'CIKIS' : 'GIRIS';
-    const row = faturaSatir(ft, yon);
+    if (cariTipi(cariler, ft.cariKartId) === 'ALICI') continue;
+    const row = faturaSatir(ft);
     if (!inRange(row.tarih, start, end) || !matchesQuery(row, q)) continue;
-    if (yon === 'CIKIS') cikis.push(row);
-    else giris.push(row);
+    evraklar.push(row);
   }
 
-  for (const t of input.hazirTutanaklar || []) {
-    if (String(t.durum || '').toLocaleUpperCase('tr-TR') === 'İPTAL') continue;
-    const row = tutanakSatir(t);
-    if (!row || !inRange(row.tarih, start, end) || !matchesQuery(row, q)) continue;
-    cikis.push(row);
-  }
-
-  const g = sortRows(giris);
-  const c = sortRows(cikis);
+  const g = sortRows(evraklar);
   return {
+    evraklar: g,
     giris: g,
-    cikis: c,
+    cikis: [],
     girisAdet: g.length,
-    cikisAdet: c.length,
+    cikisAdet: 0,
     girisTutar: g.reduce((s, r) => s + r.tutar, 0),
-    cikisTutar: c.reduce((s, r) => s + r.tutar, 0),
+    cikisTutar: 0,
   };
 }
 
