@@ -170,6 +170,19 @@ const ScreenLoader: React.FC = () => (
 
 installReportEmailGlobalBridge();
 
+const LOGIN_NOTICE_KEY = 'kibritci_login_notice';
+const ERP_DATA_SAFE_NOTICE =
+  'Kayıtlarınız silinmedi. Bu oturum veritabanını okuyamadı. Şantiye e-posta ve şifresiyle tekrar giriş yapın; personel, yoklama ve geçmiş işlemler yerinde duruyor.';
+
+function hasPublicShareQuery(): boolean {
+  try {
+    const s = new URLSearchParams(window.location.search);
+    return s.has('view_giris') || s.has('view_po') || s.has('view_kasa_rapor');
+  } catch {
+    return false;
+  }
+}
+
 function App() {
   const SECONDARY_ADMIN_EMAIL = 'mudur@gmail.com';
   const LAST_TAB_STORAGE_KEY = 'kibritci_last_tab_v1';
@@ -589,6 +602,9 @@ function App() {
         } catch {
           setCurrentUser(user);
         }
+      } else if (user?.isAnonymous && !hasPublicShareQuery()) {
+        void signOut(auth).catch(() => undefined);
+        setCurrentUser(null);
       } else {
         setCurrentUser(user);
       }
@@ -668,6 +684,28 @@ function App() {
   // 1. Core Synchronization Sync Loader
   useEffect(() => {
     if (authLoading || !currentUser || bootstrapDoneRef.current) return;
+    if (hasPublicShareQuery() || isPublicSiparisRoute()) return;
+
+    const releaseBlockedSession = async () => {
+      try {
+        sessionStorage.setItem(LOGIN_NOTICE_KEY, ERP_DATA_SAFE_NOTICE);
+      } catch {
+        /* ignore */
+      }
+      try {
+        localStorage.removeItem('kibritci_portal_session');
+      } catch {
+        /* ignore */
+      }
+      try {
+        await signOut(auth);
+      } catch {
+        /* ignore */
+      }
+      setCurrentUser(null);
+      setStartupError(null);
+      setDbStatus('loading');
+    };
 
     async function setupCloudDatabase(attempt = 1) {
       try {
@@ -677,13 +715,7 @@ function App() {
 
         const authed = await ensureFirestoreAuth();
         if (!authed) {
-          setStartupError({
-            message:
-              'Veritabanına yazmak için e-posta oturumu gerekli. Anonim oturum kaydedemez — çıkış yapıp e-posta ve şifre ile yeniden giriş yapın.',
-            step: 'Güvenli veritabanı oturumu kontrol ediliyor',
-            technical: 'ensureFirestoreAuth returned false (anonymous or missing email session)',
-          });
-          setDbStatus('error');
+          await releaseBlockedSession();
           return;
         }
 
@@ -1055,8 +1087,15 @@ function App() {
           return setupCloudDatabase(attempt + 1);
         }
 
+        if (/insufficient permissions|permission-denied/i.test(errText)) {
+          console.warn('Firestore izin hatası — kayıtlar silinmedi, oturum sıfırlanıyor');
+          await releaseBlockedSession();
+          return;
+        }
+
         setStartupError({
-          message: 'Veritabanı bağlantısı kurulamadı. Lütfen internet bağlantınızı kontrol edin.',
+          message:
+            'Kayıtlarınız silinmedi. Bağlantı kurulamadı; çıkış yapıp şantiye hesabıyla tekrar giriş yapın.',
           step: loadingMsg || 'Veritabanı senkronizasyonu',
           technical: errText,
         });
@@ -3010,6 +3049,9 @@ function App() {
       <div className="flex flex-col items-center justify-center min-h-screen bg-slate-900 text-white p-8">
         <AlertCircle className="text-rose-400 mb-4" size={48} />
         <h1 className="text-lg font-bold mb-2">Veritabanı Bağlantı Hatası</h1>
+        <p className="text-sm text-slate-400 text-center max-w-md mb-3">
+          Kayıtlarınız silinmedi. Bu ekran geçmiş işlemleri yok etmez; yalnızca bu oturum veriyi okuyamadı.
+        </p>
         <p className="text-sm text-slate-400 text-center max-w-md mb-6">{errorMessage}</p>
         <div className="w-full max-w-xl bg-slate-800/70 border border-slate-700 rounded-xl p-4 mb-5 space-y-2 text-xs">
           <p className="text-slate-300">
@@ -3024,22 +3066,30 @@ function App() {
         <div className="flex flex-col sm:flex-row gap-3">
           <button
             type="button"
-            onClick={() => window.location.reload()}
+            onClick={() => {
+              try {
+                sessionStorage.setItem(LOGIN_NOTICE_KEY, ERP_DATA_SAFE_NOTICE);
+                localStorage.removeItem('kibritci_portal_session');
+              } catch {
+                /* ignore */
+              }
+              void signOut(auth).finally(() => {
+                setCurrentUser(null);
+                setStartupError(null);
+                setDbStatus('loading');
+              });
+            }}
             className="flex items-center justify-center gap-2 bg-amber-500 hover:bg-amber-600 text-slate-900 font-bold px-6 py-3 rounded-xl"
           >
-            <RefreshCw size={16} />
-            Sayfayı Yenile
+            Çıkış yap ve yeniden giriş
           </button>
           <button
             type="button"
-            onClick={() => {
-              bootstrapDoneRef.current = true;
-              setStartupError(null);
-              setDbStatus('synced');
-            }}
+            onClick={() => window.location.reload()}
             className="flex items-center justify-center gap-2 bg-slate-700 hover:bg-slate-600 text-white font-bold px-6 py-3 rounded-xl"
           >
-            Yine de Devam Et
+            <RefreshCw size={16} />
+            Sayfayı Yenile
           </button>
         </div>
       </div>

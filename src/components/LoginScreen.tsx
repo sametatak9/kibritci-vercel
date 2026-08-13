@@ -227,6 +227,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [infoMsg, setInfoMsg] = useState<string | null>(null);
+  const [sessionNotice, setSessionNotice] = useState<string | null>(null);
   const [showOfflineBypass, setShowOfflineBypass] = useState(false);
   const [showForgotPassword, setShowForgotPassword] = useState(false);
   const [resetLoading, setResetLoading] = useState(false);
@@ -237,6 +238,18 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
   useEffect(() => {
     localStorage.setItem('kibritci_mobile_mode', isMobileMode ? 'true' : 'false');
   }, [isMobileMode]);
+
+  useEffect(() => {
+    try {
+      const notice = sessionStorage.getItem('kibritci_login_notice');
+      if (notice) {
+        setSessionNotice(notice);
+        sessionStorage.removeItem('kibritci_login_notice');
+      }
+    } catch {
+      /* ignore */
+    }
+  }, []);
 
   // Profile Registration Fields
   const [ad, setAd] = useState('');
@@ -627,6 +640,11 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
         </div>
 
         {/* Informative Security Banner */}
+        {sessionNotice && (
+          <div className="bg-emerald-950/50 border border-emerald-700 text-emerald-100 p-3 rounded-2xl text-[11px] leading-relaxed">
+            {sessionNotice}
+          </div>
+        )}
         <div className="bg-slate-950/60 border border-slate-800 rounded-2xl p-3 flex items-start space-x-2.5 text-slate-400 text-[10px] leading-relaxed">
           <ShieldCheck size={18} className="text-amber-500 shrink-0 mt-0.5" />
           <span>

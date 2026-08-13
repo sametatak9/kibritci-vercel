@@ -8,6 +8,11 @@ self.addEventListener('activate', (e) => {
 });
 
 self.addEventListener('fetch', (e) => {
+  const url = new URL(e.request.url);
+  // Üyeliksiz sipariş sayfasını ERP önbelleği / PWA yakalamasın
+  if (url.pathname === '/siparis' || url.pathname === '/siparis.html') {
+    return;
+  }
   // Pass-through everything to network to preserve Firebase realtime
   e.respondWith(fetch(e.request));
 });
