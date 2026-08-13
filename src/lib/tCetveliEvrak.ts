@@ -2,8 +2,10 @@
  * Kibritçi İnşaat gelen evrak defteri — irsaliye ve alış faturası (kalem / hizmet takibi).
  */
 import type { CariKart, Fatura, FaturaItem, HazirTutanak, Irsaliye, IrsaliyeItem } from '../types/erp';
+import { wrapCorporateReportHtml } from './corporateReportHtml';
 import { formatDateLabelTr, normalizeDateKey } from './dateKeyUtils';
 import { irsaliyeHizmetMiktari, isTaslakMaliBagFatura } from './evrakDonusum';
+import { KIBRITCI_COMPANY } from './kibritciBrand';
 
 export type TCetveliYon = 'GIRIS' | 'CIKIS';
 
@@ -285,4 +287,72 @@ export function tCetveliDonemLabel(start?: string, end?: string): string {
   const a = start ? formatDateLabelTr(start) : '…';
   const b = end ? formatDateLabelTr(end) : '…';
   return `${a} — ${b}`;
+}
+
+function escEvrak(s: unknown): string {
+  return String(s ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+/** Tek gelen evrak — Kibritçi antetli HTML (yazdır / PDF). */
+export function buildTCetveliSatirHtml(row: TCetveliSatir): string {
+  const kalemlerHtml = row.kalemler.length
+    ? row.kalemler
+        .map(
+          (k) =>
+            `<tr><td>${escEvrak(k.urunAdi || '—')}</td><td class="num">${
+              k.miktar ? k.miktar.toLocaleString('tr-TR') : '—'
+            }</td><td>${escEvrak(k.birim || '')}</td></tr>`
+        )
+        .join('')
+    : `<tr><td colspan="3">${escEvrak(row.hizmetOzet || 'Kalem yok')}</td></tr>`;
+  const tutarLabel =
+    row.tutar > 0
+      ? `${row.tutar.toLocaleString('tr-TR')} ₺`
+      : row.miktar > 0
+        ? `${row.miktar.toLocaleString('tr-TR')} ${row.miktarEtiket}`
+        : '—';
+  const body = `
+    <h1 style="margin:0 0 4px;font-size:18px;letter-spacing:.06em">GELEN EVRAK</h1>
+    <p style="margin:0 0 16px;font-size:11px;color:#475569">${escEvrak(KIBRITCI_COMPANY.legalName)}</p>
+    <div class="evrak-grid">
+      <div class="evrak-card"><span>Belge türü</span><strong>${escEvrak(row.evrakTipi)}</strong></div>
+      <div class="evrak-card"><span>Belge no</span><strong>${escEvrak(row.belgeNo || '—')}</strong></div>
+      <div class="evrak-card"><span>Tarih</span><strong>${escEvrak(formatDateLabelTr(row.tarih))}</strong></div>
+      <div class="evrak-card"><span>Durum</span><strong>${escEvrak(row.durum || '—')}</strong></div>
+      <div class="evrak-card"><span>Cari / muhatap</span><strong>${escEvrak(row.muhatap || '—')}</strong></div>
+      <div class="evrak-card"><span>Plaka</span><strong>${escEvrak(row.plaka || '—')}</strong></div>
+      ${row.faturaNo ? `<div class="evrak-card"><span>Bağlı fatura</span><strong>${escEvrak(row.faturaNo)}</strong></div>` : ''}
+      ${row.saId ? `<div class="evrak-card"><span>Satın alma</span><strong>${escEvrak(row.saId)}</strong></div>` : ''}
+    </div>
+    ${row.ozet ? `<p class="evrak-ozet">${escEvrak(row.ozet)}</p>` : ''}
+    <table class="evrak-kalem">
+      <thead><tr><th>Hizmet / kalem</th><th>Miktar</th><th>Birim</th></tr></thead>
+      <tbody>${kalemlerHtml}</tbody>
+      <tfoot><tr><td>Toplam</td><td class="num" colspan="2">${escEvrak(tutarLabel)}</td></tr></tfoot>
+    </table>
+    <p class="evrak-kaynak">Kaynak: ${escEvrak(row.kaynakEtiket || row.kaynak)} · ${escEvrak(row.malzemeTipi || '')}</p>
+  `;
+  return wrapCorporateReportHtml(body, {
+    title: `${row.evrakTipi} ${row.belgeNo || ''} — Kibritçi İnşaat`.trim(),
+    docCode: row.belgeNo || 'GELEN-EVRAK',
+    orientation: 'portrait',
+    autoPrint: false,
+    letterhead: true,
+    extraCss: `
+      .evrak-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:0 0 18px}
+      .evrak-card{background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:10px 12px}
+      .evrak-card span{display:block;font-size:9px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#64748b;margin-bottom:4px}
+      .evrak-card strong{font-size:12px;color:#0f172a}
+      .evrak-ozet{font-size:12px;color:#334155;margin:0 0 14px}
+      .evrak-kalem{width:100%;border-collapse:collapse;font-size:12px}
+      .evrak-kalem th,.evrak-kalem td{border-bottom:1px solid #cbd5e1;padding:8px 7px;text-align:left}
+      .evrak-kalem th{background:#0f2744;color:#f4ead5;font-size:10px;letter-spacing:.04em}
+      .evrak-kalem .num,.evrak-kalem tfoot td{text-align:right;font-variant-numeric:tabular-nums;font-weight:700}
+      .evrak-kaynak{margin-top:16px;font-size:10px;color:#64748b}
+    `,
+  });
 }

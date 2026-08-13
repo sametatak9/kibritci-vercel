@@ -78,5 +78,6 @@ export function buildSatinAlmaReportHtml(
     title: `Kibritçi İnşaat - PO: ${sa.saId}`,
     extraCss: poExtraCss,
     autoPrint: false,
+    letterhead: true,
   });
 }

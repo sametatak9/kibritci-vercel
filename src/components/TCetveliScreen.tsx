@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { BookOpen, Printer, Search, Pencil, Trash2, Save, X, Plus } from 'lucide-react';
+import { BookOpen, Printer, Search, Pencil, Trash2, Save, X, Plus, FileText } from 'lucide-react';
 import type { CariKart, CariKartIslem, Fatura, HazirTutanak, Irsaliye, IrsaliyeItem } from '../types/erp';
 import { wrapCorporateReportHtml } from '../lib/corporateReportHtml';
 import { formatDateLabelTr, todayDateKey } from '../lib/dateKeyUtils';
@@ -8,6 +8,7 @@ import { getKibritciLogoUrl, KIBRITCI_COMPANY } from '../lib/kibritciBrand';
 import { openHtmlReportWindow } from '../lib/reportEmail';
 import {
   buildTCetveliDefteri,
+  buildTCetveliSatirHtml,
   tCetveliDonemLabel,
   type TCetveliKalem,
   type TCetveliSatir,
@@ -382,6 +383,14 @@ export const TCetveliScreen: React.FC<TCetveliScreenProps> = ({
     }
   };
 
+  const handleViewEvrak = (row: TCetveliSatir) => {
+    const html = buildTCetveliSatirHtml(row);
+    const printWin = openHtmlReportWindow(html, `${row.evrakTipi} ${row.belgeNo || ''}`.trim());
+    if (!printWin) {
+      alert('Lütfen tarayıcınızın pop-up engelleyicisini kapatın; evrak yeni pencerede açılır.');
+    }
+  };
+
   const handleDelete = async (row: TCetveliSatir) => {
     const ir = row.kaynak === 'irsaliye' ? irsaliyeler.find((x) => x.id === row.kaynakId) : null;
     const ft = row.kaynak === 'fatura' ? faturalar.find((x) => x.id === row.kaynakId) : null;
@@ -531,6 +540,15 @@ export const TCetveliScreen: React.FC<TCetveliScreenProps> = ({
                       : '—'}
                 </td>
                 <td className="px-2 py-2 text-right whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => handleViewEvrak(r)}
+                    className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-sm text-[9px] font-black bg-[#c4a35a] text-[#0f2744] cursor-pointer mr-1 disabled:opacity-50"
+                    title="Antetli evrakı HTML olarak gör"
+                  >
+                    <FileText size={10} /> Evrakı Gör
+                  </button>
                   <button
                     type="button"
                     disabled={busy}

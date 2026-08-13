@@ -241,6 +241,36 @@ export function yolHarcamaKasaDocId(yolHarcamaId: string): string {
   return `kh_yol_${String(yolHarcamaId || '').trim()}`;
 }
 
+export function yolHarcamaIdFromKasaDocId(kasaId: string): string | null {
+  const id = String(kasaId || '').trim();
+  if (!id.startsWith('kh_yol_')) return null;
+  const yolId = id.slice('kh_yol_'.length).trim();
+  return yolId || null;
+}
+
+/** Yönetici kasadan sildi — onay senkronu kaydı yeniden yazmasın */
+export async function excludeYolHarcamaFromKasaLedger(yolHarcamaId: string): Promise<void> {
+  const id = String(yolHarcamaId || '').trim();
+  if (!id) return;
+  await updateDoc(doc(db, 'yolHarcamalari', id), { kasaDefterHaric: true });
+}
+
+/** Kasa düzenlemesi kaynak şoför fişindeki tutar/tarih ile kalsın */
+export async function patchYolHarcamaFromKasaEdit(options: {
+  yolHarcamaId: string;
+  tarih: string;
+  tutar: number;
+}): Promise<void> {
+  const id = String(options.yolHarcamaId || '').trim();
+  if (!id) return;
+  const tutar = Math.abs(Number(options.tutar) || 0);
+  if (!tutar) return;
+  await updateDoc(doc(db, 'yolHarcamalari', id), {
+    tarih: options.tarih,
+    tutar,
+  });
+}
+
 /** Şoför fişini eşleşen personel kartının geçmişine yazar */
 export async function appendSoforFisToPersonelGecmis(options: {
   personelId: string;
@@ -367,7 +397,7 @@ export async function syncApprovedYolHarcamalariToKasa(
     >
   >,
   options?: {
-    /** true ise PERSONEL_ODEDI dahil tüm alanları nihai masraf tipine göre yeniden yazar */
+    /** Artık mevcut kasa kayıtlarını üzerine yazmaz; yalnızca eksik kaydı oluşturur */
     forceFromNihai?: boolean;
   }
 ): Promise<{ created: number; updated: number; skipped: number; errors: string[] }> {
@@ -375,11 +405,11 @@ export async function syncApprovedYolHarcamalariToKasa(
   let updated = 0;
   let skipped = 0;
   const errors: string[] = [];
-  const forceFromNihai = Boolean(options?.forceFromNihai);
+  void options?.forceFromNihai;
 
   const approved = (yolHarcamalari || []).filter((y) => {
     const d = String(y.durum || '').toLocaleUpperCase('tr-TR');
-    return d.includes('ONAYLANDI') && !d.includes('RED');
+    return d.includes('ONAYLANDI') && !d.includes('RED') && !d.includes('SİL');
   });
 
   for (const item of approved) {
@@ -398,57 +428,14 @@ export async function syncApprovedYolHarcamalariToKasa(
       }
 
       const existing = await getDoc(doc(db, 'kasaHareketleri', kasaId));
-      if (!existing.exists()) {
-        await saveDocument('kasaHareketleri', payload);
-        created += 1;
-        continue;
-      }
-
-      const prev = existing.data() as Partial<KasaHareketi>;
-      // Yönetici Kasa'dan düzenlediyse onay senkronu üzerine yazmasın
-      if (prev.kasaManuelKilidi && !forceFromNihai) {
+      if (existing.exists()) {
+        // Kasa kaydı kaynak gerçeği: yönetici düzenlemesi / kilidi üzerine yazılmaz
         skipped += 1;
         continue;
       }
 
-      const prevOdeme = resolveKasaOdemeDurumu(prev as KasaHareketi);
-
-      // Manuel PERSONEL_ODEDI seçimini koru (force değilse) — tutar/personel/masraf yine hizalanır
-      const keepPersonelOdedi =
-        !forceFromNihai && prevOdeme === 'PERSONEL_ODEDI';
-
-      const next: KasaHareketi = {
-        ...payload,
-        id: kasaId,
-        fisEvrakUrl: payload.fisEvrakUrl || prev.fisEvrakUrl || '',
-      };
-      if (keepPersonelOdedi) {
-        next.odemeDurumu = 'PERSONEL_ODEDI';
-        next.harcamaKaynagi = 'PERSONEL_HARCAMA';
-        // Masraf tipi yol nihai ile kalsın; ödeme durumu personel ödedi olarak işaretli
-      }
-      if (prev.kasaManuelKilidi) {
-        next.kasaManuelKilidi = true;
-      }
-
-      const changed =
-        Number(prev.tutar) !== Number(next.tutar) ||
-        String(prev.tarih || '') !== String(next.tarih || '') ||
-        String(prev.odemeDurumu || '') !== String(next.odemeDurumu || '') ||
-        String(prev.masrafTipi || '') !== String(next.masrafTipi || '') ||
-        Boolean(prev.soforOdemesi) !== Boolean(next.soforOdemesi) ||
-        Boolean(prev.soforKasaHarcamasi) !== Boolean(next.soforKasaHarcamasi) ||
-        String(prev.personelAdi || '') !== String(next.personelAdi || '') ||
-        String(prev.personelId || '') !== String(next.personelId || '') ||
-        String(prev.aciklama || '') !== String(next.aciklama || '');
-
-      if (!changed) {
-        skipped += 1;
-        continue;
-      }
-
-      await saveDocument('kasaHareketleri', next);
-      updated += 1;
+      await saveDocument('kasaHareketleri', payload);
+      created += 1;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       errors.push(`${item.fisNo || item.id}: ${msg}`);

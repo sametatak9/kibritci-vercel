@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { 
   ShieldCheck, CheckCircle, Clock, Send, Users, AlertCircle, FileText, ShoppingCart, 
-  Truck, CreditCard, ChevronRight, PenTool, Check, CheckCircle2, UserCheck, Eye, Trash2,
+  Truck, CreditCard, ChevronRight, PenTool, Check, CheckCircle2, UserCheck, Eye, Trash2, Pencil,
   FileUp, ExternalLink, MessageSquare, AlertTriangle, Sparkles, Package, Tent, X, HardHat, Loader2, Layers, Building2
 } from 'lucide-react';
 import {
@@ -25,9 +25,12 @@ import { collection, doc, setDoc, onSnapshot, updateDoc, deleteDoc, getDocs } fr
 import {
   buildYolHarcamaKasaCikisPayload,
   appendSoforFisToPersonelGecmis,
+  excludeYolHarcamaFromKasaLedger,
   syncApprovedYolHarcamalariToKasa,
   yolHarcamaKasaDocId,
 } from '../lib/yolHarcamaUtils';
+import { buildSatinAlmaReportHtml } from '../lib/satinAlmaReportHtml';
+import { findIrsaliyelerForSa } from '../lib/evrakDonusum';
 import { formatFirestoreWriteError } from '../lib/authWriteGuard';
 import {
   buildSingleApprovalUpdate,
@@ -180,7 +183,6 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
     url: string;
     title: string;
   } | null>(null);
-  const yolKasaSyncDoneRef = React.useRef(false);
 
   // Security Gate Document Approval States
   const [gelenEvraklar, setGelenEvraklar] = useState<any[]>([]);
@@ -289,16 +291,6 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
       });
       list.sort((a, b) => new Date(b.tarih || 0).getTime() - new Date(a.tarih || 0).getTime());
       setYolHarcamalari(list);
-
-      // Onaylı ama kasaya düşmemiş fişleri bir kez otomatik tamamla
-      if (!yolKasaSyncDoneRef.current && list.some((x) => String(x.durum || '').includes('ONAYLANDI'))) {
-        yolKasaSyncDoneRef.current = true;
-        void syncApprovedYolHarcamalariToKasa(list).then((r) => {
-          if (r.created > 0) {
-            console.info(`[yol-kasa-sync] ${r.created} eksik kasa kaydı tamamlandı`);
-          }
-        });
-      }
     });
 
     return () => {
@@ -409,8 +401,6 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
         onaylayanYonetici: currentUser?.email || 'Sistem Yöneticisi',
         onayTarihi: new Date().toISOString(),
         kasaHareketId: payload.id,
-        // Kasadan silinmiş olsa bile yeniden onayda deftere alınsın
-        kasaDefterHaric: false,
       });
 
       if (item.personelId) {
@@ -443,7 +433,8 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
       await updateDoc(doc(db, 'yolHarcamalari', item.id), {
         durum: 'REDDEDİLDİ',
         onaylayanYonetici: currentUser?.email || 'Sistem Yöneticisi',
-        onayTarihi: new Date().toISOString()
+        onayTarihi: new Date().toISOString(),
+        kasaDefterHaric: true,
       });
       // Daha önce onaylanıp kasaya düşmüşse çıkışı geri al
       try {
@@ -458,9 +449,97 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
     }
   };
 
+  const handleEditYolHarcamasi = async (item: any) => {
+    const tutarStr = window.prompt('Tutar (TL)', String(item.tutar ?? ''));
+    if (tutarStr == null) return;
+    const tutar = Math.abs(parseFloat(String(tutarStr).replace(',', '.')) || 0);
+    if (!tutar) {
+      alert('Geçerli bir tutar girin.');
+      return;
+    }
+    const tarih =
+      window.prompt('Tarih (YYYY-MM-DD)', String(item.tarih || '').slice(0, 10)) ?? '';
+    if (!tarih.trim()) return;
+    const aciklama = window.prompt('Açıklama', String(item.aciklama || '')) ?? '';
+    try {
+      await updateDoc(doc(db, 'yolHarcamalari', item.id), {
+        tutar,
+        tarih: tarih.trim(),
+        aciklama: aciklama.trim(),
+      });
+      if (String(item.durum || '').includes('ONAYLANDI') && !item.kasaDefterHaric) {
+        const payload = buildYolHarcamaKasaCikisPayload({
+          ...item,
+          tutar,
+          tarih: tarih.trim(),
+          aciklama: aciklama.trim(),
+        });
+        await saveDocument('kasaHareketleri', {
+          ...payload,
+          kasaManuelKilidi: true,
+        });
+      }
+      alert('Şoför kaydı güncellendi.');
+    } catch (err) {
+      console.error(err);
+      alert(`Güncelleme başarısız: ${formatFirestoreWriteError(err)}`);
+    }
+  };
+
+  const handleDeleteYolHarcamasi = async (item: any) => {
+    if (
+      !window.confirm(
+        `${item.personelAdi || item.surucu || 'Şoför'} · ${item.tutar} TL kaydı silinsin mi?\nHaftalık Kasa’daki bağlı çıkış da kalkar. Bu işlem geri alınmaz.`
+      )
+    ) {
+      return;
+    }
+    try {
+      try {
+        await excludeYolHarcamaFromKasaLedger(item.id);
+      } catch {
+        /* belge yoksa devam */
+      }
+      try {
+        await deleteDoc(doc(db, 'kasaHareketleri', yolHarcamaKasaDocId(item.id)));
+      } catch {
+        /* yoksa sorun değil */
+      }
+      await updateDoc(doc(db, 'yolHarcamalari', item.id), {
+        durum: 'SİLİNDİ',
+        kasaDefterHaric: true,
+        silenEmail: currentUser?.email || '',
+        silinmeTarihi: new Date().toISOString(),
+      });
+      alert('Kayıt silindi.');
+    } catch (err) {
+      console.error(err);
+      alert(`Silinemedi: ${formatFirestoreWriteError(err)}`);
+    }
+  };
+
+  const handleViewSatinAlmaEvrak = (sa: SatinAlmaTalebi) => {
+    const linked = findIrsaliyelerForSa(sa, irsaliyeler);
+    const html = buildSatinAlmaReportHtml(sa, {
+      linkedIrsaliyeler: linked.map((ir) => ({
+        irsaliyeNo: ir.irsaliyeNo,
+        tarih: ir.tarih,
+        kalemOzet: (ir.kalemler || [])
+          .map((k) => `${k.urunAdi} ${k.miktar} ${k.birim}`)
+          .join(', '),
+      })),
+    });
+    void import('../lib/reportEmail').then(({ openHtmlReportWindow }) => {
+      const printWin = openHtmlReportWindow(html, `Satın Alma ${sa.saId}`);
+      if (!printWin) {
+        alert('Lütfen tarayıcınızın pop-up engelleyicisini kapatın; evrak yeni pencerede açılır.');
+      }
+    });
+  };
+
   const handleSyncYolHarcamalariToKasa = async () => {
     if (!window.confirm(
-      'Onaylanmış şoför fişlerinden Haftalık Kasa’da eksik olanları şimdi tamamlamak ister misiniz?'
+      'Onaylanmış şoför fişlerinden Haftalık Kasa’da hiç kaydı olmayanları tamamlamak ister misiniz?\n\nDüzenlenen veya kasadan silinen kayıtlar geri alınmaz.'
     )) {
       return;
     }
@@ -1783,6 +1862,9 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
 
   const pendingAracTalepleri = aracOnayTalepleri.filter(x => x.durum === 'ONAY BEKLİYOR');
   const pendingYolHarcamalari = yolHarcamalari.filter(x => x.durum === 'ONAY BEKLİYOR');
+  const yolHarcamalariVisible = yolHarcamalari.filter(
+    (x) => String(x.durum || '').toLocaleUpperCase('tr-TR') !== 'SİLİNDİ'
+  );
   const pendingSoforCount = pendingAracTalepleri.length + pendingYolHarcamalari.length;
 
   const pendingStokCount = stokKartTalepleri.length;
@@ -1874,7 +1956,12 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
   const activeTabMeta = onayNavTabs.find((t) => t.id === activeTab);
 
   // Gecmis onaylar list (approved or updated documents)
-  const approvedRequests = satinAlmaTalepleri.filter(doc => doc.onayDurumu.includes('TAMAMLANDI') || doc.onayDurumu === 'ONAYLANDI' || doc.onayDurumu === 'DİJİTAL ONAYLANDI');
+  const approvedRequests = satinAlmaTalepleri.filter(doc => doc.onayDurumu?.includes('TAMAMLANDI') || doc.onayDurumu === 'ONAYLANDI' || doc.onayDurumu === 'DİJİTAL ONAYLANDI');
+  const satinAlmaOnaylananListe = [...approvedRequests].sort(
+    (a, b) =>
+      String(b.tarih || '').localeCompare(String(a.tarih || '')) ||
+      String(b.saId || '').localeCompare(String(a.saId || ''))
+  );
   const approvedWaybills = irsaliyeler.filter(doc => doc.onayDurumu.includes('TAMAMLANDI') || doc.onayDurumu === 'ONAYLANDI' || doc.onayDurumu === 'DİJİTAL ONAYLANDI');
   const approvedInvoices = faturalar.filter(doc => doc.durum === 'ONAYLANDI' || doc.durum === 'DİJİTAL ONAYLANDI');
 
@@ -2948,6 +3035,56 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
                   ))}
                 </div>
               ) : null}
+
+              {satinAlmaOnaylananListe.length > 0 && (
+                <div className="space-y-3 pt-2">
+                  <div className="flex items-end justify-between gap-2">
+                    <div>
+                      <h3 className="font-display font-black text-xs text-slate-600 tracking-wider uppercase">
+                        Onaylanan satın almalar ({satinAlmaOnaylananListe.length})
+                      </h3>
+                      <p className="text-[11px] text-slate-500 mt-0.5">
+                        Onaylanan talepler burada kalır. Evrakı Gör ile Kibritçi antetli HTML belge açılır.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    {satinAlmaOnaylananListe.map((doc) => (
+                      <div
+                        key={doc.id}
+                        className="bg-white border border-emerald-100 rounded-2xl p-3.5 flex flex-col sm:flex-row sm:items-center gap-3"
+                      >
+                        <div className="flex-1 min-w-0 space-y-1">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-mono bg-emerald-50 border border-emerald-200 text-emerald-800 text-[10px] font-bold px-2 py-0.5 rounded-md">
+                              {doc.saId || 'KOD YOK'}
+                            </span>
+                            <span className="text-[10px] text-slate-500 font-mono font-semibold">{doc.tarih}</span>
+                            <span className="bg-emerald-100 text-emerald-800 text-[9px] font-bold px-2 py-0.5 rounded-full">
+                              {doc.onayDurumu}
+                            </span>
+                          </div>
+                          <p className="text-[13px] text-slate-900 font-semibold truncate">{doc.cariFirma}</p>
+                          <p className="text-[11px] text-slate-500 truncate">
+                            {doc.talepEden ? `Talep eden: ${doc.talepEden}` : ''}
+                            {(doc.kalemler || []).length
+                              ? ` · ${(doc.kalemler || []).length} kalem`
+                              : ''}
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleViewSatinAlmaEvrak(doc)}
+                          className="shrink-0 inline-flex items-center justify-center gap-1.5 bg-[#0f2744] hover:bg-[#17365c] text-[#f4ead5] px-3 py-2 rounded-xl text-[11px] font-bold cursor-pointer"
+                        >
+                          <FileText size={13} />
+                          Evrakı Gör
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -3717,6 +3854,14 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
 
                       {/* Control buttons */}
                       <div className="flex items-center gap-2 flex-wrap">
+                        <button
+                          type="button"
+                          onClick={() => handleViewSatinAlmaEvrak(doc)}
+                          className="bg-[#0f2744] hover:bg-[#17365c] text-[#f4ead5] px-3 py-1.5 rounded-lg text-[11px] font-bold transition flex items-center gap-1"
+                        >
+                          <FileText size={12} />
+                          <span>Evrakı Gör</span>
+                        </button>
                         <button
                           onClick={() => handleGenerateSignedPdf('request', doc)}
                           className="bg-slate-100 hover:bg-slate-200 text-slate-800 px-3 py-1.5 rounded-lg text-[11px] font-bold transition flex items-center gap-1"
@@ -4757,7 +4902,7 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
                 <div className="space-y-1">
                   <span className="text-sky-400 font-bold block text-[11px] tracking-widest uppercase">🚛 ŞÖFÖR MOBİL PANELİ TALEPLERİ</span>
                   <p className="text-slate-400 leading-relaxed text-[11px]">
-                    Şoförler tarafından eklenen yeni araç kartı talepleri ile seyahat yol harcamalarını (fiş/fatura) buradan inceleyip onaylayabilirsiniz. Onaylanan harcamalar otomatik olarak haftalık kasaya işlenir.
+                    Şoför yol harcamalarını inceleyip onaylayın. Kurucu ve yönetici onaylı kayıtları da düzenleyebilir / silebilir; bu işlemler Haftalık Kasa’ya yansır ve senkron eski haline döndürmez.
                   </p>
                 </div>
                 <button
@@ -4843,13 +4988,13 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
                 <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center space-x-2">
                   <span>💳 Yol Harcaması (Fiş/Fatura) Onayları ({pendingYolHarcamalari.length})</span>
                 </h3>
-                {yolHarcamalari.length === 0 ? (
+                {yolHarcamalariVisible.length === 0 ? (
                   <div className="bg-white border rounded-2xl p-6 text-center text-slate-500 text-xs italic">
                     Kayıtlı yol harcaması talebi bulunmuyor.
                   </div>
                 ) : (
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {yolHarcamalari.map((item) => (
+                    {yolHarcamalariVisible.map((item) => (
                       <div key={item.id} className="bg-white border rounded-2xl p-4 space-y-3 shadow-xs flex flex-col justify-between">
                         <div className="space-y-2">
                           <div className="flex justify-between items-start">
@@ -4963,11 +5108,45 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
                                   Reddet
                                 </button>
                               </div>
+                              <div className="flex gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => void handleEditYolHarcamasi(item)}
+                                  className="flex-1 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 font-bold py-2 rounded-xl text-[10px] transition cursor-pointer inline-flex items-center justify-center gap-1"
+                                >
+                                  <Pencil size={11} /> Düzenle
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => void handleDeleteYolHarcamasi(item)}
+                                  className="flex-1 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-100 font-bold py-2 rounded-xl text-[10px] transition cursor-pointer inline-flex items-center justify-center gap-1"
+                                >
+                                  <Trash2 size={11} /> Sil
+                                </button>
+                              </div>
                             </div>
                           )}
                           {item.durum !== 'ONAY BEKLİYOR' && (
-                            <div className="bg-slate-50 p-2 rounded-xl text-center text-[10px] text-slate-500 border border-dashed">
-                              Onaylayan/Reddeden: <span className="font-bold">{item.onaylayanYonetici || 'Bilinmiyor'}</span>
+                            <div className="space-y-2 pt-2 border-t">
+                              <div className="bg-slate-50 p-2 rounded-xl text-center text-[10px] text-slate-500 border border-dashed">
+                                Onaylayan/Reddeden: <span className="font-bold">{item.onaylayanYonetici || 'Bilinmiyor'}</span>
+                              </div>
+                              <div className="flex gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => void handleEditYolHarcamasi(item)}
+                                  className="flex-1 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 font-bold py-2 rounded-xl text-[10px] transition cursor-pointer inline-flex items-center justify-center gap-1"
+                                >
+                                  <Pencil size={11} /> Düzenle
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => void handleDeleteYolHarcamasi(item)}
+                                  className="flex-1 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-100 font-bold py-2 rounded-xl text-[10px] transition cursor-pointer inline-flex items-center justify-center gap-1"
+                                >
+                                  <Trash2 size={11} /> Sil
+                                </button>
+                              </div>
                             </div>
                           )}
                         </div>

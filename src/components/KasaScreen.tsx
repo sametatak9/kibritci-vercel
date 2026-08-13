@@ -23,7 +23,9 @@ import {
   isSoforKaynakliKasaHareketi,
   isSoforUzerindenKasaGideri,
   kasaListeOdemeEtiketi,
+  patchYolHarcamaFromKasaEdit,
   resolveKasaOdemeDurumu,
+  yolHarcamaIdFromKasaDocId,
 } from '../lib/yolHarcamaUtils';
 import { resolvePersonelUnvan, KASA_ADSIZ_UNVAN } from '../lib/personelUnvanUtils';
 import {
@@ -480,6 +482,19 @@ export const KasaScreen: React.FC<KasaScreenProps> = ({
         personelAdi: record.personelAdi ?? null,
         kasaManuelKilidi: record.kasaManuelKilidi ?? null,
       } as KasaHareketi);
+
+      const yolId = editingId ? yolHarcamaIdFromKasaDocId(id) : null;
+      if (yolId) {
+        try {
+          await patchYolHarcamaFromKasaEdit({
+            yolHarcamaId: yolId,
+            tarih: newDate,
+            tutar: amountFloat,
+          });
+        } catch (yolErr) {
+          console.warn('[kasa] yol harcama hizalanamadı:', yolErr);
+        }
+      }
 
       setKasaHareketleri((prev) => {
         if (prev.some((x) => x.id === id)) {

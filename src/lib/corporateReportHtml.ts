@@ -2,6 +2,7 @@ import {
   KIBRITCI_REPORT_HEADER_DATA_URL,
   KIBRITCI_REPORT_WATERMARK_DATA_URL,
 } from './reportBrandAssets';
+import { getKibritciAntetUrl } from './kibritciBrand';
 import { getReportEmailToolbarHtml } from './reportEmail';
 
 export const CORPORATE_COMPANY = {
@@ -33,6 +34,7 @@ export function getCorporateReportCss(): string {
     .corporate-report-footer-contact p{margin:0}
     .corporate-report-footer-web{text-align:right;font-weight:600;font-size:5.5px;color:#64748b;align-self:end}
     .corporate-report-footer-web p{margin:0}
+    .corporate-antet-banner{display:block;width:100%;max-width:640px;max-height:132px;object-fit:contain;object-position:left center;margin:0;-webkit-print-color-adjust:exact;print-color-adjust:exact}
     @media print{.corporate-report--portrait{min-height:270mm}.corporate-report-footer{margin-top:auto}.corporate-report-watermark-img{opacity:1;-webkit-print-color-adjust:exact;print-color-adjust:exact}.corporate-report-logo-img{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
   `;
 }
@@ -45,6 +47,8 @@ export function wrapCorporateReportHtml(
     title?: string;
     extraCss?: string;
     autoPrint?: boolean;
+    /** Resmi antetli kağıt görseli (logo + künye) */
+    letterhead?: boolean;
   }
 ): string {
   const headerLogoUrl = KIBRITCI_REPORT_HEADER_DATA_URL;
@@ -55,6 +59,8 @@ export function wrapCorporateReportHtml(
   const title = options?.title ?? 'Kibritçi Rapor';
   const extraCss = options?.extraCss ?? '';
   const autoPrint = options?.autoPrint !== false;
+  const letterhead = Boolean(options?.letterhead);
+  const antetUrl = letterhead ? getKibritciAntetUrl() : '';
 
   const emailToolbar = getReportEmailToolbarHtml({
     subject: title,
@@ -74,7 +80,9 @@ export function wrapCorporateReportHtml(
   <div class="corporate-report corporate-report--${orientation}" data-orientation="${orientation}" style="position:relative;background:#fff">
     <img src="${watermarkUrl}" alt="" class="corporate-report-watermark-img" aria-hidden="true" />
     <header class="corporate-report-header">
-      <img src="${headerLogoUrl}" alt="Kibritçi İnşaat" class="corporate-report-logo-img" />
+      ${letterhead && antetUrl
+        ? `<img src="${antetUrl}" alt="Kibritçi İnşaat antet" class="corporate-antet-banner" />`
+        : `<img src="${headerLogoUrl}" alt="Kibritçi İnşaat" class="corporate-report-logo-img" />`}
       ${docCode ? `<div class="corporate-report-meta"><span class="corporate-report-doc-code">${docCode}</span><span class="corporate-report-date">Baskı: ${printDate}</span></div>` : ''}
     </header>
     <main class="corporate-report-body">${bodyContent}</main>

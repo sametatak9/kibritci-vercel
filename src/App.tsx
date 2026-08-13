@@ -129,6 +129,10 @@ import {
   applyCariDedupPlansInMemory,
   planCariKartDedup,
 } from './lib/cariKartDedupUtils';
+import {
+  excludeYolHarcamaFromKasaLedger,
+  yolHarcamaIdFromKasaDocId,
+} from './lib/yolHarcamaUtils';
 import { collection, onSnapshot, doc, getDoc, query, orderBy, limit } from 'firebase/firestore';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { syncAuthClaimsFromServer } from './lib/authClaimsClient';
@@ -2451,17 +2455,12 @@ function App() {
 
   const deleteKasaHareketi = async (id: string) => {
     // Onay havuzu / şoför fişi: senkron yeniden yaratmasın
-    if (String(id).startsWith('kh_yol_')) {
-      const yolId = String(id).slice('kh_yol_'.length);
-      if (yolId) {
-        try {
-          await saveDocument('yolHarcamalari', {
-            id: yolId,
-            kasaDefterHaric: true,
-          } as { id: string; kasaDefterHaric: boolean });
-        } catch (err) {
-          console.warn('[kasa-delete] yol harcama işaretlenemedi:', yolId, err);
-        }
+    const yolId = yolHarcamaIdFromKasaDocId(id);
+    if (yolId) {
+      try {
+        await excludeYolHarcamaFromKasaLedger(yolId);
+      } catch (err) {
+        console.warn('[kasa-delete] yol harcama işaretlenemedi:', yolId, err);
       }
     }
     await removeDocument('kasaHareketleri', id);
