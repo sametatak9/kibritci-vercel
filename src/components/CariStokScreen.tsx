@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Building2, Package, Plus, Search, Trash2, Pencil, Download,
-  ClipboardList, X, RefreshCw, FileText, Truck, Receipt, Home, User, Users, Eye, UserX, Upload, Archive, Printer, GitMerge
+  ClipboardList, X, RefreshCw, FileText, Truck, Receipt, Home, User, Users, Eye, UserX, Upload, Archive, Printer, GitMerge, Camera
 } from 'lucide-react';
 import { collection, deleteField, doc, getDoc, getDocs, updateDoc } from 'firebase/firestore';
 import { CariKart, Fatura, Irsaliye, Personel, SatinAlmaTalebi, StokKart, StokKartIslem, CariKartIslem } from '../types/erp';
@@ -57,6 +57,7 @@ import {
   planSelectedBirlesimReset,
   type TaslakBirlesimPaketi,
 } from '../lib/taslakBirlesimRapor';
+import { openSeciliIrsaliyeFotoRaporu } from '../lib/irsaliyeTopluFotoRapor';
 import {
   irsaliyeNoChainSortKey,
   isEntoMadenFirma,
@@ -198,6 +199,7 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
   const [historyList, setHistoryList] = useState<HistoryLog[]>([]);
   const [historyFilter, setHistoryFilter] = useState('ALL');
   const [selectedIrsaliyeIds, setSelectedIrsaliyeIds] = useState<Set<string>>(new Set());
+  const [fotoRaporBusy, setFotoRaporBusy] = useState(false);
   const [detayPayload, setDetayPayload] = useState<EvrakDetayPayload | null>(null);
   const [genericDetail, setGenericDetail] = useState<GenericDetail | null>(null);
   const [detailLoadingId, setDetailLoadingId] = useState<string | null>(null);
@@ -919,6 +921,27 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
     } catch (err: any) {
       console.error(err);
       alert('Rapor üretilemedi: ' + (err?.message || err));
+    }
+  };
+
+  const handleSeciliIrsaliyeFotoRapor = async () => {
+    const ids = [...selectedIrsaliyeIds];
+    if (!ids.length) {
+      alert('Fotoğraflı rapor için listeden irsaliye işaretleyin.');
+      return;
+    }
+    setFotoRaporBusy(true);
+    try {
+      await openSeciliIrsaliyeFotoRaporu({
+        ids,
+        irsaliyeler,
+        cariUnvan: selectedCari?.unvan,
+      });
+    } catch (err: any) {
+      console.error(err);
+      alert('Fotoğraflı rapor açılamadı: ' + (err?.message || err));
+    } finally {
+      setFotoRaporBusy(false);
     }
   };
 
@@ -2352,7 +2375,7 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
                   <p className="text-[11px] text-slate-500 mt-1">
                     {selectedCari ? (
                       <>
-                        İrsaliyeleri işaretleyip bir veya birden fazlasını tek faturaya dönüştürebilirsiniz
+                        İrsaliyeleri işaretleyip tek faturaya dönüştürebilir veya fotoğraflı toplu rapor alabilirsiniz
                         {' · '}
                         {historyList.filter((h) => h.collection === 'irsaliyeler').length} irsaliye
                         {' · '}
@@ -2412,6 +2435,22 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
                         Seçimi temizle
                       </button>
                     </>
+                  )}
+                  {selectedCari && (
+                    <button
+                      type="button"
+                      onClick={() => void handleSeciliIrsaliyeFotoRapor()}
+                      disabled={fotoRaporBusy}
+                      className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-[10px] font-bold bg-indigo-700 text-white cursor-pointer disabled:opacity-60"
+                      title="İşaretli irsaliyelerin fiş / kapı / imzalı fotoğraflarını antetli rapora koyar"
+                    >
+                      <Camera size={12} />
+                      {fotoRaporBusy
+                        ? 'Fotoğraflı rapor hazırlanıyor…'
+                        : selectedIrsaliyeIds.size > 0
+                          ? `Seçilenleri Fotoğraflı Raporla (${selectedIrsaliyeIds.size})`
+                          : 'Seçilenleri Fotoğraflı Raporla'}
+                    </button>
                   )}
                   <button
                     type="button"
@@ -2556,34 +2595,47 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
 
               {selectedIrsaliyePreview && (
                 <div className="mx-5 mt-3 mb-0 rounded-xl border border-violet-200 bg-violet-50 px-3 py-2.5 text-[11px] text-violet-950">
-                  <p className="font-black uppercase tracking-wide text-[10px] text-violet-800 mb-1">
-                    Seçim önizleme
-                  </p>
-                  <p className="font-semibold leading-relaxed">
-                    {selectedIrsaliyePreview.adet} irsaliye
-                    {selectedIrsaliyePreview.kalemSayisi > 0
-                      ? ` · ${selectedIrsaliyePreview.kalemSayisi} kalem`
-                      : ''}
-                    {selectedIrsaliyePreview.kalemToplam > 0
-                      ? ` · kalem toplamı ${selectedIrsaliyePreview.kalemToplam.toLocaleString('tr-TR')}`
-                      : ''}
-                    {selectedIrsaliyePreview.ton > 0
-                      ? ` · toplam ${selectedIrsaliyePreview.ton.toLocaleString('tr-TR')} ${selectedIrsaliyePreview.etiket}`
-                      : ''}
-                  </p>
-                  {Object.keys(selectedIrsaliyePreview.byTip).length > 0 && (
-                    <p className="mt-1 text-[10px] font-bold text-violet-800 flex flex-wrap gap-x-3 gap-y-1">
-                      {(['MICIR', 'TAS_TOZU', 'STABILIZE'] as MicirMalzemeTipi[]).map((tip) => {
-                        const v = selectedIrsaliyePreview.byTip[tip];
-                        if (!v) return null;
-                        return (
-                          <span key={tip}>
-                            {malzemeTipiLabel(tip)}: {v.toLocaleString('tr-TR')} ton
-                          </span>
-                        );
-                      })}
-                    </p>
-                  )}
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div>
+                      <p className="font-black uppercase tracking-wide text-[10px] text-violet-800 mb-1">
+                        Seçim önizleme
+                      </p>
+                      <p className="font-semibold leading-relaxed">
+                        {selectedIrsaliyePreview.adet} irsaliye
+                        {selectedIrsaliyePreview.kalemSayisi > 0
+                          ? ` · ${selectedIrsaliyePreview.kalemSayisi} kalem`
+                          : ''}
+                        {selectedIrsaliyePreview.kalemToplam > 0
+                          ? ` · kalem toplamı ${selectedIrsaliyePreview.kalemToplam.toLocaleString('tr-TR')}`
+                          : ''}
+                        {selectedIrsaliyePreview.ton > 0
+                          ? ` · toplam ${selectedIrsaliyePreview.ton.toLocaleString('tr-TR')} ${selectedIrsaliyePreview.etiket}`
+                          : ''}
+                      </p>
+                      {Object.keys(selectedIrsaliyePreview.byTip).length > 0 && (
+                        <p className="mt-1 text-[10px] font-bold text-violet-800 flex flex-wrap gap-x-3 gap-y-1">
+                          {(['MICIR', 'TAS_TOZU', 'STABILIZE'] as MicirMalzemeTipi[]).map((tip) => {
+                            const v = selectedIrsaliyePreview.byTip[tip];
+                            if (!v) return null;
+                            return (
+                              <span key={tip}>
+                                {malzemeTipiLabel(tip)}: {v.toLocaleString('tr-TR')} ton
+                              </span>
+                            );
+                          })}
+                        </p>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => void handleSeciliIrsaliyeFotoRapor()}
+                      disabled={fotoRaporBusy}
+                      className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-[10px] font-black bg-indigo-700 text-white cursor-pointer disabled:opacity-60"
+                    >
+                      <Camera size={12} />
+                      {fotoRaporBusy ? 'Hazırlanıyor…' : 'Fotoğraflı raporla'}
+                    </button>
+                  </div>
                 </div>
               )}
 
