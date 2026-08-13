@@ -7,6 +7,7 @@ import { CorporateReportLayout } from './CorporateReportLayout';
 import { getCorporateReportCss } from '../lib/corporateReportHtml';
 import { collection, query, getDocs, doc, setDoc, deleteDoc, updateDoc } from 'firebase/firestore';
 import { HazirTutanakTab } from './HazirTutanakTab';
+import { TaseronHasarTutanakTab } from './TaseronHasarTutanakTab';
 import { ReportEmailButton } from './ReportEmailButton';
 
 interface IzinFormu {
@@ -52,7 +53,7 @@ export const PersonelIzinScreen: React.FC<PersonelIzinScreenProps> = ({
   stokKartlar = [],
   setCariIslemGecmisi,
 }) => {
-  const [activeTab, setActiveTab] = useState<'izin' | 'tutanak'>('izin');
+  const [activeTab, setActiveTab] = useState<'izin' | 'tutanak' | 'hasar'>('izin');
   
   const [izinFormlari, setIzinFormlari] = useState<IzinFormu[]>([]);
   const [loading, setLoading] = useState(true);
@@ -345,8 +346,20 @@ export const PersonelIzinScreen: React.FC<PersonelIzinScreenProps> = ({
             <FileText size={20} className="text-[#10b981]" />
           </div>
           <div>
-            <h1 className="text-sm font-black text-slate-900 tracking-widest uppercase">📋 PERSONEL RESMİ İZİN DURUM FORMU</h1>
-            <p className="text-[10px] text-slate-500 font-mono uppercase tracking-wider">Şantiye personeli yıllık, mazeret, sağlık onay ve talep süreçleri</p>
+            <h1 className="text-sm font-black text-slate-900 tracking-widest uppercase">
+              {activeTab === 'hasar'
+                ? 'TAŞERON HASAR TESPİT TUTANAĞI'
+                : activeTab === 'tutanak'
+                  ? 'HAZIR TUTANAKLAR'
+                  : 'PERSONEL RESMİ İZİN DURUM FORMU'}
+            </h1>
+            <p className="text-[10px] text-slate-500 font-mono uppercase tracking-wider">
+              {activeTab === 'hasar'
+                ? 'Taşeron seçimi, hasar fotoğrafı, karşılıklı imza ve antetli rapor'
+                : activeTab === 'tutanak'
+                  ? 'Malzeme teslim ve hazır tutanak arşivi'
+                  : 'Şantiye personeli yıllık, mazeret, sağlık onay ve talep süreçleri'}
+            </p>
           </div>
         </div>
       </div>
@@ -372,6 +385,16 @@ export const PersonelIzinScreen: React.FC<PersonelIzinScreenProps> = ({
           }`}
         >
           Hazır Tutanaklar
+        </button>
+        <button
+          onClick={() => setActiveTab('hasar')}
+          className={`px-4 py-2.5 text-xs font-bold transition border-b-2 ${
+            activeTab === 'hasar'
+              ? 'border-[#10b981] text-[#059669] bg-emerald-50/50'
+              : 'border-transparent text-slate-500 hover:text-slate-700 hover:bg-slate-50'
+          }`}
+        >
+          Taşeron Hasar Tutanağı
         </button>
       </div>
 
@@ -675,6 +698,15 @@ export const PersonelIzinScreen: React.FC<PersonelIzinScreenProps> = ({
             setCariIslemGecmisi={setCariIslemGecmisi}
           />
         </div>
+      )}
+
+      {activeTab === 'hasar' && (
+        <TaseronHasarTutanakTab
+          hazirTutanaklar={hazirTutanaklar}
+          setHazirTutanaklar={setHazirTutanaklar}
+          cariKartlar={cariKartlar}
+          currentUser={currentUser}
+        />
       )}
 
       {/* 🏡 PDF / ONIZLEME MODAL */}

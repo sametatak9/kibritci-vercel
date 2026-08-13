@@ -810,6 +810,8 @@ export interface MalzemeTeslimKalem {
   cinsi: string;
   aciklama: string;
   stokKartId?: string;
+  /** Hasar tutanağı — oluştururken zorunlu değil, sonradan girilebilir */
+  birimFiyat?: number | string;
 }
 
 export interface HazirTutanak {
@@ -821,6 +823,8 @@ export interface HazirTutanak {
   muhatapPersonel?: string;
   cariKartId?: string;
   taseronAdi?: string;
+  /** Taşeron firma yetkilisi (hasar tutanağı) */
+  taseronYetkili?: string;
   cezaTutari?: number;
   imzaliEvrakUrl?: string;
   konu: string;
@@ -833,6 +837,15 @@ export interface HazirTutanak {
   kalemler?: MalzemeTeslimKalem[];
   teslimEden?: string;
   teslimAlan?: string;
+  foto1?: string;
+  foto2?: string;
+  foto3?: string;
+  parsel?: string;
+  blok?: string;
+  kaynak?: string;
+  hazirlayanAd?: string;
+  hazirlayanImza?: string;
+  taseronImza?: string;
 }
 
 export interface CariKart {
