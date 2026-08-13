@@ -37,7 +37,7 @@ function makePublicShareToken(): string {
 }
 
 function buildPublicShareUrl(req: { protocol?: string; get?: (name: string) => string | undefined; headers: { host?: string } }, token: string): string {
-  const host = req.get?.('x-forwarded-host') || req.get?.('host') || req.headers.host || 'kibritci-erp.onrender.com';
+  const host = req.get?.('x-forwarded-host') || req.get?.('host') || req.headers.host || 'kibritci-web.onrender.com';
   const proto = (req.get?.('x-forwarded-proto') || req.protocol || 'https').split(',')[0].trim() || 'https';
   return `${proto}://${host}/?view_po=${encodeURIComponent(token)}`;
 }
@@ -244,7 +244,7 @@ function buildKasaRaporViewUrl(
   req: { protocol?: string; get?: (name: string) => string | undefined; headers: { host?: string } },
   token: string
 ): string {
-  const host = req.get?.('x-forwarded-host') || req.get?.('host') || req.headers.host || 'kibritci-erp.onrender.com';
+  const host = req.get?.('x-forwarded-host') || req.get?.('host') || req.headers.host || 'kibritci-web.onrender.com';
   const proto = (req.get?.('x-forwarded-proto') || req.protocol || 'https').split(',')[0].trim() || 'https';
   return `${proto}://${host}/?view_kasa_rapor=${encodeURIComponent(token)}`;
 }

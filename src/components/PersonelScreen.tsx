@@ -284,9 +284,9 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
         console.error("SGK/Dekont parsing error:", err);
         let userFriendlyMsg = err.message || "Belge çözümlenemedi. Lütfen dosyanızın geçerli bir SGK İşe Giriş Bildirgesi veya Ödeme Dekontu olduğundan emin olun.";
         if (userFriendlyMsg.includes('504') || userFriendlyMsg.includes('zaman aşımı') || userFriendlyMsg.includes('timeout') || userFriendlyMsg.includes('Gateway')) {
-          userFriendlyMsg = 'Sunucu zaman aşımına uğradı (504). Çözüm: (1) Belgenin fotoğrafını (PDF yerine JPG) yükleyin, (2) https://kibritci-erp.onrender.com adresini kullanın, (3) Render\'da GEMINI_API_KEY tanımlı olduğundan emin olun.';
-        } else if (userFriendlyMsg.includes('kibritci-web-1') || userFriendlyMsg.includes('boş yanıt') || userFriendlyMsg.includes('404')) {
-          userFriendlyMsg = 'Yapay zeka sunucusuna ulaşılamadı. Lütfen siteyi https://kibritci-erp.onrender.com adresinden açın (eski kibritci-web-1 adresi artık çalışmıyor).';
+          userFriendlyMsg = 'Sunucu zaman aşımına uğradı (504). Çözüm: (1) Belgenin fotoğrafını (PDF yerine JPG) yükleyin, (2) https://kibritci-web.onrender.com adresini kullanın, (3) Render\'da GEMINI_API_KEY tanımlı olduğundan emin olun.';
+        } else if (userFriendlyMsg.includes('kibritci-web-1') || userFriendlyMsg.includes('kibritci-erp.onrender') || userFriendlyMsg.includes('boş yanıt') || userFriendlyMsg.includes('404')) {
+          userFriendlyMsg = 'Yapay zeka sunucusuna ulaşılamadı. Lütfen siteyi https://kibritci-web.onrender.com adresinden açın.';
         } else if (/429|RESOURCE_EXHAUSTED|quota exceeded|kota doldu|prepayment credits are depleted|billing#prepay/i.test(userFriendlyMsg)) {
           userFriendlyMsg = 'Gemini kredisi/kotası tükendi (prepayment credits depleted). Google AI Studio > Projects > Billing bölümünde bakiye/faturalandırma açıp redeploy yapın: https://ai.google.dev/gemini-api/docs/billing#prepay';
         } else if (userFriendlyMsg.includes("503") || userFriendlyMsg.includes("UNAVAILABLE") || userFriendlyMsg.includes("high demand") || userFriendlyMsg.includes("experiencing high demand")) {

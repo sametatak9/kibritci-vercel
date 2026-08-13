@@ -20,7 +20,7 @@ app.use(express.urlencoded({ limit: "50mb", extended: true }));
 
 /** Render sağlık kontrolü — Gemini/Firebase'e bağlanmaz, deploy'u düşürmez */
 app.get("/api/health", (_req, res) => {
-  res.status(200).json({ ok: true, service: "kibritci-erp" });
+  res.status(200).json({ ok: true, service: "kibritci_web" });
 });
 
 registerApiRoutes(app);

@@ -1,5 +1,5 @@
 /** Canlı ERP — Node sunucusu + Gemini API bu adreste çalışır */
-export const PRODUCTION_APP_URL = 'https://kibritci-erp.onrender.com';
+export const PRODUCTION_APP_URL = 'https://kibritci-web.onrender.com';
 
 /**
  * API yanıtlarını güvenli JSON olarak okur.
@@ -14,7 +14,7 @@ export async function fetchApiJson<T = unknown>(
     res = await fetch(url, options);
   } catch {
     throw new Error(
-      'Sunucuya bağlanılamadı. Siteyi https://kibritci-erp.onrender.com adresinden açın ve Render\'da GEMINI_API_KEY tanımlı olduğundan emin olun.'
+      'Sunucuya bağlanılamadı. Siteyi https://kibritci-web.onrender.com adresinden açın ve Render\'da GEMINI_API_KEY tanımlı olduğundan emin olun.'
     );
   }
 

@@ -1,5 +1,5 @@
-# Render Blueprint — tek servis: kibritci-erp
-# Not: Aynı repo için ikinci bir Web Service bağlamayın; çift deploy olur.
+# Render Blueprint — tek servis: kibritci_web
+# Not: Aynı repo için ikinci bir Web Service (kibritci-erp vb.) bağlamayın; çift deploy olur.
 #
 # Akvizyon grup nöbeti (21:00 İstanbul) otomatik kapanış:
 # - Uygulama açıkken istemci her dakika kontrol eder
@@ -7,7 +7,7 @@
 # - İsteğe bağlı harici cron: npm run cron:akvizyon-nobet
 services:
   - type: web
-    name: kibritci-erp
+    name: kibritci_web
     runtime: node
     plan: free
     buildCommand: npm install && npm run build
