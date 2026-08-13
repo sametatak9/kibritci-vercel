@@ -14,6 +14,7 @@ import { pushRecentTab } from './lib/navPreferences';
 import { countChromePendingOnay } from './lib/onayInboxUtils';
 
 import { queueArrayStateSync } from './lib/collectionSyncQueue';
+import { isPublicSiparisRoute } from './lib/sahaSiparisUtils';
 
 // Core Screens — kod bölme (code splitting): her ekran ilk açıldığında ayrı paket olarak yüklenir,
 // böylece ana paket küçülür ve uygulama ilk açılışta çok daha hızlı gelir.
@@ -169,7 +170,7 @@ const ScreenLoader: React.FC = () => (
 
 installReportEmailGlobalBridge();
 
-export default function App() {
+function App() {
   const SECONDARY_ADMIN_EMAIL = 'mudur@gmail.com';
   const LAST_TAB_STORAGE_KEY = 'kibritci_last_tab_v1';
   const readLastTab = (): string => {
@@ -666,6 +667,7 @@ export default function App() {
 
   // 1. Core Synchronization Sync Loader
   useEffect(() => {
+    if (isPublicSiparisRoute()) return;
     if (authLoading || !currentUser || bootstrapDoneRef.current) return;
 
     async function setupCloudDatabase(attempt = 1) {
@@ -1126,6 +1128,7 @@ export default function App() {
 
   // 1.5 Real-time Synchronization for core collections when in synced mode
   useEffect(() => {
+    if (isPublicSiparisRoute()) return;
     if (dbStatus !== 'synced' || !currentUser) return;
 
     const dashboardSnapshots = new Set<string>();
@@ -4455,4 +4458,28 @@ export default function App() {
       )}
     </div>
   );
+}
+
+function PublicSiparisShell() {
+  const close = () => {
+    window.location.assign(`${window.location.origin}/`);
+  };
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen bg-slate-950 flex items-center justify-center text-slate-100">
+          <KibritciLogo size="lg" className="h-14" />
+        </div>
+      }
+    >
+      <SiparisFormuScreen isPublic onClose={close} />
+    </Suspense>
+  );
+}
+
+export default function AppRoot() {
+  if (isPublicSiparisRoute()) {
+    return <PublicSiparisShell />;
+  }
+  return <App />;
 }

@@ -8,7 +8,7 @@ import {
   StokKart,
 } from '../types/erp';
 import { fetchApiJson } from './apiClient';
-import { db, saveDocument } from './firebase';
+import { auth, db, saveDocument } from './firebase';
 import { linkSatinAlmaKalemler, resolveCariKartId } from './evrakCariStokSync';
 
 export const SAHA_SIPARIS_COLLECTION = 'sahaSiparisleri';
@@ -34,6 +34,26 @@ export type SiparisKatalog = {
 export function buildPublicSiparisUrl(): string {
   if (typeof window === 'undefined') return '/?siparis=1';
   return `${window.location.origin}/?siparis=1`;
+}
+
+/** Üyeliksiz sipariş formu — query veya hash. ERP bootstrap çalışmamalı. */
+export function isPublicSiparisRoute(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    const search = new URLSearchParams(window.location.search);
+    if (search.has('siparis') || search.get('view') === 'siparis') return true;
+    const hash = String(window.location.hash || '');
+    if (!hash) return false;
+    const hashQuery = hash.includes('?') ? hash.slice(hash.indexOf('?') + 1) : '';
+    if (hashQuery) {
+      const hp = new URLSearchParams(hashQuery);
+      if (hp.has('siparis') || hp.get('view') === 'siparis') return true;
+    }
+    const path = hash.replace(/^#\/?/, '').split('?')[0].replace(/\/$/, '');
+    return path === 'siparis';
+  } catch {
+    return false;
+  }
 }
 
 export function buildSiparisNo(tarih: string): string {
@@ -142,6 +162,13 @@ export async function submitSahaSiparis(input: SubmitSahaSiparisInput): Promise<
     if (data?.siparis?.id) return { ...payload, ...data.siparis, id: data.siparis.id };
   } catch (err) {
     console.warn('Sipariş API başarısız, Firestore deneniyor:', err);
+    const emailUser = Boolean(auth.currentUser && !auth.currentUser.isAnonymous);
+    if (!emailUser) {
+      const msg = err instanceof Error ? err.message : 'Sipariş kaydedilemedi';
+      throw new Error(
+        msg || 'Sipariş sunucuya kaydedilemedi. Sayfayı yenileyip tekrar deneyin.'
+      );
+    }
   }
 
   await setDoc(doc(collection(db, SAHA_SIPARIS_COLLECTION), id), payload);
