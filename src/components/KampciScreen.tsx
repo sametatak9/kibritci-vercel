@@ -3,7 +3,7 @@ import {
   Tent, Plus, Trash2, Camera, Check, RefreshCw, Eye, 
   Search, UserPlus, ClipboardList, Package, Layers, MapPin, Sparkles, CheckCircle, Clock, X, ArrowRight, ShieldCheck, DoorOpen, LogOut, Image as ImageIcon, MessageSquare, Calendar, Truck, AlertTriangle, Building2
 } from 'lucide-react';
-import { KampOdasi, KampKaydi, Personel, StokKart, KampYerleske, KampKat, CariKart, CariKartIslem, AylikYoklamaMap, Fatura, Irsaliye } from '../types/erp';
+import { KampOdasi, KampKaydi, Personel, StokKart, KampYerleske, KampKat, CariKart, CariKartIslem, AylikYoklamaMap, Fatura, Irsaliye, KampFirmaTalep } from '../types/erp';
 import { db, saveDocument } from '../lib/firebase';
 import { compressImage } from '../lib/imageCompress';
 import { ensureKampFaaliyetFotoPersisted } from '../lib/sahaFaaliyetFotoStorage';
@@ -37,7 +37,12 @@ import {
   setYoklamaDay,
 } from '../lib/yoklamaUtils';
 import { todayDateKey, normalizeDateKey } from '../lib/dateKeyUtils';
-import { firmaEslesir, resolveTaseronPersonelGorev, TASERON_PERSONEL_DEPARTMAN, withTaseronPersonelGorev } from '../lib/taseronUtils';
+import { firmaEslesir, getTaseronCariKartlar, resolveTaseronPersonelGorev, TASERON_PERSONEL_DEPARTMAN, withTaseronPersonelGorev } from '../lib/taseronUtils';
+import {
+  buildKampFirmaTalep,
+  evaluateKampFirmaOnerisi,
+  findSimilarTaseronCariler,
+} from '../lib/kampFirmaTalepUtils';
 import { validateTC } from '../lib/personelOdemeUtils';
 import {
   AUTO_MERGE_SCORE_MAX,
@@ -195,7 +200,12 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
   const yerleskeler = kampYerleskeleri;
   const katlar = kampKatlari;
 
-  const taseronCariler = cariKartlar.filter((c) => c.kartTipi === 'TASERON' && c.durum === 'AKTIF');
+  const taseronCariler = useMemo(() => getTaseronCariKartlar(cariKartlar), [cariKartlar]);
+  const [kampFirmaTalepleri, setKampFirmaTalepleri] = useState<KampFirmaTalep[]>([]);
+  const pendingFirmaTalepleri = useMemo(
+    () => kampFirmaTalepleri.filter((t) => t.durum === 'ONAY BEKLİYOR'),
+    [kampFirmaTalepleri]
+  );
   const [placementFirmaTipi, setPlacementFirmaTipi] = useState<'ANA_FIRMA' | 'TASERON'>('ANA_FIRMA');
 
   const selectedYerleske = yerleskeler.find(y => y.id === selectedYerleskeId);
@@ -523,30 +533,44 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
     return result;
   };
 
-  const ensureTaseronCari = async (firmaAdi: string): Promise<CariKart | null> => {
-    const cleanedFirma = String(firmaAdi || '').trim();
-    if (!cleanedFirma || isKibritciName(cleanedFirma)) return null;
-    const existing = cariKartlar.find(
-      (c) => c.kartTipi === 'TASERON' && normalizeNameKey(c.unvan) === normalizeNameKey(cleanedFirma)
+  const requestOrResolveTaseronFirma = async (firmaAdi: string): Promise<CariKart | null> => {
+    const result = evaluateKampFirmaOnerisi(firmaAdi, cariKartlar, pendingFirmaTalepleri);
+    if (result.kind === 'invalid') {
+      showStatus('error', result.message);
+      return null;
+    }
+    if (result.kind === 'existing') return result.cari;
+    if (result.kind === 'pending') {
+      showStatus(
+        'info',
+        `"${result.talep.onerilenUnvan}" zaten yönetici onayında. Onaylanınca kayıtlı firmalardan seçin.`,
+        8000
+      );
+      return null;
+    }
+
+    const email = currentUser?.email || 'kampci';
+    const talep = buildKampFirmaTalep({
+      unvan: result.unvan,
+      email,
+      benzerler: result.benzerler,
+    });
+    await saveDocument('kampFirmaTalepleri', talep);
+    setKampFirmaTalepleri((prev) => [talep, ...prev.filter((t) => t.id !== talep.id)]);
+    await addNotification?.(
+      `Kampçı yeni taşeron firma onayı bekliyor: ${talep.onerilenUnvan}`,
+      { tip: 'KAMP_FIRMA_TALEP', hedefRol: 'YÖNETİCİ', talepId: talep.id }
     );
-    if (existing) return existing;
-    const newCari: CariKart = {
-      id: `ck_taseron_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-      kartTipi: 'TASERON',
-      kod: `TSR-${Math.floor(100 + Math.random() * 900)}`,
-      unvan: cleanedFirma,
-      yetkili: '',
-      telefon: '',
-      eposta: '',
-      vergiNo: '',
-      vergiDairesi: '',
-      adres: 'Kamp yerleşim entegrasyonu ile oluşturuldu.',
-      iban: '',
-      durum: 'AKTIF',
-      notlar: 'Kamp oda yerleşiminden otomatik oluşturulan taşeron cari kartı.',
-    };
-    await saveDocument('cariKartlar', newCari);
-    return newCari;
+    const benzerNot =
+      result.benzerler.length > 0
+        ? ` Kayıtlı benzer: ${result.benzerler.map((c) => c.unvan).join(', ')}.`
+        : '';
+    showStatus(
+      'info',
+      `Yeni firma yönetici onayına gönderildi (${talep.onerilenUnvan}). Onaylanınca listeden seçebilirsiniz.${benzerNot}`,
+      9000
+    );
+    return null;
   };
 
   // ─────────────────────────────────────────────────────────────
@@ -653,10 +677,19 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
       setGirisTalepleriList(list);
     });
 
+    const firmaColl = collection(db, 'kampFirmaTalepleri');
+    const unsubFirma = onSnapshot(firmaColl, (snap) => {
+      const list: KampFirmaTalep[] = [];
+      snap.forEach((d) => list.push({ id: d.id, ...(d.data() as Omit<KampFirmaTalep, 'id'>) }));
+      list.sort((a, b) => String(b.olusturmaTarihi || '').localeCompare(String(a.olusturmaTarihi || '')));
+      setKampFirmaTalepleri(list);
+    });
+
     return () => {
       unsubCounts();
       unsubActs();
       unsubGiris();
+      unsubFirma();
     };
   }, [currentUser?.email]);
 
@@ -1056,14 +1089,17 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
     setLoadingPlacement(true);
     try {
       let createdPersonel = false;
-      let createdCari = false;
 
       if (placementFirmaTipi === 'TASERON' && resolvedFirma) {
-        const cari = await ensureTaseronCari(resolvedFirma);
-        if (cari) {
-          createdCari = !cariKartlar.some((c) => c.id === cari.id);
-          setCariKartlar?.((prev) => (prev.some((c) => c.id === cari.id) ? prev : [...prev, cari]));
+        const cari = await requestOrResolveTaseronFirma(resolvedFirma);
+        if (!cari) {
+          setLoadingPlacement(false);
+          return;
         }
+        resolvedFirma = cari.unvan;
+        setSelectedFirma(cari.unvan);
+        setFirmaType('DB');
+        setManualFirma('');
       }
 
       if (!matchedPersonel && placementType === 'MANUAL') {
@@ -1152,15 +1188,7 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
       setSelectedFirma('');
       setManualFirma('');
       setPlacementModalRoom(null);
-      const dbNote =
-        createdPersonel || createdCari
-          ? ` (${[
-              createdCari ? 'taşeron firma DB' : '',
-              createdPersonel ? 'personel DB' : '',
-            ]
-              .filter(Boolean)
-              .join(' + ')})`
-          : '';
+      const dbNote = createdPersonel ? ' (personel DB)' : '';
       showStatus('success', `${personelIsim} başarıyla ${targetRoom.odaNo} no'lu odaya yerleştirildi.${dbNote}`);
     } catch (err) {
       console.error(err);
@@ -1503,13 +1531,21 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
       return;
     }
     const firmaTipi = girisFirmaTipi;
-    const firmaAdi =
+    let firmaAdi =
       firmaTipi === 'ANA_FIRMA'
         ? CANONICAL_ANA_FIRMA_ADI
         : (girisFirmaType === 'DB' ? girisSelectedFirma : girisManualFirma).trim();
     if (firmaTipi === 'TASERON' && !firmaAdi) {
       showStatus('error', 'Taşeron personel için firma seçin veya yazın.');
       return;
+    }
+    if (firmaTipi === 'TASERON' && firmaAdi) {
+      const cari = await requestOrResolveTaseronFirma(firmaAdi);
+      if (!cari) return;
+      firmaAdi = cari.unvan;
+      setGirisFirmaType('DB');
+      setGirisSelectedFirma(cari.unvan);
+      setGirisManualFirma('');
     }
     const kayitGorev =
       firmaTipi === 'TASERON'
@@ -1529,9 +1565,6 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
         yeniTcNo,
         yeniTelefonNo
       );
-      if (firmaTipi === 'TASERON' && firmaAdi) {
-        await ensureTaseronCari(firmaAdi);
-      }
       if (resolved.created) {
         const created = resolved.personel;
         const patched = withTaseronPersonelGorev({
@@ -1719,6 +1752,58 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
     });
   }, [kampOdalari, kampKayitlari, searchRoomQuery]);
 
+  const renderYeniFirmaYardim = (
+    manualValue: string,
+    onPick: (unvan: string) => void
+  ) => {
+    const q = manualValue.trim();
+    const benzer = q.length >= 2 ? findSimilarTaseronCariler(q, cariKartlar) : [];
+    const evalr = q.length >= 3 ? evaluateKampFirmaOnerisi(q, cariKartlar, pendingFirmaTalepleri) : null;
+    return (
+      <div className="space-y-1.5">
+        <p className="text-[9px] text-amber-800 leading-relaxed">
+          Yeni firma hemen açılmaz; yönetici onayına gider. Yazım hatası / çift kayıt olmasın diye kayıtlıya benziyorsa aşağıdan seçin.
+        </p>
+        {evalr?.kind === 'existing' && (
+          <button
+            type="button"
+            onClick={() => onPick(evalr.cari.unvan)}
+            className="w-full text-left text-[10px] font-bold bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-lg px-2.5 py-1.5"
+          >
+            Kayıtlı firma bulundu: {evalr.cari.unvan} — bunu kullan
+          </button>
+        )}
+        {evalr?.kind === 'pending' && (
+          <p className="text-[9px] font-bold text-amber-900 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1.5">
+            “{evalr.talep.onerilenUnvan}” zaten onay bekliyor.
+          </p>
+        )}
+        {evalr?.kind === 'invalid' && q.length >= 3 && (
+          <p className="text-[9px] font-bold text-rose-700">{evalr.message}</p>
+        )}
+        {benzer.length > 0 && evalr?.kind !== 'existing' && (
+          <div className="flex flex-wrap gap-1">
+            {benzer.map((c) => (
+              <button
+                key={c.id}
+                type="button"
+                onClick={() => onPick(c.unvan)}
+                className="text-[9px] font-bold px-2 py-1 rounded-lg border border-slate-200 bg-white text-slate-700 hover:border-amber-400"
+              >
+                {c.unvan}
+              </button>
+            ))}
+          </div>
+        )}
+        {pendingFirmaTalepleri.length > 0 && (
+          <p className="text-[9px] text-slate-500">
+            Onay bekleyen: {pendingFirmaTalepleri.map((t) => t.onerilenUnvan).join(', ')}
+          </p>
+        )}
+      </div>
+    );
+  };
+
   const renderPlacementPersonForm = () => (
     <>
       <div className="space-y-1.5">
@@ -1796,7 +1881,7 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
                   firmaType === 'MANUAL' ? 'bg-slate-800 text-white' : 'text-slate-500 hover:text-slate-800'
                 }`}
               >
-                Yeni Firma Yaz
+                Yeni Firma Yaz (onaya gider)
               </button>
             </div>
 
@@ -1835,6 +1920,12 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
                   }}
                   className="w-full bg-slate-50 border border-slate-200 text-xs text-slate-800 p-3 rounded-xl outline-none"
                 />
+                {renderYeniFirmaYardim(manualFirma, (unvan) => {
+                  setFirmaType('DB');
+                  setSelectedFirma(unvan);
+                  setManualFirma('');
+                  setSelectedPersonelId('');
+                })}
               </div>
             )}
           </>
@@ -3063,7 +3154,7 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
               <div className="space-y-2">
                 <div className="grid grid-cols-2 gap-2">
                   <button type="button" onClick={() => setGirisFirmaType('DB')} className={`py-1 rounded-md text-[9px] font-bold ${girisFirmaType === 'DB' ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-600'}`}>Kayıtlı Firma</button>
-                  <button type="button" onClick={() => setGirisFirmaType('MANUAL')} className={`py-1 rounded-md text-[9px] font-bold ${girisFirmaType === 'MANUAL' ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-600'}`}>Yeni Firma</button>
+                  <button type="button" onClick={() => setGirisFirmaType('MANUAL')} className={`py-1 rounded-md text-[9px] font-bold ${girisFirmaType === 'MANUAL' ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-600'}`}>Yeni Firma (onaya gider)</button>
                 </div>
                 {girisFirmaType === 'DB' ? (
                   <select value={girisSelectedFirma} onChange={(e) => setGirisSelectedFirma(e.target.value)} className="w-full bg-slate-50 border border-slate-200 text-xs font-bold text-slate-800 rounded-xl p-3 outline-none">
@@ -3073,7 +3164,14 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
                     ))}
                   </select>
                 ) : (
-                  <input value={girisManualFirma} onChange={(e) => setGirisManualFirma(e.target.value)} placeholder="Firma adı" className="w-full bg-slate-50 border border-slate-200 text-xs text-slate-800 p-3 rounded-xl outline-none" />
+                  <>
+                  <input value={girisManualFirma} onChange={(e) => setGirisManualFirma(e.target.value)} placeholder="Firma adı — yönetici onayına gider" className="w-full bg-slate-50 border border-slate-200 text-xs text-slate-800 p-3 rounded-xl outline-none" />
+                  {renderYeniFirmaYardim(girisManualFirma, (unvan) => {
+                    setGirisFirmaType('DB');
+                    setGirisSelectedFirma(unvan);
+                    setGirisManualFirma('');
+                  })}
+                  </>
                 )}
               </div>
             )}

@@ -864,6 +864,24 @@ export interface CariKart {
   notlar: string;
 }
 
+export type KampFirmaTalepDurum = 'ONAY BEKLİYOR' | 'ONAYLANDI' | 'REDDEDILDI';
+
+/** Kampçının yazdığı yeni taşeron unvanı — yönetici onayı olmadan cari açılmaz */
+export interface KampFirmaTalep {
+  id: string;
+  onerilenUnvan: string;
+  durum: KampFirmaTalepDurum;
+  kaynak: 'KAMPCI';
+  gonderenEmail: string;
+  olusturmaTarihi: string;
+  notlar?: string;
+  onaylananUnvan?: string;
+  onaylananCariId?: string;
+  onaylayanEmail?: string;
+  onayTarihi?: string;
+  redNedeni?: string;
+}
+
 export interface StokKart {
   id: string;
   stokKodu: string;

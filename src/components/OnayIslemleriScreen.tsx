@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { 
   ShieldCheck, CheckCircle, Clock, Send, Users, AlertCircle, FileText, ShoppingCart, 
   Truck, CreditCard, ChevronRight, PenTool, Check, CheckCircle2, UserCheck, Eye, Trash2,
-  FileUp, ExternalLink, MessageSquare, AlertTriangle, Sparkles, Package, Tent, X, HardHat, Loader2, Layers
+  FileUp, ExternalLink, MessageSquare, AlertTriangle, Sparkles, Package, Tent, X, HardHat, Loader2, Layers, Building2
 } from 'lucide-react';
 import {
   SatinAlmaTalebi,
@@ -16,6 +16,7 @@ import {
   KampOdasi,
   Personel,
   SahaSiparis,
+  KampFirmaTalep,
 } from '../types/erp';
 import { db, cleanUndefined, saveDocument } from '../lib/firebase';
 import { evictActiveKampResidentsForPersonel } from '../lib/kampPlacementUtils';
@@ -38,6 +39,12 @@ import {
   normalizeKampTaseronSayimForDisplay,
 } from '../lib/mobilOnayUtils';
 import { wrapCorporateReportHtml } from '../lib/corporateReportHtml';
+import {
+  buildApprovedTaseronCari,
+  evaluateKampFirmaOnerisi,
+  findSimilarTaseronCariler,
+} from '../lib/kampFirmaTalepUtils';
+import { getTaseronCariKartlar } from '../lib/taseronUtils';
 import { fetchApiJson } from '../lib/apiClient';
 import { GuvenlikEvrakOnayHavuzu } from './GuvenlikEvrakOnayHavuzu';
 import { DijitalOnayScreen } from './DijitalOnayScreen';
@@ -161,6 +168,8 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
   const [operatorKesintiFaaliyetler, setOperatorKesintiFaaliyetler] = useState<any[]>([]);
   const [operatorSahaFaaliyetler, setOperatorSahaFaaliyetler] = useState<any[]>([]);
   const [bekleyenKampPersonelleri, setBekleyenKampPersonelleri] = useState<any[]>([]);
+  const [kampFirmaTalepleri, setKampFirmaTalepleri] = useState<KampFirmaTalep[]>([]);
+  const [firmaTalepDrafts, setFirmaTalepDrafts] = useState<Record<string, { unvan: string; mergeId: string }>>({});
   const [gunlukAkisRaporlari, setGunlukAkisRaporlari] = useState<any[]>([]);
   const [approvingTaseronSayimId, setApprovingTaseronSayimId] = useState<string | null>(null);
   const [sahaSiparisleri, setSahaSiparisleri] = useState<SahaSiparis[]>([]);
@@ -716,6 +725,18 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
     return () => unsub();
   }, []);
 
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, 'kampFirmaTalepleri'), (snapshot) => {
+      const list: KampFirmaTalep[] = [];
+      snapshot.forEach((d) => list.push({ id: d.id, ...(d.data() as Omit<KampFirmaTalep, 'id'>) }));
+      list.sort((a, b) => String(b.olusturmaTarihi || '').localeCompare(String(a.olusturmaTarihi || '')));
+      setKampFirmaTalepleri(list);
+    });
+    return () => unsub();
+  }, []);
+
+  const pendingKampFirmaTalepleri = kampFirmaTalepleri.filter((t) => t.durum === 'ONAY BEKLİYOR');
+
   const handleApproveKampPersonel = async (id: string) => {
     try {
       const matchedUser = kullanicilar.find((u) => u.email?.toLowerCase() === currentUser?.email?.toLowerCase());
@@ -745,6 +766,76 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
     } catch (err) {
       console.error(err);
       alert('Reddetme sırasında hata oluştu.');
+    }
+  };
+
+  const kampFirmaDraft = (talep: KampFirmaTalep) =>
+    firmaTalepDrafts[talep.id] || { unvan: talep.onerilenUnvan, mergeId: '' };
+
+  const handleApproveKampFirmaTalep = async (talep: KampFirmaTalep) => {
+    const matchedUser = kullanicilar.find((u) => u.email?.toLowerCase() === currentUser?.email?.toLowerCase());
+    const role = matchedUser?.yetki || 'YÖNETİCİ';
+    if (!canApproveMobilDocuments(role, currentUser?.email)) {
+      alert('Bu firma talebini onaylama yetkiniz bulunmuyor.');
+      return;
+    }
+    const draft = kampFirmaDraft(talep);
+    const liveCari = cariKartlar || [];
+    try {
+      let keep = liveCari.find((c) => c.id === draft.mergeId);
+      if (!keep) {
+        const evalr = evaluateKampFirmaOnerisi(draft.unvan, liveCari, []);
+        if (evalr.kind === 'invalid') {
+          alert(evalr.message);
+          return;
+        }
+        if (evalr.kind === 'existing') keep = evalr.cari;
+      }
+      if (keep) {
+        if (!window.confirm(`"${talep.onerilenUnvan}" mevcut karta bağlansın mı?\n${keep.unvan}`)) return;
+        await updateDoc(doc(db, 'kampFirmaTalepleri', talep.id), {
+          durum: 'ONAYLANDI',
+          onaylananUnvan: keep.unvan,
+          onaylananCariId: keep.id,
+          onaylayanEmail: currentUser?.email || 'yonetici',
+          onayTarihi: new Date().toISOString(),
+        });
+        await addNotification?.(`Kampçı firma talebi mevcut karta bağlandı: ${talep.onerilenUnvan} → ${keep.unvan}`);
+        alert(`Bağlandı: ${keep.unvan}`);
+        return;
+      }
+      if (!window.confirm(`Yeni taşeron cari açılsın mı?\n${draft.unvan.trim().toLocaleUpperCase('tr-TR')}`)) return;
+      const created = buildApprovedTaseronCari(draft.unvan, liveCari);
+      await saveDocument('cariKartlar', created);
+      setCariKartlar?.((prev) => (prev.some((c) => c.id === created.id) ? prev : [...prev, created]));
+      await updateDoc(doc(db, 'kampFirmaTalepleri', talep.id), {
+        durum: 'ONAYLANDI',
+        onaylananUnvan: created.unvan,
+        onaylananCariId: created.id,
+        onaylayanEmail: currentUser?.email || 'yonetici',
+        onayTarihi: new Date().toISOString(),
+      });
+      await addNotification?.(`Kampçı firma talebi onaylandı: ${created.unvan}`);
+      alert(`Taşeron cari açıldı: ${created.unvan}`);
+    } catch (err) {
+      console.error(err);
+      alert(err instanceof Error ? err.message : 'Firma onayı başarısız.');
+    }
+  };
+
+  const handleRejectKampFirmaTalep = async (talep: KampFirmaTalep) => {
+    if (!window.confirm(`"${talep.onerilenUnvan}" firma talebi reddedilsin mi?`)) return;
+    try {
+      await updateDoc(doc(db, 'kampFirmaTalepleri', talep.id), {
+        durum: 'REDDEDILDI',
+        onaylayanEmail: currentUser?.email || 'yonetici',
+        onayTarihi: new Date().toISOString(),
+        redNedeni: 'Yönetici tarafından reddedildi',
+      });
+      await addNotification?.(`Kampçı firma talebi reddedildi: ${talep.onerilenUnvan}`);
+    } catch (err) {
+      console.error(err);
+      alert('Reddetme başarısız.');
     }
   };
 
@@ -1723,6 +1814,7 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
     pendingKampFaaliyetler.length +
     pendingTaseronSayimlar.length +
     bekleyenKampPersonelleri.length +
+    pendingKampFirmaTalepleri.length +
     tesisatMermerCount +
     operatorOnayCount +
     pendingGunlukAkis.length +
@@ -1739,7 +1831,8 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
     pendingKampFaaliyetler.length +
     pendingTaseronSayimlar.length +
     pendingVidanjorGateCount +
-    bekleyenKampPersonelleri.length;
+    bekleyenKampPersonelleri.length +
+    pendingKampFirmaTalepleri.length;
 
   type OnayTab =
     | 'satin_alma'
@@ -2954,6 +3047,110 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
                 irsaliyeler={irsaliyeler}
                 addNotification={addNotification}
               />
+
+              <div className="border bg-white p-4.5 rounded-2xl border-amber-200 text-xs">
+                <div className="space-y-1">
+                  <span className="text-amber-800 font-bold block text-[11px] tracking-widest uppercase flex items-center gap-1.5">
+                    <Building2 size={13} /> Kampçı Firma Onayları ({pendingKampFirmaTalepleri.length})
+                  </span>
+                  <p className="text-slate-500 leading-relaxed text-[11px]">
+                    Kampçı yeni taşeron firmasını kendisi açamaz. İsmi düzeltin, kayıtlı firmaya bağlayın veya reddedin — yanlış/çift unvan böyle kesilir.
+                  </p>
+                </div>
+
+                {pendingKampFirmaTalepleri.length === 0 ? (
+                  <p className="text-[11px] text-slate-400 italic mt-3">Onay bekleyen firma talebi yok.</p>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-4">
+                    {pendingKampFirmaTalepleri.map((talep) => {
+                      const draft = kampFirmaDraft(talep);
+                      const benzer = findSimilarTaseronCariler(draft.unvan || talep.onerilenUnvan, cariKartlar || []);
+                      const taseronlar = getTaseronCariKartlar(cariKartlar || []);
+                      return (
+                        <div key={talep.id} className="border border-amber-200 bg-amber-50/40 rounded-xl p-3 space-y-2">
+                          <div className="flex items-start justify-between gap-2">
+                            <div>
+                              <p className="font-bold text-slate-800 text-[13px]">{talep.onerilenUnvan}</p>
+                              <p className="text-[9px] text-amber-800 font-mono mt-0.5">
+                                {talep.gonderenEmail} · {String(talep.olusturmaTarihi || '').slice(0, 16).replace('T', ' ')}
+                              </p>
+                            </div>
+                            <span className="text-[9px] font-black uppercase bg-amber-200 text-amber-900 rounded-full px-2 py-0.5 shrink-0">Onay Bekliyor</span>
+                          </div>
+                          {talep.notlar ? <p className="text-[10px] text-slate-500">{talep.notlar}</p> : null}
+                          <label className="text-[9px] font-extrabold text-slate-500 uppercase block">Onaylanacak unvan</label>
+                          <input
+                            value={draft.unvan}
+                            onChange={(e) =>
+                              setFirmaTalepDrafts((prev) => ({
+                                ...prev,
+                                [talep.id]: { ...draft, unvan: e.target.value },
+                              }))
+                            }
+                            className="w-full bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-[12px] font-bold text-slate-800"
+                          />
+                          {benzer.length > 0 && (
+                            <div className="flex flex-wrap gap-1">
+                              {benzer.map((c) => (
+                                <button
+                                  key={c.id}
+                                  type="button"
+                                  onClick={() =>
+                                    setFirmaTalepDrafts((prev) => ({
+                                      ...prev,
+                                      [talep.id]: { unvan: c.unvan, mergeId: c.id },
+                                    }))
+                                  }
+                                  className={`text-[9px] font-bold px-2 py-1 rounded-lg border ${
+                                    draft.mergeId === c.id
+                                      ? 'bg-emerald-600 text-white border-emerald-700'
+                                      : 'bg-white text-slate-700 border-slate-200'
+                                  }`}
+                                >
+                                  {c.unvan}
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                          <select
+                            value={draft.mergeId}
+                            onChange={(e) =>
+                              setFirmaTalepDrafts((prev) => ({
+                                ...prev,
+                                [talep.id]: { ...draft, mergeId: e.target.value },
+                              }))
+                            }
+                            className="w-full bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-[11px] font-bold text-slate-700"
+                          >
+                            <option value="">Yeni cari aç (veya yukarıdan bağla)</option>
+                            {taseronlar.map((c) => (
+                              <option key={c.id} value={c.id}>
+                                Mevcut: {c.unvan}
+                              </option>
+                            ))}
+                          </select>
+                          <div className="flex gap-2 pt-1 border-t border-amber-100">
+                            <button
+                              type="button"
+                              onClick={() => void handleRejectKampFirmaTalep(talep)}
+                              className="flex-1 bg-red-950 hover:bg-red-900 text-red-300 py-1.5 px-3 rounded-lg text-[10px] font-black tracking-widest transition flex items-center justify-center gap-1 cursor-pointer"
+                            >
+                              <X size={11} /> Reddet
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => void handleApproveKampFirmaTalep(talep)}
+                              className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white py-1.5 px-3 rounded-lg text-[10px] font-black tracking-widest transition flex items-center justify-center gap-1 cursor-pointer"
+                            >
+                              <Check size={11} /> {draft.mergeId ? 'Mevcut karta bağla' : 'Onayla ve cari aç'}
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
 
               {/* Kampçının kurduğu, onay bekleyen personeller */}
               <div className="border bg-white p-4.5 rounded-2xl border-amber-200 text-xs">
