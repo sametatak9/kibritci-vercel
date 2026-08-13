@@ -12,6 +12,7 @@ import {
   formatMicirMiktarLabel,
   kgToTon,
   malzemeTipiLabel,
+  MICIR_MALZEME_OPTIONS,
   MicirMalzemeTipi,
   normalizeMicirMalzemeTipi,
   resolveMicirKiloKg,
@@ -24,6 +25,28 @@ import {
   rejectMicirFis,
 } from '../lib/micirOnayUtils';
 import { deleteMicirFisCascade, fisDurumLabel } from '../lib/fisGecmisUtils';
+
+function malzemeTipiKartSinif(tip: MicirMalzemeTipi): { bar: string; badge: string; head: string } {
+  if (tip === 'STABILIZE') {
+    return {
+      bar: 'border-l-4 border-l-amber-500',
+      badge: 'bg-amber-100 text-amber-900',
+      head: 'bg-amber-50 text-amber-950 border-amber-200',
+    };
+  }
+  if (tip === 'TAS_TOZU') {
+    return {
+      bar: 'border-l-4 border-l-stone-500',
+      badge: 'bg-stone-200 text-stone-800',
+      head: 'bg-stone-100 text-stone-900 border-stone-200',
+    };
+  }
+  return {
+    bar: 'border-l-4 border-l-emerald-600',
+    badge: 'bg-emerald-100 text-emerald-900',
+    head: 'bg-emerald-50 text-emerald-950 border-emerald-200',
+  };
+}
 
 interface MicirFisOnayPanelProps {
   currentUser: any;
@@ -57,6 +80,7 @@ export const MicirFisOnayPanel: React.FC<MicirFisOnayPanelProps> = ({
   const [saving, setSaving] = useState(false);
   const [listMode, setListMode] = useState<'bekleyen' | 'gecmis'>('bekleyen');
   const [gecmisArama, setGecmisArama] = useState('');
+  const [malzemeFilter, setMalzemeFilter] = useState<'ALL' | MicirMalzemeTipi>('ALL');
 
   const entoCari = useMemo(() => findEntoMadenCari(cariKartlar), [cariKartlar]);
 
@@ -82,7 +106,32 @@ export const MicirFisOnayPanel: React.FC<MicirFisOnayPanelProps> = ({
         .includes(q)
     );
   }, [gecmis, gecmisArama]);
-  const visibleList = listMode === 'bekleyen' ? pending : filteredGecmis;
+  const sourceList = listMode === 'bekleyen' ? pending : filteredGecmis;
+  const malzemeCounts = useMemo(() => {
+    const counts: Record<'ALL' | MicirMalzemeTipi, number> = {
+      ALL: sourceList.length,
+      MICIR: 0,
+      TAS_TOZU: 0,
+      STABILIZE: 0,
+    };
+    for (const f of sourceList) {
+      const t = normalizeMicirMalzemeTipi(f.malzemeTipi);
+      counts[t] += 1;
+    }
+    return counts;
+  }, [sourceList]);
+  const groupedVisible = useMemo(() => {
+    const filtered =
+      malzemeFilter === 'ALL'
+        ? sourceList
+        : sourceList.filter((f) => normalizeMicirMalzemeTipi(f.malzemeTipi) === malzemeFilter);
+    return MICIR_MALZEME_OPTIONS.map((opt) => ({
+      tip: opt.id,
+      label: opt.label,
+      items: filtered.filter((f) => normalizeMicirMalzemeTipi(f.malzemeTipi) === opt.id),
+    })).filter((g) => g.items.length > 0);
+  }, [sourceList, malzemeFilter]);
+  const visibleCount = groupedVisible.reduce((n, g) => n + g.items.length, 0);
   const editingApproved = editing?.durum === 'ONAYLANDI';
 
   const saCandidates = useMemo(() => {
@@ -291,6 +340,26 @@ export const MicirFisOnayPanel: React.FC<MicirFisOnayPanelProps> = ({
             <History size={11} /> Geçmiş ({gecmis.length})
           </button>
         </div>
+        <div className="flex flex-wrap gap-1.5 mt-2.5">
+          {([{ id: 'ALL' as const, label: 'Tümü' }, ...MICIR_MALZEME_OPTIONS]).map((tab) => {
+            const active = malzemeFilter === tab.id;
+            const count = malzemeCounts[tab.id];
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setMalzemeFilter(tab.id)}
+                className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wide cursor-pointer border ${
+                  active
+                    ? 'bg-slate-900 text-white border-slate-900'
+                    : 'bg-white text-slate-700 border-[#D5DEE3]'
+                }`}
+              >
+                {tab.label} ({count})
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {!entoCari && (
@@ -315,14 +384,16 @@ export const MicirFisOnayPanel: React.FC<MicirFisOnayPanelProps> = ({
         </div>
       )}
 
-      {visibleList.length === 0 ? (
+      {visibleCount === 0 ? (
         <div className="bg-white rounded-2xl p-10 text-center border border-[#D5DEE3]">
           <p className="text-sm font-bold text-slate-700">
             {listMode === 'bekleyen'
-              ? 'Onay bekleyen mıcır/stabilize irsaliyesi yok.'
+              ? malzemeFilter === 'ALL'
+                ? 'Onay bekleyen mıcır/stabilize irsaliyesi yok.'
+                : `Bekleyen ${malzemeTipiLabel(malzemeFilter)} irsaliyesi yok.`
               : gecmis.length === 0
                 ? 'Henüz geçmiş irsaliye yok.'
-                : 'Aramaya uyan geçmiş kayıt yok.'}
+                : 'Bu malzeme / aramaya uyan geçmiş kayıt yok.'}
           </p>
           <p className="text-xs text-slate-500 mt-1">
             {listMode === 'bekleyen'
@@ -332,13 +403,24 @@ export const MicirFisOnayPanel: React.FC<MicirFisOnayPanelProps> = ({
         </div>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <div className="space-y-2 max-h-[520px] overflow-y-auto pr-1">
-            {visibleList.map((f) => {
+          <div className="space-y-3 max-h-[520px] overflow-y-auto pr-1">
+            {groupedVisible.map((group) => {
+              const style = malzemeTipiKartSinif(group.tip);
+              return (
+                <div key={group.tip} className="space-y-2">
+                  <div
+                    className={`sticky top-0 z-[1] flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg border text-[10px] font-black uppercase tracking-wider ${style.head}`}
+                  >
+                    <span>{group.label}</span>
+                    <span>{group.items.length} evrak</span>
+                  </div>
+                  {group.items.map((f) => {
               const badge = fisDurumLabel(f.durum);
+              const kart = malzemeTipiKartSinif(normalizeMicirMalzemeTipi(f.malzemeTipi));
               return (
               <div
                 key={f.id}
-                className={`bg-white border rounded-xl p-3 flex gap-3 ${
+                className={`bg-white border rounded-xl p-3 flex gap-3 ${kart.bar} ${
                   editing?.id === f.id ? 'border-[#0F6C5C] ring-1 ring-[#B9DBD2]' : 'border-[#D5DEE3]'
                 }`}
               >
@@ -361,6 +443,9 @@ export const MicirFisOnayPanel: React.FC<MicirFisOnayPanelProps> = ({
                 )}
                 <div className="min-w-0 flex-1">
                   <p className="text-xs font-black text-slate-900 truncate flex items-center gap-1.5 flex-wrap">
+                    <span className={`text-[8px] font-black px-1.5 py-0.5 rounded ${kart.badge}`}>
+                      {malzemeTipiLabel(f.malzemeTipi)}
+                    </span>
                     {f.irsaliyeNo} · {f.plaka}
                     {listMode === 'gecmis' && (
                       <span className={`text-[8px] font-black px-1.5 py-0.5 rounded-full ${badge.className}`}>
@@ -369,7 +454,7 @@ export const MicirFisOnayPanel: React.FC<MicirFisOnayPanelProps> = ({
                     )}
                   </p>
                   <p className="text-[10px] text-slate-500 mt-0.5">
-                    {f.tarih} · {malzemeTipiLabel(f.malzemeTipi)} ·{' '}
+                    {f.tarih} ·{' '}
                     <strong>{formatMicirMiktarLabel(f.tonaj, f.kiloKg)}</strong>
                   </p>
                   <p className="text-[9px] text-slate-500 truncate">{f.firmaUnvan || ENTO_MADEN_UNVAN}</p>
@@ -402,6 +487,9 @@ export const MicirFisOnayPanel: React.FC<MicirFisOnayPanelProps> = ({
                   </div>
                 </div>
               </div>
+              );
+                  })}
+                </div>
               );
             })}
           </div>
