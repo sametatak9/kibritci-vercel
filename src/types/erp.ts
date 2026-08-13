@@ -79,6 +79,47 @@ export interface SatinAlmaTalebi {
   kalemler: SatinAlmaItem[];
   eImzalar?: string[];
   arsivde?: boolean;
+  /** Saha sipariş formundan onaylanıp içeri alınan talep */
+  kaynak?: 'SIPARIS_FORMU' | string;
+  siparisId?: string;
+}
+
+export type SahaSiparisDurum = 'ONAY_BEKLIYOR' | 'ONAYLANDI' | 'REDDEDILDI';
+
+export interface SahaSiparisKalem {
+  id: string;
+  urunAdi: string;
+  miktar: number;
+  birim: string;
+  marka?: string;
+  kullanilacakYer?: string;
+  aciklama?: string;
+  stokKartId?: string;
+}
+
+/** Üyeliksiz / ortak sipariş formu — onayda satın alma talebine dönüşür */
+export interface SahaSiparis {
+  id: string;
+  siparisNo: string;
+  tarih: string;
+  personelAdSoyad: string;
+  personelGorev?: string;
+  telefon?: string;
+  kullanilacakYer: string;
+  cariFirma?: string;
+  cariKartId?: string;
+  aciklama?: string;
+  kalemler: SahaSiparisKalem[];
+  durum: SahaSiparisDurum;
+  kaynak: 'SIPARIS_FORMU';
+  satinAlmaTalepId?: string;
+  saId?: string;
+  olusturanEmail?: string;
+  olusturulma: string;
+  guncellenme?: string;
+  onaylayan?: string;
+  onayTarihi?: string;
+  redNedeni?: string;
 }
 
 export interface IrsaliyeItem {

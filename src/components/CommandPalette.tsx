@@ -27,6 +27,7 @@ const ROUTES = [
   { key: 'maas', label: 'Maaş Hesaplama', icon: CreditCard },
   { key: 'personel_izin', label: 'Personel İzin Formu', icon: FileText },
   { key: 'satin_alma', label: 'Satın Alma', icon: Package },
+  { key: 'siparis_formu', label: 'Sipariş Formu', icon: ClipboardList },
   { key: 'irsaliye_giris', label: 'İrsaliye Girişi', icon: FileText },
   { key: 'fatura_giris', label: 'Fatura Girişi', icon: FileText },
   { key: 'cari_stok', label: 'Cari ve Stok Kartları', icon: Wallet },

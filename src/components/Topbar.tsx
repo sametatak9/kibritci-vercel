@@ -74,6 +74,7 @@ export const Topbar: React.FC<TopbarProps> = ({
       maas: "Maaş Hesaplama",
       personel_izin: "Personel İzin Formu",
       satin_alma: "Satın Alma Talep",
+      siparis_formu: "Sipariş Formu",
       cari_stok: "Cari ve Stok Kartları",
       arac: "Araç ve Demirbaş Takibi",
       kamp: "Kamp Yönetimi",

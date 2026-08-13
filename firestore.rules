@@ -104,6 +104,19 @@ service cloud.firestore {
       allow update, delete: if canUseFinance() || isYonetici() || isFounderEmail();
     }
 
+    // Saha sipariş formu — üyeliksiz oluşturma, onay/ERP ile okuma
+    match /sahaSiparisleri/{docId} {
+      allow create: if request.resource.data.personelAdSoyad is string
+        && request.resource.data.personelAdSoyad.size() >= 3
+        && request.resource.data.personelAdSoyad.size() <= 80
+        && request.resource.data.kullanilacakYer is string
+        && request.resource.data.kullanilacakYer.size() >= 3
+        && request.resource.data.kalemler is list
+        && request.resource.data.kalemler.size() > 0
+        && request.resource.data.kalemler.size() <= 40;
+      allow read, update, delete: if canUseErp();
+    }
+
     match /bekleyenUyelikler/{docId} {
       allow create: if isSignedIn();
       allow read, update, delete: if isYonetici() || legacyUnclaimedEmailUser() || isFounderEmail();

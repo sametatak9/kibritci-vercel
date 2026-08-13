@@ -34,6 +34,7 @@ const KasaScreen = lazy(() => import('./components/KasaScreen').then(m => ({ def
 const IdariScreen = lazy(() => import('./components/IdariScreen').then(m => ({ default: m.IdariScreen })));
 const CariStokScreen = lazy(() => import('./components/CariStokScreen').then(m => ({ default: m.CariStokScreen })));
 const OnayIslemleriScreen = lazy(() => import('./components/OnayIslemleriScreen').then(m => ({ default: m.OnayIslemleriScreen })));
+const SiparisFormuScreen = lazy(() => import('./components/SiparisFormuScreen').then(m => ({ default: m.SiparisFormuScreen })));
 const FormenScreen = lazy(() => import('./components/FormenScreen').then(m => ({ default: m.FormenScreen })));
 const GuvenlikScreen = lazy(() => import('./components/GuvenlikScreen').then(m => ({ default: m.GuvenlikScreen })));
 const KampciScreen = lazy(() => import('./components/KampciScreen').then(m => ({ default: m.KampciScreen })));
@@ -360,6 +361,13 @@ export default function App() {
   const [publicViewPo, setPublicViewPo] = useState<any>(null);
   const [publicViewKasaRapor, setPublicViewKasaRapor] = useState<any>(null);
   const [publicLoading, setPublicLoading] = useState<boolean>(false);
+  const [publicSiparisOpen, setPublicSiparisOpen] = useState(() => {
+    try {
+      return new URLSearchParams(window.location.search).has('siparis');
+    } catch {
+      return false;
+    }
+  });
 
   // Error reporting state
   const [errorReport, setErrorReport] = useState<{ message: string; techDetails: string; contextInfo?: string } | null>(null);
@@ -2834,6 +2842,7 @@ export default function App() {
     if (has('onay', 'reddedil', 'onaylandı', 'onaylandi', 'imza', 'kapı', 'kapi', 'gate', 'evrak')) return 'onay_islemleri';
     if (has('irsaliye', 'fiş', 'fis')) return 'irsaliye_giris';
     if (has('fatura')) return 'fatura_giris';
+    if (has('sipariş', 'siparis')) return 'siparis_formu';
     if (has('satın alma', 'satin alma', 'talep', 'po ')) return 'satin_alma';
     if (has('yoklama', 'mesai', 'puantaj')) return 'yoklama';
     if (has('saha', 'faaliyet')) return 'faaliyet_personel';
@@ -2897,7 +2906,28 @@ export default function App() {
     setPublicViewKasaRapor(null);
   };
 
+  const closePublicSiparis = () => {
+    const url = new URL(window.location.href);
+    url.searchParams.delete('siparis');
+    window.history.replaceState({}, '', url.toString());
+    setPublicSiparisOpen(false);
+  };
+
   // Public WhatsApp giriş / satın alma evrak linki — oturum gerekmez
+  if (publicSiparisOpen) {
+    return (
+      <Suspense
+        fallback={
+          <div className="min-h-screen bg-slate-950 flex items-center justify-center text-slate-100">
+            <KibritciLogo size="lg" className="h-14" />
+          </div>
+        }
+      >
+        <SiparisFormuScreen isPublic onClose={closePublicSiparis} />
+      </Suspense>
+    );
+  }
+
   if (publicLoading) {
     return (
       <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center text-slate-100 font-sans p-6">
@@ -3795,6 +3825,14 @@ export default function App() {
                   currentUser={currentUser}
                   addNotification={addNotification}
                   onOpenIrsaliyeFromSa={openIrsaliyeFromSatinAlma}
+                />
+              )}
+
+              {activeTab === "siparis_formu" && (
+                <SiparisFormuScreen
+                  cariKartlar={cariKartlar}
+                  stokKartlar={stokKartlar}
+                  currentUser={currentUser}
                 />
               )}
 

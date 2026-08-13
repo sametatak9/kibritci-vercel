@@ -15,6 +15,7 @@ import {
   KampKaydi,
   KampOdasi,
   Personel,
+  SahaSiparis,
 } from '../types/erp';
 import { db, cleanUndefined, saveDocument } from '../lib/firebase';
 import { evictActiveKampResidentsForPersonel } from '../lib/kampPlacementUtils';
@@ -68,6 +69,11 @@ import type { OperatorFaaliyet } from '../types/erp';
 import { pickPrimaryFotoUrl } from '../lib/guvenlikEvrakFotolar';
 import { toAiParsePayload } from '../lib/guvenlikFotoStorage';
 import { GOTURU_DEFAULT_GOREV, GOTURU_FIRMA_ADI, isGoturuPersonelTalep } from '../lib/goturuPersonelTalep';
+import {
+  approveSahaSiparisToSatinAlma,
+  rejectSahaSiparis,
+  SAHA_SIPARIS_COLLECTION,
+} from '../lib/sahaSiparisUtils';
 import {
   applyTaseronSayimOnApproval,
   filterSayimGuncellemeleriForSession,
@@ -157,6 +163,7 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
   const [bekleyenKampPersonelleri, setBekleyenKampPersonelleri] = useState<any[]>([]);
   const [gunlukAkisRaporlari, setGunlukAkisRaporlari] = useState<any[]>([]);
   const [approvingTaseronSayimId, setApprovingTaseronSayimId] = useState<string | null>(null);
+  const [sahaSiparisleri, setSahaSiparisleri] = useState<SahaSiparis[]>([]);
 
   const [aracOnayTalepleri, setAracOnayTalepleri] = useState<any[]>([]);
   const [yolHarcamalari, setYolHarcamalari] = useState<any[]>([]);
@@ -663,6 +670,16 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
       unsubMermerci();
       unsubSeramik();
     };
+  }, []);
+
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, SAHA_SIPARIS_COLLECTION), (snapshot) => {
+      const list: SahaSiparis[] = [];
+      snapshot.forEach((d) => list.push({ id: d.id, ...(d.data() as Omit<SahaSiparis, 'id'>) }));
+      list.sort((a, b) => String(b.olusturulma || '').localeCompare(String(a.olusturulma || '')));
+      setSahaSiparisleri(list);
+    });
+    return () => unsub();
   }, []);
 
   // Operatör taşeron kesinti + saha faaliyetleri (onay havuzu)
@@ -1544,6 +1561,8 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
     return true;
   });
 
+  const pendingSiparisler = sahaSiparisleri.filter((s) => s.durum === 'ONAY_BEKLIYOR');
+
   const pendingWaybills = irsaliyeler.filter(doc => {
     // Vidanjör / mıcır-stabilize / Yıldırım / kapı evrak özel panelden yönetilir
     if (
@@ -1744,7 +1763,7 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
     count?: number;
     icon: React.ComponentType<{ size?: number; className?: string }>;
   }> = [
-    { id: 'satin_alma', label: 'Satın Alma', shortLabel: 'Satın Alma', count: pendingRequests.length, icon: ShoppingCart },
+    { id: 'satin_alma', label: 'Satın Alma', shortLabel: 'Satın Alma', count: pendingRequests.length + pendingSiparisler.length, icon: ShoppingCart },
     { id: 'guvenlik_belgeleri', label: 'Güvenlik Belgeleri', shortLabel: 'Güvenlik', count: guvenlikCount, icon: Truck },
     { id: 'kampci_belgeleri', label: 'Kampçı Belgeleri', shortLabel: 'Kampçı', count: kampciCount, icon: Package },
     { id: 'tesisat_mermer_belgeleri', label: 'Tesisatçı / Mermerci', shortLabel: 'Tesisat/Mermer', count: tesisatMermerCount, icon: FileText },
@@ -1863,6 +1882,56 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
       alert("Cari Faturası başarıyla muhasebeleştirilip onaylandı.");
     }
     setActiveDocForDetail(null);
+  };
+
+  const handleApproveSahaSiparis = async (siparis: SahaSiparis) => {
+    if (
+      !window.confirm(
+        `${siparis.siparisNo} onaylansın mı?\nSatın alma talebi olarak içeri alınacak.`
+      )
+    ) {
+      return;
+    }
+    try {
+      const result = await approveSahaSiparisToSatinAlma({
+        siparis,
+        onaylayan: currentUser?.email || 'yonetici',
+        cariKartlar,
+        stokKartlar,
+        satinAlmaTalepleri,
+        setSatinAlmaTalepleri,
+      });
+      await addNotification?.(
+        `Saha siparişi onaylandı ve satın alma talebi oluştu: ${result.sa.saId}`,
+        {
+          tip: 'SAHA_SIPARIS_ONAYLANDI',
+          siparisId: siparis.id,
+          saId: result.sa.saId,
+          hedefTab: 'satin_alma',
+        }
+      );
+      alert(`Onaylandı.\nSatın alma talebi: ${result.sa.saId}`);
+    } catch (err: any) {
+      alert('Onay başarısız: ' + (err?.message || ''));
+    }
+  };
+
+  const handleRejectSahaSiparis = async (siparis: SahaSiparis) => {
+    const neden = window.prompt('Red nedeni (opsiyonel):') || '';
+    if (!window.confirm(`${siparis.siparisNo} reddedilsin mi?`)) return;
+    try {
+      await rejectSahaSiparis({
+        siparis,
+        onaylayan: currentUser?.email || 'yonetici',
+        redNedeni: neden,
+      });
+      await addNotification?.(
+        `Saha siparişi reddedildi: ${siparis.siparisNo}`,
+        { tip: 'SAHA_SIPARIS_REDDEDILDI', siparisId: siparis.id }
+      );
+    } catch (err: any) {
+      alert('Red başarısız: ' + (err?.message || ''));
+    }
   };
 
   const handleRejectDocument = (type: 'request' | 'waybill' | 'invoice', docId: string) => {
@@ -2645,16 +2714,86 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
             <div className="space-y-5">
               <div className="border bg-white/90 p-4 rounded-2xl border-[#D5DEE3]">
                 <p className="text-[#5B6B73] leading-relaxed text-[12px]">
-                  Satın alma taleplerini inceleyin; uygun olanları dijital imzanızla onaylayın.
+                  Saha sipariş formundan gelen talepler burada incelenir. Onaylarsanız içeride satın
+                  alma talebi oluşur. Mevcut satın alma taleplerini de dijital imzanızla onaylayabilirsiniz.
                 </p>
               </div>
 
-              {pendingRequests.length === 0 ? (
+              {pendingSiparisler.length > 0 && (
+                <div className="space-y-3">
+                  <h3 className="font-display font-black text-xs text-slate-600 tracking-wider uppercase">
+                    Saha siparişleri ({pendingSiparisler.length})
+                  </h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    {pendingSiparisler.map((sip) => (
+                      <div
+                        key={sip.id}
+                        className="bg-white border border-emerald-200 rounded-2xl p-4 space-y-3"
+                      >
+                        <div className="flex justify-between items-start gap-2">
+                          <span className="font-mono bg-emerald-50 border border-emerald-200 text-emerald-800 text-[10px] font-bold px-2 py-0.5 rounded-md">
+                            {sip.siparisNo}
+                          </span>
+                          <span className="text-[10px] text-slate-500 font-mono font-semibold">{sip.tarih}</span>
+                        </div>
+                        <div>
+                          <p className="text-[13px] text-slate-900 font-semibold">
+                            {sip.personelAdSoyad}
+                            {sip.personelGorev ? ` · ${sip.personelGorev}` : ''}
+                          </p>
+                          <p className="text-[11px] text-slate-600 mt-0.5">
+                            Kullanılacak yer: {sip.kullanilacakYer}
+                          </p>
+                          {sip.cariFirma ? (
+                            <p className="text-[11px] text-slate-500 mt-0.5">Tedarikçi: {sip.cariFirma}</p>
+                          ) : null}
+                          {sip.aciklama ? (
+                            <p className="text-[11px] text-slate-500 mt-1 line-clamp-2">{sip.aciklama}</p>
+                          ) : null}
+                        </div>
+                        <div className="pt-2 border-t border-slate-100 space-y-1 text-[11px] font-mono text-slate-600">
+                          {(sip.kalemler || []).slice(0, 4).map((k) => (
+                            <div key={k.id} className="flex justify-between gap-2">
+                              <span className="truncate">{k.urunAdi}</span>
+                              <span className="font-bold shrink-0">
+                                {k.miktar} {k.birim}
+                              </span>
+                            </div>
+                          ))}
+                          {(sip.kalemler || []).length > 4 && (
+                            <p className="text-[10px] text-slate-400">
+                              + {(sip.kalemler || []).length - 4} kalem daha
+                            </p>
+                          )}
+                        </div>
+                        <div className="flex gap-2 pt-1">
+                          <button
+                            type="button"
+                            onClick={() => handleRejectSahaSiparis(sip)}
+                            className="flex-1 bg-red-950 hover:bg-red-900 text-red-300 py-2 px-3 rounded-xl text-[11px] font-bold cursor-pointer"
+                          >
+                            Reddet
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleApproveSahaSiparis(sip)}
+                            className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white py-2 px-3 rounded-xl text-[11px] font-bold cursor-pointer"
+                          >
+                            Onayla → Satın Alma
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {pendingRequests.length === 0 && pendingSiparisler.length === 0 ? (
                 <div className="bg-white/90 rounded-2xl p-12 text-center border border-[#D5DEE3]">
                   <h3 className="text-sm font-bold text-[#15252B]">Onay bekleyen satın alma talebi yok</h3>
                   <p className="text-xs text-[#5B6B73] mt-1">Bu kuyruk güncel.</p>
                 </div>
-              ) : (
+              ) : pendingRequests.length > 0 ? (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   {pendingRequests.map(doc => (
                     <div
@@ -2715,7 +2854,7 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
                     </div>
                   ))}
                 </div>
-              )}
+              ) : null}
             </div>
           )}
 

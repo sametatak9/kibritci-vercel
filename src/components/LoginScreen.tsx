@@ -1000,6 +1000,14 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
           >
             {isSignUp ? 'Zaten hesabınız var mı? Giriş Yapın' : 'Henüz hesabınız yok mu? Yeni Hesap Açın'}
           </button>
+          <div className="mt-3">
+            <a
+              href={`${typeof window !== 'undefined' ? window.location.origin : ''}/?siparis=1`}
+              className="text-[11px] text-emerald-400 hover:underline font-bold"
+            >
+              Üyeliksiz malzeme siparişi ver →
+            </a>
+          </div>
         </div>
 
       </div>

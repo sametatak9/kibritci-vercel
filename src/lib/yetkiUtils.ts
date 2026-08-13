@@ -9,6 +9,7 @@ export const PORTAL_PAGES = [
   { key: "personel_izin", label: "Personel İzin Formu", group: "PERSONEL" },
   { key: "kasa", label: "Haftalık Kasa", group: "FİNANS & ENVANTER" },
   { key: "satin_alma", label: "Satın Alma Talep", group: "FİNANS & ENVANTER" },
+  { key: "siparis_formu", label: "Sipariş Formu", group: "FİNANS & ENVANTER" },
   { key: "irsaliye_giris", label: "İrsaliye ve Fiş Girişi", group: "FİNANS & ENVANTER" },
   { key: "fatura_giris", label: "Fatura Girişi", group: "FİNANS & ENVANTER" },
   { key: "taseron_kesinti", label: "Taşeron Yönetimi", group: "FİNANS & ENVANTER" },
@@ -39,16 +40,16 @@ export type PortalPageKey = (typeof PORTAL_PAGES)[number]["key"];
 /** Mobil saha rolleri → erişilebilir panel sekmeleri */
 export const MOBILE_ROLE_ALLOWED_TABS: Record<string, PortalPageKey[]> = {
   // Formen günlük planı yönetirken ana sayfadaki genel özeti de görebilir.
-  FORMEN: ['ana_sayfa', 'formen_ekrani', 'faaliyet_personel', 'rapor_programlama', 'personel'],
-  GÜVENLİK: ['guvenlik_ekrani'],
-  KAMPÇI: ['kampci_ekrani'],
-  TESİSATÇI: ['tesisatci_ekrani'],
-  MERMERCİ: ['mermerci_ekrani'],
-  GÖTÜRÜ: ['seramik_ekrani'],
-  LOJİSTİK: ['lojistik_ekrani'],
-  OPERATÖR: ['operator'],
-  DEPOCU: ['depocu_ekrani'],
-  ANAHTARCI: ['imalat_terminali'],
+  FORMEN: ['ana_sayfa', 'formen_ekrani', 'faaliyet_personel', 'rapor_programlama', 'personel', 'siparis_formu'],
+  GÜVENLİK: ['guvenlik_ekrani', 'siparis_formu'],
+  KAMPÇI: ['kampci_ekrani', 'siparis_formu'],
+  TESİSATÇI: ['tesisatci_ekrani', 'siparis_formu'],
+  MERMERCİ: ['mermerci_ekrani', 'siparis_formu'],
+  GÖTÜRÜ: ['seramik_ekrani', 'siparis_formu'],
+  LOJİSTİK: ['lojistik_ekrani', 'siparis_formu'],
+  OPERATÖR: ['operator', 'siparis_formu'],
+  DEPOCU: ['depocu_ekrani', 'siparis_formu'],
+  ANAHTARCI: ['imalat_terminali', 'siparis_formu'],
 };
 
 /** @deprecated MOBILE_ROLE_ALLOWED_TABS kullanın */
