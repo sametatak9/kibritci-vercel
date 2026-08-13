@@ -9,6 +9,7 @@ import {
   isKampciGorev,
   isMermerciGorev,
   isOperatorGorev,
+  isSeramikGorev,
   isSenorGorev,
   isSoforGorev,
   isTesisatciGorev,
@@ -23,6 +24,7 @@ export type PersonelGorevGrup =
   | 'FORMEN'
   | 'TESISATCI'
   | 'MERMERCI'
+  | 'SERAMIK'
   | 'OPERATOR'
   | 'SOFOR'
   | 'SENOR';
@@ -34,6 +36,7 @@ export const PERSONEL_GOREV_GRUP_ORDER: PersonelGorevGrup[] = [
   'FORMEN',
   'TESISATCI',
   'MERMERCI',
+  'SERAMIK',
   'OPERATOR',
   'SOFOR',
   'SENOR',
@@ -53,6 +56,8 @@ export function personelGorevGrupLabel(grup: PersonelGorevGrup): string {
       return 'TESİSATÇI';
     case 'MERMERCI':
       return 'MERMERCİ';
+    case 'SERAMIK':
+      return 'SERAMİK';
     case 'OPERATOR':
       return 'OPERATÖR';
     case 'SOFOR':
@@ -71,6 +76,7 @@ const GOREV_GRUP_CHIP_CLASS: Record<PersonelGorevGrup, string> = {
   FORMEN: 'bg-purple-50 text-purple-900 border-purple-200 hover:bg-purple-100',
   TESISATCI: 'bg-orange-50 text-orange-900 border-orange-200 hover:bg-orange-100',
   MERMERCI: 'bg-rose-50 text-rose-900 border-rose-200 hover:bg-rose-100',
+  SERAMIK: 'bg-amber-50 text-amber-900 border-amber-200 hover:bg-amber-100',
   OPERATOR: 'bg-cyan-50 text-cyan-900 border-cyan-200 hover:bg-cyan-100',
   SOFOR: 'bg-indigo-50 text-indigo-900 border-indigo-200 hover:bg-indigo-100',
   SENOR: 'bg-teal-50 text-teal-900 border-teal-200 hover:bg-teal-100',
@@ -83,6 +89,7 @@ const GOREV_GRUP_ACTIVE_CLASS: Record<PersonelGorevGrup, string> = {
   FORMEN: 'bg-purple-600 text-white border-purple-700',
   TESISATCI: 'bg-orange-600 text-white border-orange-700',
   MERMERCI: 'bg-rose-600 text-white border-rose-700',
+  SERAMIK: 'bg-amber-600 text-white border-amber-700',
   OPERATOR: 'bg-cyan-600 text-white border-cyan-700',
   SOFOR: 'bg-indigo-600 text-white border-indigo-700',
   SENOR: 'bg-teal-600 text-white border-teal-700',
@@ -106,6 +113,7 @@ export function resolvePersonelGorevGrubuFromGorev(gorev?: string): PersonelGore
   if (isSoforGorev(gorev)) return 'SOFOR';
   if (isTesisatciGorev(gorev)) return 'TESISATCI';
   if (isMermerciGorev(gorev)) return 'MERMERCI';
+  if (isSeramikGorev(gorev)) return 'SERAMIK';
   if (isUstaGorev(gorev)) return 'USTA';
   if (isKampciGorev(gorev)) return 'DUZ_ISCI';
 

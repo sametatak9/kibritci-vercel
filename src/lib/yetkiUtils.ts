@@ -25,6 +25,7 @@ export const PORTAL_PAGES = [
   { key: "kampci_ekrani", label: "Kampçı Mobil Paneli", group: "İDARİ İŞLER & SAHA" },
   { key: "tesisatci_ekrani", label: "Tesisatçı Mobil Paneli", group: "İDARİ İŞLER & SAHA" },
   { key: "mermerci_ekrani", label: "Mermerci Mobil Paneli", group: "İDARİ İŞLER & SAHA" },
+  { key: "seramik_ekrani", label: "Götürü / Seramik Mobil Paneli", group: "İDARİ İŞLER & SAHA" },
   { key: "lojistik_ekrani", label: "Şöför Mobil Paneli", group: "İDARİ İŞLER & SAHA" },
   { key: "depocu_ekrani", label: "Depocu Mobil Paneli", group: "İDARİ İŞLER & SAHA" },
   { key: "imalat_terminali", label: "İmalat Terminali", group: "İDARİ İŞLER & SAHA" },
@@ -43,6 +44,7 @@ export const MOBILE_ROLE_ALLOWED_TABS: Record<string, PortalPageKey[]> = {
   KAMPÇI: ['kampci_ekrani'],
   TESİSATÇI: ['tesisatci_ekrani'],
   MERMERCİ: ['mermerci_ekrani'],
+  GÖTÜRÜ: ['seramik_ekrani'],
   LOJİSTİK: ['lojistik_ekrani'],
   OPERATÖR: ['operator'],
   DEPOCU: ['depocu_ekrani'],
@@ -69,6 +71,10 @@ const YETKI_ALIASES: Record<string, string> = {
   TESISATCI: 'TESİSATÇI',
   TESİSATCI: 'TESİSATÇI',
   MERMERCI: 'MERMERCİ',
+  GOTURU: 'GÖTÜRÜ',
+  GÖTURU: 'GÖTÜRÜ',
+  SERAMIK: 'GÖTÜRÜ',
+  SERAMİK: 'GÖTÜRÜ',
   OPERATOR: 'OPERATÖR',
   OPERATÖR: 'OPERATÖR',
   'İDARİ İŞLER': 'İDARİ_İŞLER',
@@ -138,6 +144,7 @@ export function getMobileRoleDisplayName(yetki?: string | null): string {
     KAMPÇI: 'Kampçı Mobil',
     TESİSATÇI: 'Tesisatçı Mobil',
     MERMERCİ: 'Mermerci Mobil',
+    GÖTÜRÜ: 'Götürü / Seramik Mobil',
     GÜVENLİK: 'Güvenlik Mobil',
     LOJİSTİK: 'Şöför Mobil',
     OPERATÖR: 'Operatör Mobil',
@@ -206,6 +213,7 @@ export const YETKI_ROLLER = [
   'KAMPÇI',
   'TESİSATÇI',
   'MERMERCİ',
+  'GÖTÜRÜ',
   'GÜVENLİK',
   'LOJİSTİK',
   'OPERATÖR',
@@ -269,6 +277,9 @@ export function guessRoleFromEmail(email: string): string {
   }
   if (norm.includes('mermer') || norm.includes('marble')) {
     return 'MERMERCİ';
+  }
+  if (norm.includes('goturu') || norm.includes('götürü') || norm.includes('seramik')) {
+    return 'GÖTÜRÜ';
   }
   if (norm.includes('depo') || norm.includes('store')) {
     return 'DEPOCU';

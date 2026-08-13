@@ -64,7 +64,7 @@ function renderCard(
 }
 
 export function buildMobilGunlukFaaliyetReportHtml(options: {
-  rol: 'TESİSATÇI' | 'MERMERCİ';
+  rol: 'TESİSATÇI' | 'MERMERCİ' | 'GÖTÜRÜ';
   anchorDate: string;
   records: MobilGunlukFaaliyetKaydi[];
   olusturan?: string;

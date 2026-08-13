@@ -6,6 +6,7 @@ export const MOBILE_ROLES = [
   'KAMPÇI',
   'TESİSATÇI',
   'MERMERCİ',
+  'GÖTÜRÜ',
   'LOJİSTİK',
   'OPERATÖR',
   'DEPOCU',
@@ -61,6 +62,10 @@ export function normalizeClaimRole(yetki?: string | null): string {
     TESISATCI: 'TESİSATÇI',
     TESİSATCI: 'TESİSATÇI',
     MERMERCI: 'MERMERCİ',
+    GOTURU: 'GÖTÜRÜ',
+    GÖTURU: 'GÖTÜRÜ',
+    SERAMIK: 'GÖTÜRÜ',
+    SERAMİK: 'GÖTÜRÜ',
     OPERATOR: 'OPERATÖR',
     OPERATÖR: 'OPERATÖR',
   };

@@ -39,6 +39,7 @@ const GuvenlikScreen = lazy(() => import('./components/GuvenlikScreen').then(m =
 const KampciScreen = lazy(() => import('./components/KampciScreen').then(m => ({ default: m.KampciScreen })));
 const TesisatciMobilScreen = lazy(() => import('./components/TesisatciMobilScreen').then(m => ({ default: m.TesisatciMobilScreen })));
 const MermerciMobilScreen = lazy(() => import('./components/MermerciMobilScreen').then(m => ({ default: m.MermerciMobilScreen })));
+const SeramikMobilScreen = lazy(() => import('./components/SeramikMobilScreen').then(m => ({ default: m.SeramikMobilScreen })));
 const LojistikScreen = lazy(() => import('./components/LojistikScreen').then(m => ({ default: m.LojistikScreen })));
 const ProfilScreen = lazy(() => import('./components/ProfilScreen').then(m => ({ default: m.ProfilScreen })));
 const DepocuScreen = lazy(() => import('./components/DepocuScreen').then(m => ({ default: m.DepocuScreen })));
@@ -3076,6 +3077,7 @@ export default function App() {
   const isAllowedKampci = userYetki === 'KAMPÇI' || isYonetici;
   const isAllowedTesisatci = userYetki === 'TESİSATÇI' || isYonetici;
   const isAllowedMermerci = userYetki === 'MERMERCİ' || isYonetici;
+  const isAllowedGoturu = userYetki === 'GÖTÜRÜ' || isYonetici;
   /** Şöför Mobil: yalnızca ŞÖFÖR/LOJİSTİK yetkisi (yönetici önizleme) */
   const isAllowedLojistik = isSoforYetki(userYetki) || isYonetici;
   const isAllowedDepocu = userYetki === 'DEPOCU' || isYonetici;
@@ -3185,6 +3187,20 @@ export default function App() {
     if (userYetki === 'MERMERCİ') {
       return (
         <MermerciMobilScreen
+          personeller={personeller}
+          yoklamalar={yoklamalar}
+          setYoklamalar={setYoklamalarWithSync}
+          saveYoklamalarNow={saveYoklamalarNow}
+          currentUser={currentUser}
+          onSignOut={handleSignOut}
+          isStandalone={true}
+          addNotification={addNotification}
+        />
+      );
+    }
+    if (userYetki === 'GÖTÜRÜ') {
+      return (
+        <SeramikMobilScreen
           personeller={personeller}
           yoklamalar={yoklamalar}
           setYoklamalar={setYoklamalarWithSync}
@@ -3343,6 +3359,20 @@ export default function App() {
     if (role === 'MERMERCİ') {
       return (
         <MermerciMobilScreen
+          personeller={personeller}
+          yoklamalar={yoklamalar}
+          setYoklamalar={setYoklamalarWithSync}
+          saveYoklamalarNow={saveYoklamalarNow}
+          currentUser={currentUser}
+          onSignOut={handleSignOut}
+          isStandalone={true}
+          addNotification={addNotification}
+        />
+      );
+    }
+    if (role === 'GÖTÜRÜ') {
+      return (
+        <SeramikMobilScreen
           personeller={personeller}
           yoklamalar={yoklamalar}
           setYoklamalar={setYoklamalarWithSync}
@@ -4039,6 +4069,20 @@ export default function App() {
               {activeTab === "mermerci_ekrani" && (
                 isAllowedMermerci ? (
                   <MermerciMobilScreen
+                    personeller={personeller}
+                    yoklamalar={yoklamalar}
+                    setYoklamalar={setYoklamalarWithSync}
+                    saveYoklamalarNow={saveYoklamalarNow}
+                    currentUser={currentUser}
+                    onSignOut={handleSignOut}
+                    addNotification={addNotification}
+                  />
+                ) : renderAccessDenied()
+              )}
+
+              {activeTab === "seramik_ekrani" && (
+                isAllowedGoturu ? (
+                  <SeramikMobilScreen
                     personeller={personeller}
                     yoklamalar={yoklamalar}
                     setYoklamalar={setYoklamalarWithSync}

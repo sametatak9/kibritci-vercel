@@ -109,6 +109,7 @@ const GOREV_PRESETS = [
   'ELEKTRİKÇİ',
   'TESİSATÇI',
   'MERMERCİ',
+  'SERAMİKÇİ',
 ] as const;
 
 function isTaseronCariKart(cari: CariKart): boolean {

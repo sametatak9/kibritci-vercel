@@ -10,6 +10,8 @@ import {
   isKampciGorev,
   isMermerciGorev,
   isOperatorGorev,
+  isSeramikEkibiPersonel,
+  isSeramikGorev,
   isSoforGorev,
   isTaseronPersonel,
   isTesisatciGorev,
@@ -20,6 +22,7 @@ export type MobilRolEtiket =
   | 'KAMPCI'
   | 'TESISATCI'
   | 'MERMERCI'
+  | 'SERAMIK'
   | 'SOFOR'
   | 'OPERATOR';
 
@@ -44,6 +47,7 @@ export function roleGorevMatcher(rol: MobilRolEtiket): (gorev?: string) => boole
   if (rol === 'KAMPCI') return isKampciRol;
   if (rol === 'TESISATCI') return isTesisatciGorev;
   if (rol === 'MERMERCI') return isMermerciGorev;
+  if (rol === 'SERAMIK') return (gorev?: string) => isSeramikGorev(gorev);
   if (rol === 'SOFOR') return isSoforGorev;
   return isOperatorGorev;
 }
@@ -95,8 +99,13 @@ export function resolveGeldiRolPersonelIds(
   const { y, m, d } = parts;
   for (const p of personeller || []) {
     if (!isAktifPersonel(p)) continue;
-    if (isTaseronPersonel(p) || isIdariPersonel(p)) continue;
-    if (!matchGorev(p.gorev)) continue;
+    if (isIdariPersonel(p)) continue;
+    if (rol === 'SERAMIK') {
+      if (!isSeramikEkibiPersonel(p)) continue;
+    } else {
+      if (isTaseronPersonel(p)) continue;
+      if (!matchGorev(p.gorev)) continue;
+    }
     const day = getYoklamaDay(yoklamalar[p.id], y, m, d);
     if (!isGeldiDurum(day?.durum)) continue;
     push(p.id);
@@ -108,7 +117,7 @@ export function resolveGeldiRolPersonelIds(
   if (email) {
     const self = (personeller || []).find(
       (p) =>
-        matchGorev(p.gorev) &&
+        (rol === 'SERAMIK' ? isSeramikEkibiPersonel(p) : matchGorev(p.gorev)) &&
         String(p.eposta || '')
           .trim()
           .toLowerCase() === email

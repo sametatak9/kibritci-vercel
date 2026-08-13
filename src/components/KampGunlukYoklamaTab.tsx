@@ -14,6 +14,7 @@ import {
   isMermerciGorev,
   isSoforGorev,
   isOperatorGorev,
+  isSeramikEkibiPersonel,
 } from '../lib/yoklamaUtils';
 import { todayDateKey, normalizeDateKey, formatDateLabelTr } from '../lib/dateKeyUtils';
 import { downloadCsv } from '../lib/reportExport';
@@ -26,7 +27,7 @@ interface KampGunlukYoklamaTabProps {
   currentUser: any;
   addNotification?: (mesaj: string) => void;
   /** Varsayılan: kampçı + şenör. Tesisatçı / mermerci / şöför / operatör kendi mobillerinde */
-  personelKapsami?: 'kamp' | 'tesisatci' | 'mermerci' | 'sofor' | 'operator';
+  personelKapsami?: 'kamp' | 'tesisatci' | 'mermerci' | 'sofor' | 'operator' | 'seramik';
 }
 
 export const KampGunlukYoklamaTab: React.FC<KampGunlukYoklamaTabProps> = ({
@@ -71,6 +72,10 @@ export const KampGunlukYoklamaTab: React.FC<KampGunlukYoklamaTabProps> = ({
 
   const activeStaff = useMemo(() => {
     return monthPersonelList.filter((p) => {
+      if (personelKapsami === 'seramik') {
+        if (!isSeramikEkibiPersonel(p)) return false;
+        return isDayActiveForPersonel(p, year, month, day, yoklamalar[p.id] as any);
+      }
       if (isTaseronPersonel(p)) return false;
       if (personelKapsami === 'tesisatci') {
         if (!isTesisatciGorev(p.gorev)) return false;

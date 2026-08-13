@@ -6,16 +6,18 @@ import type {
   MermerciFaaliyet,
   OperatorSahaFaaliyet,
   SahaFaaliyeti,
+  SeramikFaaliyet,
   SoforSahaFaaliyet,
   TesisatciFaaliyet,
 } from '../types/erp';
-import { mermerciToSaha, operatorToSaha, soforToSaha, tesisatciToSaha } from './mobilFaaliyetAdapter';
+import { mermerciToSaha, operatorToSaha, seramikToSaha, soforToSaha, tesisatciToSaha } from './mobilFaaliyetAdapter';
 
 /** Kamp/mobil faaliyet koleksiyonları — yalnızca ihtiyaç olduğunda dinlenir. */
 export function useMobilFaaliyetSnapshots(enabled: boolean, sahaFaaliyetleri: SahaFaaliyeti[] = []) {
   const [kampFaaliyetleri, setKampFaaliyetleri] = useState<KampFaaliyet[]>([]);
   const [tesisatciFaaliyetleri, setTesisatciFaaliyetleri] = useState<TesisatciFaaliyet[]>([]);
   const [mermerciFaaliyetleri, setMermerciFaaliyetleri] = useState<MermerciFaaliyet[]>([]);
+  const [seramikFaaliyetleri, setSeramikFaaliyetleri] = useState<SeramikFaaliyet[]>([]);
   const [soforSahaFaaliyetleri, setSoforSahaFaaliyetleri] = useState<SoforSahaFaaliyet[]>([]);
   const [operatorSahaFaaliyetleri, setOperatorSahaFaaliyetleri] = useState<OperatorSahaFaaliyet[]>([]);
 
@@ -37,6 +39,11 @@ export function useMobilFaaliyetSnapshots(enabled: boolean, sahaFaaliyetleri: Sa
         snap.forEach((d) => list.push({ id: d.id, ...(d.data() as Omit<MermerciFaaliyet, 'id'>) }));
         setMermerciFaaliyetleri(list);
       }),
+      onSnapshot(collection(db, 'seramikFaaliyetleri'), (snap) => {
+        const list: SeramikFaaliyet[] = [];
+        snap.forEach((d) => list.push({ id: d.id, ...(d.data() as Omit<SeramikFaaliyet, 'id'>) }));
+        setSeramikFaaliyetleri(list);
+      }),
       onSnapshot(collection(db, 'soforSahaFaaliyetleri'), (snap) => {
         const list: SoforSahaFaaliyet[] = [];
         snap.forEach((d) => list.push({ id: d.id, ...(d.data() as Omit<SoforSahaFaaliyet, 'id'>) }));
@@ -56,6 +63,7 @@ export function useMobilFaaliyetSnapshots(enabled: boolean, sahaFaaliyetleri: Sa
       ...sahaFaaliyetleri,
       ...(enabled ? tesisatciFaaliyetleri.map(tesisatciToSaha) : []),
       ...(enabled ? mermerciFaaliyetleri.map(mermerciToSaha) : []),
+      ...(enabled ? seramikFaaliyetleri.map(seramikToSaha) : []),
       ...(enabled ? soforSahaFaaliyetleri.map(soforToSaha) : []),
       ...(enabled
         ? operatorSahaFaaliyetleri
@@ -68,6 +76,7 @@ export function useMobilFaaliyetSnapshots(enabled: boolean, sahaFaaliyetleri: Sa
       sahaFaaliyetleri,
       tesisatciFaaliyetleri,
       mermerciFaaliyetleri,
+      seramikFaaliyetleri,
       soforSahaFaaliyetleri,
       operatorSahaFaaliyetleri,
     ]

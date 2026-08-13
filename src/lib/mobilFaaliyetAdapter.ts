@@ -2,6 +2,7 @@ import {
   MermerciFaaliyet,
   OperatorSahaFaaliyet,
   SahaFaaliyeti,
+  SeramikFaaliyet,
   SoforSahaFaaliyet,
   TesisatciFaaliyet,
 } from '../types/erp';
@@ -44,6 +45,25 @@ export function mermerciToSaha(f: MermerciFaaliyet): SahaFaaliyeti {
     personelMesaiSaatleri: f.personelMesaiSaatleri,
     faaliyetTipi: f.faaliyetGrubu === 'MESAI' ? 'MESAI_SAHA' : 'NORMAL',
     kaynakEkran: 'MERMERCI_MOBIL',
+    kaydeden: f.kaydeden,
+  } as SahaFaaliyeti;
+}
+
+export function seramikToSaha(f: SeramikFaaliyet): SahaFaaliyeti {
+  return {
+    id: f.id,
+    personelId: f.aktifPersonelListesi?.[0] || '',
+    tarih: f.tarih,
+    isNiteligi: f.isNiteligi || 'Seramik faaliyeti',
+    parsel: f.parsel || '',
+    blok: f.blok || '',
+    aciklama: f.aciklama || '',
+    fotoUrl: f.fotoUrl || undefined,
+    fotoUrls: f.fotoUrls,
+    aktifPersonelListesi: f.aktifPersonelListesi,
+    personelMesaiSaatleri: f.personelMesaiSaatleri,
+    faaliyetTipi: f.faaliyetGrubu === 'MESAI' ? 'MESAI_SAHA' : 'NORMAL',
+    kaynakEkran: 'SERAMIK_MOBIL',
     kaydeden: f.kaydeden,
   } as SahaFaaliyeti;
 }

@@ -58,6 +58,8 @@ service cloud.firestore {
           'TESISATCI',
           'MERMERCİ',
           'MERMERCI',
+          'GÖTÜRÜ',
+          'GOTURU',
           'LOJİSTİK',
           'OPERATÖR',
           'OPERATOR',

@@ -10,12 +10,12 @@ import {
   AracBakim, Demisbas, Tahsis, KampOdasi, KampKaydi, KampSarf, KampFaaliyet,
   SahaFaaliyeti, HazirTutanak, CariKart, StokKart, EpostaGonderim, Personel,
   KampYerleske, KampKat, SahaGunRaporArsiv, SahaFaaliyetTipi, AylikYoklamaMap,
-  ProgramliFaaliyet, TesisatciFaaliyet, MermerciFaaliyet, KiralikKamyonPuantajKaydi
+  ProgramliFaaliyet, TesisatciFaaliyet, MermerciFaaliyet, SeramikFaaliyet, KiralikKamyonPuantajKaydi
 } from '../types/erp';
 import { db, auth } from '../lib/firebase';
 import { SahaKolajScreen } from './SahaKolajScreen';
 import { ProgramliFaaliyetScreen } from './ProgramliFaaliyetScreen';
-import { tesisatciToSaha, mermerciToSaha } from '../lib/mobilFaaliyetAdapter';
+import { tesisatciToSaha, mermerciToSaha, seramikToSaha } from '../lib/mobilFaaliyetAdapter';
 import {
   createKampYerleske,
   createKampKat,
@@ -161,6 +161,7 @@ export const IdariScreen: React.FC<IdariScreenProps> = ({
 }) => {
   const [mobilTesisatciFaaliyetleri, setMobilTesisatciFaaliyetleri] = useState<TesisatciFaaliyet[]>([]);
   const [mobilMermerciFaaliyetleri, setMobilMermerciFaaliyetleri] = useState<MermerciFaaliyet[]>([]);
+  const [mobilSeramikFaaliyetleri, setMobilSeramikFaaliyetleri] = useState<SeramikFaaliyet[]>([]);
 
   useEffect(() => {
     const unsubT = onSnapshot(collection(db, 'tesisatciFaaliyetleri'), (snap) => {
@@ -173,9 +174,15 @@ export const IdariScreen: React.FC<IdariScreenProps> = ({
       snap.forEach((d) => list.push({ id: d.id, ...(d.data() as Omit<MermerciFaaliyet, 'id'>) }));
       setMobilMermerciFaaliyetleri(list);
     });
+    const unsubS = onSnapshot(collection(db, 'seramikFaaliyetleri'), (snap) => {
+      const list: SeramikFaaliyet[] = [];
+      snap.forEach((d) => list.push({ id: d.id, ...(d.data() as Omit<SeramikFaaliyet, 'id'>) }));
+      setMobilSeramikFaaliyetleri(list);
+    });
     return () => {
       unsubT();
       unsubM();
+      unsubS();
     };
   }, []);
 
@@ -184,8 +191,9 @@ export const IdariScreen: React.FC<IdariScreenProps> = ({
       ...(sahaFaaliyetleri || []),
       ...mobilTesisatciFaaliyetleri.map(tesisatciToSaha),
       ...mobilMermerciFaaliyetleri.map(mermerciToSaha),
+      ...mobilSeramikFaaliyetleri.map(seramikToSaha),
     ],
-    [sahaFaaliyetleri, mobilTesisatciFaaliyetleri, mobilMermerciFaaliyetleri]
+    [sahaFaaliyetleri, mobilTesisatciFaaliyetleri, mobilMermerciFaaliyetleri, mobilSeramikFaaliyetleri]
   );
 
   // ─────────────────────────────────────────────────────────────

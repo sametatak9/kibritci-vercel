@@ -7,6 +7,7 @@ export type GorevMerkeziKaynak =
   | 'KAMP'
   | 'TESISAT'
   | 'MERMER'
+  | 'GOTURU'
   | 'SOFOR'
   | 'OPERATOR'
   | 'FORMEN'
@@ -18,6 +19,7 @@ const KAYNAK_MAP: Record<string, GorevMerkeziKaynak> = {
   IDARI_SAHA: 'SAHA',
   TESISATCI_MOBIL: 'TESISAT',
   MERMERCI_MOBIL: 'MERMER',
+  SERAMIK_MOBIL: 'GOTURU',
   SOFOR_MOBIL: 'SOFOR',
   OPERATOR_MOBIL: 'OPERATOR',
   KAMPCI: 'KAMP',
@@ -36,6 +38,8 @@ export function gorevMerkeziKaynakLabel(kaynak: GorevMerkeziKaynak): string {
       return 'Tesisat';
     case 'MERMER':
       return 'Mermer';
+    case 'GOTURU':
+      return 'Götürü';
     case 'SOFOR':
       return 'Şoför';
     case 'OPERATOR':
@@ -56,6 +60,7 @@ export const GOREV_MERKEZI_KAYNAK_STYLE: Record<GorevMerkeziKaynak, string> = {
   KAMP: 'bg-amber-100 text-amber-900 border-amber-200',
   TESISAT: 'bg-sky-100 text-sky-900 border-sky-200',
   MERMER: 'bg-stone-100 text-stone-800 border-stone-200',
+  GOTURU: 'bg-orange-100 text-orange-900 border-orange-200',
   SOFOR: 'bg-emerald-100 text-emerald-900 border-emerald-200',
   OPERATOR: 'bg-orange-100 text-orange-900 border-orange-200',
 };

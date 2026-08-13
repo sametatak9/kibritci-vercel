@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Search, ChevronRight, LayoutDashboard, Users, CreditCard, Tent, Truck,
-  Settings, Camera, ShieldCheck, FileText, Package, Wallet, ClipboardList, MessageSquare, Pin, PinOff, Clock
+  Settings, Camera, ShieldCheck, FileText, Package, Wallet, ClipboardList, MessageSquare, Pin, PinOff, Clock, Layers
 } from 'lucide-react';
 import { EmptyState } from './EmptyState';
 import {
@@ -33,6 +33,7 @@ const ROUTES = [
   { key: 'kasa', label: 'Kasa', icon: Wallet },
   { key: 'kamp', label: 'Kamp Yönetimi', icon: Tent },
   { key: 'kampci_ekrani', label: 'Kampçı Ekranı', icon: Tent },
+  { key: 'seramik_ekrani', label: 'Götürü / Seramik Mobil', icon: Layers },
   { key: 'arac', label: 'Araç ve Demirbaş', icon: Truck },
   { key: 'lojistik_ekrani', label: 'Lojistik', icon: Truck },
   { key: 'depocu_ekrani', label: 'Depocu', icon: Package },

@@ -283,6 +283,26 @@ export interface MermerciFaaliyet {
   guncellenme?: string;
 }
 
+/** Götürü / Seramik mobil — seramik ekibi saha faaliyeti */
+export interface SeramikFaaliyet {
+  id: string;
+  tarih: string;
+  faaliyetGrubu: 'NORMAL' | 'MESAI';
+  isNiteligi: string;
+  parsel: string;
+  blok: string;
+  aciklama: string;
+  fotoUrl?: string | null;
+  fotoUrls?: string[];
+  aktifPersonelListesi?: string[];
+  personelMesaiSaatleri?: Record<string, number>;
+  durum?: string;
+  kaydeden?: string;
+  kaynakEkran?: 'SERAMIK_MOBIL';
+  olusturulma?: string;
+  guncellenme?: string;
+}
+
 /** Şöför mobil — saha/nakliye faaliyeti (Faaliyeti Olan Personeller besler) */
 export interface SoforSahaFaaliyet {
   id: string;

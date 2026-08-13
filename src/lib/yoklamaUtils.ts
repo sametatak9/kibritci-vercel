@@ -31,6 +31,25 @@ export function isMermerciGorev(gorev?: string): boolean {
   return normalizeGorevKey(gorev).includes('MERMERCI');
 }
 
+/** Seramik / götürü ekibi — görev adı veya seramikçi */
+export function isSeramikGorev(gorev?: string): boolean {
+  const g = normalizeGorevKey(gorev);
+  return (
+    g.includes('SERAMIK') ||
+    g.includes('FAYANS') ||
+    g.includes('GOTURU') ||
+    g.includes('GÖTURU')
+  );
+}
+
+/** Seramik ekibi personeli: SERAMİKÇİ görev veya SERAMİK EKİBİ taşeron firması */
+export function isSeramikEkibiPersonel(p?: Personel): boolean {
+  if (!p) return false;
+  if (isSeramikGorev(p.gorev)) return true;
+  const firma = normalizeGorevKey(p.firmaAdi);
+  return firma.includes('SERAMIK');
+}
+
 export function isSoforGorev(gorev?: string): boolean {
   const g = normalizeGorevKey(gorev);
   return (
@@ -92,6 +111,7 @@ export function isKampciTesisatciMermerci(gorev?: string): boolean {
     isSenorGorev(gorev) ||
     isTesisatciGorev(gorev) ||
     isMermerciGorev(gorev) ||
+    isSeramikGorev(gorev) ||
     isSoforGorev(gorev) ||
     isOperatorGorev(gorev)
   );

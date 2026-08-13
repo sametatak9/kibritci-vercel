@@ -120,7 +120,9 @@ export function mergeAlbumFotolari(input: {
           ? 'Tesisatçı'
           : sf.kaynakEkran === 'MERMERCI_MOBIL'
             ? 'Mermerci'
-            : sf.kaynakEkran === 'FORMEN_MOBIL'
+            : sf.kaynakEkran === 'SERAMIK_MOBIL'
+              ? 'Götürü'
+              : sf.kaynakEkran === 'FORMEN_MOBIL'
               ? 'Formen'
               : 'Saha';
       list.push({

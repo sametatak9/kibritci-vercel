@@ -149,6 +149,7 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
   const [kampFaaliyetler, setKampFaaliyetler] = useState<any[]>([]);
   const [tesisatciFaaliyetler, setTesisatciFaaliyetler] = useState<any[]>([]);
   const [mermerciFaaliyetler, setMermerciFaaliyetler] = useState<any[]>([]);
+  const [seramikFaaliyetler, setSeramikFaaliyetler] = useState<any[]>([]);
   const [operatorKesintiFaaliyetler, setOperatorKesintiFaaliyetler] = useState<any[]>([]);
   const [operatorSahaFaaliyetler, setOperatorSahaFaaliyetler] = useState<any[]>([]);
   const [bekleyenKampPersonelleri, setBekleyenKampPersonelleri] = useState<any[]>([]);
@@ -650,9 +651,15 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
       snapshot.forEach((d) => list.push({ id: d.id, ...d.data() }));
       setMermerciFaaliyetler(list);
     });
+    const unsubSeramik = onSnapshot(collection(db, 'seramikFaaliyetleri'), (snapshot) => {
+      const list: any[] = [];
+      snapshot.forEach((d) => list.push({ id: d.id, ...d.data() }));
+      setSeramikFaaliyetler(list);
+    });
     return () => {
       unsubTesisatci();
       unsubMermerci();
+      unsubSeramik();
     };
   }, []);
 
@@ -893,10 +900,14 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
     }
   };
 
-  const tesisatMermerCollection = (type: 'tesisatci' | 'mermerci') =>
-    type === 'tesisatci' ? 'tesisatciFaaliyetleri' : 'mermerciFaaliyetleri';
+  const tesisatMermerCollection = (type: 'tesisatci' | 'mermerci' | 'seramik') =>
+    type === 'tesisatci'
+      ? 'tesisatciFaaliyetleri'
+      : type === 'mermerci'
+        ? 'mermerciFaaliyetleri'
+        : 'seramikFaaliyetleri';
 
-  const handleApproveTesisatMermer = async (type: 'tesisatci' | 'mermerci', id: string) => {
+  const handleApproveTesisatMermer = async (type: 'tesisatci' | 'mermerci' | 'seramik', id: string) => {
     try {
       const matchedUser = kullanicilar.find(u => u.email?.toLowerCase() === currentUser?.email?.toLowerCase());
       const role = matchedUser?.yetki || 'YÖNETİCİ';
@@ -906,14 +917,15 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
       }
       const updateData = buildSingleApprovalUpdate(currentUser?.email || 'yonetici@kibritci.com', role);
       await updateDoc(doc(db, tesisatMermerCollection(type), id), updateData);
-      alert(`${type === 'tesisatci' ? 'Tesisatçı' : 'Mermerci'} faaliyeti onaylandı.`);
+      const label = type === 'tesisatci' ? 'Tesisatçı' : type === 'mermerci' ? 'Mermerci' : 'Götürü / Seramik';
+      alert(`${label} faaliyeti onaylandı.`);
     } catch (err) {
       console.error(err);
       alert("Onaylama işlemi sırasında bir hata oluştu.");
     }
   };
 
-  const handleRejectTesisatMermer = async (type: 'tesisatci' | 'mermerci', id: string) => {
+  const handleRejectTesisatMermer = async (type: 'tesisatci' | 'mermerci' | 'seramik', id: string) => {
     if (!window.confirm("Bu faaliyeti reddetmek istediğinize emin misiniz?")) return;
     try {
       await updateDoc(doc(db, tesisatMermerCollection(type), id), {
@@ -1568,6 +1580,11 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
     return canApproveMobilDocuments(currentUserRole, currentUser?.email);
   });
 
+  const pendingSeramikFaaliyetler = seramikFaaliyetler.filter((doc) => {
+    if (!isMobilDocPending(doc)) return false;
+    return canApproveMobilDocuments(currentUserRole, currentUser?.email);
+  });
+
   const pendingOperatorSaha = operatorSahaFaaliyetler.filter((doc) => {
     if (!isMobilDocPending(doc)) return false;
     // Eski kayıtlar durum boşsa onaylı say — yalnızca açık ONAY BEKLİYOR / BEKLEMEDE
@@ -1598,6 +1615,7 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
   const tesisatMermerCount =
     pendingTesisatciFaaliyetler.length +
     pendingMermerciFaaliyetler.length +
+    pendingSeramikFaaliyetler.length +
     pendingYildirimGateCount;
 
   const pendingGunlukAkis = gunlukAkisRaporlari.filter(
@@ -1680,7 +1698,7 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
     { id: 'satin_alma', label: 'Satın Alma', shortLabel: 'Satın Alma', count: pendingRequests.length, icon: ShoppingCart },
     { id: 'guvenlik_belgeleri', label: 'Güvenlik Belgeleri', shortLabel: 'Güvenlik', count: guvenlikCount, icon: Truck },
     { id: 'kampci_belgeleri', label: 'Kampçı Belgeleri', shortLabel: 'Kampçı', count: kampciCount, icon: Package },
-    { id: 'tesisat_mermer_belgeleri', label: 'Tesisatçı & Mermerci', shortLabel: 'Tesisat/Mermer', count: tesisatMermerCount, icon: FileText },
+    { id: 'tesisat_mermer_belgeleri', label: 'Tesisatçı / Mermerci / Götürü', shortLabel: 'Tesisat/Mermer/Götürü', count: tesisatMermerCount, icon: FileText },
     { id: 'operator_belgeleri', label: 'Operatör Belgeleri', shortLabel: 'Operatör', count: operatorOnayCount, icon: HardHat },
     { id: 'formen_belgeleri', label: 'Formen Belgeleri', shortLabel: 'Formen', count: pendingPersonelCount, icon: UserCheck },
     { id: 'gunluk_loglar', label: 'Günlük Loglar', shortLabel: 'Loglar', count: pendingGunlukAkis.length, icon: FileText },
@@ -3045,16 +3063,17 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
                 addNotification={addNotification}
               />
 
-              {pendingTesisatciFaaliyetler.length + pendingMermerciFaaliyetler.length === 0 ? (
+              {pendingTesisatciFaaliyetler.length + pendingMermerciFaaliyetler.length + pendingSeramikFaaliyetler.length === 0 ? (
                 pendingYildirimGateCount === 0 ? (
                   <div className="text-center py-8 text-slate-400 text-sm">
-                    Onay bekleyen tesisatçı / mermerci faaliyeti bulunmuyor.
+                    Onay bekleyen tesisatçı / mermerci / götürü faaliyeti bulunmuyor.
                   </div>
                 ) : null
               ) : (
                 [
                   { type: 'tesisatci' as const, title: 'Tesisatçı Faaliyet Onayları', items: pendingTesisatciFaaliyetler },
                   { type: 'mermerci' as const, title: 'Mermerci Faaliyet Onayları', items: pendingMermerciFaaliyetler },
+                  { type: 'seramik' as const, title: 'Götürü / Seramik Faaliyet Onayları', items: pendingSeramikFaaliyetler },
                 ].map(({ type, title, items }) =>
                   items.length === 0 ? null : (
                     <div key={type} className="space-y-3">
@@ -3073,7 +3092,7 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
                               <div>
                                 <div className="flex justify-between items-start">
                                   <span className="font-mono bg-amber-500/10 border border-amber-200/20 text-amber-700 text-[10px] font-bold px-2 py-0.5 rounded-md">
-                                    {type === 'tesisatci' ? 'TESİSAT' : 'MERMER'} #{String(docItem.id).substring(0, 6).toUpperCase()}
+                                    {type === 'tesisatci' ? 'TESİSAT' : type === 'mermerci' ? 'MERMER' : 'GÖTÜRÜ'} #{String(docItem.id).substring(0, 6).toUpperCase()}
                                   </span>
                                   <span className="text-[10px] text-slate-500 font-mono font-bold">{docItem.tarih}</span>
                                 </div>

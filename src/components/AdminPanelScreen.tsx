@@ -50,6 +50,7 @@ export interface Kullanici {
     | 'KAMPÇI'
     | 'TESİSATÇI'
     | 'MERMERCİ'
+    | 'GÖTÜRÜ'
     | 'GÜVENLİK'
     | 'LOJİSTİK'
     | 'OPERATÖR'
@@ -841,6 +842,7 @@ export const AdminPanelScreen: React.FC<AdminPanelScreenProps> = ({
                                   <option value="KAMPÇI">⛺ KAMPÇI — Yalnızca Kampçı Mobil</option>
                                   <option value="TESİSATÇI">🔧 TESİSATÇI — Yalnızca Tesisatçı Mobil</option>
                                   <option value="MERMERCİ">🪨 MERMERCİ — Yalnızca Mermerci Mobil</option>
+                                  <option value="GÖTÜRÜ">🧱 GÖTÜRÜ — Yalnızca Seramik / Götürü Mobil</option>
                                   <option value="GÜVENLİK">👮 GÜVENLİK — Yalnızca Güvenlik Mobil</option>
                                   <option value="LOJİSTİK">🚚 ŞÖFÖR — Yalnızca Şöför Mobil Paneli</option>
                                   <option value="OPERATÖR">🚜 OPERATÖR — Yalnızca Operatör Faaliyetleri</option>
@@ -976,6 +978,7 @@ export const AdminPanelScreen: React.FC<AdminPanelScreenProps> = ({
                           <option value="KAMPÇI">KAMPÇI</option>
                           <option value="TESİSATÇI">TESİSATÇI</option>
                           <option value="MERMERCİ">MERMERCİ</option>
+                          <option value="GÖTÜRÜ">GÖTÜRÜ</option>
                         </select>
                         <button
                           type="button"
@@ -1085,6 +1088,7 @@ export const AdminPanelScreen: React.FC<AdminPanelScreenProps> = ({
                   <option value="KAMPÇI">KAMPÇI</option>
                   <option value="TESİSATÇI">TESİSATÇI</option>
                   <option value="MERMERCİ">MERMERCİ</option>
+                  <option value="GÖTÜRÜ">GÖTÜRÜ</option>
                   <option value="MİSAFİR">MİSAFİR</option>
                 </select>
               </div>
@@ -1446,6 +1450,7 @@ export const AdminPanelScreen: React.FC<AdminPanelScreenProps> = ({
                   <option value="KAMPÇI">⛺ KAMPÇI (Mobil)</option>
                   <option value="TESİSATÇI">🔧 TESİSATÇI (Mobil)</option>
                   <option value="MERMERCİ">🪨 MERMERCİ (Mobil)</option>
+                  <option value="GÖTÜRÜ">🧱 GÖTÜRÜ (Mobil)</option>
                   <option value="GÜVENLİK">👮 GÜVENLİK (Mobil)</option>
                   <option value="LOJİSTİK">🚚 ŞÖFÖR (Mobil)</option>
                   <option value="OPERATÖR">🚜 OPERATÖR (Mobil)</option>

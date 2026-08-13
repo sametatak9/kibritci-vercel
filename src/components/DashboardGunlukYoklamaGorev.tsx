@@ -22,6 +22,7 @@ const GRUP_ACCENT: Record<PersonelGorevGrup, string> = {
   FORMEN: 'ring-purple-100',
   TESISATCI: 'ring-orange-100',
   MERMERCI: 'ring-rose-100',
+  SERAMIK: 'ring-amber-100',
   OPERATOR: 'ring-cyan-100',
   SOFOR: 'ring-indigo-100',
   SENOR: 'ring-teal-100',

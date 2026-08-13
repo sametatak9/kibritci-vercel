@@ -95,6 +95,7 @@ function kaynakEtiket(kaynak?: string): string {
   if (k === 'GUNLUK_PROGRAM') return 'Günlük Program';
   if (k === 'TESISATCI_MOBIL') return 'Tesisatçı';
   if (k === 'MERMERCI_MOBIL') return 'Mermerci';
+  if (k === 'SERAMIK_MOBIL') return 'Götürü / Seramik';
   if (k === 'KAMPCI') return 'Kampçı';
   return k ? k.replace(/_/g, ' ') : 'Saha kaydı';
 }

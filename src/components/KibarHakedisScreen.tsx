@@ -5,8 +5,8 @@ import {
 } from 'lucide-react';
 import { db, parseYoklamaSnapshotData, saveDocument } from '../lib/firebase';
 import { collection, doc, getDoc, onSnapshot, query, where } from 'firebase/firestore';
-import { Personel, AylikYoklamaMap, SahaKolajFoto, ProgramliFaaliyet, TesisatciFaaliyet, MermerciFaaliyet } from '../types/erp';
-import { tesisatciToSaha, mermerciToSaha } from '../lib/mobilFaaliyetAdapter';
+import { Personel, AylikYoklamaMap, SahaKolajFoto, ProgramliFaaliyet, TesisatciFaaliyet, MermerciFaaliyet, SeramikFaaliyet } from '../types/erp';
+import { tesisatciToSaha, mermerciToSaha, seramikToSaha } from '../lib/mobilFaaliyetAdapter';
 import { CorporateReportLayout } from './CorporateReportLayout';
 import { CORPORATE_COMPANY, getCorporateReportCss } from '../lib/corporateReportHtml';
 import { buildPersonelListForMonth, isDayActiveForPersonel, normalizeTurkishName } from '../lib/yoklamaUtils';
@@ -359,6 +359,7 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
   const [kampFaaliyetleri, setKampFaaliyetleri] = useState<any[]>([]);
   const [tesisatciFaaliyetleri, setTesisatciFaaliyetleri] = useState<TesisatciFaaliyet[]>([]);
   const [mermerciFaaliyetleri, setMermerciFaaliyetleri] = useState<MermerciFaaliyet[]>([]);
+  const [seramikFaaliyetleri, setSeramikFaaliyetleri] = useState<SeramikFaaliyet[]>([]);
   const [kolajFotolari, setKolajFotolari] = useState<SahaKolajFoto[]>([]);
   const [excludedStaffIds, setExcludedStaffIds] = useState<string[]>([]);
   const [reportType, setReportType] = useState<'NORMAL' | 'E-IMZALI'>('NORMAL');
@@ -404,10 +405,16 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
       snap.forEach((d) => list.push({ id: d.id, ...(d.data() as Omit<MermerciFaaliyet, 'id'>) }));
       setMermerciFaaliyetleri(list);
     });
+    const unsubSeramik = onSnapshot(collection(db, 'seramikFaaliyetleri'), (snap) => {
+      const list: SeramikFaaliyet[] = [];
+      snap.forEach((d) => list.push({ id: d.id, ...(d.data() as Omit<SeramikFaaliyet, 'id'>) }));
+      setSeramikFaaliyetleri(list);
+    });
     return () => {
       unsubKamp();
       unsubTesisatci();
       unsubMermerci();
+      unsubSeramik();
     };
   }, []);
 
@@ -417,8 +424,9 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
       ...(sahaFaaliyetleri || []),
       ...tesisatciFaaliyetleri.map(tesisatciToSaha),
       ...mermerciFaaliyetleri.map(mermerciToSaha),
+      ...seramikFaaliyetleri.map(seramikToSaha),
     ],
-    [sahaFaaliyetleri, tesisatciFaaliyetleri, mermerciFaaliyetleri]
+    [sahaFaaliyetleri, tesisatciFaaliyetleri, mermerciFaaliyetleri, seramikFaaliyetleri]
   );
 
   useEffect(() => {

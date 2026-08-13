@@ -8,6 +8,7 @@ import {
   isKampciGorev,
   isMermerciGorev,
   isOperatorGorev,
+  isSeramikGorev,
   isSenorGorev,
   isSoforGorev,
   isTesisatciGorev,
@@ -82,6 +83,7 @@ export function resolveGunlukYoklamaRaporGrup(gorev?: string): GunlukYoklamaRapo
   if (
     isTesisatciGorev(gorev) ||
     isMermerciGorev(gorev) ||
+    isSeramikGorev(gorev) ||
     isOperatorGorev(gorev) ||
     isSoforGorev(gorev)
   ) {

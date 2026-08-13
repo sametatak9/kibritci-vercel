@@ -17,6 +17,7 @@ export const DEFAULT_GOREV_PRESETS = [
   'TESİSATÇI',
   'KALIPÇI',
   'DEMİRCİ',
+  'SERAMİKÇİ',
   'ŞÖFÖR',
   'AŞÇI',
   'KAMP GÖREVLİSİ',

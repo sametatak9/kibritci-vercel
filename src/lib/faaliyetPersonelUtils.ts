@@ -134,6 +134,7 @@ export function personMatchesFaaliyetKart(
     kaydedenEmail &&
     (kaynak === 'TESISATCI_MOBIL' ||
       kaynak === 'MERMERCI_MOBIL' ||
+      kaynak === 'SERAMIK_MOBIL' ||
       kaynak === 'SOFOR_MOBIL' ||
       kaynak === 'OPERATOR_MOBIL') &&
     String(p.eposta || '').trim().toLowerCase() === kaydedenEmail
@@ -179,6 +180,7 @@ export function personMatchesFaaliyet(
     kaydedenEmail &&
     (kaynak === 'TESISATCI_MOBIL' ||
       kaynak === 'MERMERCI_MOBIL' ||
+      kaynak === 'SERAMIK_MOBIL' ||
       kaynak === 'SOFOR_MOBIL' ||
       kaynak === 'OPERATOR_MOBIL') &&
     String(p.eposta || '').trim().toLowerCase() === kaydedenEmail
@@ -292,6 +294,7 @@ function absorbFaaliyetPersonel(
   if (
     kaynak === 'TESISATCI_MOBIL' ||
     kaynak === 'MERMERCI_MOBIL' ||
+    kaynak === 'SERAMIK_MOBIL' ||
     kaynak === 'SOFOR_MOBIL' ||
     kaynak === 'OPERATOR_MOBIL'
   ) {

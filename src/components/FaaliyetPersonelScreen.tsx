@@ -27,7 +27,7 @@ import {
   Pencil,
   Save,
 } from 'lucide-react';
-import { AylikYoklamaMap, KampFaaliyet, MermerciFaaliyet, OperatorSahaFaaliyet, Personel, SahaFaaliyeti, SoforSahaFaaliyet, TesisatciFaaliyet } from '../types/erp';
+import { AylikYoklamaMap, KampFaaliyet, MermerciFaaliyet, OperatorSahaFaaliyet, Personel, SahaFaaliyeti, SeramikFaaliyet, SoforSahaFaaliyet, TesisatciFaaliyet } from '../types/erp';
 import { FaaliyetEtiketIlerlemePanel } from './FaaliyetEtiketIlerlemePanel';
 import {
   FAALIYET_ETIKET_ONSETLERI,
@@ -61,7 +61,7 @@ import { formatDateLabelTr, todayDateKey } from '../lib/dateKeyUtils';
 import { isKampciGorev, normalizeTurkishName } from '../lib/yoklamaUtils';
 import { db } from '../lib/firebase';
 import { collection, onSnapshot } from 'firebase/firestore';
-import { tesisatciToSaha, mermerciToSaha, soforToSaha, operatorToSaha } from '../lib/mobilFaaliyetAdapter';
+import { tesisatciToSaha, mermerciToSaha, seramikToSaha, soforToSaha, operatorToSaha } from '../lib/mobilFaaliyetAdapter';
 import { GunlukFaaliyetProgramScreen } from './GunlukFaaliyetProgramScreen';
 import {
   PARSEL_LIST,
@@ -136,6 +136,7 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
   const [kampFaaliyetleri, setKampFaaliyetleri] = useState<KampFaaliyet[]>([]);
   const [tesisatciFaaliyetleri, setTesisatciFaaliyetleri] = useState<TesisatciFaaliyet[]>([]);
   const [mermerciFaaliyetleri, setMermerciFaaliyetleri] = useState<MermerciFaaliyet[]>([]);
+  const [seramikFaaliyetleri, setSeramikFaaliyetleri] = useState<SeramikFaaliyet[]>([]);
   const [soforSahaFaaliyetleri, setSoforSahaFaaliyetleri] = useState<SoforSahaFaaliyet[]>([]);
   const [operatorSahaFaaliyetleri, setOperatorSahaFaaliyetleri] = useState<OperatorSahaFaaliyet[]>([]);
   const [exportingExcel, setExportingExcel] = useState(false);
@@ -178,6 +179,15 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
   }, []);
 
   useEffect(() => {
+    const unsub = onSnapshot(collection(db, 'seramikFaaliyetleri'), (snap) => {
+      const list: SeramikFaaliyet[] = [];
+      snap.forEach((d) => list.push({ id: d.id, ...(d.data() as Omit<SeramikFaaliyet, 'id'>) }));
+      setSeramikFaaliyetleri(list);
+    });
+    return () => unsub();
+  }, []);
+
+  useEffect(() => {
     const unsub = onSnapshot(collection(db, 'soforSahaFaaliyetleri'), (snap) => {
       const list: SoforSahaFaaliyet[] = [];
       snap.forEach((d) => list.push({ id: d.id, ...(d.data() as Omit<SoforSahaFaaliyet, 'id'>) }));
@@ -201,6 +211,7 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
       ...sahaFaaliyetleri,
       ...tesisatciFaaliyetleri.map(tesisatciToSaha),
       ...mermerciFaaliyetleri.map(mermerciToSaha),
+      ...seramikFaaliyetleri.map(seramikToSaha),
       ...soforSahaFaaliyetleri.map(soforToSaha),
       ...operatorSahaFaaliyetleri
         .filter((f) => {
@@ -215,6 +226,7 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
       sahaFaaliyetleri,
       tesisatciFaaliyetleri,
       mermerciFaaliyetleri,
+      seramikFaaliyetleri,
       soforSahaFaaliyetleri,
       operatorSahaFaaliyetleri,
     ]
