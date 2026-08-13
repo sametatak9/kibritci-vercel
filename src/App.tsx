@@ -28,6 +28,7 @@ const MaasMerkeziScreen = lazy(() => import('./components/MaasMerkeziScreen').th
 const PersonelIzinScreen = lazy(() => import('./components/PersonelIzinScreen').then(m => ({ default: m.PersonelIzinScreen })));
 const SatinAlmaScreen = lazy(() => import('./components/SatinAlmaScreen').then(m => ({ default: m.SatinAlmaScreen })));
 const IrsaliyeGirisScreen = lazy(() => import('./components/IrsaliyeGirisScreen').then(m => ({ default: m.IrsaliyeGirisScreen })));
+const TCetveliScreen = lazy(() => import('./components/TCetveliScreen').then(m => ({ default: m.TCetveliScreen })));
 const FaturaGirisScreen = lazy(() => import('./components/FaturaGirisScreen').then(m => ({ default: m.FaturaGirisScreen })));
 const TaseronKesintiScreen = lazy(() => import('./components/TaseronKesintiScreen').then(m => ({ default: m.TaseronKesintiScreen })));
 const PersonelKartlariScreen = lazy(() => import('./components/PersonelKartlariScreen').then(m => ({ default: m.PersonelKartlariScreen })));
@@ -2897,6 +2898,7 @@ function App() {
 
     if (has('onay', 'reddedil', 'onaylandı', 'onaylandi', 'imza', 'kapı', 'kapi', 'gate', 'evrak')) return 'onay_islemleri';
     if (has('irsaliye', 'fiş', 'fis')) return 'irsaliye_giris';
+    if (has('t cetvel', 't-cetvel', 'cetveli')) return 't_cetveli';
     if (has('fatura')) return 'fatura_giris';
     if (has('sipariş', 'siparis')) return 'siparis_formu';
     if (has('satın alma', 'satin alma', 'talep', 'po ')) return 'satin_alma';
@@ -3922,6 +3924,16 @@ function App() {
                   addNotification={addNotification}
                   prefillFromSa={irsaliyeSaPrefill}
                   onPrefillConsumed={() => setIrsaliyeSaPrefill(null)}
+                  onOpenTCetveli={() => handleTabNavigation('t_cetveli')}
+                />
+              )}
+
+              {activeTab === "t_cetveli" && (
+                <TCetveliScreen
+                  irsaliyeler={irsaliyeler}
+                  faturalar={faturalar}
+                  hazirTutanaklar={hazirTutanaklar}
+                  cariKartlar={cariKartlar}
                 />
               )}
 

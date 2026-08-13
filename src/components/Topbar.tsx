@@ -90,6 +90,7 @@ export const Topbar: React.FC<TopbarProps> = ({
       taseron_kesinti: "Taşeron Yönetimi",
       fatura_giris: "Fatura Girişi",
       irsaliye_giris: "İrsaliye ve Fiş Girişi",
+      t_cetveli: "T Cetveli",
       imalat_terminali: "İmalat Terminali"
     };
     return labels[tab] || tab;

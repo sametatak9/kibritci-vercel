@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import {
   Pin, LayoutDashboard, ShieldCheck, Users, ClipboardList, Camera, CreditCard,
-  FileText, Package, Wallet, Tent, Truck, Settings, MessageSquare, ShoppingCart, Home
+  FileText, Package, Wallet, Tent, Truck, Settings, MessageSquare, ShoppingCart, Home, BookOpen
 } from 'lucide-react';
 import { readFavoriteTabs, FAVORITES_STORAGE_KEY } from '../lib/navPreferences';
 
@@ -23,6 +23,7 @@ const TAB_META: Record<string, { label: string; icon: React.ElementType }> = {
   satin_alma: { label: 'Satın Alma', icon: ShoppingCart },
   siparis_formu: { label: 'Sipariş Formu', icon: ClipboardList },
   irsaliye_giris: { label: 'İrsaliye', icon: FileText },
+  t_cetveli: { label: 'T Cetveli', icon: BookOpen },
   fatura_giris: { label: 'Fatura', icon: FileText },
   cari_stok: { label: 'Cari / Stok', icon: Wallet },
   kasa: { label: 'Kasa', icon: Wallet },

@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { 
   Truck, ClipboardList, Plus, Trash2, Edit3, ArrowRight, 
-  Upload, Printer, Download, Sparkles, FileText, CheckCircle2, Search 
+  Upload, Printer, Download, Sparkles, FileText, CheckCircle2, Search, BookOpen
 } from 'lucide-react';
 import { Irsaliye, IrsaliyeItem, SatinAlmaTalebi, CariKart, StokKart, Fatura, EvrakBaglantiGrubu, CariKartIslem, StokKartIslem } from '../types/erp';
 import { compressImage } from '../lib/imageCompress';
@@ -65,6 +65,7 @@ interface IrsaliyeGirisScreenProps {
   /** Satın Alma «İrsaliyeye Dönüştür» ile gelen ön doldurma */
   prefillFromSa?: SaIrsaliyeFormPrefill | null;
   onPrefillConsumed?: () => void;
+  onOpenTCetveli?: () => void;
 }
 
 export const IrsaliyeGirisScreen: React.FC<IrsaliyeGirisScreenProps> = ({
@@ -85,6 +86,7 @@ export const IrsaliyeGirisScreen: React.FC<IrsaliyeGirisScreenProps> = ({
   addNotification,
   prefillFromSa = null,
   onPrefillConsumed,
+  onOpenTCetveli,
 }) => {
 
   // Form states
@@ -734,13 +736,25 @@ export const IrsaliyeGirisScreen: React.FC<IrsaliyeGirisScreenProps> = ({
             Şantiye İrsaliye, Makbuz ve Fiş Giriş Paneli
           </h2>
         </div>
-        <button
-          type="button"
-          onClick={() => setEditingIrId(null)}
-          className="px-4 py-2 font-bold rounded-xl text-xs transition cursor-pointer bg-emerald-700 text-white shadow-sm"
-        >
-          İrsaliye Giriş (Manuel / AI)
-        </button>
+        <div className="flex flex-wrap gap-2">
+          {onOpenTCetveli && (
+            <button
+              type="button"
+              onClick={onOpenTCetveli}
+              className="px-4 py-2 font-bold rounded-xl text-xs transition cursor-pointer bg-stone-800 text-white shadow-sm inline-flex items-center gap-1.5"
+              title="Kibritçi giriş / çıkış evrak T cetveli"
+            >
+              <BookOpen size={13} /> T Cetveli
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => setEditingIrId(null)}
+            className="px-4 py-2 font-bold rounded-xl text-xs transition cursor-pointer bg-emerald-700 text-white shadow-sm"
+          >
+            İrsaliye Giriş (Manuel / AI)
+          </button>
+        </div>
       </div>
 
       <EvrakZincirBanner

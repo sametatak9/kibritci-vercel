@@ -75,6 +75,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         { key: "satin_alma", label: "Satın Alma Talebi", icon: ShoppingCart },
         { key: "siparis_formu", label: "Sipariş Formu", icon: ClipboardList },
         { key: "irsaliye_giris", label: "İrsaliye ve Fiş Girişi", icon: Truck },
+        { key: "t_cetveli", label: "T Cetveli", icon: BookOpen },
         { key: "fatura_giris", label: "Fatura Girişi", icon: CreditCard },
         { key: "taseron_kesinti", label: "Taşeron Yönetimi", icon: Wallet },
         { key: "cari_stok", label: "Cari ve Stok Kartları", icon: Package },
@@ -130,6 +131,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
       ...group,
       items: group.items.filter(item => {
         if (!isPrivilegedAdmin && roleAllowedTabs) {
+          if (item.key === 't_cetveli') {
+            return (
+              roleAllowedTabs.includes('t_cetveli') ||
+              roleAllowedTabs.includes('irsaliye_giris') ||
+              roleAllowedTabs.includes('fatura_giris')
+            );
+          }
           return roleAllowedTabs.includes(item.key as typeof roleAllowedTabs[number]);
         }
 

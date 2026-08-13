@@ -11,6 +11,7 @@ export const PORTAL_PAGES = [
   { key: "satin_alma", label: "Satın Alma Talep", group: "FİNANS & ENVANTER" },
   { key: "siparis_formu", label: "Sipariş Formu", group: "FİNANS & ENVANTER" },
   { key: "irsaliye_giris", label: "İrsaliye ve Fiş Girişi", group: "FİNANS & ENVANTER" },
+  { key: "t_cetveli", label: "T Cetveli", group: "FİNANS & ENVANTER" },
   { key: "fatura_giris", label: "Fatura Girişi", group: "FİNANS & ENVANTER" },
   { key: "taseron_kesinti", label: "Taşeron Yönetimi", group: "FİNANS & ENVANTER" },
   { key: "cari_stok", label: "Cari ve Stok Kartları", group: "FİNANS & ENVANTER" },
