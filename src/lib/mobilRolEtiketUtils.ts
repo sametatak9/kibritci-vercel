@@ -7,7 +7,7 @@ import { normalizeDateKey } from './dateKeyUtils';
 import {
   getYoklamaDay,
   isIdariPersonel,
-  isKampciGorev,
+  isKampciYoklamaKapsami,
   isMermerciGorev,
   isOperatorGorev,
   isSeramikEkibiPersonel,
@@ -16,7 +16,6 @@ import {
   isTaseronPersonel,
   isTesisatciGorev,
 } from './yoklamaUtils';
-import { normalizeGorev } from './gorevUtils';
 
 export type MobilRolEtiket =
   | 'KAMPCI'
@@ -27,8 +26,7 @@ export type MobilRolEtiket =
   | 'OPERATOR';
 
 function isKampciRol(gorev?: string): boolean {
-  if (isKampciGorev(gorev)) return true;
-  return normalizeGorev(gorev) === 'KAMPÇI';
+  return isKampciYoklamaKapsami(gorev);
 }
 
 function parseDateParts(dateKey: string): { y: number; m: number; d: number } | null {

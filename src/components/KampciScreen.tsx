@@ -20,6 +20,7 @@ import { collection, onSnapshot, doc, updateDoc, setDoc, query, orderBy } from '
 import {
   applySahaMesaiToYoklama,
   mesaiInputDisplayValue,
+  normalizeMesaiHours,
   setMesaiHoursInMap,
 } from '../lib/sahaFaaliyetUtils';
 import { submitPersonelCikisTalebi } from '../lib/personelCikisTalebiUtils';
@@ -32,7 +33,10 @@ import {
   isSoforGorev,
   isOperatorGorev,
   isIdariPersonel,
+  getYoklamaDay,
+  setYoklamaDay,
 } from '../lib/yoklamaUtils';
+import { todayDateKey, normalizeDateKey } from '../lib/dateKeyUtils';
 import { firmaEslesir, resolveTaseronPersonelGorev, TASERON_PERSONEL_DEPARTMAN, withTaseronPersonelGorev } from '../lib/taseronUtils';
 import { validateTC } from '../lib/personelOdemeUtils';
 import {
@@ -61,7 +65,7 @@ interface KampciScreenProps {
   setCariKartlar?: React.Dispatch<React.SetStateAction<CariKart[]>>;
   yoklamalar?: AylikYoklamaMap;
   setYoklamalar?: (updater: AylikYoklamaMap | ((y: AylikYoklamaMap) => AylikYoklamaMap)) => void;
-  saveYoklamalarNow?: (next: AylikYoklamaMap) => Promise<void>;
+  saveYoklamalarNow?: (next: AylikYoklamaMap, kaynak?: string) => Promise<void>;
   stokKartlar?: StokKart[];
   faturalar?: Fatura[];
   setFaturalar?: React.Dispatch<React.SetStateAction<Fatura[]>>;
@@ -1350,17 +1354,33 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
     tarih: string,
     mesaiMap: Record<string, number> | undefined
   ) => {
-    const hasNew = mesaiMap && Object.values(mesaiMap).some((h) => Number(h) > 0);
-    if (!hasNew) return;
+    const cleaned = Object.fromEntries(
+      Object.entries(mesaiMap || {})
+        .map(([pid, h]) => [pid, normalizeMesaiHours(Number(h))])
+        .filter(([, h]) => Number(h) > 0)
+    ) as Record<string, number>;
+    if (Object.keys(cleaned).length === 0) return;
+    if (!saveYoklamalarNow && !setYoklamalar) {
+      showStatus('error', 'Mesai yoklamaya yazılamadı: kayıt fonksiyonu yok.');
+      return;
+    }
 
-    let next = { ...yoklamalar };
     const gonderen = currentUser?.email || 'KAMP_MOBIL';
-    next = applySahaMesaiToYoklama(next, tarih, mesaiMap, gonderen, 'add');
-    
+    const draft = applySahaMesaiToYoklama(yoklamalar, tarih, cleaned, gonderen, 'add');
+    const dk = normalizeDateKey(tarih);
+    const [y, m, d] = dk.split('-').map(Number);
+    const sparse: AylikYoklamaMap = {};
+    for (const pid of Object.keys(cleaned)) {
+      const cell = getYoklamaDay(draft[pid], y, m, d);
+      if (!cell) continue;
+      sparse[pid] = setYoklamaDay({}, y, m, d, cell) as any;
+    }
+    if (Object.keys(sparse).length === 0) return;
+
     if (saveYoklamalarNow) {
-      await saveYoklamalarNow(next);
+      await saveYoklamalarNow(sparse, 'kamp');
     } else if (setYoklamalar) {
-      setYoklamalar(next);
+      setYoklamalar(draft);
     }
   };
 
@@ -1382,13 +1402,20 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
     setLoadingFaaliyet(true);
     try {
       const actId = `act_${Date.now()}`;
-      const bugunTarih = new Date().toISOString().slice(0, 10);
+      const bugunTarih = todayDateKey();
+
+      const mesaiMap =
+        faaliyetGrubu === 'MESAI'
+          ? (Object.fromEntries(
+              Object.entries(personelMesaiSaatleri)
+                .map(([pid, h]) => [pid, normalizeMesaiHours(Number(h))])
+                .filter(([, h]) => Number(h) > 0)
+            ) as Record<string, number>)
+          : undefined;
 
       let aktifPersonelListesi: string[] = [];
       if (faaliyetGrubu === 'MESAI') {
-        aktifPersonelListesi = Object.entries(personelMesaiSaatleri)
-          .filter(([, hrs]) => Number(hrs) > 0)
-          .map(([pid]) => pid);
+        aktifPersonelListesi = Object.keys(mesaiMap || {});
       } else {
         // NORMAL: yalnızca yoklamada Geldi olan kampçılar (düz işçi / usta / formen / yerleşim yok)
         aktifPersonelListesi = resolveGeldiRolPersonelIds(
@@ -1410,7 +1437,8 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
         kaydedenKampci: currentUser?.email || 'kamp_sorumlusu',
         faaliyetTipi,
         faaliyetGrubu,
-        personelMesaiSaatleri: faaliyetGrubu === 'MESAI' ? personelMesaiSaatleri : undefined,
+        personelMesaiSaatleri: mesaiMap,
+        mesaiYoklamayaIslendi: false,
         aktifPersonelListesi,
         personelId: aktifPersonelListesi[0],
         yerleskeAdi: faaliyetYerleske,
@@ -1424,7 +1452,12 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
       await saveDocument('kampGunlukFaaliyetleri', actData);
       
       if (faaliyetGrubu === 'MESAI') {
-        await syncKampMesaiFromFaaliyet(bugunTarih, personelMesaiSaatleri);
+        await syncKampMesaiFromFaaliyet(bugunTarih, mesaiMap);
+        try {
+          await updateDoc(doc(db, 'kampGunlukFaaliyetleri', actId), { mesaiYoklamayaIslendi: true });
+        } catch {
+          /* onay anında tekrar yazılabilir */
+        }
       }
 
       if (addNotification) {
@@ -1439,7 +1472,9 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
       setPersonelMesaiSaatleri({});
       showStatus(
         'success',
-        `Günlük faaliyet kaydedildi (${aktifPersonelListesi.length} personel). Onay havuzuna iletildi.`
+        faaliyetGrubu === 'MESAI'
+          ? `Mesai faaliyeti kaydedildi. Saatler yoklama ve puantaja yazıldı (${aktifPersonelListesi.length} personel).`
+          : `Günlük faaliyet kaydedildi (${aktifPersonelListesi.length} personel). Onay havuzuna iletildi.`
       );
     } catch (err) {
       console.error(err);
@@ -1644,11 +1679,15 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
   });
 
   const mesaiPersonelListesi = useMemo(() => {
-    const base = personeller.filter(
-      (p) =>
-        isTaseronPersonel(p) ||
-        kampKayitlari.some((k) => k.personelId === p.id && k.durum === 'AKTIF')
-    );
+    const dk = todayDateKey();
+    const [y, m, d] = dk.split('-').map(Number);
+    const base = personeller.filter((p) => {
+      if (isTaseronPersonel(p) || isIdariPersonel(p)) return false;
+      if (isSoforGorev(p.gorev) || isOperatorGorev(p.gorev)) return false;
+      if (!isKampciYoklamaKapsami(p.gorev)) return false;
+      const day = getYoklamaDay(yoklamalar[p.id], y, m, d);
+      return day?.durum === 'Geldi';
+    });
     const q = mesaiPersonelSearch.trim().toLowerCase();
     if (!q) return base;
     return base.filter((p) => {
@@ -1660,7 +1699,7 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
         (p.firmaAdi || '').toLowerCase().includes(q)
       );
     });
-  }, [personeller, kampKayitlari, mesaiPersonelSearch]);
+  }, [personeller, yoklamalar, mesaiPersonelSearch]);
 
   const filteredRoomsWithOccupants = useMemo(() => {
     const q = searchRoomQuery.trim().toLowerCase();
@@ -2749,7 +2788,10 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
               {faaliyetGrubu === 'MESAI' && (
                 <div className="space-y-1.5 bg-amber-50/40 border border-amber-200 p-3 rounded-xl">
                   <label className="text-[9px] font-extrabold text-amber-800 uppercase tracking-wider block">İlgili Personeller & Mesai Saati *</label>
-                  <p className="text-[8px] text-amber-700/70 leading-tight mb-2">Taşeron ve kamp personelleri listelenmektedir. Yalnızca mesaiye kalanların saatini artırın.</p>
+                  <p className="text-[8px] text-amber-700/70 leading-tight mb-2">
+                    Yalnızca bugün Yoklama sekmesinde Geldi işaretlediğiniz kamp personeli listelenir.
+                    Girdiğiniz saat yoklama ve puantaja mesai olarak yazılır.
+                  </p>
                   <div className="relative mb-2">
                     <Search size={12} className="absolute left-2.5 top-2.5 text-amber-700/60" />
                     <input
@@ -2766,7 +2808,7 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
                       <div className="text-[9px] text-slate-400 italic p-2 text-center">
                         {mesaiPersonelSearch.trim()
                           ? 'Aramaya uygun personel yok.'
-                          : 'İlgili personel bulunamadı.'}
+                          : 'Bugün Geldi yoklaması yok. Önce Yoklama sekmesinden yoklama kaydedin.'}
                       </div>
                     ) : (
                       mesaiPersonelListesi.map(p => {
@@ -2776,7 +2818,7 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
                           <div key={p.id} className={`flex items-center justify-between gap-2 border rounded-lg px-2 py-1.5 transition-colors ${hasHrs ? 'bg-amber-100 border-amber-300' : 'bg-white border-slate-200 hover:bg-slate-50'}`}>
                             <div className="flex flex-col min-w-0">
                               <span className="text-[9px] font-bold text-slate-800 truncate">{p.ad} {p.soyad}</span>
-                              <span className="text-[7px] font-semibold text-slate-500 truncate">{p.gorev} • {p.firmaTipi === 'TASERON' ? 'Taşeron' : 'Kamp'}</span>
+                              <span className="text-[7px] font-semibold text-slate-500 truncate">{p.gorev || 'Kamp'} • Geldi</span>
                             </div>
                             <div className="flex items-center gap-1 shrink-0">
                               <input

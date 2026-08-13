@@ -758,7 +758,7 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
         role
       );
 
-      // Faaliyet onayında o gün Geldi tüm kampçıları listeye göm (kısmi liste olsa bile birleştir)
+      // Faaliyet onayında: NORMAL → Geldi kampçıları birleştir; MESAI → yoklama/puantaja mesai yaz
       if (type === 'faaliyet') {
         try {
           const { getDoc, getDocs: getAll } = await import('firebase/firestore');
@@ -767,21 +767,45 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
           const existingList: string[] = Array.isArray(raw?.aktifPersonelListesi)
             ? raw.aktifPersonelListesi.map((x: unknown) => String(x || '').trim()).filter(Boolean)
             : [];
-          const { mergeGeldiKampciIntoList } = await import('../lib/mobilRolEtiketUtils');
-          const { fetchYoklamaMap } = await import('../lib/yoklamaPersistence');
+          const { fetchYoklamaMap, persistYoklamaDocument } = await import('../lib/yoklamaPersistence');
           const persSnap = await getAll(collection(db, 'personeller'));
           const personeller = persSnap.docs.map((d) => ({ id: d.id, ...d.data() })) as any[];
           const yoklamalar = await fetchYoklamaMap();
           const tarih = String(raw?.tarih || new Date().toISOString().slice(0, 10));
-          const merged = mergeGeldiKampciIntoList(existingList, personeller, yoklamalar, tarih, {
-            ensureEmail: raw?.kaydedenKampci || null,
-          });
-          if (merged.length > 0) {
-            updateData.aktifPersonelListesi = merged;
-            updateData.personelId = merged[0];
+
+          if (raw?.faaliyetGrubu === 'MESAI') {
+            const mesaiMap = raw?.personelMesaiSaatleri as Record<string, number> | undefined;
+            if (mesaiMap && Object.keys(mesaiMap).length > 0 && !raw?.mesaiYoklamayaIslendi) {
+              const { applySahaMesaiToYoklama } = await import('../lib/sahaFaaliyetUtils');
+              const { getYoklamaDay, setYoklamaDay } = await import('../lib/yoklamaUtils');
+              const { normalizeDateKey } = await import('../lib/dateKeyUtils');
+              const dk = normalizeDateKey(tarih);
+              const gonderen = String(raw?.kaydedenKampci || currentUser?.email || 'kampci');
+              const draft = applySahaMesaiToYoklama(yoklamalar, dk, mesaiMap, gonderen, 'add');
+              const [y, m, d] = dk.split('-').map(Number);
+              const sparse: Record<string, unknown> = {};
+              for (const pid of Object.keys(mesaiMap)) {
+                const cell = getYoklamaDay(draft[pid], y, m, d);
+                if (!cell) continue;
+                sparse[pid] = setYoklamaDay({}, y, m, d, cell) as any;
+              }
+              if (Object.keys(sparse).length > 0) {
+                const result = await persistYoklamaDocument(sparse as any, 'kamp');
+                if (result.ok) updateData.mesaiYoklamayaIslendi = true;
+              }
+            }
+          } else {
+            const { mergeGeldiKampciIntoList } = await import('../lib/mobilRolEtiketUtils');
+            const merged = mergeGeldiKampciIntoList(existingList, personeller, yoklamalar, tarih, {
+              ensureEmail: raw?.kaydedenKampci || null,
+            });
+            if (merged.length > 0) {
+              updateData.aktifPersonelListesi = merged;
+              updateData.personelId = merged[0];
+            }
           }
         } catch (repairErr) {
-          console.warn('[kamp-onay] personel listesi onarımı atlandı:', repairErr);
+          console.warn('[kamp-onay] personel/mesai onarımı atlandı:', repairErr);
         }
       }
 
