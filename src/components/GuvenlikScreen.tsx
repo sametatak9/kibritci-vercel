@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   ShieldAlert, FileText, Users, Truck, UserCheck, Search, PlusCircle, Trash2, 
   Check, X, FileUp, Camera, Printer, Clock, AlertTriangle, Key, Download, ArrowRight, RefreshCw, Barcode,
-  Archive, Calendar, Lock, ClipboardList, MessageCircle, Droplets, Fuel, Images
+  Archive, Calendar, Lock, ClipboardList, MessageCircle, Droplets, Fuel, Images, History
 } from 'lucide-react';
 import EvrakDuvariPanel, {
   type EvrakDuvariItem,
@@ -74,6 +74,8 @@ import {
   GuvenlikDuzenleKind,
   GuvenlikKayitDuzenleModal,
 } from './GuvenlikKayitDuzenleModal';
+import { GuvenlikGecmisEvrakListesi } from './GuvenlikGecmisEvrakListesi';
+import { formatFirestoreWriteError } from '../lib/authWriteGuard';
 import { normalizeDateKey, todayDateKey, formatDateLabelTr } from '../lib/dateKeyUtils';
 import {
   AKVIZYON_NOBET_KAPANIS_SAAT,
@@ -124,7 +126,7 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
   satinAlmaTalepleri: satinAlmaProp = [],
   irsaliyeler: irsaliyelerProp = [],
 }) => {
-  const [activeTab, setActiveTab] = useState<'irsaliye' | 'personel' | 'arac' | 'su_tankeri' | 'vidanjor' | 'petrol_tankeri' | 'mici_stabilize' | 'ziyaretci' | 'nobet_arsivi' | 'akvizyon_yoklama' | 'evrak_galerisi'>('irsaliye');
+  const [activeTab, setActiveTab] = useState<'irsaliye' | 'gecmis_evraklar' | 'personel' | 'arac' | 'su_tankeri' | 'vidanjor' | 'petrol_tankeri' | 'mici_stabilize' | 'ziyaretci' | 'nobet_arsivi' | 'akvizyon_yoklama' | 'evrak_galerisi'>('irsaliye');
   const [viewMode, setViewMode] = useState<'web' | 'mobile'>('web');
   const [showGecmisKayitlar, setShowGecmisKayitlar] = useState(false);
   useEffect(() => {
@@ -160,6 +162,8 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
   const [editEvrakSaat, setEditEvrakSaat] = useState('');
   const [editCariKartId, setEditCariKartId] = useState('');
   const [editKalemler, setEditKalemler] = useState<any[]>([{ id: 'ek_1', urunAdi: '', miktar: '', birim: 'KG' }]);
+  const [savingEvrak, setSavingEvrak] = useState(false);
+  const [deletingEvrakId, setDeletingEvrakId] = useState<string | null>(null);
   const [editingKayit, setEditingKayit] = useState<{
     kind: GuvenlikDuzenleKind;
     record: any;
@@ -1322,9 +1326,10 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
 
   const handleUpdateGelenEvrak = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!editingEvrak) return;
+    if (!editingEvrak || savingEvrak) return;
 
     try {
+      setSavingEvrak(true);
       const firma = editEvrakFirma.trim();
       const cleanedKalemler = usableKalemler(editKalemler).map((k: any, i: number) => ({
         id: k.id || `ek_${i}`,
@@ -1343,21 +1348,20 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
         return;
       }
 
-      const patch: any = {
-        ...editingEvrak,
+      const patch: Record<string, unknown> = {
         evrakTuru: editEvrakTuru,
-        aciklama: editAciklama,
-        evrakNo: editEvrakNo.trim() || editingEvrak.evrakNo,
+        aciklama: editAciklama.trim() || editingEvrak.aciklama || '',
+        evrakNo: editEvrakNo.trim() || editingEvrak.evrakNo || '',
         firma,
         cariKartId: editCariKartId || '',
         tarih: editEvrakTarih || editingEvrak.tarih,
-        saat: editEvrakSaat || editingEvrak.saat,
+        saat: editEvrakSaat || editingEvrak.saat || '',
         kalemler: cleanedKalemler.length ? cleanedKalemler : editingEvrak.kalemler || [],
         kapidaElleGirildi: cleanedKalemler.length > 0,
         duzeltmeZamani: new Date().toISOString(),
+        duzelten: currentUser?.email || '',
       };
 
-      // İrsaliye: firma değişince cari/stok önerisini yenile (yeni kart açmaz)
       if (editEvrakTuru === 'İRSALİYE' && firma) {
         const matched = doubleCheckKapiMatch(
           firma,
@@ -1374,25 +1378,29 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
         } else {
           patch.cariOneriler = suggestCariFromDb(firma, cariKartlarLive, 5);
         }
-        patch.aciklama =
-          editAciklama ||
-          `Kapı irsaliye · ${formatKapiMatchLabel(matched.summary)} · güvenlik elle güncelledi`;
+        if (!editAciklama.trim()) {
+          patch.aciklama = `Kapı irsaliye · ${formatKapiMatchLabel(matched.summary)} · güvenlik elle güncelledi`;
+        }
 
-        if (editingEvrak.irsaliyeId || editingEvrak.id) {
-          await upsertKapiDraftIrsaliye({
-            guvenlikEvrakId: editingEvrak.id,
-            firma: patch.firma,
-            irsaliyeNo: patch.evrakNo || editingEvrak.id,
-            tarih: patch.tarih || islemTarihi,
-            fotoUrl: editingEvrak.fotoUrl,
-            kalemler: matched.kalemler,
-            cariKartlar: cariKartlarLive,
-            stokKartlar: stokKartlarLive,
-            kaydeden: currentUser?.email || 'nobetci_guvenlik',
-            saId: editingEvrak.saId,
-            satinAlmaTalepleri: satinAlmaProp,
-            irsaliyeler: irsaliyelerProp,
-          });
+        try {
+          if (editingEvrak.irsaliyeId || editingEvrak.id) {
+            await upsertKapiDraftIrsaliye({
+              guvenlikEvrakId: editingEvrak.id,
+              firma: String(patch.firma || firma),
+              irsaliyeNo: String(patch.evrakNo || editingEvrak.id),
+              tarih: String(patch.tarih || islemTarihi),
+              fotoUrl: editingEvrak.fotoUrl,
+              kalemler: matched.kalemler,
+              cariKartlar: cariKartlarLive,
+              stokKartlar: stokKartlarLive,
+              kaydeden: currentUser?.email || 'nobetci_guvenlik',
+              saId: editingEvrak.saId,
+              satinAlmaTalepleri: satinAlmaProp,
+              irsaliyeler: irsaliyelerProp,
+            });
+          }
+        } catch (draftErr) {
+          console.warn('Taslak irsaliye güncellenemedi (evrak yine kaydedilecek):', draftErr);
         }
       } else if (firma && !editCariKartId) {
         const oneri = suggestCariFromDb(firma, cariKartlarLive, 1)[0];
@@ -1404,13 +1412,15 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
         }
       }
 
-      await setDoc(doc(db, 'guvenlikGelenEvraklar', editingEvrak.id), cleanUndefined(patch), { merge: true });
+      await updateDoc(doc(db, 'guvenlikGelenEvraklar', editingEvrak.id), cleanUndefined(patch));
 
-      showStatus('success', 'Evrak bilgileri güncellendi.');
+      showStatus('success', 'Evrak kaydedildi.');
       setEditingEvrak(null);
     } catch (err) {
       console.error(err);
-      alert('Güncellenemedi.');
+      alert(formatFirestoreWriteError(err, 'Evrak güncellenemedi.'));
+    } finally {
+      setSavingEvrak(false);
     }
   };
 
@@ -2024,6 +2034,7 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
 
   const handleDeleteEvrak = async (evrakId: string) => {
     if (!window.confirm('Bu evrak kaydını tamamen silmek istediğinize emin misiniz?')) return;
+    setDeletingEvrakId(evrakId);
     try {
       let linkedIrsaliyeId = '';
       try {
@@ -2044,10 +2055,14 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
           /* taslak yoksa sorun değil */
         }
       }
+      if (editingEvrak?.id === evrakId) setEditingEvrak(null);
       if (addNotification) addNotification('Evrak kaydı silindi.');
+      showStatus('success', 'Evrak silindi.');
     } catch (e) {
       console.error(e);
-      alert('Silinemedi.');
+      alert(formatFirestoreWriteError(e, 'Evrak silinemedi.'));
+    } finally {
+      setDeletingEvrakId(null);
     }
   };
 
@@ -3163,6 +3178,23 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
               <span className="flex items-center space-x-2"><FileText size={13} /> <span>1. Evrak Girişi</span></span>
             </button>
 
+            <button
+              type="button"
+              onClick={() => setActiveTab('gecmis_evraklar')}
+              className={`flex-1 lg:flex-none flex items-center justify-between text-xs px-3 py-2.5 rounded-lg font-bold transition cursor-pointer min-w-[120px] ${activeTab === 'gecmis_evraklar' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-500/15' : 'text-slate-600 hover:bg-slate-100'}`}
+            >
+              <span className="flex items-center space-x-2">
+                <History size={13} /> <span>Geçmiş Evraklar</span>
+              </span>
+              {gelenEvraklar.length > 0 && (
+                <span className={`text-[9px] font-mono rounded-full px-1.5 py-0.2 ml-1 hidden lg:inline ${
+                  activeTab === 'gecmis_evraklar' ? 'bg-white/20 text-white' : 'bg-indigo-50 text-indigo-700'
+                }`}>
+                  {gelenEvraklar.length}
+                </span>
+              )}
+            </button>
+
             <button 
               onClick={() => setActiveTab('personel')}
               className={`flex-1 lg:flex-none flex items-center justify-between text-xs px-3 py-2.5 rounded-lg font-bold transition cursor-pointer min-w-[120px] ${activeTab === 'personel' ? 'bg-amber-600 text-slate-950 shadow-md shadow-amber-500/15' : 'text-slate-600 hover:bg-slate-100'}`}
@@ -3303,16 +3335,10 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
                 logCount={gorunenEvraklar.length}
                 archivedCount={seciliGunNobetArsivleri.length}
                 onGoster={() => handleGosterSeciliGun('Evrak Girişi', seciliGunEvraklar.length)}
-                onGecmisGoster={() =>
-                  setShowGecmisKayitlar((v) => {
-                    const next = !v;
-                    showStatus(
-                      'success',
-                      next ? 'Geçmiş kayıtlar gösteriliyor.' : 'Seçili gün kayıtlarına dönüldü.'
-                    );
-                    return next;
-                  })
-                }
+                onGecmisGoster={() => {
+                  setActiveTab('gecmis_evraklar');
+                  showStatus('success', 'Geçmiş evrak listesi açıldı. Düzenle / Sil / Kaydet buradan yapılır.');
+                }}
                 gecmisAktif={showGecmisKayitlar}
                 onKaydet={handleSendQueueToManager}
                 kaydetLabel="Kuyruğu Kaydet"
@@ -4149,10 +4175,22 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
                 )}
               </div>
 
+            </div>
+          )}
+
+          {activeTab === 'gecmis_evraklar' && (
+            <GuvenlikGecmisEvrakListesi
+              evraklar={gelenEvraklar}
+              onEdit={openEvrakDuzenle}
+              onDelete={(id) => void handleDeleteEvrak(id)}
+              deletingId={deletingEvrakId}
+            />
+          )}
+
               {/* DÜZENLEME MODAL (Editing Modal Overlay) */}
               {editingEvrak && (
                 <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-                  <div className="bg-white rounded-3xl p-6 max-w-md w-full border border-slate-200 shadow-2xl space-y-4">
+                  <div className="bg-white rounded-3xl p-6 max-w-lg w-full border border-slate-200 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
                     <div className="flex justify-between items-center border-b pb-2">
                       <h3 className="font-display font-black text-sm text-slate-800 uppercase tracking-wider">
                         ✏️ EVRAK BİLGİLERİNİ DÜZENLE
@@ -4345,7 +4383,6 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
                           <label className="text-[10px] font-bold text-slate-500 uppercase block">Saat</label>
                           <input
                             type="time"
-                            required
                             value={editEvrakSaat}
                             onChange={(e) => setEditEvrakSaat(e.target.value)}
                             className="w-full bg-slate-50 border border-slate-200 p-2.5 rounded-xl text-xs font-medium text-slate-800"
@@ -4357,7 +4394,6 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
                         <label className="text-[10px] font-bold text-slate-500 uppercase block">Açıklama</label>
                         <input
                           type="text"
-                          required
                           value={editAciklama}
                           onChange={(e) => setEditAciklama(e.target.value)}
                           className="w-full bg-slate-50 border border-slate-200 p-2.5 rounded-xl text-xs font-medium text-slate-800"
@@ -4374,18 +4410,16 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
                         </button>
                         <button
                           type="submit"
-                          className="bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold px-5 py-2 rounded-xl transition cursor-pointer"
+                          disabled={savingEvrak}
+                          className="bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white font-extrabold px-5 py-2 rounded-xl transition cursor-pointer"
                         >
-                          Güncelle
+                          {savingEvrak ? 'Kaydediliyor…' : 'Kaydet'}
                         </button>
                       </div>
                     </form>
                   </div>
                 </div>
               )}
-
-            </div>
-          )}
 
 
           {/* ─────────────────────────────────────────────────────────────
