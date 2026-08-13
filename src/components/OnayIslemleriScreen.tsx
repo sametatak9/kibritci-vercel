@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { 
   ShieldCheck, CheckCircle, Clock, Send, Users, AlertCircle, FileText, ShoppingCart, 
   Truck, CreditCard, ChevronRight, PenTool, Check, CheckCircle2, UserCheck, Eye, Trash2,
-  FileUp, ExternalLink, MessageSquare, AlertTriangle, Sparkles, Package, Tent, X, HardHat, Loader2
+  FileUp, ExternalLink, MessageSquare, AlertTriangle, Sparkles, Package, Tent, X, HardHat, Loader2, Layers
 } from 'lucide-react';
 import {
   SatinAlmaTalebi,
@@ -66,6 +66,7 @@ import {
 import type { OperatorFaaliyet } from '../types/erp';
 import { pickPrimaryFotoUrl } from '../lib/guvenlikEvrakFotolar';
 import { toAiParsePayload } from '../lib/guvenlikFotoStorage';
+import { GOTURU_DEFAULT_GOREV, GOTURU_FIRMA_ADI, isGoturuPersonelTalep } from '../lib/goturuPersonelTalep';
 import {
   applyTaseronSayimOnApproval,
   filterSayimGuncellemeleriForSession,
@@ -127,7 +128,7 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
   kampOdalari = [],
   setKampOdalari,
 }) => {
-  const [activeTab, setActiveTab] = useState<'satin_alma' | 'guvenlik_belgeleri' | 'kampci_belgeleri' | 'tesisat_mermer_belgeleri' | 'operator_belgeleri' | 'formen_belgeleri' | 'gunluk_loglar' | 'sofor_talepleri' | 'depocu_talepleri' | 'gecmis' | 'imzalar' | 'anahtarci_tutanaklari'>('satin_alma');
+  const [activeTab, setActiveTab] = useState<'satin_alma' | 'guvenlik_belgeleri' | 'kampci_belgeleri' | 'tesisat_mermer_belgeleri' | 'goturu_belgeleri' | 'operator_belgeleri' | 'formen_belgeleri' | 'gunluk_loglar' | 'sofor_talepleri' | 'depocu_talepleri' | 'gecmis' | 'imzalar' | 'anahtarci_tutanaklari'>('satin_alma');
   const [selectedYoneticiEmail, setSelectedYoneticiEmail] = useState<string>('');
   const [stampText, setStampText] = useState<string>('🔵 ŞİRKET GENEL MÜDÜRÜ (E-İMZA)');
   const [customStamp, setCustomStamp] = useState<string>('');
@@ -1571,10 +1572,21 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
     return true;
   });
 
-  const pendingGirisCount = personelGirisTalepleri.filter(p => p.durum === 'BEKLEMEDE' || p.durum === 'WP_GÖNDERİLDİ').length;
-  const pendingCikisCount = personelCikisTalepleri.filter(p => p.durum === 'BEKLEMEDE').length;
-  const pendingGuncellemeCount = personelGuncellemeTalepleri.filter(p => p.durum === 'BEKLEMEDE').length;
+  const formenGirisTalepleri = personelGirisTalepleri.filter((p) => !isGoturuPersonelTalep(p));
+  const goturuGirisTalepleri = personelGirisTalepleri.filter(isGoturuPersonelTalep);
+  const formenCikisTalepleri = personelCikisTalepleri.filter((p) => !isGoturuPersonelTalep(p));
+  const goturuCikisTalepleri = personelCikisTalepleri.filter(isGoturuPersonelTalep);
+  const formenGuncellemeTalepleri = personelGuncellemeTalepleri.filter((p) => !isGoturuPersonelTalep(p));
+  const goturuGuncellemeTalepleri = personelGuncellemeTalepleri.filter(isGoturuPersonelTalep);
+
+  const isPendingGirisDurum = (p: any) => p.durum === 'BEKLEMEDE' || p.durum === 'WP_GÖNDERİLDİ';
+  const pendingGirisCount = formenGirisTalepleri.filter(isPendingGirisDurum).length;
+  const pendingCikisCount = formenCikisTalepleri.filter((p) => p.durum === 'BEKLEMEDE').length;
+  const pendingGuncellemeCount = formenGuncellemeTalepleri.filter((p) => p.durum === 'BEKLEMEDE').length;
   const pendingPersonelCount = pendingGirisCount + pendingCikisCount + pendingGuncellemeCount;
+  const pendingGoturuGirisCount = goturuGirisTalepleri.filter(isPendingGirisDurum).length;
+  const pendingGoturuCikisCount = goturuCikisTalepleri.filter((p) => p.durum === 'BEKLEMEDE').length;
+  const pendingGoturuGuncellemeCount = goturuGuncellemeTalepleri.filter((p) => p.durum === 'BEKLEMEDE').length;
 
   const matchedUserObj = kullanicilar.find(u => u.email?.toLowerCase() === currentUser?.email?.toLowerCase());
   const currentUserRole = matchedUserObj?.yetki || 'YÖNETİCİ';
@@ -1639,8 +1651,18 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
   const tesisatMermerCount =
     pendingTesisatciFaaliyetler.length +
     pendingMermerciFaaliyetler.length +
-    pendingSeramikFaaliyetler.length +
     pendingYildirimGateCount;
+
+  const goturuOnayCount =
+    pendingSeramikFaaliyetler.length +
+    pendingGoturuGirisCount +
+    pendingGoturuCikisCount +
+    pendingGoturuGuncellemeCount;
+
+  const isGoturuOnayTab = activeTab === 'goturu_belgeleri';
+  const girisTalepleriForTab = isGoturuOnayTab ? goturuGirisTalepleri : formenGirisTalepleri;
+  const cikisTalepleriForTab = isGoturuOnayTab ? goturuCikisTalepleri : formenCikisTalepleri;
+  const guncellemeTalepleriForTab = isGoturuOnayTab ? goturuGuncellemeTalepleri : formenGuncellemeTalepleri;
 
   const pendingGunlukAkis = gunlukAkisRaporlari.filter(
     (doc) =>
@@ -1676,6 +1698,7 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
     pendingWaybills.length +
     pendingInvoices.length +
     pendingPersonelCount +
+    goturuOnayCount +
     pendingKampSayimlar.length +
     pendingKampFaaliyetler.length +
     pendingTaseronSayimlar.length +
@@ -1703,6 +1726,7 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
     | 'guvenlik_belgeleri'
     | 'kampci_belgeleri'
     | 'tesisat_mermer_belgeleri'
+    | 'goturu_belgeleri'
     | 'operator_belgeleri'
     | 'formen_belgeleri'
     | 'gunluk_loglar'
@@ -1722,7 +1746,8 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
     { id: 'satin_alma', label: 'Satın Alma', shortLabel: 'Satın Alma', count: pendingRequests.length, icon: ShoppingCart },
     { id: 'guvenlik_belgeleri', label: 'Güvenlik Belgeleri', shortLabel: 'Güvenlik', count: guvenlikCount, icon: Truck },
     { id: 'kampci_belgeleri', label: 'Kampçı Belgeleri', shortLabel: 'Kampçı', count: kampciCount, icon: Package },
-    { id: 'tesisat_mermer_belgeleri', label: 'Tesisatçı / Mermerci / Götürü', shortLabel: 'Tesisat/Mermer/Götürü', count: tesisatMermerCount, icon: FileText },
+    { id: 'tesisat_mermer_belgeleri', label: 'Tesisatçı / Mermerci', shortLabel: 'Tesisat/Mermer', count: tesisatMermerCount, icon: FileText },
+    { id: 'goturu_belgeleri', label: 'Götürü Onayları', shortLabel: 'Götürü', count: goturuOnayCount, icon: Layers },
     { id: 'operator_belgeleri', label: 'Operatör Belgeleri', shortLabel: 'Operatör', count: operatorOnayCount, icon: HardHat },
     { id: 'formen_belgeleri', label: 'Formen Belgeleri', shortLabel: 'Formen', count: pendingPersonelCount, icon: UserCheck },
     { id: 'gunluk_loglar', label: 'Günlük Loglar', shortLabel: 'Loglar', count: pendingGunlukAkis.length, icon: FileText },
@@ -3087,17 +3112,16 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
                 addNotification={addNotification}
               />
 
-              {pendingTesisatciFaaliyetler.length + pendingMermerciFaaliyetler.length + pendingSeramikFaaliyetler.length === 0 ? (
+              {pendingTesisatciFaaliyetler.length + pendingMermerciFaaliyetler.length === 0 ? (
                 pendingYildirimGateCount === 0 ? (
                   <div className="text-center py-8 text-slate-400 text-sm">
-                    Onay bekleyen tesisatçı / mermerci / götürü faaliyeti bulunmuyor.
+                    Onay bekleyen tesisatçı / mermerci faaliyeti bulunmuyor.
                   </div>
                 ) : null
               ) : (
                 [
                   { type: 'tesisatci' as const, title: 'Tesisatçı Faaliyet Onayları', items: pendingTesisatciFaaliyetler },
                   { type: 'mermerci' as const, title: 'Mermerci Faaliyet Onayları', items: pendingMermerciFaaliyetler },
-                  { type: 'seramik' as const, title: 'Götürü / Seramik Faaliyet Onayları', items: pendingSeramikFaaliyetler },
                 ].map(({ type, title, items }) =>
                   items.length === 0 ? null : (
                     <div key={type} className="space-y-3">
@@ -3116,7 +3140,7 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
                               <div>
                                 <div className="flex justify-between items-start">
                                   <span className="font-mono bg-amber-500/10 border border-amber-200/20 text-amber-700 text-[10px] font-bold px-2 py-0.5 rounded-md">
-                                    {type === 'tesisatci' ? 'TESİSAT' : type === 'mermerci' ? 'MERMER' : 'GÖTÜRÜ'} #{String(docItem.id).substring(0, 6).toUpperCase()}
+                                    {type === 'tesisatci' ? 'TESİSAT' : 'MERMER'} #{String(docItem.id).substring(0, 6).toUpperCase()}
                                   </span>
                                   <span className="text-[10px] text-slate-500 font-mono font-bold">{docItem.tarih}</span>
                                 </div>
@@ -3661,18 +3685,87 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
             </div>
           )}
 
-          {activeTab === 'formen_belgeleri' && (
+          {(activeTab === 'formen_belgeleri' || activeTab === 'goturu_belgeleri') && (
             <div className="space-y-6">
               
               {/* Header Info */}
               <div className="border bg-white p-4.5 rounded-2xl border-slate-200 flex justify-between items-center text-xs">
                 <div className="space-y-1">
-                  <span className="text-slate-600 font-bold block text-[11px] tracking-widest uppercase">👷 SAHA KAPISI PERSONEL GİRİŞ TAKİP SİSTEMİ</span>
+                  <span className="text-slate-600 font-bold block text-[11px] tracking-widest uppercase">
+                    {isGoturuOnayTab
+                      ? '🧱 GÖTÜRÜ / SERAMİK ONAY HAVUZU'
+                      : '👷 SAHA KAPISI PERSONEL GİRİŞ TAKİP SİSTEMİ'}
+                  </span>
                   <p className="text-slate-500 leading-relaxed text-[11px]">
-                    Saha formenleri tarafından kapıdan gönderilen yeni personellerin bilgileri, işten çıkış talepleri ve bilgi güncelleme istekleri buraya düşer. Yetkililer talepleri onaylayarak personel veri havuzunu güncel tutabilir.
+                    {isGoturuOnayTab
+                      ? 'Götürü / Seramik mobil ekranından gönderilen faaliyetler, işçi giriş talepleri, işten çıkarma ve bilgi değişiklik istekleri buraya düşer. Onaylanmadan personel kartı açılmaz veya güncellenmez.'
+                      : 'Saha formenleri tarafından kapıdan gönderilen yeni personellerin bilgileri, işten çıkış talepleri ve bilgi güncelleme istekleri buraya düşer. Yetkililer talepleri onaylayarak personel veri havuzunu güncel tutabilir.'}
                   </p>
                 </div>
               </div>
+
+              {isGoturuOnayTab && (
+                pendingSeramikFaaliyetler.length === 0 ? (
+                  <div className="text-center py-4 text-slate-400 text-sm border border-dashed border-slate-200 rounded-2xl">
+                    Onay bekleyen Götürü / Seramik faaliyeti yok.
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    <h3 className="font-display font-black text-xs text-slate-600 tracking-wider flex items-center space-x-2 uppercase">
+                      <Layers size={14} className="text-orange-700" />
+                      <span>Götürü / Seramik Faaliyet Onayları ({pendingSeramikFaaliyetler.length})</span>
+                    </h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {pendingSeramikFaaliyetler.map((docItem) => {
+                        const foto =
+                          docItem.fotoUrl ||
+                          (Array.isArray(docItem.fotoUrls) ? docItem.fotoUrls[0] : '') ||
+                          '';
+                        return (
+                          <div key={docItem.id} className="bg-white border border-slate-200 p-4 rounded-2xl flex flex-col justify-between hover:border-slate-300 transition space-y-3">
+                            <div>
+                              <div className="flex justify-between items-start">
+                                <span className="font-mono bg-orange-500/10 border border-orange-200/20 text-orange-700 text-[10px] font-bold px-2 py-0.5 rounded-md">
+                                  GÖTÜRÜ #{String(docItem.id).substring(0, 6).toUpperCase()}
+                                </span>
+                                <span className="text-[10px] text-slate-500 font-mono font-bold">{docItem.tarih}</span>
+                              </div>
+                              <p className="text-xs text-slate-800 font-bold mt-2.5">İş: {docItem.isNiteligi || '—'}</p>
+                              <p className="text-[10.5px] text-slate-400 mt-1">
+                                Alan: {docItem.calismaAlani || docItem.parsel || '—'}
+                                {docItem.yerleskeAdi ? ` · ${docItem.yerleskeAdi}` : ''}
+                              </p>
+                              <p className="text-[10.5px] text-slate-400 mt-1">Açıklama: {docItem.aciklama || '—'}</p>
+                              <p className="text-[10px] text-orange-700/80 mt-0.5">Gönderen: {docItem.kaydeden || '—'}</p>
+                              {foto && (
+                                <div className="mt-2.5 rounded-xl overflow-hidden border border-slate-200 aspect-video bg-slate-100 flex items-center justify-center relative group">
+                                  <img src={foto} alt="Faaliyet" className="w-full h-full object-cover group-hover:scale-105 transition duration-300" referrerPolicy="no-referrer" />
+                                </div>
+                              )}
+                            </div>
+                            <div className="flex gap-2 pt-2.5 border-t border-slate-100">
+                              <button
+                                onClick={() => handleRejectTesisatMermer('seramik', docItem.id)}
+                                className="flex-1 bg-red-950 hover:bg-red-900 border border-red-900/30 text-red-300 py-1.5 px-3 rounded-lg text-[10px] font-black tracking-widest transition flex items-center justify-center space-x-1"
+                              >
+                                <X size={11} />
+                                <span>Reddet</span>
+                              </button>
+                              <button
+                                onClick={() => handleApproveTesisatMermer('seramik', docItem.id)}
+                                className="flex-1 bg-orange-600 hover:bg-orange-700 active:scale-95 text-white py-1.5 px-3 rounded-lg text-[10px] font-black tracking-widest transition flex items-center justify-center space-x-1"
+                              >
+                                <Check size={11} />
+                                <span>Onayla</span>
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )
+              )}
 
               {/* Subtabs for Personnel Management */}
               <div className="flex space-x-2 border-b border-slate-200 pb-px">
@@ -3682,7 +3775,7 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
                     formenSubTab === 'giris' ? 'border-[#2563EB] text-slate-900 font-black' : 'border-transparent text-slate-500 hover:text-slate-800'
                   }`}
                 >
-                  🚪 İşe Giriş Talepleri ({personelGirisTalepleri.filter(p => p.durum === 'BEKLEMEDE' || p.durum === 'WP_GÖNDERİLDİ').length})
+                  🚪 İşe Giriş Talepleri ({girisTalepleriForTab.filter(p => p.durum === 'BEKLEMEDE' || p.durum === 'WP_GÖNDERİLDİ').length})
                 </button>
                 <button
                   onClick={() => setFormenSubTab('cikis')}
@@ -3690,7 +3783,7 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
                     formenSubTab === 'cikis' ? 'border-[#2563EB] text-slate-900 font-black' : 'border-transparent text-slate-500 hover:text-slate-800'
                   }`}
                 >
-                  🛑 İşten Çıkış Talepleri ({personelCikisTalepleri.filter(p => p.durum === 'BEKLEMEDE').length})
+                  🛑 İşten Çıkış Talepleri ({cikisTalepleriForTab.filter(p => p.durum === 'BEKLEMEDE').length})
                 </button>
                 <button
                   onClick={() => setFormenSubTab('guncelleme')}
@@ -3698,19 +3791,19 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
                     formenSubTab === 'guncelleme' ? 'border-[#2563EB] text-slate-900 font-black' : 'border-transparent text-slate-500 hover:text-slate-800'
                   }`}
                 >
-                  📝 Bilgi Güncelleme ({personelGuncellemeTalepleri.filter(p => p.durum === 'BEKLEMEDE').length})
+                  📝 Bilgi Güncelleme ({guncellemeTalepleriForTab.filter(p => p.durum === 'BEKLEMEDE').length})
                 </button>
               </div>
 
               {/* Request Cards Grid */}
               {formenSubTab === 'giris' && (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {personelGirisTalepleri.length === 0 ? (
+                {girisTalepleriForTab.length === 0 ? (
                   <div className="bg-slate-50 border border-slate-200 rounded-3xl p-10 text-center col-span-2 text-slate-500 italic">
                     Şu an onay bekleyen veya kayıtlı herhangi bir saha giriş talebi bulunmuyor.
                   </div>
                 ) : (
-                  personelGirisTalepleri.map((item) => {
+                  girisTalepleriForTab.map((item) => {
                     const isPending = item.durum === 'BEKLEMEDE' || item.durum === 'WP_GÖNDERİLDİ';
                     return (
                       <div key={item.id} className="bg-white border border-slate-200 rounded-3xl p-4.5 flex flex-col justify-between space-y-3.5 relative overflow-hidden">
@@ -3733,29 +3826,45 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
 
                         {/* Person details */}
                         <div className="flex space-x-3">
-                          {/* Thumbnail / Click to zoom */}
-                          {item.kimlikFotoUrl ? (
-                            <div className="w-20 h-20 bg-slate-905 rounded-2xl overflow-hidden border border-slate-200 shrink-0 relative group">
-                              <img src={item.kimlikFotoUrl} alt="Kimlik Foto" className="w-full h-full object-cover" />
-                              <a 
-                                href={item.kimlikFotoUrl} 
-                                target="_blank" 
-                                rel="noreferrer"
-                                className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex items-center justify-center transition text-[8px] font-bold text-slate-900 uppercase"
-                              >
-                                Kimliği Büyüt
-                              </a>
-                            </div>
-                          ) : (
-                            <div className="w-20 h-20 bg-slate-50 rounded-2xl flex items-center justify-center border border-slate-200 shrink-0">
-                              <span className="text-[8px] text-slate-500 text-center">Fotoğraf Yok</span>
-                            </div>
-                          )}
+                          {/* Thumbnail / Click to zoom — ön + arka */}
+                          {(() => {
+                            const kimlikler: string[] = Array.isArray(item.kimlikFotoUrls) && item.kimlikFotoUrls.length
+                              ? item.kimlikFotoUrls.slice(0, 2)
+                              : item.kimlikFotoUrl
+                                ? [item.kimlikFotoUrl]
+                                : [];
+                            if (kimlikler.length === 0) {
+                              return (
+                                <div className="w-20 h-20 bg-slate-50 rounded-2xl flex items-center justify-center border border-slate-200 shrink-0">
+                                  <span className="text-[8px] text-slate-500 text-center">Fotoğraf Yok</span>
+                                </div>
+                              );
+                            }
+                            return kimlikler.map((url: string, idx: number) => (
+                              <div key={idx} className="w-20 h-20 bg-slate-905 rounded-2xl overflow-hidden border border-slate-200 shrink-0 relative group">
+                                <img src={url} alt={idx === 0 ? 'Kimlik Ön' : 'Kimlik Arka'} className="w-full h-full object-cover" />
+                                <span className="absolute bottom-0.5 left-0.5 bg-black/60 text-white text-[7px] font-bold px-1 rounded">
+                                  {idx === 0 ? 'ÖN' : 'ARKA'}
+                                </span>
+                                <a 
+                                  href={url} 
+                                  target="_blank" 
+                                  rel="noreferrer"
+                                  className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex items-center justify-center transition text-[8px] font-bold text-white uppercase"
+                                >
+                                  Büyüt
+                                </a>
+                              </div>
+                            ));
+                          })()}
 
                           <div className="min-w-0 flex-1">
                             <h4 className="font-bold text-slate-100 text-sm">{item.ad} {item.soyad}</h4>
                             <p className="text-[10px] text-slate-400 font-mono tracking-tight mt-1">💼 Görevi: {item.gorev}</p>
-                            <p className="text-[9px] text-slate-500 mt-0.5">👷 Gönderen Formen: {item.gonderenFormen?.split('@')[0]}</p>
+                            <p className="text-[9px] text-slate-500 mt-0.5">
+                              👷 Gönderen: {item.gonderenFormen?.split('@')[0]}
+                              {isGoturuPersonelTalep(item) ? ' · Götürü' : ''}
+                            </p>
                           </div>
                         </div>
 
@@ -3906,19 +4015,30 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
                                             durum: true,
                                           };
 
-                                          const firmaTipi = item.firmaTipi === 'TASERON' ? 'TASERON' : 'ANA_FIRMA';
-                                          const firmaAdi = item.firmaAdi;
-                                          const resolvedGorev =
-                                            firmaTipi === 'TASERON'
+                                          const isGoturuKayit = isGoturuPersonelTalep(item);
+                                          const firmaTipi = item.firmaTipi === 'TASERON' || isGoturuKayit ? 'TASERON' : 'ANA_FIRMA';
+                                          const firmaAdi = item.firmaAdi || (isGoturuKayit ? GOTURU_FIRMA_ADI : undefined);
+                                          const resolvedGorev = isGoturuKayit
+                                            ? (item.gorev || GOTURU_DEFAULT_GOREV)
+                                            : firmaTipi === 'TASERON'
                                               ? resolveTaseronPersonelGorev({ firmaAdi, firmaTipi: 'TASERON' })
                                               : item.gorev || 'İŞÇİ';
 
-                                          const mergedCandidate = withTaseronPersonelGorev({
-                                            ...candidate,
-                                            gorev: resolvedGorev,
-                                            firmaTipi,
-                                            firmaAdi,
-                                          } as Personel);
+                                          const mergedCandidate = isGoturuKayit
+                                            ? ({
+                                                ...candidate,
+                                                gorev: resolvedGorev,
+                                                firmaTipi,
+                                                firmaAdi,
+                                                departman: 'ŞANTİYE',
+                                                telefonNo: item.telefonNo || candidate.telefonNo,
+                                              } as Personel)
+                                            : withTaseronPersonelGorev({
+                                                ...candidate,
+                                                gorev: resolvedGorev,
+                                                firmaTipi,
+                                                firmaAdi,
+                                              } as Personel);
 
                                           const allPersoneller = await loadPersonellerForDedup(personeller || []);
                                           const { personel: saved, merged } = await upsertPersonelAvoidDuplicate(
@@ -4039,12 +4159,12 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
               {/* TAB 2: İŞTEN ÇIKIŞ TALEPLERİ */}
               {formenSubTab === 'cikis' && (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {personelCikisTalepleri.length === 0 ? (
+                  {cikisTalepleriForTab.length === 0 ? (
                     <div className="bg-slate-50 border border-slate-200 rounded-3xl p-10 text-center col-span-2 text-slate-500 italic">
                       Şu an onay bekleyen veya kayıtlı herhangi bir işten çıkış talebi bulunmuyor.
                     </div>
                   ) : (
-                    personelCikisTalepleri.map((item) => {
+                    cikisTalepleriForTab.map((item) => {
                       const isPending = item.durum === 'BEKLEMEDE';
                       return (
                         <div key={item.id} className="bg-white border border-slate-200 rounded-3xl p-4.5 flex flex-col justify-between space-y-3.5 relative overflow-hidden">
@@ -4146,12 +4266,12 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
               {/* TAB 3: BİLGİ GÜNCELLEME TALEPLERİ */}
               {formenSubTab === 'guncelleme' && (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {personelGuncellemeTalepleri.length === 0 ? (
+                  {guncellemeTalepleriForTab.length === 0 ? (
                     <div className="bg-slate-50 border border-slate-200 rounded-3xl p-10 text-center col-span-2 text-slate-500 italic">
                       Şu an onay bekleyen veya kayıtlı herhangi bir bilgi güncelleme talebi bulunmuyor.
                     </div>
                   ) : (
-                    personelGuncellemeTalepleri.map((item) => {
+                    guncellemeTalepleriForTab.map((item) => {
                       const isPending = item.durum === 'BEKLEMEDE';
                       return (
                         <div key={item.id} className="bg-white border border-slate-200 rounded-3xl p-4.5 flex flex-col justify-between space-y-3.5 relative overflow-hidden">

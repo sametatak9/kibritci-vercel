@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Layers, ClipboardList, Camera, CheckCircle, RefreshCw, LogOut, Pencil, Trash2, Calendar, Printer, FileSpreadsheet, History
+  Layers, ClipboardList, Camera, CheckCircle, RefreshCw, LogOut, Pencil, Trash2, Calendar, Printer, FileSpreadsheet, History, Users
 } from 'lucide-react';
 import { collection, deleteDoc, doc, onSnapshot, setDoc } from 'firebase/firestore';
 import { Personel, SahaFaaliyeti, SeramikFaaliyet } from '../types/erp';
@@ -31,6 +31,7 @@ import {
   type GoturuYoklamaGunKaydi,
 } from '../lib/goturuYoklamaPersistence';
 import { exportGoturuFaaliyetliPuantajExcel } from '../lib/goturuPuantajExcel';
+import { GoturuPersonelIslemleriTab } from './GoturuPersonelIslemleriTab';
 
 interface SeramikMobilScreenProps {
   personeller: Personel[];
@@ -60,7 +61,7 @@ export const SeramikMobilScreen: React.FC<SeramikMobilScreenProps> = ({
   isStandalone = false,
   addNotification,
 }) => {
-  const [activeSubTab, setActiveSubTab] = useState<'faaliyet' | 'yoklama' | 'rapor'>('faaliyet');
+  const [activeSubTab, setActiveSubTab] = useState<'faaliyet' | 'yoklama' | 'personel' | 'rapor'>('faaliyet');
   const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
   const statusHideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -370,7 +371,7 @@ export const SeramikMobilScreen: React.FC<SeramikMobilScreenProps> = ({
           <div>
             <h1 className="text-sm font-black text-slate-900 uppercase tracking-wide">Götürü / Seramik Mobil</h1>
             <p className="text-[10px] text-slate-500">
-              Seramik ekibi faaliyeti · Yoklama ayrı kayıt · Aylık puantaj
+              Seramik ekibi faaliyeti · Personel giriş / çıkış · Yoklama · Aylık puantaj
             </p>
           </div>
         </div>
@@ -430,10 +431,21 @@ export const SeramikMobilScreen: React.FC<SeramikMobilScreenProps> = ({
         </button>
         <button
           type="button"
+          onClick={() => setActiveSubTab('personel')}
+          className={`px-4 py-2.5 rounded-xl font-bold text-xs transition flex items-center gap-2 border cursor-pointer ${
+            activeSubTab === 'personel'
+              ? 'bg-orange-600 border-orange-500 text-white'
+              : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'
+          }`}
+        >
+          <Users size={14} /> Personel
+        </button>
+        <button
+          type="button"
           onClick={() => setActiveSubTab('rapor')}
           className={`px-4 py-2.5 rounded-xl font-bold text-xs transition flex items-center gap-2 border cursor-pointer ${
             activeSubTab === 'rapor'
-              ? 'bg-orange-600 border-orange-500 text-white'
+              ? 'bg-amber-700 border-amber-600 text-white'
               : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'
           }`}
         >
@@ -715,6 +727,14 @@ export const SeramikMobilScreen: React.FC<SeramikMobilScreenProps> = ({
           hideQuickExport
         />
         </div>
+      )}
+
+      {activeSubTab === 'personel' && (
+        <GoturuPersonelIslemleriTab
+          personeller={personeller}
+          currentUser={currentUser}
+          showStatus={showStatus}
+        />
       )}
 
       {activeSubTab === 'rapor' && (
