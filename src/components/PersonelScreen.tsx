@@ -31,7 +31,7 @@ import {
   exportSeciliPersonelExcel,
   openPersonelListeRaporu,
 } from '../lib/taseronPersonelExcelExport';
-import { findPersonelMatches, findPersonelByTcInList, loadPersonellerForDedup, pickBestPersonelMatch, upsertPersonelAvoidDuplicate, AUTO_MERGE_SCORE_MAX } from '../lib/personelMatchUtils';
+import { findPersonelByTcInList, loadPersonellerForDedup, upsertPersonelAvoidDuplicate } from '../lib/personelMatchUtils';
 import {
   applyPersonelDuplicateMerge,
   planPersonelDuplicateMerge,
@@ -654,16 +654,8 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
         const lean = leanPersonelForFirestore(savedPersonel, prev);
         await saveDocument('personeller', lean as Personel);
       } else {
-        const dedupList = await loadPersonellerForDedup(personeller);
-        const result = await upsertPersonelAvoidDuplicate(dedupList, savedPersonel, {
-          rawName: `${savedPersonel.ad} ${savedPersonel.soyad}`.trim(),
-          tcNo: savedPersonel.tcNo,
-          telefonNo: savedPersonel.telefonNo,
-          firmaAdi: savedPersonel.firmaAdi,
-          firmaTipi: savedPersonel.firmaTipi === 'TASERON' ? 'TASERON' : 'ANA_FIRMA',
-        });
-        savedPersonel = result.personel;
-        savingAsEdit = result.merged;
+        // Form kaydı: mükerrer yalnızca aynı TC ile engellenir (isim benzerliği ayrı kişi olabilir).
+        await saveDocument('personeller', savedPersonel);
       }
     } catch (err: any) {
       console.error(err);
@@ -1007,70 +999,6 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
             `Mevcut kaydı açıp güncellemek ister misiniz?\n(Yeni mükerrer kayıt açılmaz.)`
         );
         if (openExisting) openPersonelForEdit(duplicateTc);
-        return;
-      }
-    }
-
-    if (!isEdit && isTaseronForm) {
-      const nameFirmaMatch = pickBestPersonelMatch(
-        findPersonelMatches(dedupList, {
-          rawName: `${formData.ad} ${formData.soyad}`.trim(),
-          tcNo: normalizedTc,
-          firmaAdi: formData.firmaAdi,
-          firmaTipi: 'TASERON',
-        })
-      );
-      if (nameFirmaMatch && nameFirmaMatch.score <= AUTO_MERGE_SCORE_MAX) {
-        const p = nameFirmaMatch.personel;
-        const openExisting = window.confirm(
-          `Bu personel zaten kayıtlı: ${p.ad} ${p.soyad} (${p.firmaAdi || 'Taşeron'}).\n\n` +
-            `Mevcut kaydı açıp güncellemek ister misiniz?\n(Yeni kayıt açılmaz.)`
-        );
-        if (openExisting) openPersonelForEdit(p);
-        return;
-      }
-    }
-
-    // Ana firma: aynı isim/telefon taşeron veya ana kadroda varsa yeni kayıt açma —
-    // özellikle taşeron→ana firma geçişinde eski kayıt “yok” gibi görünür (yanlış kadro sekmesi).
-    if (!isEdit && !isTaseronForm) {
-      const nameMatches = findPersonelMatches(dedupList, {
-        rawName: `${formData.ad} ${formData.soyad}`.trim(),
-        tcNo: normalizedTc,
-        telefonNo: formData.telefonNo,
-        firmaTipi: 'ANA_FIRMA',
-      }).filter((m) => m.score <= 2 && m.reason !== 'TC');
-      const exactNameMatch = pickBestPersonelMatch(nameMatches);
-      if (exactNameMatch) {
-        const p = exactNameMatch.personel;
-        const isTas = isTaseronPersonel(p);
-        if (isTas) {
-          const migrate = window.confirm(
-            `"${p.ad} ${p.soyad}" taşeron firmada kayıtlı (${p.firmaAdi || 'Taşeron'}).\n` +
-              `Eski mimar/taşeron kaydı ana firma listesinde görünmez.\n\n` +
-              `Ana firmaya taşımak için bu kaydı açayım mı?\n` +
-              `(Yeni mükerrer personel oluşturulmaz.)`
-          );
-          if (migrate) {
-            openPersonelForEdit(p, {
-              firmaTipi: 'ANA_FIRMA',
-              firmaAdi: CANONICAL_ANA_FIRMA_ADI,
-              tcNo: normalizedTc || p.tcNo,
-              ad: formData.ad || p.ad,
-              soyad: formData.soyad || p.soyad,
-              gorev: formData.gorev || p.gorev,
-              telefonNo: formData.telefonNo || p.telefonNo,
-              durum: formData.durum || p.durum,
-            });
-          }
-          return;
-        }
-        const openExisting = window.confirm(
-          `Bu isim zaten kayıtlı: ${p.ad} ${p.soyad}` +
-            `${p.firmaAdi ? ` (${p.firmaAdi})` : ''}.\n\n` +
-            `Mevcut kaydı açıp güncellemek ister misiniz?`
-        );
-        if (openExisting) openPersonelForEdit(p);
         return;
       }
     }

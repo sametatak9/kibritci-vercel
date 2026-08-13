@@ -166,7 +166,19 @@ export const KampGunlukYoklamaTab: React.FC<KampGunlukYoklamaTabProps> = ({
       return;
     }
 
-    if (!window.confirm(`${formatDateLabelTr(selectedDate)} tarihli Kampçı / Tesisatçı yoklamasını sisteme kaydetmek istiyor musunuz?`)) {
+    const kapsamLabel =
+      personelKapsami === 'seramik'
+        ? 'Götürü / Seramik'
+        : personelKapsami === 'tesisatci'
+          ? 'Tesisatçı'
+          : personelKapsami === 'mermerci'
+            ? 'Mermerci'
+            : personelKapsami === 'sofor'
+              ? 'Şöför'
+              : personelKapsami === 'operator'
+                ? 'Operatör'
+                : 'Kampçı';
+    if (!window.confirm(`${formatDateLabelTr(selectedDate)} tarihli ${kapsamLabel} yoklamasını sisteme kaydetmek istiyor musunuz?`)) {
       return;
     }
 

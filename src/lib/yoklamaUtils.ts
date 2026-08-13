@@ -463,14 +463,16 @@ export function isIdariPersonel(p?: Personel): boolean {
 
 /**
  * Faaliyeti Olan Personeller kapsamı:
- * yalnızca Ana Firma saha işçileri (Düz işçi, Tesisatçı, Kampçı, …).
- * Taşeron, idari kadro ve Formen hariç.
+ * Ana firma saha işçileri + Götürü/seramik ekibi (taşeron SERAMİK EKİBİ dahil).
+ * Diğer taşeron, idari kadro ve Formen hariç.
  */
 export function isFaaliyetPersonelKapsaminda(p?: Personel): boolean {
   if (!p) return false;
-  if (isTaseronPersonel(p)) return false;
   if (isIdariPersonel(p)) return false;
   if (isFormenGorev(p.gorev)) return false;
+  // Götürü / seramik ekibi taşeron olsa da saha takibine dahil
+  if (isSeramikEkibiPersonel(p)) return true;
+  if (isTaseronPersonel(p)) return false;
   return true;
 }
 
