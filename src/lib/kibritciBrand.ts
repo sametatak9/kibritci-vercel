@@ -33,21 +33,18 @@ export function getKibritciWatermarkUrl(): string {
   return absUrl(KIBRITCI_WATERMARK_PATH);
 }
 
+/** Resmi antetli evrak görseli */
+export function getKibritciAntetUrl(): string {
+  return absUrl('/kibritci-antetli.png');
+}
+
 /** Excel / canvas raporları için PNG data URL */
 export async function loadKibritciLogoDataUrl(): Promise<string | null> {
-  try {
-    const res = await fetch(getKibritciLogoUrl());
-    if (!res.ok) return null;
-    const blob = await res.blob();
-    return await new Promise<string | null>((resolve) => {
-      const reader = new FileReader();
-      reader.onloadend = () => resolve(typeof reader.result === 'string' ? reader.result : null);
-      reader.onerror = () => resolve(null);
-      reader.readAsDataURL(blob);
-    });
-  } catch {
-    return null;
-  }
+  return fetchAsDataUrl(getKibritciLogoUrl());
+}
+
+export async function loadKibritciAntetDataUrl(): Promise<string | null> {
+  return fetchAsDataUrl(getKibritciAntetUrl());
 }
 
 export function kibritciLogoHtml(heightPx = 56): string {

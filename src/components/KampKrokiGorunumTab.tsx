@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Building2, Layers, Map as MapIcon, Users, ChevronDown, ChevronUp } from 'lucide-react';
+import { Building2, Layers, Map as MapIcon, Users, ChevronDown, ChevronUp, FileSpreadsheet } from 'lucide-react';
 import { KampKaydi, KampOdasi, Personel } from '../types/erp';
 import {
   buildKampKrokiModel,
@@ -7,6 +7,7 @@ import {
   type KampKatKroki,
   type KampYerleskeKroki,
 } from '../lib/kampKrokiUtils';
+import { exportKampKrokiTaseronExcel } from '../lib/kampKrokiTaseronExcel';
 
 interface KampKrokiGorunumTabProps {
   kampOdalari: KampOdasi[];
@@ -308,6 +309,7 @@ export const KampKrokiGorunumTab: React.FC<KampKrokiGorunumTabProps> = ({
   );
 
   const [selectedCampus, setSelectedCampus] = useState<string>('HEPSI');
+  const [exportingExcel, setExportingExcel] = useState(false);
 
   const visible = useMemo(() => {
     if (selectedCampus === 'HEPSI') return model;
@@ -334,6 +336,29 @@ export const KampKrokiGorunumTab: React.FC<KampKrokiGorunumTabProps> = ({
         .sort((a, b) => b.kisi - a.kisi),
     };
   }, [model]);
+
+  const visibleDolu = visible.reduce((s, c) => s + c.dolu, 0);
+
+  const handleExportTaseronExcel = async () => {
+    if (visibleDolu === 0) {
+      alert('Excel için bu kapsamda aktif konaklayan personel yok.');
+      return;
+    }
+    setExportingExcel(true);
+    try {
+      await exportKampKrokiTaseronExcel({
+        kampOdalari,
+        kampKayitlari,
+        personeller,
+        yerleske: selectedCampus === 'HEPSI' ? undefined : selectedCampus,
+      });
+    } catch (err) {
+      console.error(err);
+      alert(err instanceof Error ? err.message : 'Kamp krokisi Excel raporu oluşturulamadı.');
+    } finally {
+      setExportingExcel(false);
+    }
+  };
 
   if (kampOdalari.length === 0) {
     return (
@@ -364,7 +389,7 @@ export const KampKrokiGorunumTab: React.FC<KampKrokiGorunumTabProps> = ({
               Kat · Firma · Personel
             </h2>
             <p className="text-[12px] text-slate-300 mt-1 max-w-xl leading-relaxed">
-              Hangi katta hangi firmadan kaç kişi kaldığını kuşbakışı görün. Kat şeridine tıklayınca oda planı açılır.
+              Hangi katta hangi firmadan kaç kişi kaldığını kuşbakışı görün. Sağdaki Excel, taşeron bazında oda özetini antetli indirir.
             </p>
           </div>
           <div className="flex flex-wrap gap-2 text-[11px]">
@@ -383,6 +408,16 @@ export const KampKrokiGorunumTab: React.FC<KampKrokiGorunumTabProps> = ({
               <span className="block text-[9px] text-slate-300 uppercase font-bold">Firma</span>
               <span className="font-display font-bold text-lg tabular-nums">{totals.firmaSayisi}</span>
             </div>
+            <button
+              type="button"
+              onClick={() => void handleExportTaseronExcel()}
+              disabled={exportingExcel || visibleDolu === 0}
+              title="Hangi taşeronun kaç personeli hangi odalarda kalıyor — Kibritçi antetli Excel"
+              className="bg-amber-400 hover:bg-amber-300 disabled:opacity-50 disabled:cursor-not-allowed text-slate-950 font-black text-[10px] uppercase tracking-wide rounded-xl px-3 py-2 cursor-pointer transition flex items-center gap-1.5 min-w-[7.5rem]"
+            >
+              <FileSpreadsheet size={14} />
+              {exportingExcel ? 'Excel hazırlanıyor…' : 'Taşeron oda Excel'}
+            </button>
           </div>
         </div>
 
