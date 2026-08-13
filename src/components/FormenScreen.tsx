@@ -4,7 +4,7 @@ import {
   MapPin, Camera, Sparkles, Undo2, ChevronRight, User, 
   Info, Smartphone, Monitor, Search, PlusCircle, Trash2, 
   FileSignature, Briefcase, RefreshCw, Send, Image as ImageIcon, MessageCircle,
-  Check, X, FileText, UserPlus, Upload, ShieldCheck, Edit2, ArrowLeft, Eye
+  Check, X, FileText, UserPlus, Upload, ShieldCheck, Edit2, ArrowLeft, Eye, Tag
 } from 'lucide-react';
 import { Personel, AylikYoklamaMap, YoklamaDurum, SahaFaaliyeti as SahaFaaliyetiType, SahaFaaliyetTipi } from '../types/erp';
 import { db, saveDocument } from '../lib/firebase';
@@ -33,6 +33,23 @@ import { KIBRITCI_LOGO_PATH } from '../lib/kibritciBrand';
 import type { SahaFaaliyetSaveSource } from '../lib/sahaFaaliyetPersistence';
 import { FAALIYET_ETIKET_ONSETLERI, normalizeFaaliyetEtiketi } from '../lib/faaliyetEtiketUtils';
 import { AylikPuantajMobilPanel } from './AylikPuantajMobilPanel';
+import { FormenEtiketliYoklamaTab, YoklamaMeslekEtiketBar } from './FormenEtiketliYoklamaTab';
+import {
+  collectUsedYoklamaEtiketleri,
+  mergeYoklamaEtiketKatalogu,
+  normalizeYoklamaEtiketi,
+  YOKLAMA_ACIKLAMA_MAX,
+} from '../lib/yoklamaEtiketUtils';
+import {
+  rememberYoklamaMeslekEtiketleri,
+  subscribeYoklamaMeslekEtiketleri,
+} from '../lib/yoklamaMeslekEtiketPersistence';
+import {
+  buildGunlukYoklamaOzet,
+  buildGunlukYoklamaRaporHtml,
+  buildGunlukYoklamaSatirlari,
+  openGunlukYoklamaRaporHtml,
+} from '../lib/yoklamaGunRaporu';
 
 interface FormenScreenProps {
   personeller: Personel[];
@@ -82,7 +99,7 @@ export const FormenScreen: React.FC<FormenScreenProps> = ({
   }, [isStandalone]);
 
   // Active Tab: 'yoklama' | 'saha_faaliyet' | 'personel_giris' | 'personel_listesi'
-  const [activeTab, setActiveTab] = useState<'yoklama' | 'saha_faaliyet' | 'personel_giris' | 'personel_listesi' | 'gunluk_akis' | 'aylik_puantaj'>('yoklama');
+  const [activeTab, setActiveTab] = useState<'yoklama' | 'etiketli_yoklama' | 'saha_faaliyet' | 'personel_giris' | 'personel_listesi' | 'gunluk_akis' | 'aylik_puantaj'>('yoklama');
   const [sendingGunlukAkis, setSendingGunlukAkis] = useState(false);
 
   // Helper to match current user to a personnel record
@@ -150,6 +167,11 @@ export const FormenScreen: React.FC<FormenScreenProps> = ({
   const [attendanceTouchedIds, setAttendanceTouchedIds] = useState<string[]>([]);
   const [hasLocalAttendanceDraft, setHasLocalAttendanceDraft] = useState(false);
   const [spotlightMesai, setSpotlightMesai] = useState<string>('');
+  const [personelEtiketleri, setPersonelEtiketleri] = useState<Record<string, string>>({});
+  const [personelAciklamalari, setPersonelAciklamalari] = useState<Record<string, string>>({});
+  const [bulkEtiket, setBulkEtiket] = useState('');
+  const [bulkEtiketCustom, setBulkEtiketCustom] = useState('');
+  const [kayitliEtiketler, setKayitliEtiketler] = useState<string[]>([]);
   const [lastAttendanceSaveAt, setLastAttendanceSaveAt] = useState<string | null>(() => {
     try {
       return localStorage.getItem('formen_gunluk_yoklama_last');
@@ -252,6 +274,14 @@ export const FormenScreen: React.FC<FormenScreenProps> = ({
         return isDayActiveForPersonel(p, year, month, day, yoklamalar[p.id] as any);
       }),
     [monthPersonelList, yoklamalar, year, month, day]
+  );
+  const kullanilmisEtiketler = useMemo(
+    () => collectUsedYoklamaEtiketleri(yoklamalar as any),
+    [yoklamalar]
+  );
+  const etiketKatalogu = useMemo(
+    () => mergeYoklamaEtiketKatalogu([kayitliEtiketler, kullanilmisEtiketler, Object.values(personelEtiketleri)]),
+    [kayitliEtiketler, kullanilmisEtiketler, personelEtiketleri]
   );
   const presentIdSet = useMemo(() => new Set(presentIds), [presentIds]);
   const absentIdSet = useMemo(() => new Set(absentIds), [absentIds]);
@@ -388,6 +418,8 @@ export const FormenScreen: React.FC<FormenScreenProps> = ({
     const present: string[] = [];
     const absent: string[] = [];
     const localMesai: Record<string, number> = {};
+    const localEtiket: Record<string, string> = {};
+    const localAciklama: Record<string, string> = {};
 
     activeStaff.forEach(p => {
       const dayData = getYoklamaDay(yoklamalar[p.id], year, month, day);
@@ -398,6 +430,8 @@ export const FormenScreen: React.FC<FormenScreenProps> = ({
           absent.push(p.id);
         }
         localMesai[p.id] = dayData.mesaiSaati || 0;
+        if (dayData.isEtiketi) localEtiket[p.id] = normalizeYoklamaEtiketi(dayData.isEtiketi);
+        if (dayData.aciklama) localAciklama[p.id] = String(dayData.aciklama);
       } else {
         localMesai[p.id] = 0;
       }
@@ -406,6 +440,8 @@ export const FormenScreen: React.FC<FormenScreenProps> = ({
     setPresentIds(present);
     setAbsentIds(absent);
     setMesaiSaatleri(localMesai);
+    setPersonelEtiketleri(localEtiket);
+    setPersonelAciklamalari(localAciklama);
     setFaaliyetPersonelIds([]);
   }, [selectedDate, yoklamalar, personeller, hasLocalAttendanceDraft]);
 
@@ -428,6 +464,8 @@ export const FormenScreen: React.FC<FormenScreenProps> = ({
     });
     return () => unsubscribe();
   }, []);
+
+  useEffect(() => subscribeYoklamaMeslekEtiketleri(setKayitliEtiketler), []);
 
   // Load and subscribe to exit requests
   useEffect(() => {
@@ -558,6 +596,94 @@ export const FormenScreen: React.FC<FormenScreenProps> = ({
     setMesaiSaatleri(copy);
   };
 
+  const resolvedBulkEtiket = () => {
+    if (bulkEtiket === '__CUSTOM__') return normalizeYoklamaEtiketi(bulkEtiketCustom);
+    return normalizeYoklamaEtiketi(bulkEtiket);
+  };
+
+  const touchEtiketDraft = (id: string) => {
+    touchAttendance(id);
+  };
+
+  const handlePersonelEtiketChange = (personelId: string, etiket: string) => {
+    const next = normalizeYoklamaEtiketi(etiket);
+    touchEtiketDraft(personelId);
+    setPersonelEtiketleri((prev) => {
+      const copy = { ...prev };
+      if (next) copy[personelId] = next;
+      else delete copy[personelId];
+      return copy;
+    });
+    if (next) void rememberYoklamaMeslekEtiketleri([next], kayitliEtiketler);
+  };
+
+  const handlePersonelAciklamaChange = (personelId: string, aciklama: string) => {
+    const next = aciklama.slice(0, YOKLAMA_ACIKLAMA_MAX);
+    touchEtiketDraft(personelId);
+    setPersonelAciklamalari((prev) => ({ ...prev, [personelId]: next }));
+  };
+
+  const handleBulkEtiketApply = () => {
+    const etiket = resolvedBulkEtiket();
+    if (bulkEtiket === '__CUSTOM__' && !etiket) {
+      showStatus('error', 'Özel meslek grubu yazın veya listeden bir etiket seçin.');
+      return;
+    }
+    const targets = presentIds.length > 0 ? presentIds : [];
+    if (targets.length === 0) {
+      showStatus('error', 'Önce Geldi işaretleyin, sonra günü etiketleyin.');
+      return;
+    }
+    setHasLocalAttendanceDraft(true);
+    setAttendanceTouchedIds((prev) => Array.from(new Set([...prev, ...targets])));
+    setPersonelEtiketleri((prev) => {
+      const copy = { ...prev };
+      for (const id of targets) {
+        if (etiket) copy[id] = etiket;
+        else delete copy[id];
+      }
+      return copy;
+    });
+    if (etiket) void rememberYoklamaMeslekEtiketleri([etiket], kayitliEtiketler);
+    showStatus(
+      'success',
+      etiket
+        ? `${targets.length} Geldi personeline «${etiket}» işlendi. Kaydet ile yoklamaya yazılır.`
+        : `${targets.length} kişiden etiket kaldırıldı.`
+    );
+  };
+
+  const handleEtiketliRapor = () => {
+    let overlay = yoklamalar;
+    const ids = new Set([...presentIds, ...absentIds, ...Object.keys(personelEtiketleri), ...Object.keys(personelAciklamalari)]);
+    for (const pid of ids) {
+      const existing = getYoklamaDay(overlay[pid], year, month, day);
+      const durum: YoklamaDurum = presentIds.includes(pid)
+        ? 'Geldi'
+        : absentIds.includes(pid)
+          ? 'Yok'
+          : existing?.durum || 'Girilmedi';
+      if (durum === 'Girilmedi') continue;
+      overlay = {
+        ...overlay,
+        [pid]: setYoklamaDay(overlay[pid], year, month, day, {
+          durum,
+          mesaiSaati: mesaiSaatleri[pid] ?? existing?.mesaiSaati ?? 0,
+          gonderen: existing?.gonderen || currentUser?.email || 'formen',
+          isEtiketi: personelEtiketleri[pid] || existing?.isEtiketi,
+          aciklama: (personelAciklamalari[pid] ?? existing?.aciklama ?? '').trim() || undefined,
+        }),
+      };
+    }
+    const rows = buildGunlukYoklamaSatirlari(activeStaff, overlay, year, month, day);
+    if (rows.length === 0) {
+      showStatus('error', 'Bu tarihte raporlanacak yoklama kaydı yok. Önce Geldi/Yok işaretleyin.');
+      return;
+    }
+    const html = buildGunlukYoklamaRaporHtml(rows, buildGunlukYoklamaOzet(rows), year, month, day);
+    openGunlukYoklamaRaporHtml(html, `Formen Etiketli Yoklama — ${formatDateLabelTr(selectedDate)}`);
+  };
+
   // Digital Signature Save — yalnızca dokunulan personelin SEÇİLİ GÜNÜ yazılır (tam harita gönderme)
   const handleSaveYoklama = async () => {
     if (savingAttendance) return;
@@ -584,24 +710,32 @@ export const FormenScreen: React.FC<FormenScreenProps> = ({
       const gonderen = currentUser?.email || 'formen';
 
       idsToWrite.forEach((pid) => {
+        const existing = getYoklamaDay(yoklamalar[pid], year, month, day);
+        const etiket = personelEtiketleri[pid] || existing?.isEtiketi;
+        const aciklama = (personelAciklamalari[pid] ?? existing?.aciklama ?? '').trim();
         if (presentIds.includes(pid)) {
           sparse[pid] = setYoklamaDay(sparse[pid], year, month, day, {
             durum: 'Geldi',
             mesaiSaati: mesaiSaatleri[pid] || 0,
             gonderen,
+            isEtiketi: etiket || undefined,
+            aciklama: aciklama || undefined,
           });
         } else if (absentIds.includes(pid)) {
           sparse[pid] = setYoklamaDay(sparse[pid], year, month, day, {
             durum: 'Yok',
             mesaiSaati: 0,
             gonderen,
+            isEtiketi: etiket || undefined,
+            aciklama: aciklama || undefined,
           });
         } else {
-          // Bilinçli sıfırlama — yalnızca bu gün
           sparse[pid] = setYoklamaDay(sparse[pid], year, month, day, {
             durum: 'Girilmedi',
             mesaiSaati: 0,
             gonderen,
+            isEtiketi: etiket || undefined,
+            aciklama: aciklama || undefined,
           });
         }
       });
@@ -1478,6 +1612,15 @@ ${satirlar
                   <span>Yoklama Al</span>
                 </button>
                 <button
+                  onClick={() => setActiveTab('etiketli_yoklama')}
+                  className={`py-1.5 rounded-lg text-[8px] font-extrabold flex flex-col items-center justify-center transition duration-150 cursor-pointer ${
+                    activeTab === 'etiketli_yoklama' ? 'bg-amber-500 text-slate-950 shadow-xs' : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <Tag size={11} className="mb-0.5" />
+                  <span>Etiketli Yoklama</span>
+                </button>
+                <button
                   onClick={() => setActiveTab('aylik_puantaj')}
                   className={`py-1.5 rounded-lg text-[8px] font-extrabold flex flex-col items-center justify-center transition duration-150 cursor-pointer ${
                     activeTab === 'aylik_puantaj' ? 'bg-amber-500 text-slate-950 shadow-xs' : 'text-slate-400 hover:text-white'
@@ -1547,6 +1690,17 @@ ${satirlar
                       <strong className="text-sm font-black text-rose-600 block">{absentIds.length}</strong>
                     </div>
                   </div>
+
+                  <YoklamaMeslekEtiketBar
+                    compact
+                    etiket={bulkEtiket}
+                    customEtiket={bulkEtiketCustom}
+                    katalog={etiketKatalogu}
+                    onEtiketChange={setBulkEtiket}
+                    onCustomChange={setBulkEtiketCustom}
+                    onApply={handleBulkEtiketApply}
+                    onReport={handleEtiketliRapor}
+                  />
 
                   {/* 1. THE SPOTLIGHT SINGLE STAFF CARD FOR EXTREME TACTILE SPEED */}
                   {spotlightStaff ? (
@@ -3176,6 +3330,32 @@ _Lütfen bu personelin sigorta giriş işlemlerini başlatınız._`}
                     </div>
                   </div>
                 </div>
+              )}
+
+              {activeTab === 'etiketli_yoklama' && (
+                <FormenEtiketliYoklamaTab
+                  dateLabel={formatDateLabelTr(selectedDate)}
+                  activeStaff={activeStaff}
+                  presentIds={presentIds}
+                  absentIds={absentIds}
+                  mesaiSaatleri={mesaiSaatleri}
+                  personelEtiketleri={personelEtiketleri}
+                  personelAciklamalari={personelAciklamalari}
+                  etiketKatalogu={etiketKatalogu}
+                  bulkEtiket={bulkEtiket}
+                  bulkEtiketCustom={bulkEtiketCustom}
+                  onBulkEtiketChange={setBulkEtiket}
+                  onBulkEtiketCustomChange={setBulkEtiketCustom}
+                  onBulkApply={handleBulkEtiketApply}
+                  onReport={handleEtiketliRapor}
+                  onEtiketChange={handlePersonelEtiketChange}
+                  onAciklamaChange={handlePersonelAciklamaChange}
+                  onMarkPresent={(id) => handleMarkPresent(id, mesaiSaatleri[id] || 0)}
+                  onMarkAbsent={handleMarkAbsent}
+                  onSave={handleSaveYoklama}
+                  saving={savingAttendance}
+                  hasDraft={hasLocalAttendanceDraft}
+                />
               )}
 
               {activeTab === 'aylik_puantaj' && (

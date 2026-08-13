@@ -18,6 +18,9 @@ export const YOKLAMA_MESLEK_ETIKETLERI = [
 
 export const YOKLAMA_ETIKETSIZ = 'ETİKETSİZ';
 
+/** Günlük yoklama serbest açıklama üst sınırı */
+export const YOKLAMA_ACIKLAMA_MAX = 160;
+
 export function normalizeYoklamaEtiketi(raw?: string | null): string {
   const t = String(raw || '').trim();
   if (!t) return '';

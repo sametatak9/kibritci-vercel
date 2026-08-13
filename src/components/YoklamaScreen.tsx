@@ -45,6 +45,7 @@ import {
   normalizeYoklamaEtiketi,
   yoklamaEtiketBadgeClass,
   yoklamaEtiketOptionsWithCustom,
+  YOKLAMA_ACIKLAMA_MAX,
   YOKLAMA_ETIKETSIZ,
 } from '../lib/yoklamaEtiketUtils';
 import {
@@ -70,8 +71,6 @@ function countFilledDaysInMonth(map: AylikYoklamaMap, year: number, month: numbe
 const maskName = (name?: string): string => {
   return name || '';
 };
-
-const YOKLAMA_ACIKLAMA_MAX = 160;
 
 function YoklamaGunAciklamaInput({
   value,
