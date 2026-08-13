@@ -122,49 +122,97 @@ export function paketlerForSelectedIrsaliyeler(
   return paketler.filter((p) => p.irsaliyeler.some((ir) => selectedIds.has(ir.id)));
 }
 
+function irMatchesSelected(ir: Irsaliye, selected: Set<string>): boolean {
+  return (
+    selected.has(String(ir.id || '')) ||
+    selected.has(String(ir.irsaliyeId || '')) ||
+    selected.has(String(ir.irsaliyeNo || ''))
+  );
+}
+
+function irMatchesFatura(ir: Irsaliye, ft: Fatura): boolean {
+  const refs = new Set((ft.bagliIrsaliyeler || []).map((x) => String(x).trim()));
+  const fatNo = String(ft.faturaNo || '').trim();
+  if (refs.has(String(ir.id || '')) || refs.has(String(ir.irsaliyeNo || '')) || refs.has(String(ir.irsaliyeId || ''))) {
+    return true;
+  }
+  return Boolean(fatNo && String(ir.faturaNo || '').trim() === fatNo);
+}
+
 /** Seçili irsaliyelerin birleşim faturalarını sıfırlama planı */
 export function planSelectedBirlesimReset(input: {
   selectedIrsaliyeIds: string[];
   irsaliyeler: Irsaliye[];
   faturalar: Fatura[];
+  /** Liste başlığındaki FAT-… — bellek eşleşmesi kaçsa bile paketi bulur */
+  faturaNoHint?: string;
 }): {
   linkedIrsaliyeler: Irsaliye[];
   faturalarToDelete: Fatura[];
+  faturalarToUnlink: Fatura[];
+  extraIrsaliyeIds: string[];
   ozet: string;
 } {
-  const selected = new Set(input.selectedIrsaliyeIds);
-  const linkedIrsaliyeler = (input.irsaliyeler || []).filter((ir) => selected.has(ir.id));
+  const selected = new Set((input.selectedIrsaliyeIds || []).map(String).filter(Boolean));
+  const hint = String(input.faturaNoHint || '').trim();
+  const linkedFromSelection = (input.irsaliyeler || []).filter((ir) => irMatchesSelected(ir, selected));
   const faturaMap = new Map<string, Fatura>();
-  for (const ir of linkedIrsaliyeler) {
+  for (const ir of linkedFromSelection) {
     for (const ft of findFaturalarForIrsaliye(ir, input.faturalar || [])) {
       faturaMap.set(ft.id, ft);
     }
   }
-  const allLinked: Irsaliye[] = [];
-  const seen = new Set<string>();
-  for (const ft of faturaMap.values()) {
-    const refs = new Set((ft.bagliIrsaliyeler || []).map(String));
+  if (hint) {
+    for (const ft of input.faturalar || []) {
+      if (String(ft.faturaNo || '').trim() === hint || String(ft.id || '') === hint) {
+        faturaMap.set(ft.id, ft);
+      }
+    }
     for (const ir of input.irsaliyeler || []) {
-      if (
-        refs.has(ir.id) ||
-        refs.has(ir.irsaliyeNo) ||
-        (ir.faturaNo && ir.faturaNo === ft.faturaNo)
-      ) {
-        if (!seen.has(ir.id)) {
-          seen.add(ir.id);
-          allLinked.push(ir);
+      if (String(ir.faturaNo || '').trim() === hint) {
+        for (const ft of findFaturalarForIrsaliye(ir, input.faturalar || [])) {
+          faturaMap.set(ft.id, ft);
         }
       }
     }
   }
-  const faturalarToDelete = [...faturaMap.values()];
+  const allLinked: Irsaliye[] = [];
+  const seen = new Set<string>();
+  const addIr = (ir: Irsaliye) => {
+    if (!ir?.id || seen.has(ir.id)) return;
+    seen.add(ir.id);
+    allLinked.push(ir);
+  };
+  for (const ir of linkedFromSelection) addIr(ir);
+  if (hint) {
+    for (const ir of input.irsaliyeler || []) {
+      if (String(ir.faturaNo || '').trim() === hint) addIr(ir);
+    }
+  }
+  for (const ft of faturaMap.values()) {
+    for (const ir of input.irsaliyeler || []) {
+      if (irMatchesFatura(ir, ft)) addIr(ir);
+    }
+  }
+  const extraIrsaliyeIds = [...selected].filter((id) => !seen.has(id));
+  const faturalarToDelete: Fatura[] = [];
+  const faturalarToUnlink: Fatura[] = [];
+  for (const ft of faturaMap.values()) {
+    if (isTaslakMaliBagFatura(ft)) faturalarToDelete.push(ft);
+    else faturalarToUnlink.push(ft);
+  }
   const ozet = [
-    `Seçim: ${linkedIrsaliyeler.length} irsaliye`,
+    `Seçim: ${selected.size} kayıt`,
     `Paket irsaliye: ${allLinked.length}`,
-    `Silinecek taslak/fatura: ${faturalarToDelete.length}`,
-    faturalarToDelete.map((f) => f.faturaNo).filter(Boolean).join(', ') || '—',
-  ].join(' · ');
-  return { linkedIrsaliyeler: allLinked, faturalarToDelete, ozet };
+    `Silinecek taslak: ${faturalarToDelete.length}`,
+    faturalarToUnlink.length ? `Gerçek faturadan koparılacak: ${faturalarToUnlink.length}` : '',
+    [...faturalarToDelete, ...faturalarToUnlink].map((f) => f.faturaNo).filter(Boolean).join(', ') ||
+      hint ||
+      '—',
+  ]
+    .filter(Boolean)
+    .join(' · ');
+  return { linkedIrsaliyeler: allLinked, faturalarToDelete, faturalarToUnlink, extraIrsaliyeIds, ozet };
 }
 
 function downloadBuffer(buffer: ArrayBuffer, fileName: string) {

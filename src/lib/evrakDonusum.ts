@@ -73,12 +73,18 @@ export function ensureIrsaliyeSaBaglari(
 }
 
 export function findFaturalarForIrsaliye(ir: Irsaliye, faturalar: Fatura[]): Fatura[] {
-  return faturalar.filter(
-    (ft) =>
-      (ft.bagliIrsaliyeler || []).includes(ir.id) ||
-      (ft.bagliIrsaliyeler || []).includes(ir.irsaliyeNo) ||
-      (ir.faturaNo && ft.faturaNo === ir.faturaNo)
-  );
+  const id = String(ir.id || '').trim();
+  const no = String(ir.irsaliyeNo || '').trim();
+  const irId = String(ir.irsaliyeId || '').trim();
+  const fatNo = String(ir.faturaNo || '').trim();
+  return faturalar.filter((ft) => {
+    const refs = (ft.bagliIrsaliyeler || []).map((x) => String(x).trim());
+    if (id && refs.includes(id)) return true;
+    if (no && refs.includes(no)) return true;
+    if (irId && refs.includes(irId)) return true;
+    if (fatNo && String(ft.faturaNo || '').trim() === fatNo) return true;
+    return false;
+  });
 }
 
 export type SaToIrsaliyeResult = {

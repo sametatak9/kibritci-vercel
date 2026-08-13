@@ -1,9 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Building2, Package, Plus, Search, Trash2, Pencil, Download,
-  ClipboardList, X, RefreshCw, FileText, Truck, Receipt, Home, User, Users, Eye, UserX, Upload, Archive, Printer, GitMerge, Camera
+  ClipboardList, X, RefreshCw, FileText, Truck, Receipt, Home, User, Users, Eye, UserX, Upload, Archive, Printer, GitMerge, Camera, CheckSquare
 } from 'lucide-react';
-import { collection, deleteField, doc, getDoc, getDocs, updateDoc } from 'firebase/firestore';
+import { collection, deleteField, doc, getDoc, getDocs, updateDoc, writeBatch } from 'firebase/firestore';
 import { CariKart, Fatura, Irsaliye, Personel, SatinAlmaTalebi, StokKart, StokKartIslem, CariKartIslem } from '../types/erp';
 import { db, removeDocument } from '../lib/firebase';
 import { warnIfDuplicateCari, warnIfDuplicateStok } from '../lib/duplicateNameUtils';
@@ -833,13 +833,14 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
     setHistoryFilter('BİRLEŞTİRİLEN');
   };
 
-  const handleResetSelectedBirlesimler = async (overrideIds?: string[]) => {
+  const handleResetSelectedBirlesimler = async (overrideIds?: string[], faturaNoHint?: string) => {
     if (!selectedCari || !setFaturalar || !setIrsaliyeler) {
       alert('Cari / fatura bağlantısı yok.');
       return;
     }
     const ids = overrideIds?.length ? overrideIds : [...selectedIrsaliyeIds];
-    if (ids.length === 0) {
+    const hint = String(faturaNoHint || '').trim();
+    if (ids.length === 0 && !hint) {
       alert('Sıfırlamak için birleşim paketinden irsaliye seçin (veya «Paketi seç»).');
       return;
     }
@@ -847,33 +848,101 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
       selectedIrsaliyeIds: ids,
       irsaliyeler,
       faturalar,
+      faturaNoHint: hint,
     });
-    if (!plan.faturalarToDelete.length && !plan.linkedIrsaliyeler.length) {
+    const clearIds = [
+      ...new Set([
+        ...plan.linkedIrsaliyeler.map((ir) => ir.id),
+        ...plan.extraIrsaliyeIds,
+        ...ids,
+      ]),
+    ].filter(Boolean);
+    if (!plan.faturalarToDelete.length && !plan.faturalarToUnlink.length && !clearIds.length) {
       alert('Seçili kayıtlarda sıfırlanacak birleşim yok.');
       return;
     }
     const ok = window.confirm(
-      `Seçili birleşimler sıfırlansın mı?\n\n${plan.ozet}\n\n• İrsaliyelerin faturaNo temizlenir\n• Taslak faturalar silinir\n• İrsaliye evrakları yerinde kalır`
+      `Seçili birleşimler sıfırlansın mı?\n\n${plan.ozet}\n\n• İrsaliyelerin fatura bağı temizlenir\n• Taslak faturalar silinir (gerçek fatura silinmez)\n• İrsaliye evrakları yerinde kalır`
     );
     if (!ok) return;
     try {
-      for (const ir of plan.linkedIrsaliyeler) {
-        await updateDoc(doc(db, 'irsaliyeler', ir.id), { faturaNo: deleteField() });
-      }
-      for (const ft of plan.faturalarToDelete) {
-        await removeDocument('faturalar', ft.id);
+      const CHUNK = 400;
+      for (let i = 0; i < clearIds.length || i === 0; i += CHUNK) {
+        const batch = writeBatch(db);
+        const slice = clearIds.slice(i, i + CHUNK);
+        for (const id of slice) {
+          batch.update(doc(db, 'irsaliyeler', id), { faturaNo: deleteField() });
+        }
+        if (i === 0) {
+          for (const ft of plan.faturalarToDelete) {
+            batch.delete(doc(db, 'faturalar', ft.id));
+          }
+          for (const ft of plan.faturalarToUnlink) {
+            const keep = (ft.bagliIrsaliyeler || []).filter((ref) => {
+              const s = String(ref);
+              if (clearIds.includes(s)) return false;
+              const ir = plan.linkedIrsaliyeler.find(
+                (x) => x.id === s || x.irsaliyeNo === s || x.irsaliyeId === s
+              );
+              return !ir;
+            });
+            batch.update(doc(db, 'faturalar', ft.id), { bagliIrsaliyeler: keep });
+          }
+        }
+        try {
+          await batch.commit();
+        } catch (batchErr) {
+          // Belge yoksa tek tek dene — paket yine de çözülsün
+          console.warn('Birleşim sıfırlama batch:', batchErr);
+          for (const id of slice) {
+            try {
+              await updateDoc(doc(db, 'irsaliyeler', id), { faturaNo: deleteField() });
+            } catch {
+              /* kayıt yok */
+            }
+          }
+          if (i === 0) {
+            for (const ft of plan.faturalarToDelete) {
+              try {
+                await removeDocument('faturalar', ft.id);
+              } catch {
+                /* yok */
+              }
+            }
+          }
+        }
+        if (clearIds.length === 0) break;
       }
       const deleteFtIds = new Set(plan.faturalarToDelete.map((f) => f.id));
-      const linkedIds = new Set(plan.linkedIrsaliyeler.map((ir) => ir.id));
-      setFaturalar((prev) => prev.filter((ft) => !deleteFtIds.has(ft.id)));
+      const unlinkFtIds = new Set(plan.faturalarToUnlink.map((f) => f.id));
+      const linkedIds = new Set(clearIds);
+      setFaturalar((prev) =>
+        prev
+          .filter((ft) => !deleteFtIds.has(ft.id))
+          .map((ft) => {
+            if (!unlinkFtIds.has(ft.id)) return ft;
+            return {
+              ...ft,
+              bagliIrsaliyeler: (ft.bagliIrsaliyeler || []).filter((ref) => !linkedIds.has(String(ref))),
+            };
+          })
+      );
       setIrsaliyeler((prev) =>
-        prev.map((ir) => (linkedIds.has(ir.id) ? { ...ir, faturaNo: undefined } : ir))
+        prev.map((ir) => {
+          if (!linkedIds.has(ir.id) && !(hint && String(ir.faturaNo || '') === hint)) return ir;
+          const next = { ...ir };
+          delete next.faturaNo;
+          return next;
+        })
       );
       setHistoryList((prev) =>
         prev
           .filter((h) => !(h.collection === 'faturalar' && deleteFtIds.has(h.id)))
           .map((h) => {
-            if (!linkedIds.has(h.id) || h.collection !== 'irsaliyeler') return h;
+            const hit =
+              h.collection === 'irsaliyeler' &&
+              (linkedIds.has(h.id) || (hint && h.bagliFaturaNo === hint));
+            if (!hit) return h;
             return {
               ...h,
               birlestirilmis: false,
@@ -887,8 +956,9 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
       setSelectedIrsaliyeIds(new Set());
       setHistoryFilter('İRSALİYE');
       alert(
-        `Sıfırlandı.\n${plan.linkedIrsaliyeler.length} irsaliye serbest\n${plan.faturalarToDelete.length} taslak silindi`
+        `Sıfırlandı.\n${plan.linkedIrsaliyeler.length || clearIds.length} irsaliye serbest\n${plan.faturalarToDelete.length} taslak silindi`
       );
+      void loadHistoryData('cari', selectedCari.id, selectedCari.unvan, selectedCari.kod || '');
     } catch (err: any) {
       console.error(err);
       alert('Sıfırlama başarısız: ' + (err?.message || err));
@@ -1066,6 +1136,37 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
+      return next;
+    });
+  };
+
+  const visibleIrsaliyeIds = useMemo(() => {
+    if (historyFilter === 'TASLAK BAĞ') {
+      return [...new Set(taslakPaketler.flatMap((p) => p.irsaliyeler.map((ir) => ir.id)))];
+    }
+    return filteredHistory.filter((h) => h.collection === 'irsaliyeler').map((h) => h.id);
+  }, [historyFilter, taslakPaketler, filteredHistory]);
+
+  const allVisibleIrsaliyeSelected =
+    visibleIrsaliyeIds.length > 0 && visibleIrsaliyeIds.every((id) => selectedIrsaliyeIds.has(id));
+
+  const toggleSelectAllVisibleIrsaliyeler = () => {
+    if (!visibleIrsaliyeIds.length) {
+      alert('Bu listede seçilecek irsaliye yok. İRSALİYE sekmesine geçin veya birleşim paketine bakın.');
+      return;
+    }
+    if (allVisibleIrsaliyeSelected) setSelectedIrsaliyeIds(new Set());
+    else setSelectedIrsaliyeIds(new Set(visibleIrsaliyeIds));
+  };
+
+  const toggleSelectMonthIrsaliyeler = (items: HistoryLog[]) => {
+    const ids = items.filter((h) => h.collection === 'irsaliyeler').map((h) => h.id);
+    if (!ids.length) return;
+    setSelectedIrsaliyeIds((prev) => {
+      const next = new Set(prev);
+      const allIn = ids.every((id) => next.has(id));
+      if (allIn) ids.forEach((id) => next.delete(id));
+      else ids.forEach((id) => next.add(id));
       return next;
     });
   };
@@ -2375,7 +2476,7 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
                   <p className="text-[11px] text-slate-500 mt-1">
                     {selectedCari ? (
                       <>
-                        İrsaliyeleri işaretleyip tek faturaya dönüştürebilir veya fotoğraflı toplu rapor alabilirsiniz
+                        İrsaliyeleri işaretleyin: tümünü seçin, fotoğraflı rapor alın veya tek faturaya dönüştürün
                         {' · '}
                         {historyList.filter((h) => h.collection === 'irsaliyeler').length} irsaliye
                         {' · '}
@@ -2409,6 +2510,23 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
                       <RefreshCw size={12} /> Dönüşüm Bağlarını Sıfırla
                     </button>
                   )}
+                  {selectedCari && (
+                    <button
+                      type="button"
+                      onClick={toggleSelectAllVisibleIrsaliyeler}
+                      className={`inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-[10px] font-bold cursor-pointer border ${
+                        allVisibleIrsaliyeSelected
+                          ? 'bg-indigo-700 text-white border-indigo-700'
+                          : 'bg-white text-indigo-800 border-indigo-200'
+                      }`}
+                      title="Bu listedeki tüm irsaliyeleri toplu işaretle"
+                    >
+                      <CheckSquare size={12} />
+                      {allVisibleIrsaliyeSelected
+                        ? `Tüm seçim kalksın (${visibleIrsaliyeIds.length})`
+                        : `Tümünü seç (${visibleIrsaliyeIds.length})`}
+                    </button>
+                  )}
                   {selectedIrsaliyeIds.size > 0 && (
                     <>
                       <button
@@ -2421,7 +2539,12 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
                       </button>
                       <button
                         type="button"
-                        onClick={() => void handleResetSelectedBirlesimler()}
+                        onClick={() => {
+                          const hint = [...selectedIrsaliyeIds]
+                            .map((id) => historyList.find((h) => h.id === id)?.bagliFaturaNo)
+                            .find(Boolean);
+                          void handleResetSelectedBirlesimler(undefined, hint);
+                        }}
                         className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-[10px] font-bold bg-rose-600 text-white cursor-pointer"
                         title="Seçili birleşim paketini sıfırla — irsaliyeler kalır"
                       >
@@ -2694,7 +2817,8 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
                                   type="button"
                                   onClick={() =>
                                     void handleResetSelectedBirlesimler(
-                                      paket.irsaliyeler.map((ir) => ir.id)
+                                      paket.irsaliyeler.map((ir) => ir.id),
+                                      paket.fatura.faturaNo
                                     )
                                   }
                                   className="text-[10px] font-black px-2.5 py-1.5 rounded-lg cursor-pointer bg-rose-600 text-white"
@@ -2773,7 +2897,8 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
                         <h4 className="text-[10px] font-black uppercase tracking-wider text-indigo-800">
                           {group.label}
                         </h4>
-                        <span className="text-[10px] font-bold text-slate-500">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="text-[10px] font-bold text-slate-500">
                           {group.items.length} kayıt
                           {group.hizmetToplam > 0
                             ? ` · ${group.hizmetToplam.toLocaleString('tr-TR')} ${group.etiket}`
@@ -2787,7 +2912,21 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
                           {group.tipCounts.STABILIZE
                             ? ` · Stabilize ${group.tipCounts.STABILIZE}`
                             : ''}
-                        </span>
+                          </span>
+                          {group.items.some((x) => x.collection === 'irsaliyeler') && (
+                            <button
+                              type="button"
+                              onClick={() => toggleSelectMonthIrsaliyeler(group.items)}
+                              className="text-[9px] font-black px-2 py-0.5 rounded bg-indigo-600 text-white cursor-pointer"
+                            >
+                              {group.items
+                                .filter((x) => x.collection === 'irsaliyeler')
+                                .every((x) => selectedIrsaliyeIds.has(x.id))
+                                ? 'Ay seçimini kaldır'
+                                : 'Bu ayın tümünü seç'}
+                            </button>
+                          )}
+                        </div>
                       </div>
                       {group.items.map((log, idx) => {
                         const prev = idx > 0 ? group.items[idx - 1] : null;
@@ -2849,7 +2988,7 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
                                     const ids = group.items
                                       .filter((x) => x.bagliFaturaNo === log.bagliFaturaNo)
                                       .map((x) => x.id);
-                                    void handleResetSelectedBirlesimler(ids);
+                                    void handleResetSelectedBirlesimler(ids, log.bagliFaturaNo);
                                   }}
                                   className="text-[9px] font-black px-2 py-0.5 rounded bg-rose-600 text-white cursor-pointer"
                                 >
