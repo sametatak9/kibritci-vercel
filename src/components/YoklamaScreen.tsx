@@ -104,9 +104,9 @@ function YoklamaGunAciklamaInput({
           (e.currentTarget as HTMLInputElement).blur();
         }
       }}
-      placeholder="Açıklama"
+      placeholder="Açıklama yazın…"
       title="Etiketten bağımsız günlük açıklama"
-      className="w-full min-w-[120px] max-w-[220px] text-[10px] font-semibold bg-white border border-slate-200 rounded px-1.5 py-1 text-slate-800 print:hidden"
+      className="w-full min-w-[140px] text-[10px] font-semibold bg-amber-50 border border-amber-300 rounded px-1.5 py-1 text-slate-800 print:hidden"
     />
   );
 }
@@ -2482,8 +2482,10 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
                             <th className="p-2 text-left border-b border-slate-200">Ad Soyad</th>
                             <th className="p-2 text-left border-b border-slate-200">Görev</th>
                             <th className="p-2 text-left border-b border-slate-200">İş / Meslek</th>
-                            <th className="p-2 text-left border-b border-slate-200">Açıklama</th>
-                            <th className="p-2 text-left border-b border-slate-200 hidden sm:table-cell">Departman</th>
+                            <th className="p-2 text-left border-b border-amber-200 bg-amber-50 min-w-[160px]">
+                              Açıklama
+                            </th>
+                            <th className="p-2 text-left border-b border-slate-200 hidden lg:table-cell">Departman</th>
                             <th className="p-2 text-center border-b border-slate-200 w-24">Durum</th>
                             <th className="p-2 text-center border-b border-slate-200 w-16">Mesai</th>
                           </tr>
@@ -2560,7 +2562,7 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
                                   <span className="hidden print:inline text-slate-400">—</span>
                                 )}
                               </td>
-                              <td className="p-2">
+                              <td className="p-2 bg-amber-50/70">
                                 <YoklamaGunAciklamaInput
                                   value={row.aciklama}
                                   onCommit={(next) =>
@@ -2571,7 +2573,7 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
                                   {row.aciklama || '—'}
                                 </span>
                               </td>
-                              <td className="p-2 text-slate-500 hidden sm:table-cell">{row.departman}</td>
+                              <td className="p-2 text-slate-500 hidden lg:table-cell">{row.departman}</td>
                               <td className="p-2 text-center">
                                 <span
                                   className={`inline-block text-[10px] font-black uppercase px-2 py-0.5 rounded-full border ${getStatusColor(row.durum)}`}
