@@ -20,6 +20,14 @@ app.use(express.urlencoded({ limit: "50mb", extended: true }));
 
 registerApiRoutes(app);
 
+app.get("/api/public/siparis-health", (_req, res) => {
+  res.json({
+    ok: true,
+    form: "/siparis.html",
+    note: "Üyeliksiz sipariş — ERP oturumu yok, personel/yoklama yazılmaz",
+  });
+});
+
 function siparisQueryRedirect(req: express.Request, res: express.Response, next: express.NextFunction) {
   if (req.path === "/" && Object.prototype.hasOwnProperty.call(req.query, "siparis")) {
     return res.redirect(302, "/siparis.html");
@@ -30,12 +38,6 @@ function siparisQueryRedirect(req: express.Request, res: express.Response, next:
 app.use(siparisQueryRedirect);
 
 async function startServer() {
-  app.use("/api", (req, res) => {
-    res.status(404).json({
-      error: `API endpoint bulunamadı: ${req.method} ${req.originalUrl}. Sunucuyu "npm run dev" ile başlatın.`,
-    });
-  });
-
   if (process.env.NODE_ENV !== "production") {
     const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({

@@ -15,11 +15,6 @@ if ('serviceWorker' in navigator) {
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <SiparisFormuScreen
-      isPublic
-      onClose={() => {
-        window.location.assign(`${window.location.origin}/`);
-      }}
-    />
+    <SiparisFormuScreen isPublic />
   </StrictMode>
 );
