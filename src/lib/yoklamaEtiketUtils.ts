@@ -24,11 +24,57 @@ export function normalizeYoklamaEtiketi(raw?: string | null): string {
   return t.toLocaleUpperCase('tr-TR');
 }
 
-export function yoklamaEtiketOptionsWithCustom(current?: string | null): string[] {
-  const cur = normalizeYoklamaEtiketi(current);
-  const base = [...YOKLAMA_MESLEK_ETIKETLERI] as string[];
-  if (cur && !base.includes(cur)) base.push(cur);
-  return base;
+export function isBuiltinYoklamaEtiketi(raw?: string | null): boolean {
+  const k = normalizeYoklamaEtiketi(raw);
+  return (YOKLAMA_MESLEK_ETIKETLERI as readonly string[]).includes(k);
+}
+
+export function yoklamaEtiketDocId(raw: string): string {
+  const n = normalizeYoklamaEtiketi(raw);
+  return n.replace(/[/#[\]]/g, '_').slice(0, 120) || 'etiket';
+}
+
+/** Ön tanımlı + kayıtlı + yoklamada kullanılmış etiketleri tek listede birleştir */
+export function mergeYoklamaEtiketKatalogu(parts: Array<Iterable<string> | undefined> = []): string[] {
+  const set = new Set<string>(YOKLAMA_MESLEK_ETIKETLERI);
+  for (const part of parts) {
+    if (!part) continue;
+    for (const raw of part) {
+      const e = normalizeYoklamaEtiketi(raw);
+      if (e) set.add(e);
+    }
+  }
+  const known = YOKLAMA_MESLEK_ETIKETLERI as readonly string[];
+  return [...set].sort((a, b) => {
+    const ia = known.indexOf(a);
+    const ib = known.indexOf(b);
+    if (ia >= 0 && ib >= 0) return ia - ib;
+    if (ia >= 0) return -1;
+    if (ib >= 0) return 1;
+    return a.localeCompare(b, 'tr');
+  });
+}
+
+export function yoklamaEtiketOptionsWithCustom(
+  current?: string | null,
+  extras: Array<Iterable<string> | undefined> = []
+): string[] {
+  return mergeYoklamaEtiketKatalogu([current ? [current] : [], ...extras]);
+}
+
+/** Yoklama haritasındaki tüm gün etiketlerini topla — geçmiş iş girişleri kaybolmasın */
+export function collectUsedYoklamaEtiketleri(
+  map: Record<string, Record<string, { isEtiketi?: string } | undefined> | undefined> | undefined
+): string[] {
+  const set = new Set<string>();
+  for (const personMap of Object.values(map || {})) {
+    if (!personMap || typeof personMap !== 'object') continue;
+    for (const data of Object.values(personMap)) {
+      const etiket = normalizeYoklamaEtiketi(data?.isEtiketi);
+      if (etiket) set.add(etiket);
+    }
+  }
+  return [...set];
 }
 
 export function yoklamaEtiketBadgeClass(etiket?: string | null): string {

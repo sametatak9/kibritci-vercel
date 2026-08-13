@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { Calendar, Trash2, ShieldAlert, CheckCircle, FileText, ChevronRight, RefreshCw, Database, Undo2, Redo2, Camera, DollarSign, Tag } from 'lucide-react';
 import { Personel, AylikYoklamaMap, YoklamaDurum, SahaFaaliyeti, KampFaaliyet } from '../types/erp';
 import { normalizeDateKey, formatDateLabelTr } from '../lib/dateKeyUtils';
@@ -40,12 +40,17 @@ import { db } from '../lib/firebase';
 import { collection, onSnapshot } from 'firebase/firestore';
 import {
   buildYoklamaEtiketOzeti,
+  collectUsedYoklamaEtiketleri,
+  mergeYoklamaEtiketKatalogu,
   normalizeYoklamaEtiketi,
   yoklamaEtiketBadgeClass,
   yoklamaEtiketOptionsWithCustom,
   YOKLAMA_ETIKETSIZ,
-  YOKLAMA_MESLEK_ETIKETLERI,
 } from '../lib/yoklamaEtiketUtils';
+import {
+  rememberYoklamaMeslekEtiketleri,
+  subscribeYoklamaMeslekEtiketleri,
+} from '../lib/yoklamaMeslekEtiketPersistence';
 
 /** Seçili ayda Girilmedi dışı dolu hücre sayısı */
 function countFilledDaysInMonth(map: AylikYoklamaMap, year: number, month: number): number {
@@ -112,6 +117,10 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
   const [overtimeHours, setOvertimeHours] = useState<number>(2);
   const [overtimeEtiket, setOvertimeEtiket] = useState<string>('');
   const [overtimeEtiketCustom, setOvertimeEtiketCustom] = useState<string>('');
+  const [kayitliEtiketler, setKayitliEtiketler] = useState<string[]>([]);
+  const [etiketYazanId, setEtiketYazanId] = useState<string | null>(null);
+  const [etiketYazi, setEtiketYazi] = useState<string>('');
+  const harvestedEtiketRef = useRef(false);
 
   // AI Daily Yoklama state variables
   const [showAiUpload, setShowAiUpload] = useState(false);
@@ -154,6 +163,19 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
     });
     return () => unsub();
   }, []);
+
+  useEffect(() => {
+    return subscribeYoklamaMeslekEtiketleri(setKayitliEtiketler);
+  }, []);
+
+  useEffect(() => {
+    if (harvestedEtiketRef.current) return;
+    if (Object.keys(yoklamalar || {}).length === 0) return;
+    harvestedEtiketRef.current = true;
+    const used = collectUsedYoklamaEtiketleri(yoklamalar);
+    if (used.length === 0) return;
+    void rememberYoklamaMeslekEtiketleri(used, kayitliEtiketler);
+  }, [yoklamalar, kayitliEtiketler]);
 
   useEffect(() => {
     const now = new Date();
@@ -266,6 +288,10 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
       if (addNotification) {
         addNotification(`${selectedMonth}. Ay ${selectedYear} yoklama/mesai değişiklikleri güvenli kayıt ile veritabanına yazıldı.`);
       }
+      void rememberYoklamaMeslekEtiketleri(
+        collectUsedYoklamaEtiketleri(draftYoklamalar),
+        kayitliEtiketler
+      );
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Yoklama kaydedilemedi';
       alert(`Kayıt başarısız — veriler korundu:\n${msg}`);
@@ -777,6 +803,16 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
     [gunRaporSatirlari]
   );
 
+  const kullanilmisEtiketler = useMemo(
+    () => collectUsedYoklamaEtiketleri(draftYoklamalar),
+    [draftYoklamalar]
+  );
+
+  const etiketKatalogu = useMemo(
+    () => mergeYoklamaEtiketKatalogu([kayitliEtiketler, kullanilmisEtiketler]),
+    [kayitliEtiketler, kullanilmisEtiketler]
+  );
+
   const gunRaporGrupHeaderClass: Record<GunlukYoklamaRaporGrup, string> = {
     FORMEN: 'bg-violet-700 text-white',
     USTA: 'bg-fuchsia-700 text-white',
@@ -973,7 +1009,14 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
     return normalizeYoklamaEtiketi(overtimeEtiket);
   };
 
+  const rememberEtiket = (etiket: string) => {
+    const next = normalizeYoklamaEtiketi(etiket);
+    if (!next) return;
+    void rememberYoklamaMeslekEtiketleri([next], kayitliEtiketler);
+  };
+
   const applyIsEtiketiToPersonDay = (personelId: string, day: number, etiket: string) => {
+    const nextEtiket = normalizeYoklamaEtiketi(etiket);
     updateDraftYoklama((prev) => {
       const p = personeller.find((emp) => emp.id === personelId);
       if (!p || !isEmployeeVisibleInMonth(p) || !isDayActiveForEmployee(p, day)) return prev;
@@ -981,7 +1024,6 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
         durum: 'Girilmedi' as YoklamaDurum,
         mesaiSaati: 0,
       };
-      const nextEtiket = normalizeYoklamaEtiketi(etiket);
       if (normalizeYoklamaEtiketi(dayData.isEtiketi) === nextEtiket) return prev;
       return {
         ...prev,
@@ -991,6 +1033,18 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
         }),
       };
     });
+    if (nextEtiket) rememberEtiket(nextEtiket);
+  };
+
+  const commitYeniEtiketForPerson = (personelId: string) => {
+    const next = normalizeYoklamaEtiketi(etiketYazi);
+    if (!next) {
+      alert('Yeni meslek grubu yazın (ör. İZOLASYON).');
+      return;
+    }
+    applyIsEtiketiToPersonDay(personelId, overtimeDay, next);
+    setEtiketYazanId(null);
+    setEtiketYazi('');
   };
 
   const handleQuickEtiketSubmit = () => {
@@ -1035,6 +1089,7 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
 
     const label = etiket || 'etiket kaldırıldı';
     alert(`${overtimeDay}. gün yoklamasına ${eligibleIds.length} kişi için «${label}» işlendi. Kaydet ile veritabanına gönderin.`);
+    if (etiket) rememberEtiket(etiket);
     if (addNotification) {
       addNotification(`${overtimeDay}. gün yoklaması meslek grubu: ${label} (${eligibleIds.length} kişi).`);
     }
@@ -1612,7 +1667,7 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
               <Tag size={10} /> MESLEK GRUBU ETİKETİ
             </span>
             <span className="text-[11px] text-slate-600 font-medium font-sans">
-              Seçili günün yoklamasına ne iş yaptıklarını yazın, sonra «Günü Raporla»:
+              Seçili günün yoklamasına ne iş yaptıklarını yazın. Yeni etiket kalıcı kaydolur:
             </span>
           </div>
 
@@ -1625,12 +1680,12 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
                 className="text-[11px] font-bold bg-white border border-slate-200 rounded p-1 max-w-[220px]"
               >
                 <option value="">— Etiket yok / kaldır —</option>
-                {YOKLAMA_MESLEK_ETIKETLERI.map((etiket) => (
+                {etiketKatalogu.map((etiket) => (
                   <option key={etiket} value={etiket}>
                     {etiket}
                   </option>
                 ))}
-                <option value="__CUSTOM__">Özel yaz…</option>
+                <option value="__CUSTOM__">＋ Yeni etiket yaz…</option>
               </select>
             </div>
             {overtimeEtiket === '__CUSTOM__' && (
@@ -2379,20 +2434,61 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
                               <td className="p-2 font-bold text-slate-900">{row.adSoyad}</td>
                               <td className="p-2 text-slate-600">{row.gorev}</td>
                               <td className="p-2">
-                                <select
-                                  value={row.isEtiketi}
-                                  onChange={(e) =>
-                                    applyIsEtiketiToPersonDay(row.personelId, overtimeDay, e.target.value)
-                                  }
-                                  className="w-full max-w-[160px] text-[10px] font-bold bg-white border border-slate-200 rounded px-1 py-1 print:hidden"
-                                >
-                                  <option value="">—</option>
-                                  {yoklamaEtiketOptionsWithCustom(row.isEtiketi).map((etiket) => (
-                                    <option key={etiket} value={etiket}>
-                                      {etiket}
-                                    </option>
-                                  ))}
-                                </select>
+                                <div className="flex flex-col gap-1 print:hidden">
+                                  <select
+                                    value={etiketYazanId === row.personelId ? '__YENI__' : row.isEtiketi}
+                                    onChange={(e) => {
+                                      const val = e.target.value;
+                                      if (val === '__YENI__') {
+                                        setEtiketYazanId(row.personelId);
+                                        setEtiketYazi('');
+                                        return;
+                                      }
+                                      setEtiketYazanId(null);
+                                      applyIsEtiketiToPersonDay(row.personelId, overtimeDay, val);
+                                    }}
+                                    className="w-full max-w-[180px] text-[10px] font-bold bg-white border border-slate-200 rounded px-1 py-1"
+                                  >
+                                    <option value="">—</option>
+                                    {yoklamaEtiketOptionsWithCustom(row.isEtiketi, [
+                                      etiketKatalogu,
+                                    ]).map((etiket) => (
+                                      <option key={etiket} value={etiket}>
+                                        {etiket}
+                                      </option>
+                                    ))}
+                                    <option value="__YENI__">＋ Yeni etiket yaz…</option>
+                                  </select>
+                                  {etiketYazanId === row.personelId && (
+                                    <div className="flex items-center gap-1">
+                                      <input
+                                        autoFocus
+                                        type="text"
+                                        value={etiketYazi}
+                                        onChange={(e) => setEtiketYazi(e.target.value)}
+                                        onKeyDown={(e) => {
+                                          if (e.key === 'Enter') {
+                                            e.preventDefault();
+                                            commitYeniEtiketForPerson(row.personelId);
+                                          }
+                                          if (e.key === 'Escape') {
+                                            setEtiketYazanId(null);
+                                            setEtiketYazi('');
+                                          }
+                                        }}
+                                        placeholder="Örn. İZOLASYON"
+                                        className="w-28 text-[10px] font-bold bg-white border border-violet-300 rounded px-1 py-1 uppercase"
+                                      />
+                                      <button
+                                        type="button"
+                                        onClick={() => commitYeniEtiketForPerson(row.personelId)}
+                                        className="text-[9px] font-black bg-violet-600 text-white px-2 py-1 rounded cursor-pointer"
+                                      >
+                                        Kaydet
+                                      </button>
+                                    </div>
+                                  )}
+                                </div>
                                 {row.isEtiketi ? (
                                   <span
                                     className={`hidden print:inline-block text-[9px] font-black uppercase px-2 py-0.5 rounded-full border ${yoklamaEtiketBadgeClass(row.isEtiketi)}`}
