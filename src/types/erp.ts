@@ -44,6 +44,7 @@ export interface GunlukYoklama {
     mesaiSaati: number;
     gonderen?: string;
     isEtiketi?: string;
+    aciklama?: string;
   };
 }
 

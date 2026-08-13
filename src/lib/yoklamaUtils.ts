@@ -6,6 +6,8 @@ export interface YoklamaGunKaydi {
   gonderen?: string;
   /** O gün yapılan iş / meslek grubu (görevden bağımsız etiket) */
   isEtiketi?: string;
+  /** Etiketten bağımsız serbest açıklama */
+  aciklama?: string;
 }
 
 type PersonelYoklamaMap = GunlukYoklama | Record<string, YoklamaGunKaydi>;

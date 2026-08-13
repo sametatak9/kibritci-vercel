@@ -30,6 +30,8 @@ export interface GunlukYoklamaSatir {
   mesaiSaati: number;
   /** O gün yapılan iş / meslek grubu */
   isEtiketi: string;
+  /** Etiketten bağımsız serbest açıklama */
+  aciklama: string;
 }
 
 export interface GunlukYoklamaOzet {
@@ -159,6 +161,7 @@ export function buildGunlukYoklamaSatirlari(
       durum,
       mesaiSaati: Number(dayData?.mesaiSaati) || 0,
       isEtiketi: normalizeYoklamaEtiketi(dayData?.isEtiketi),
+      aciklama: String(dayData?.aciklama || '').trim(),
     });
   }
 
@@ -238,6 +241,7 @@ function renderSatirRows(satirlar: GunlukYoklamaSatir[]): string {
         <td><strong>${escapeHtml(r.adSoyad)}</strong></td>
         <td>${escapeHtml(r.gorev)}</td>
         <td>${r.isEtiketi ? `<span style="display:inline-block;padding:1px 8px;border-radius:999px;background:#f8fafc;border:1px solid #e2e8f0;font-size:10px;font-weight:800">${escapeHtml(r.isEtiketi)}</span>` : '<span style="color:#94a3b8">—</span>'}</td>
+        <td style="font-size:11px;color:#334155">${r.aciklama ? escapeHtml(r.aciklama) : '<span style="color:#94a3b8">—</span>'}</td>
         <td>${escapeHtml(r.departman)}</td>
         <td style="font-family:monospace;font-size:11px">${escapeHtml(r.tcNo)}</td>
         <td style="font-weight:800;color:${DURUM_COLOR[r.durum] || '#64748b'}">${escapeHtml(r.durum)}</td>
@@ -254,7 +258,7 @@ function renderGrupSection(grup: GunlukYoklamaGorevGrubu, index: number): string
     <table style="width:100%;border-collapse:collapse;font-size:12px;margin:${index === 0 ? '0' : '16px'} 0 0">
       <thead>
         <tr>
-          <th colspan="8" style="background:${bg};color:#fff;padding:6px 10px;text-align:left;font-size:11px;font-weight:800;letter-spacing:0.04em;text-transform:uppercase;border:1px solid ${bg}">
+          <th colspan="9" style="background:${bg};color:#fff;padding:6px 10px;text-align:left;font-size:11px;font-weight:800;letter-spacing:0.04em;text-transform:uppercase;border:1px solid ${bg}">
             ${escapeHtml(grup.label)}
             <span style="float:right;font-size:10px;font-weight:700;background:rgba(255,255,255,0.15);padding:2px 8px;border-radius:999px;text-transform:none">
               ${grup.satirlar.length} kişi · ${grup.ozet.geldi} geldi · ${grup.ozet.mesaiToplam}s mesai
@@ -266,6 +270,7 @@ function renderGrupSection(grup: GunlukYoklamaGorevGrubu, index: number): string
           <th style="padding:8px;border-bottom:2px solid #cbd5e1;text-transform:uppercase;font-size:10px">Ad Soyad</th>
           <th style="padding:8px;border-bottom:2px solid #cbd5e1;text-transform:uppercase;font-size:10px">Görev</th>
           <th style="padding:8px;border-bottom:2px solid #cbd5e1;text-transform:uppercase;font-size:10px">İş / Meslek</th>
+          <th style="padding:8px;border-bottom:2px solid #cbd5e1;text-transform:uppercase;font-size:10px">Açıklama</th>
           <th style="padding:8px;border-bottom:2px solid #cbd5e1;text-transform:uppercase;font-size:10px">Departman</th>
           <th style="padding:8px;border-bottom:2px solid #cbd5e1;text-transform:uppercase;font-size:10px">TC</th>
           <th style="padding:8px;border-bottom:2px solid #cbd5e1;text-transform:uppercase;font-size:10px">Durum</th>

@@ -71,6 +71,46 @@ const maskName = (name?: string): string => {
   return name || '';
 };
 
+const YOKLAMA_ACIKLAMA_MAX = 160;
+
+function YoklamaGunAciklamaInput({
+  value,
+  onCommit,
+}: {
+  value: string;
+  onCommit: (next: string) => void;
+}) {
+  const [text, setText] = useState(value);
+  useEffect(() => {
+    setText(value);
+  }, [value]);
+
+  const commit = () => {
+    const next = text.trim().slice(0, YOKLAMA_ACIKLAMA_MAX);
+    if (next !== value) onCommit(next);
+    else if (text !== next) setText(next);
+  };
+
+  return (
+    <input
+      type="text"
+      value={text}
+      maxLength={YOKLAMA_ACIKLAMA_MAX}
+      onChange={(e) => setText(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          (e.currentTarget as HTMLInputElement).blur();
+        }
+      }}
+      placeholder="Açıklama"
+      title="Etiketten bağımsız günlük açıklama"
+      className="w-full min-w-[120px] max-w-[220px] text-[10px] font-semibold bg-white border border-slate-200 rounded px-1.5 py-1 text-slate-800 print:hidden"
+    />
+  );
+}
+
 interface YoklamaScreenProps {
   personeller: Personel[];
   setPersoneller?: React.Dispatch<React.SetStateAction<Personel[]>>;
@@ -1034,6 +1074,26 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
       };
     });
     if (nextEtiket) rememberEtiket(nextEtiket);
+  };
+
+  const applyAciklamaToPersonDay = (personelId: string, day: number, aciklama: string) => {
+    const next = aciklama.trim().slice(0, YOKLAMA_ACIKLAMA_MAX);
+    updateDraftYoklama((prev) => {
+      const p = personeller.find((emp) => emp.id === personelId);
+      if (!p || !isEmployeeVisibleInMonth(p) || !isDayActiveForEmployee(p, day)) return prev;
+      const dayData = getYoklamaDay(prev[personelId], selectedYear, selectedMonth, day) || {
+        durum: 'Girilmedi' as YoklamaDurum,
+        mesaiSaati: 0,
+      };
+      if (String(dayData.aciklama || '').trim() === next) return prev;
+      return {
+        ...prev,
+        [personelId]: setYoklamaDay(prev[personelId], selectedYear, selectedMonth, day, {
+          ...dayData,
+          aciklama: next || undefined,
+        }),
+      };
+    });
   };
 
   const commitYeniEtiketForPerson = (personelId: string) => {
@@ -2268,7 +2328,7 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
 
       {printModal === 'GUN_RAPORU' && (
         <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/80 flex items-start justify-center p-6 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl w-full max-w-5xl shadow-2xl flex flex-col overflow-hidden my-4">
+          <div className="bg-white rounded-2xl w-full max-w-6xl shadow-2xl flex flex-col overflow-hidden my-4">
             <div className="bg-amber-600 text-white p-4 flex flex-wrap justify-between items-center gap-3 px-6 shrink-0 print:hidden">
               <div className="flex flex-wrap items-center gap-2">
                 <Calendar size={18} />
@@ -2354,7 +2414,7 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
                     {gunRaporOzet.mesaiToplam} saat mesai
                   </p>
                   <p className="text-[10px] text-violet-700 font-semibold mt-1 print:hidden">
-                    Görev yanındaki «İş / Meslek» sütunundan o gün ne iş yaptıklarını etiketleyin; Yazdır / PDF rapora işler.
+                    Görev yanındaki «İş / Meslek» etiketi ve «Açıklama» birbirinden bağımsızdır. Yazdır / PDF ikisini de alır.
                   </p>
                 </div>
 
@@ -2422,6 +2482,7 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
                             <th className="p-2 text-left border-b border-slate-200">Ad Soyad</th>
                             <th className="p-2 text-left border-b border-slate-200">Görev</th>
                             <th className="p-2 text-left border-b border-slate-200">İş / Meslek</th>
+                            <th className="p-2 text-left border-b border-slate-200">Açıklama</th>
                             <th className="p-2 text-left border-b border-slate-200 hidden sm:table-cell">Departman</th>
                             <th className="p-2 text-center border-b border-slate-200 w-24">Durum</th>
                             <th className="p-2 text-center border-b border-slate-200 w-16">Mesai</th>
@@ -2498,6 +2559,17 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
                                 ) : (
                                   <span className="hidden print:inline text-slate-400">—</span>
                                 )}
+                              </td>
+                              <td className="p-2">
+                                <YoklamaGunAciklamaInput
+                                  value={row.aciklama}
+                                  onCommit={(next) =>
+                                    applyAciklamaToPersonDay(row.personelId, overtimeDay, next)
+                                  }
+                                />
+                                <span className="hidden print:inline text-[10px] text-slate-700">
+                                  {row.aciklama || '—'}
+                                </span>
                               </td>
                               <td className="p-2 text-slate-500 hidden sm:table-cell">{row.departman}</td>
                               <td className="p-2 text-center">
