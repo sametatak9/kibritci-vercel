@@ -3931,9 +3931,13 @@ function App() {
               {activeTab === "t_cetveli" && (
                 <TCetveliScreen
                   irsaliyeler={irsaliyeler}
+                  setIrsaliyeler={setIrsaliyelerWithSync}
                   faturalar={faturalar}
+                  setFaturalar={setFaturalarWithSync}
                   hazirTutanaklar={hazirTutanaklar}
+                  setHazirTutanaklar={setHazirTutanaklarWithSync}
                   cariKartlar={cariKartlar}
+                  setCariIslemGecmisi={setCariIslemGecmisiWithSync}
                 />
               )}
 

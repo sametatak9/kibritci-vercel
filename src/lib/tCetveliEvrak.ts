@@ -9,8 +9,12 @@ export type TCetveliYon = 'GIRIS' | 'CIKIS';
 
 export type TCetveliEvrakTipi = 'İRSALİYE' | 'FATURA' | 'TESLİM' | 'SEVK';
 
+export type TCetveliKaynak = 'irsaliye' | 'fatura' | 'tutanak';
+
 export type TCetveliSatir = {
   id: string;
+  kaynak: TCetveliKaynak;
+  kaynakId: string;
   yon: TCetveliYon;
   tarih: string;
   evrakTipi: TCetveliEvrakTipi;
@@ -63,6 +67,8 @@ function irsaliyeSatir(ir: Irsaliye): TCetveliSatir {
   const kalem = (ir.kalemler || []).length;
   return {
     id: `ir:${ir.id}`,
+    kaynak: 'irsaliye',
+    kaynakId: ir.id,
     yon: 'GIRIS',
     tarih: normalizeDateKey(ir.tarih) || String(ir.tarih || ''),
     evrakTipi: 'İRSALİYE',
@@ -85,6 +91,8 @@ function irsaliyeSatir(ir: Irsaliye): TCetveliSatir {
 function faturaSatir(ft: Fatura, yon: TCetveliYon): TCetveliSatir {
   return {
     id: `ft:${ft.id}`,
+    kaynak: 'fatura',
+    kaynakId: ft.id,
     yon,
     tarih: normalizeDateKey(ft.tarih) || String(ft.tarih || ''),
     evrakTipi: 'FATURA',
@@ -104,6 +112,8 @@ function tutanakSatir(t: HazirTutanak): TCetveliSatir | null {
   const kalem = (t.kalemler || []).length;
   return {
     id: `tt:${t.id}`,
+    kaynak: 'tutanak',
+    kaynakId: t.id,
     yon: 'CIKIS',
     tarih: normalizeDateKey(t.tarih) || String(t.tarih || ''),
     evrakTipi,
