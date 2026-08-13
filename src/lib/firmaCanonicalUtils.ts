@@ -1,18 +1,21 @@
 import { isAkvizyonFirmaAdi } from './guvenlikHelpers';
 import { firmaAnahtar, firmaEslesir } from './taseronUtils';
-import { CANONICAL_ANA_FIRMA_ADI, isKibritciCompany, isTaseronPersonel } from './yoklamaUtils';
-import type { Personel } from '../types/erp';
+import { CANONICAL_ANA_FIRMA_ADI, isAnaFirmaFirmaAdi, isKibritciCompany, isTaseronPersonel } from './yoklamaUtils';
+import type { CariKart, Personel } from '../types/erp';
 
 export const CANONICAL_AKVIZYON_FIRMA_ADI = 'AKVİZYON';
 export const CANONICAL_VIRADOOR_FIRMA_ADI = 'VİRADOOR MOBİLYA';
+export const CANONICAL_EMA_FIRMA_ADI = 'EMA MERMERİ';
 
-/** Bilinen alias → tek kanonik unvan (REHA → VİRADOOR vb.) */
+/** Bilinen alias → tek kanonik unvan (REHA → VİRADOOR, EMA → EMA MERMERİ vb.) */
 const FIRMA_ALIAS_CANONICAL: Record<string, string> = {
   reha: CANONICAL_VIRADOOR_FIRMA_ADI,
   'reha mobilya': CANONICAL_VIRADOOR_FIRMA_ADI,
   'reha mobilya insaat': CANONICAL_VIRADOOR_FIRMA_ADI,
   'reha insaat': CANONICAL_VIRADOOR_FIRMA_ADI,
-  ema: 'EMA MERMER',
+  ema: CANONICAL_EMA_FIRMA_ADI,
+  'ema mermer': CANONICAL_EMA_FIRMA_ADI,
+  'ema mermeri': CANONICAL_EMA_FIRMA_ADI,
 };
 
 /** Silinecek geçersiz / mükerrer cari unvanları (firmaAnahtar) */
@@ -58,8 +61,8 @@ export function canonicalFirmaUnvan(name?: string | null): string {
   return upper;
 }
 
-/** Geçersiz / test cari unvanları (AAA, Y, — vb.) */
-export function isJunkCariUnvan(unvan?: string | null): boolean {
+/** Kampçı placeholder: AAA, Y, BELİRTİLMEDİ, tire vb. */
+export function isPlaceholderTaseronUnvan(unvan?: string | null): boolean {
   const u = String(unvan || '').trim();
   if (!u) return true;
   const norm = u.toLocaleLowerCase('tr-TR');
@@ -68,15 +71,47 @@ export function isJunkCariUnvan(unvan?: string | null): boolean {
     return true;
   }
   const key = firmaAnahtar(u);
-  if (JUNK_CARI_NAME_KEYS.has(key)) return true;
-  if (key.length <= 2) return true;
+  if (!key || key.length <= 2) return true;
   if (/^[a]+$/i.test(key.replace(/\s/g, ''))) return true;
   return false;
+}
+
+/** Geçersiz / test cari unvanları (AAA, Y, — ve tarihî junk anahtarlar) */
+export function isJunkCariUnvan(unvan?: string | null): boolean {
+  if (isPlaceholderTaseronUnvan(unvan)) return true;
+  const key = firmaAnahtar(String(unvan || '').trim());
+  return JUNK_CARI_NAME_KEYS.has(key);
 }
 
 /** Personel / kamp firmaAdi için junk kontrolü */
 export function isJunkFirmaAdi(name?: string | null): boolean {
   return isJunkCariUnvan(name);
+}
+
+/** Boş olmayan ANA FİRMA / Kibritçi adı — taşeron envanterinde yer almamalı */
+export function isExplicitAnaFirmaUnvan(name?: string | null): boolean {
+  const raw = String(name || '').trim();
+  if (!raw) return false;
+  return isAnaFirmaFirmaAdi(raw);
+}
+
+export function isTaseronCariKart(
+  c: Pick<CariKart, 'kartTipi'> & { tur?: string }
+): boolean {
+  return (
+    c.kartTipi === 'TASERON' || String(c.tur || '').toUpperCase() === 'TASERON'
+  );
+}
+
+/**
+ * Silinecek cari: AAA/Y/BELİRTİLMEDİ vb. junk, veya taşeron kartında ana firma adı.
+ * Kibritçi tedarikçi/cari kartına dokunulmaz.
+ */
+export function isCariKartSilinmeli(
+  c: Pick<CariKart, 'kartTipi' | 'unvan'> & { tur?: string }
+): boolean {
+  if (isJunkCariUnvan(c.unvan)) return true;
+  return isTaseronCariKart(c) && isExplicitAnaFirmaUnvan(c.unvan);
 }
 
 export type FirmaOptionEntry = { key: string; label: string };

@@ -1002,7 +1002,7 @@ export const TaseronKesintiScreen: React.FC<TaseronKesintiScreenProps> = ({
                       disabled={repairingEnvanter}
                       onClick={() => void handleRepairEnvanter()}
                       className="text-[10px] font-bold px-3 py-1.5 rounded-xl border border-amber-300 bg-amber-50 text-amber-900 hover:bg-amber-100 disabled:opacity-60 cursor-pointer"
-                      title="Cari'siz firmalara taşeron cari aç, AAA/Y sil, EMA+EMA MERMER birleştir, junk firma adlarını düzelt"
+                      title="Cari'siz firmalara taşeron cari aç, AAA/Y/BELİRTİLMEDİ/ANA FİRMA sil, EMA+EMA MERMERİ birleştir, junk firma adlarını düzelt"
                     >
                       {repairingEnvanter ? 'Düzeltiliyor…' : 'Envanteri Düzelt'}
                     </button>

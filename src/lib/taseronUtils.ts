@@ -1,4 +1,10 @@
 import { CariKart, CariKartIslem, KampKaydi, KampOdasi, OperatorFaaliyet, Personel, TaseronEnerjiKaydi, TaseronKesintiRaporu, TaseronSayacOlcum, TaseronYemekKaydi } from '../types/erp';
+import {
+  canonicalFirmaUnvan,
+  firmaDedupKey,
+  isExplicitAnaFirmaUnvan,
+  isPlaceholderTaseronUnvan,
+} from './firmaCanonicalUtils';
 import { AKVIZYON_GOREV, isAkvizyonFirmaAdi } from './guvenlikHelpers';
 import { isTaseronPersonel } from './yoklamaUtils';
 
@@ -37,11 +43,17 @@ export function withTaseronPersonelGorev<T extends Personel>(p: T): T {
   };
 }
 
+/** AAA, Y, BELİRTİLMEDİ, ANA FİRMA / Kibritçi — taşeron listesinde gösterilmez */
+export function shouldHideFromTaseronEnvanter(unvan?: string | null): boolean {
+  return isPlaceholderTaseronUnvan(unvan) || isExplicitAnaFirmaUnvan(unvan);
+}
+
 export function getTaseronCariKartlar(cariKartlar: CariKart[]): CariKart[] {
   return cariKartlar.filter(
     (c) =>
       (c.kartTipi === 'TASERON' || String((c as { tur?: string }).tur || '').toUpperCase() === 'TASERON') &&
-      c.durum !== 'PASIF'
+      c.durum !== 'PASIF' &&
+      !shouldHideFromTaseronEnvanter(c.unvan)
   );
 }
 
@@ -106,13 +118,14 @@ export function buildTaseronFirmaEnvanteri(
 
   const ensure = (rawName: string, cari?: CariKart) => {
     const name = (cari?.unvan || rawName || '').trim();
-    if (!name) return null;
-    const key = firmaAnahtar(name) || normFirma(name);
+    if (!name || shouldHideFromTaseronEnvanter(name)) return null;
+    const key = firmaDedupKey(name) || firmaAnahtar(name) || normFirma(name);
+    const label = canonicalFirmaUnvan(name) || name;
     let row = byKey.get(key);
     if (!row) {
       row = {
         key,
-        unvan: name,
+        unvan: cari?.unvan || label,
         cari,
         personelSayisi: 0,
         kampSakinSayisi: 0,
@@ -120,10 +133,14 @@ export function buildTaseronFirmaEnvanteri(
         personeller: [],
       };
       byKey.set(key, row);
-    } else if (cari && !row.cari) {
-      row.cari = cari;
-      row.unvan = cari.unvan;
-      row.durum = cari.durum === 'PASIF' ? 'PASIF' : 'AKTIF';
+    } else {
+      if (cari && !row.cari) {
+        row.cari = cari;
+        row.unvan = cari.unvan;
+        row.durum = cari.durum === 'PASIF' ? 'PASIF' : 'AKTIF';
+      } else if (!row.cari && label.length > row.unvan.length) {
+        row.unvan = label;
+      }
     }
     return row;
   };

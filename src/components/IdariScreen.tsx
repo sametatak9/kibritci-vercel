@@ -3464,7 +3464,7 @@ export const IdariScreen: React.FC<IdariScreenProps> = ({
                     onClick={() => void handleRepairKampYerlesimFirma()}
                     disabled={repairingKampFirma || kampKayitlari.length === 0}
                     className="w-full bg-amber-600 hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold py-2 px-3 rounded-lg cursor-pointer transition flex items-center justify-center gap-1.5 text-[10px]"
-                    title="AAA, Y, BELİRTİLMEDİ sil; EMA + EMA MERMER birleştir"
+                    title="AAA, Y, BELİRTİLMEDİ, ANA FİRMA sil; EMA + EMA MERMERİ birleştir"
                   >
                     {repairingKampFirma ? 'Düzeltiliyor…' : 'Yerleşim Firmalarını Düzelt'}
                   </button>

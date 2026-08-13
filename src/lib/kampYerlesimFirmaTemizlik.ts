@@ -16,7 +16,7 @@ function resolvePersonelFirmaForPatch(p: Personel): string {
   return canonicalFirmaUnvan(raw);
 }
 
-/** AAA, Y, BELİRTİLMEDİ vb. junk firmaları düzelt; EMA + EMA MERMER birleştir. */
+/** AAA, Y, BELİRTİLMEDİ vb. junk firmaları düzelt; EMA + EMA MERMERİ birleştir. */
 export function planKampYerlesimFirmaTemizlik(
   personeller: Personel[],
   kampKayitlari: KampKaydi[]
@@ -71,7 +71,7 @@ export function planKampYerlesimFirmaTemizlik(
 
   const mergeCount = deduped.length - junkCount;
   if (mergeCount > 0) {
-    summary.push(`${mergeCount} yerleşim firması kanonikleştirilecek (ör. EMA → EMA MERMER)`);
+    summary.push(`${mergeCount} yerleşim firması kanonikleştirilecek (ör. EMA → EMA MERMERİ)`);
   }
 
   if (deduped.length === 0) {

@@ -8,7 +8,9 @@ import {
 import {
   canonicalFirmaUnvan,
   firmaDedupKey,
+  isExplicitAnaFirmaUnvan,
   isJunkFirmaAdi,
+  resolveFirmaAliasCanonical,
 } from './firmaCanonicalUtils';
 import { removeDocument, saveDocument } from './firebase';
 import {
@@ -24,6 +26,7 @@ import {
   planPersonelDuplicateMerge,
   type PersonelDuplicateMergePlan,
 } from './personelDuplicateMerge';
+import { CANONICAL_ANA_FIRMA_ADI } from './yoklamaUtils';
 
 export type TaseronEnvanterTemizlikPlan = {
   dedupPlans: CariDedupPlan[];
@@ -81,7 +84,7 @@ function buildTaseronCariKart(unvan: string, existingCariler: CariKart[]): CariK
   };
 }
 
-/** Aynı kök adlı taşeron carileri birleştir (EMA + EMA MERMER vb.) */
+/** Aynı kök adlı taşeron carileri birleştir (EMA + EMA MERMERİ vb.) */
 export function planFuzzyTaseronCariMerge(
   cariKartlar: CariKart[],
   personeller: Personel[] = []
@@ -172,7 +175,7 @@ export function planTaseronEnvanterTemizlik(
   }
   if (fuzzyMergePlans.length > 0) {
     summary.push(
-      `${fuzzyMergePlans.length} fuzzy birleştirme (ör. EMA + EMA MERMER → ${fuzzyMergePlans.map((p) => p.keep.unvan).join(', ')})`
+      `${fuzzyMergePlans.length} fuzzy birleştirme (ör. EMA + EMA MERMERİ → ${fuzzyMergePlans.map((p) => p.keep.unvan).join(', ')})`
     );
   }
 
@@ -186,7 +189,7 @@ export function planTaseronEnvanterTemizlik(
   const envanter = buildTaseronFirmaEnvanteri(afterMerge, personeller, kampKayitlari);
   for (const row of envanter) {
     if (row.cari) continue;
-    if (isJunkFirmaAdi(row.unvan)) continue;
+    if (isJunkFirmaAdi(row.unvan) || isExplicitAnaFirmaUnvan(row.unvan)) continue;
 
     const existing = findCariForFirma(workingCariler, row.unvan);
     if (existing) continue;
@@ -198,40 +201,49 @@ export function planTaseronEnvanterTemizlik(
   }
 
   const allCariler = [...afterMerge, ...createCariler];
-  const fallbackCari =
-    findCariForFirma(allCariler, 'TAŞERON') ||
-    createCariler.find((c) => firmaAnahtar(c.unvan) === 'taseron') ||
-    null;
 
   for (const p of personeller) {
     if (p.firmaTipi !== 'TASERON' && !p.firmaAdi?.trim()) continue;
     const firma = String(p.firmaAdi || '').trim();
 
+    if (firma && isExplicitAnaFirmaUnvan(firma)) {
+      if (p.firmaTipi !== 'ANA_FIRMA' || p.firmaAdi !== CANONICAL_ANA_FIRMA_ADI) {
+        personelPatches.push({
+          id: p.id,
+          patch: {
+            firmaTipi: 'ANA_FIRMA',
+            firmaAdi: CANONICAL_ANA_FIRMA_ADI,
+          },
+        });
+      }
+      continue;
+    }
+
     if (isJunkFirmaAdi(firma)) {
       const inferred = inferFirmaFromKamp(p.id, kampKayitlari);
-      const targetCari =
-        (inferred && findCariForFirma(allCariler, inferred)) ||
-        fallbackCari;
-
-      if (targetCari && inferred) {
+      if (inferred && isExplicitAnaFirmaUnvan(inferred)) {
+        personelPatches.push({
+          id: p.id,
+          patch: {
+            firmaTipi: 'ANA_FIRMA',
+            firmaAdi: CANONICAL_ANA_FIRMA_ADI,
+          },
+        });
+      } else if (inferred && !isJunkFirmaAdi(inferred)) {
+        const targetCari = findCariForFirma(allCariler, inferred);
         personelPatches.push({
           id: p.id,
           patch: withTaseronPersonelGorev({
             ...p,
             firmaTipi: 'TASERON',
-            firmaAdi: targetCari.unvan,
+            firmaAdi: targetCari?.unvan || canonicalFirmaUnvan(inferred),
             departman: TASERON_PERSONEL_DEPARTMAN,
           }),
         });
-      } else if (targetCari) {
+      } else if (firma) {
         personelPatches.push({
           id: p.id,
-          patch: withTaseronPersonelGorev({
-            ...p,
-            firmaTipi: 'TASERON',
-            firmaAdi: targetCari.unvan,
-            departman: TASERON_PERSONEL_DEPARTMAN,
-          }),
+          patch: { firmaAdi: '' },
         });
       }
       continue;
@@ -247,6 +259,19 @@ export function planTaseronEnvanterTemizlik(
           firmaAdi: matched.unvan,
         }),
       });
+    } else {
+      const alias = canonicalFirmaUnvan(firma);
+      const aliasOnly = resolveFirmaAliasCanonical(firma);
+      if (aliasOnly && alias !== firma) {
+        personelPatches.push({
+          id: p.id,
+          patch: withTaseronPersonelGorev({
+            ...p,
+            firmaTipi: 'TASERON',
+            firmaAdi: aliasOnly,
+          }),
+        });
+      }
     }
   }
 
@@ -281,23 +306,49 @@ export function planTaseronEnvanterTemizlik(
   }
 
   for (const k of kampKayitlari) {
-    if (isJunkFirmaAdi(k.calistigiFirma)) {
-      const p = k.personelId ? personeller.find((x) => x.id === k.personelId) : undefined;
-      const target =
-        (p?.firmaAdi && !isJunkFirmaAdi(p.firmaAdi) ? p.firmaAdi : null) ||
-        inferFirmaFromKamp(k.personelId || '', kampKayitlari);
-      if (target && !kampPatches.some((x) => x.id === k.id)) {
-        kampPatches.push({ id: k.id, patch: { calistigiFirma: canonicalFirmaUnvan(target) } });
-      }
-    }
-  }
-
-  for (const k of kampKayitlari) {
+    if (kampPatches.some((x) => x.id === k.id)) continue;
     const raw = String(k.calistigiFirma || '').trim();
-    if (!raw || isJunkFirmaAdi(raw)) continue;
-    const canon = canonicalFirmaUnvan(raw);
-    if (canon !== raw && !kampPatches.some((x) => x.id === k.id)) {
-      kampPatches.push({ id: k.id, patch: { calistigiFirma: canon } });
+    const personelPatch = k.personelId
+      ? personelPatches.find((x) => x.id === k.personelId)
+      : undefined;
+    const p = k.personelId ? personeller.find((x) => x.id === k.personelId) : undefined;
+
+    if (raw && isExplicitAnaFirmaUnvan(raw)) {
+      kampPatches.push({
+        id: k.id,
+        patch: { calistigiFirma: CANONICAL_ANA_FIRMA_ADI, firmaTipi: 'ANA_FIRMA' },
+      });
+      continue;
+    }
+
+    if (isJunkFirmaAdi(raw)) {
+      const fromPersonelPatch = String(personelPatch?.patch.firmaAdi || '').trim();
+      const fromPersonel = String(p?.firmaAdi || '').trim();
+      const inferred = inferFirmaFromKamp(k.personelId || '', kampKayitlari);
+      const target =
+        (fromPersonelPatch && !isJunkFirmaAdi(fromPersonelPatch) ? fromPersonelPatch : null) ||
+        (fromPersonel && !isJunkFirmaAdi(fromPersonel) ? fromPersonel : null) ||
+        inferred;
+      if (target && isExplicitAnaFirmaUnvan(target)) {
+        kampPatches.push({
+          id: k.id,
+          patch: { calistigiFirma: CANONICAL_ANA_FIRMA_ADI, firmaTipi: 'ANA_FIRMA' },
+        });
+      } else if (target && !isJunkFirmaAdi(target)) {
+        kampPatches.push({ id: k.id, patch: { calistigiFirma: canonicalFirmaUnvan(target) } });
+      } else if (raw) {
+        kampPatches.push({ id: k.id, patch: { calistigiFirma: '' } });
+      }
+      continue;
+    }
+
+    if (!raw) continue;
+    const alias = resolveFirmaAliasCanonical(raw);
+    if (alias && alias !== raw) {
+      kampPatches.push({
+        id: k.id,
+        patch: { calistigiFirma: alias },
+      });
     }
   }
 

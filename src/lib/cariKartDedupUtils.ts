@@ -3,7 +3,9 @@ import { removeDocument, saveDocument } from './firebase';
 import {
   canonicalFirmaUnvan,
   firmaDedupKey,
+  isCariKartSilinmeli,
   isJunkCariUnvan,
+  resolveFirmaAliasCanonical,
 } from './firmaCanonicalUtils';
 import { personelForCariKart } from './taseronUtils';
 
@@ -62,7 +64,7 @@ export function planCariKartDedup(
   const valid: CariKart[] = [];
 
   for (const c of cariKartlar) {
-    if (isJunkCariUnvan(c.unvan)) {
+    if (isCariKartSilinmeli(c)) {
       junkIds.push(c.id);
     } else {
       valid.push(c);
@@ -92,7 +94,19 @@ export function planCariKartDedup(
   }
 
   for (const [key, group] of byKey) {
-    if (group.length < 2) continue;
+    if (group.length < 2) {
+      const only = group[0];
+      const alias = resolveFirmaAliasCanonical(only.unvan);
+      if (alias && alias !== only.unvan) {
+        plans.push({
+          key: `${key}::rename`,
+          keep: { ...only, unvan: alias },
+          deleteIds: [],
+          idRemap: {},
+        });
+      }
+      continue;
+    }
     let keep = pickCanonicalFromGroup(group, personeller);
     for (const dup of group) {
       if (dup.id === keep.id) continue;
