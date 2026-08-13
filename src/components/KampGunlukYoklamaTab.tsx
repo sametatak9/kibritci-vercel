@@ -4,7 +4,8 @@ import {
 } from 'lucide-react';
 import { Personel, AylikYoklamaMap, YoklamaDurum } from '../types/erp';
 import { 
-  buildPersonelListForMonth, 
+  buildPersonelListForMonth,
+  buildSeramikPersonelListForMonth,
   getYoklamaDay, 
   isDayActiveForPersonel, 
   isTaseronPersonel, 
@@ -28,6 +29,10 @@ interface KampGunlukYoklamaTabProps {
   addNotification?: (mesaj: string) => void;
   /** Varsayılan: kampçı + şenör. Tesisatçı / mermerci / şöför / operatör kendi mobillerinde */
   personelKapsami?: 'kamp' | 'tesisatci' | 'mermerci' | 'sofor' | 'operator' | 'seramik';
+  dateKey?: string;
+  onDateKeyChange?: (dateKey: string) => void;
+  lastSaveStorageKey?: string;
+  hideQuickExport?: boolean;
 }
 
 export const KampGunlukYoklamaTab: React.FC<KampGunlukYoklamaTabProps> = ({
@@ -38,8 +43,13 @@ export const KampGunlukYoklamaTab: React.FC<KampGunlukYoklamaTabProps> = ({
   currentUser,
   addNotification,
   personelKapsami = 'kamp',
+  dateKey,
+  onDateKeyChange,
+  lastSaveStorageKey,
+  hideQuickExport,
 }) => {
-  const [selectedDate, setSelectedDate] = useState<string>(todayDateKey());
+  const persistKey = lastSaveStorageKey || 'kamp_gunluk_yoklama_last';
+  const [selectedDate, setSelectedDate] = useState<string>(dateKey || todayDateKey());
   const [searchQuery, setSearchQuery] = useState('');
   
   const [presentIds, setPresentIds] = useState<string[]>([]);
@@ -50,11 +60,17 @@ export const KampGunlukYoklamaTab: React.FC<KampGunlukYoklamaTabProps> = ({
   const [hasLocalAttendanceDraft, setHasLocalAttendanceDraft] = useState(false);
   const [lastSaveAt, setLastSaveAt] = useState<string | null>(() => {
     try {
-      return localStorage.getItem('kamp_gunluk_yoklama_last');
+      return localStorage.getItem(persistKey);
     } catch {
       return null;
     }
   });
+
+  useEffect(() => {
+    if (!dateKey || dateKey === selectedDate) return;
+    setSelectedDate(dateKey);
+    setHasLocalAttendanceDraft(false);
+  }, [dateKey]);
 
   const { year, month, day } = useMemo(() => {
     const parts = selectedDate.split('-');
@@ -66,8 +82,11 @@ export const KampGunlukYoklamaTab: React.FC<KampGunlukYoklamaTabProps> = ({
   }, [selectedDate]);
 
   const monthPersonelList = useMemo(
-    () => buildPersonelListForMonth(personeller, yoklamalar, year, month),
-    [personeller, yoklamalar, year, month]
+    () =>
+      personelKapsami === 'seramik'
+        ? buildSeramikPersonelListForMonth(personeller, yoklamalar, year, month)
+        : buildPersonelListForMonth(personeller, yoklamalar, year, month),
+    [personeller, yoklamalar, year, month, personelKapsami]
   );
 
   const activeStaff = useMemo(() => {
@@ -131,6 +150,7 @@ export const KampGunlukYoklamaTab: React.FC<KampGunlukYoklamaTabProps> = ({
     setSelectedDate(cleanDate);
     setHasLocalAttendanceDraft(false);
     setSearchQuery('');
+    onDateKeyChange?.(cleanDate);
   };
 
   const setMesaiWithDraft = (id: string, value: number) => {
@@ -185,7 +205,7 @@ export const KampGunlukYoklamaTab: React.FC<KampGunlukYoklamaTabProps> = ({
     setSavingAttendance(true);
     try {
       const sparse: AylikYoklamaMap = {};
-      const gonderen = currentUser?.email || 'kampci';
+      const gonderen = currentUser?.email || (personelKapsami === 'seramik' ? 'goturu' : 'kampci');
 
       activeStaff.forEach((p) => {
         let durumToSave: YoklamaDurum | null = null;
@@ -218,7 +238,7 @@ export const KampGunlukYoklamaTab: React.FC<KampGunlukYoklamaTabProps> = ({
       const stamp = new Date().toLocaleString('tr-TR');
       setLastSaveAt(stamp);
       try {
-        localStorage.setItem('kamp_gunluk_yoklama_last', stamp);
+        localStorage.setItem(persistKey, stamp);
       } catch {
         /* ignore */
       }
@@ -279,12 +299,14 @@ export const KampGunlukYoklamaTab: React.FC<KampGunlukYoklamaTabProps> = ({
               />
             </div>
           </div>
+          {!hideQuickExport && (
           <button 
             onClick={handleExportCsv}
             className="ml-3 shrink-0 bg-emerald-100 hover:bg-emerald-200 text-emerald-800 text-[10px] font-bold px-3 py-2 rounded-xl border border-emerald-200 transition-colors flex items-center justify-center no-print"
           >
             Excel'e Aktar
           </button>
+          )}
         </div>
         
         {hasLocalAttendanceDraft && (

@@ -1,9 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Layers, ClipboardList, Camera, CheckCircle, RefreshCw, LogOut, Pencil, Trash2, Calendar, Printer
+  Layers, ClipboardList, Camera, CheckCircle, RefreshCw, LogOut, Pencil, Trash2, Calendar, Printer, FileSpreadsheet, History
 } from 'lucide-react';
 import { collection, deleteDoc, doc, onSnapshot, setDoc } from 'firebase/firestore';
-import { AylikYoklamaMap, Personel, SahaFaaliyeti, SeramikFaaliyet } from '../types/erp';
+import { Personel, SahaFaaliyeti, SeramikFaaliyet } from '../types/erp';
 import { db, cleanUndefined } from '../lib/firebase';
 import { compressImage } from '../lib/imageCompress';
 import { todayDateKey, formatDateLabelTr, normalizeDateKey } from '../lib/dateKeyUtils';
@@ -22,12 +22,21 @@ import {
   openMobilGunlukFaaliyetReport,
 } from '../lib/mobilGunlukFaaliyetReport';
 import { KampGunlukYoklamaTab } from './KampGunlukYoklamaTab';
+import {
+  goturuGunleriToAylikMap,
+  ozetGoturuYoklamaGunleri,
+  persistGoturuYoklamaSparse,
+  sparseFromGoturuMap,
+  subscribeGoturuYoklamalari,
+  type GoturuYoklamaGunKaydi,
+} from '../lib/goturuYoklamaPersistence';
+import { exportGoturuFaaliyetliPuantajExcel } from '../lib/goturuPuantajExcel';
 
 interface SeramikMobilScreenProps {
   personeller: Personel[];
-  yoklamalar?: AylikYoklamaMap;
-  setYoklamalar?: (updater: AylikYoklamaMap | ((y: AylikYoklamaMap) => AylikYoklamaMap)) => void;
-  saveYoklamalarNow?: (next: AylikYoklamaMap) => Promise<void>;
+  yoklamalar?: unknown;
+  setYoklamalar?: unknown;
+  saveYoklamalarNow?: unknown;
   currentUser: any;
   onSignOut?: () => void;
   isStandalone?: boolean;
@@ -46,15 +55,12 @@ const IS_NITELIGI_OPTIONS = [
 
 export const SeramikMobilScreen: React.FC<SeramikMobilScreenProps> = ({
   personeller,
-  yoklamalar = {},
-  setYoklamalar,
-  saveYoklamalarNow,
   currentUser,
   onSignOut,
   isStandalone = false,
   addNotification,
 }) => {
-  const [activeSubTab, setActiveSubTab] = useState<'faaliyet' | 'yoklama'>('faaliyet');
+  const [activeSubTab, setActiveSubTab] = useState<'faaliyet' | 'yoklama' | 'rapor'>('faaliyet');
   const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
   const statusHideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -77,6 +83,10 @@ export const SeramikMobilScreen: React.FC<SeramikMobilScreenProps> = ({
   const [savingFaaliyet, setSavingFaaliyet] = useState(false);
   const [faaliyetler, setFaaliyetler] = useState<SeramikFaaliyet[]>([]);
   const [editingFaaliyetId, setEditingFaaliyetId] = useState<string | null>(null);
+  const [goturuGunler, setGoturuGunler] = useState<GoturuYoklamaGunKaydi[]>([]);
+  const [yoklamaDate, setYoklamaDate] = useState(todayDateKey());
+  const [raporAy, setRaporAy] = useState(() => todayDateKey().slice(0, 7));
+  const [excelUretiyor, setExcelUretiyor] = useState(false);
 
   useEffect(() => {
     const unsub = onSnapshot(collection(db, 'seramikFaaliyetleri'), (snap) => {
@@ -87,6 +97,14 @@ export const SeramikMobilScreen: React.FC<SeramikMobilScreenProps> = ({
     });
     return () => unsub();
   }, []);
+
+  useEffect(() => subscribeGoturuYoklamalari(setGoturuGunler), []);
+
+  const goturuYoklamalar = useMemo(() => goturuGunleriToAylikMap(goturuGunler), [goturuGunler]);
+  const gecmisOzet = useMemo(
+    () => ozetGoturuYoklamaGunleri(goturuGunler, raporAy),
+    [goturuGunler, raporAy]
+  );
 
   const seramikPersoneller = useMemo(
     () => personeller.filter((p) => isSeramikEkibiPersonel(p)),
@@ -150,17 +168,53 @@ export const SeramikMobilScreen: React.FC<SeramikMobilScreenProps> = ({
     nextMap?: Record<string, number>,
     prevMap?: Record<string, number>
   ) => {
-    if (!setYoklamalar || !saveYoklamalarNow) return;
-    const gonderen = currentUser?.email || 'SERAMIK_MOBIL';
-    let draft = yoklamalar;
+    const gonderen = currentUser?.email || 'goturu';
+    let draft = goturuYoklamalar;
     if (prevMap && Object.keys(prevMap).length) {
       draft = applySahaMesaiToYoklama(draft, tarih, prevMap, gonderen, 'subtract');
     }
     if (nextMap && Object.keys(nextMap).length) {
       draft = applySahaMesaiToYoklama(draft, tarih, nextMap, gonderen, 'add');
     }
-    setYoklamalar(draft);
-    await saveYoklamalarNow(draft);
+    const sparse = sparseFromGoturuMap(draft, tarih);
+    await persistGoturuYoklamaSparse({
+      sparse,
+      existingGunler: goturuGunler,
+      personeller,
+      kaydeden: gonderen,
+      fallbackDate: normalizeDateKey(tarih),
+    });
+  };
+
+  const saveGoturuYoklamaNow = async (sparse: import('../types/erp').AylikYoklamaMap) => {
+    await persistGoturuYoklamaSparse({
+      sparse,
+      existingGunler: goturuGunler,
+      personeller,
+      kaydeden: currentUser?.email || 'goturu',
+      fallbackDate: yoklamaDate,
+    });
+  };
+
+  const handleExcelUret = async () => {
+    const [ys, ms] = raporAy.split('-').map(Number);
+    if (!ys || !ms) return;
+    setExcelUretiyor(true);
+    showStatus('info', 'Aylık faaliyetli puantaj Excel hazırlanıyor…', 0);
+    try {
+      await exportGoturuFaaliyetliPuantajExcel({
+        year: ys,
+        month: ms,
+        gunler: goturuGunler,
+        faaliyetler,
+        personeller,
+      });
+      showStatus('success', 'Kibritçi antetli Excel indirildi.');
+    } catch (err: any) {
+      showStatus('error', 'Excel üretilemedi: ' + (err?.message || ''));
+    } finally {
+      setExcelUretiyor(false);
+    }
   };
 
   const handleSaveFaaliyet = async (e: React.FormEvent) => {
@@ -203,7 +257,7 @@ export const SeramikMobilScreen: React.FC<SeramikMobilScreenProps> = ({
       } else {
         aktifPersonelListesi = resolveGeldiRolPersonelIds(
           personeller,
-          yoklamalar,
+          goturuYoklamalar,
           normalizeDateKey(faaliyetTarih),
           'SERAMIK',
           { ensureEmail: kaydedenEmail }
@@ -315,7 +369,9 @@ export const SeramikMobilScreen: React.FC<SeramikMobilScreenProps> = ({
           </div>
           <div>
             <h1 className="text-sm font-black text-slate-900 uppercase tracking-wide">Götürü / Seramik Mobil</h1>
-            <p className="text-[10px] text-slate-500">Seramik ekibi faaliyeti · Yoklama (parsel / blok)</p>
+            <p className="text-[10px] text-slate-500">
+              Seramik ekibi faaliyeti · Yoklama ayrı kayıt · Aylık puantaj
+            </p>
           </div>
         </div>
         {isStandalone && onSignOut && (
@@ -371,6 +427,17 @@ export const SeramikMobilScreen: React.FC<SeramikMobilScreenProps> = ({
           }`}
         >
           <Calendar size={14} /> Yoklama
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveSubTab('rapor')}
+          className={`px-4 py-2.5 rounded-xl font-bold text-xs transition flex items-center gap-2 border cursor-pointer ${
+            activeSubTab === 'rapor'
+              ? 'bg-orange-600 border-orange-500 text-white'
+              : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'
+          }`}
+        >
+          <FileSpreadsheet size={14} /> Puantaj / Rapor
         </button>
       </div>
 
@@ -629,21 +696,105 @@ export const SeramikMobilScreen: React.FC<SeramikMobilScreenProps> = ({
         </div>
       )}
 
-      {activeSubTab === 'yoklama' && setYoklamalar && saveYoklamalarNow && (
+      {activeSubTab === 'yoklama' && (
+        <div className="space-y-3">
+          <p className="text-[10px] text-slate-500 bg-orange-50 border border-orange-100 rounded-xl px-3 py-2 max-w-[420px] mx-auto">
+            Bu yoklama ana Yoklama ve Puantaj ekranından ayrı tutulur. Aylık Excel ve geçmiş liste
+            Puantaj / Rapor sekmesindedir.
+          </p>
         <KampGunlukYoklamaTab
           personeller={personeller}
-          yoklamalar={yoklamalar}
-          setYoklamalar={setYoklamalar}
-          saveYoklamalarNow={saveYoklamalarNow}
+          yoklamalar={goturuYoklamalar}
+          saveYoklamalarNow={saveGoturuYoklamaNow}
           currentUser={currentUser}
           addNotification={addNotification}
           personelKapsami="seramik"
+          dateKey={yoklamaDate}
+          onDateKeyChange={setYoklamaDate}
+          lastSaveStorageKey="goturu_gunluk_yoklama_last"
+          hideQuickExport
         />
+        </div>
       )}
 
-      {activeSubTab === 'yoklama' && (!setYoklamalar || !saveYoklamalarNow) && (
-        <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 text-xs text-amber-800">
-          Yoklama kaydı için gerekli bağlantılar yüklenemedi.
+      {activeSubTab === 'rapor' && (
+        <div className="space-y-4 max-w-3xl">
+          <div className="bg-white border border-slate-200 rounded-2xl p-4 space-y-3 shadow-sm">
+            <div className="flex flex-wrap items-end gap-3">
+              <label className="space-y-1">
+                <span className="text-[9px] font-black text-slate-500 uppercase tracking-wider block">
+                  Rapor ayı
+                </span>
+                <input
+                  type="month"
+                  value={raporAy}
+                  onChange={(e) => setRaporAy(e.target.value)}
+                  className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm font-bold"
+                />
+              </label>
+              <button
+                type="button"
+                onClick={() => void handleExcelUret()}
+                disabled={excelUretiyor}
+                className="inline-flex items-center gap-2 bg-orange-600 hover:bg-orange-700 disabled:opacity-60 text-white font-black text-[11px] px-4 py-2.5 rounded-xl cursor-pointer"
+              >
+                <FileSpreadsheet size={14} />
+                {excelUretiyor ? 'Hazırlanıyor…' : 'Aylık Faaliyetli Puantaj Excel Üret'}
+              </button>
+            </div>
+            <p className="text-[10px] text-slate-500 leading-snug">
+              Excel Kibritçi antet/logo ile iner. Puantaj sayfası Götürü yoklamasını (ana puantajdan ayrı)
+              ve o ayın seramik faaliyetlerini birleştirir. G = geldi, Y = yok, F = faaliyet.
+            </p>
+          </div>
+
+          <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm space-y-3">
+            <div className="flex items-center gap-2">
+              <History size={16} className="text-orange-700" />
+              <h3 className="text-xs font-black uppercase tracking-wider text-slate-800">
+                Geçmiş yoklamalar
+              </h3>
+              <span className="ml-auto text-[10px] font-bold text-slate-400">
+                {gecmisOzet.length} gün
+              </span>
+            </div>
+            {gecmisOzet.length === 0 ? (
+              <p className="text-[11px] text-slate-400 italic py-4 text-center">
+                Bu ay henüz Götürü yoklaması kaydı yok.
+              </p>
+            ) : (
+              <div className="divide-y divide-slate-100">
+                {gecmisOzet.map((g) => (
+                  <button
+                    key={g.tarih}
+                    type="button"
+                    onClick={() => {
+                      setYoklamaDate(g.tarih);
+                      setActiveSubTab('yoklama');
+                    }}
+                    className="w-full text-left py-2.5 flex items-center justify-between gap-2 hover:bg-slate-50 rounded-lg px-1 cursor-pointer"
+                  >
+                    <div>
+                      <p className="text-[12px] font-black text-slate-800">{formatDateLabelTr(g.tarih)}</p>
+                      <p className="text-[9px] text-slate-400">
+                        {g.kaydeden || '—'}
+                        {g.guncellenme
+                          ? ` · ${new Date(g.guncellenme).toLocaleString('tr-TR')}`
+                          : ''}
+                      </p>
+                    </div>
+                    <div className="flex gap-2 shrink-0 text-[10px] font-extrabold">
+                      <span className="text-emerald-700">Geldi {g.geldi}</span>
+                      <span className="text-rose-600">Yok {g.yok}</span>
+                      {g.mesaiToplam > 0 ? (
+                        <span className="text-amber-700">+{g.mesaiToplam}s</span>
+                      ) : null}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>

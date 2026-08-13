@@ -60,6 +60,7 @@ export const FIRESTORE_COLLECTIONS = [
   'tesisatciFaaliyetleri',
   'mermerciFaaliyetleri',
   'seramikFaaliyetleri',
+  'goturuYoklamalari',
   'depoSayimlari',
   'personelZimmetleri',
   'asanaTasks',

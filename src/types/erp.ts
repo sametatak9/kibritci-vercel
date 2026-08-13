@@ -303,6 +303,24 @@ export interface SeramikFaaliyet {
   guncellenme?: string;
 }
 
+/** Götürü / seramik ekibi günlük yoklaması — ana puantajdan ayrı koleksiyon */
+export interface GoturuYoklamaSatir {
+  personelId: string;
+  ad: string;
+  soyad: string;
+  gorev?: string;
+  durum: YoklamaDurum;
+  mesaiSaati: number;
+}
+
+export interface GoturuYoklamaGunKaydi {
+  id: string;
+  tarih: string;
+  kaydeden?: string;
+  guncellenme?: string;
+  satirlar: GoturuYoklamaSatir[];
+}
+
 /** Şöför mobil — saha/nakliye faaliyeti (Faaliyeti Olan Personeller besler) */
 export interface SoforSahaFaaliyet {
   id: string;

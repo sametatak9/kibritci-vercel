@@ -533,7 +533,8 @@ export function buildPersonelListForMonth(
 
   personeller.forEach(p => {
     // Taşeron + idari kadro yoklama/puantaj listesine girmez.
-    if (isTaseronPersonel(p) || isIdariPersonel(p)) return;
+    // Götürü / seramik ekibi ayrı koleksiyonda (goturuYoklamalari) tutulur.
+    if (isTaseronPersonel(p) || isIdariPersonel(p) || isSeramikEkibiPersonel(p)) return;
     if (isPersonelVisibleInMonth(p, year, month, asYoklamaGunMap(yoklamalar[p.id]))) ids.add(p.id);
   });
   Object.entries(yoklamalar).forEach(([id, map]) => {
@@ -541,7 +542,7 @@ export function buildPersonelListForMonth(
     // Bu, "kayıtlı olmayan personel yoklamada görünüyor" ve mükerrer satır riskini azaltır.
     const existing = byId.get(id);
     if (!existing) return;
-    if (isTaseronPersonel(existing) || isIdariPersonel(existing)) return;
+    if (isTaseronPersonel(existing) || isIdariPersonel(existing) || isSeramikEkibiPersonel(existing)) return;
     const personMap = asYoklamaGunMap(map);
     if (!personHasYoklamaInMonth(personMap, year, month)) return;
     if (!isPersonelVisibleInMonth(existing, year, month, personMap)) return;
@@ -574,4 +575,33 @@ export function buildPersonelListForMonth(
   return Array.from(deduped.values()).sort((a, b) =>
     `${a.ad} ${a.soyad}`.localeCompare(`${b.ad} ${b.soyad}`, 'tr')
   );
+}
+
+/** Götürü / seramik yoklaması — taşeron SERAMİK EKİBİ dahil, ana puantajdan bağımsız */
+export function buildSeramikPersonelListForMonth(
+  personeller: Personel[],
+  yoklamalar: AylikYoklamaMap,
+  year: number,
+  month: number
+): Personel[] {
+  const byId = new Map(personeller.map((p) => [p.id, p]));
+  const ids = new Set<string>();
+
+  personeller.forEach((p) => {
+    if (!isSeramikEkibiPersonel(p)) return;
+    if (isPersonelVisibleInMonth(p, year, month, asYoklamaGunMap(yoklamalar[p.id]))) ids.add(p.id);
+  });
+  Object.entries(yoklamalar).forEach(([id, map]) => {
+    const existing = byId.get(id);
+    if (!existing || !isSeramikEkibiPersonel(existing)) return;
+    const personMap = asYoklamaGunMap(map);
+    if (!personHasYoklamaInMonth(personMap, year, month)) return;
+    if (!isPersonelVisibleInMonth(existing, year, month, personMap)) return;
+    ids.add(id);
+  });
+
+  return Array.from(ids)
+    .map((id) => byId.get(id))
+    .filter((p): p is Personel => !!p)
+    .sort((a, b) => `${a.ad} ${a.soyad}`.localeCompare(`${b.ad} ${b.soyad}`, 'tr'));
 }
