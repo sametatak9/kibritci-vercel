@@ -18,7 +18,8 @@ import { loadKibritciLogoDataUrl } from '../lib/kibritciBrand';
 import { buildPersonelListForMonth, findPersonelByName, getBoundaryDayInMonth, getYoklamaDay, isDayActiveForPersonel, isPersonelVisibleInMonth, normalizeTurkishName, parseFlexibleDateParts, setYoklamaDay } from '../lib/yoklamaUtils';
 import { exportModernPuantajExcel } from '../lib/modernPuantajExcel';
 import { exportAktifPersonelMaasMesaiExcel } from '../lib/aktifPersonelMaasMesaiExcel';
-import { exportAktifPersonelListeExcel, exportAralikYoklamaExcel } from '../lib/aktifPersonelListeExcel';
+import { exportAktifPersonelListeExcel } from '../lib/aktifPersonelListeExcel';
+import { AralikYoklamaExcelModal } from './AralikYoklamaExcelModal';
 import { importAllLegacyExcelMonths, importLegacyExcelMonth, aiMonthlyDataToLegacyMonth, resolveStubPersonelFromLegacyId } from '../lib/legacyYoklamaImport';
 import { LEGACY_EXCEL_MONTHS } from '../data/legacyExcelYoklama';
 import { fetchApiJson } from '../lib/apiClient';
@@ -160,6 +161,7 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
   const [aktifListeEnd, setAktifListeEnd] = useState(() =>
     monthDateRangeKeys(new Date().getFullYear(), new Date().getMonth() + 1).end
   );
+  const [aralikYoklamaOpen, setAralikYoklamaOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [isEditMode, setIsEditMode] = useState(false);
   
@@ -1041,40 +1043,14 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
     }
   };
 
-  const handleExportAralikYoklamaExcel = async () => {
+  const handleOpenAralikYoklamaExcel = () => {
     const start = normalizeDateKey(aktifListeStart);
     const end = normalizeDateKey(aktifListeEnd);
     if (!start || !end) {
       alert('Yoklama dökümü için başlangıç ve bitiş tarihi seçin.');
       return;
     }
-    const from = start <= end ? start : end;
-    const to = start <= end ? end : start;
-    const periodLabel =
-      from === to
-        ? formatDateLabelTr(from)
-        : `${formatDateLabelTr(from)} — ${formatDateLabelTr(to)}`;
-    if (
-      !window.confirm(
-        `${periodLabel} yoklaması Excel indirilsin mi?\n\n` +
-          `Yalnız Kibritçi saha kadrosu (taşeron / idari / seramik ekibi yok).\n` +
-          `Günler: G Geldi · Y Yok · İ İzinli · R Raporlu · P Pazar.\n` +
-          `Mesai saati gün hücresinde ve sağdaki Mesai sütununda görünür.`
-      )
-    ) {
-      return;
-    }
-    try {
-      const count = await exportAralikYoklamaExcel({
-        personeller,
-        yoklamalar: draftYoklamalar,
-        startDate: from,
-        endDate: to,
-      });
-      alert(`${count} kişi için ${periodLabel} yoklaması Excel olarak indirildi.`);
-    } catch (err) {
-      alert(err instanceof Error ? err.message : 'Excel oluşturulamadı.');
-    }
+    setAralikYoklamaOpen(true);
   };
 
   const handleBulkOvertime = (hours: number) => {
@@ -1366,9 +1342,9 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
               </button>
               <button
                 type="button"
-                onClick={() => void handleExportAralikYoklamaExcel()}
+                onClick={handleOpenAralikYoklamaExcel}
                 className="text-[11px] bg-[#1e4e78] hover:bg-[#2563a8] text-white rounded-lg px-3 py-1.5 font-bold cursor-pointer transition flex items-center space-x-1 shadow-sm border border-[#c4a35a]/40"
-                title="Seçili tarih aralığının yoklamasını (G/Y/İ/R/P + mesai) antetli Excel olarak indirir. En fazla 62 gün."
+                title="Seçili aralığın saha yoklamasını görev/T.C. ile Excel’e dökmeden önce personel ekleyip çıkarabilirsiniz."
               >
                 <Calendar size={13} />
                 <span>Aralık Yoklama Excel</span>
@@ -3091,6 +3067,14 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
           </div>
         </div>
       )}
+      <AralikYoklamaExcelModal
+        open={aralikYoklamaOpen}
+        onClose={() => setAralikYoklamaOpen(false)}
+        personeller={personeller}
+        yoklamalar={draftYoklamalar}
+        startDate={aktifListeStart}
+        endDate={aktifListeEnd}
+      />
     </div>
   );
 };

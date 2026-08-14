@@ -96,6 +96,26 @@ export function collectAktifAnaFirmaPersonelForRange(
     .sort(sortByName);
 }
 
+/** Aralık yoklama raporu: Kibritçi saha (idari / taşeron / seramik ekibi yok). */
+export function isAralikYoklamaSahaPersonel(p: Personel): boolean {
+  return !isTaseronPersonel(p) && !isIdariPersonel(p) && !isSeramikEkibiPersonel(p);
+}
+
+export function collectAralikYoklamaSahaPersonel(
+  personeller: Personel[],
+  startDate: string,
+  endDate: string
+): Personel[] {
+  return collectAktifAnaFirmaPersonelForRange(personeller, startDate, endDate).filter(
+    isAralikYoklamaSahaPersonel
+  );
+}
+
+/** Personel ekle araması — pasif kayıtlar da bulunur, idari/taşeron gelmez. */
+export function collectAralikYoklamaSahaHavuz(personeller: Personel[]): Personel[] {
+  return (personeller || []).filter(isAralikYoklamaSahaPersonel).slice().sort(sortByName);
+}
+
 type GorevBucket = { gorev: string; personeller: Personel[] };
 type GrupBucket = { grup: PersonelGorevGrup; label: string; gorevler: GorevBucket[]; kisi: number };
 
@@ -403,7 +423,7 @@ export async function exportAktifPersonelListeExcel(options: {
 }
 
 const WEEKDAY_TR = ['Pa', 'Pt', 'Sa', 'Ça', 'Pe', 'Cu', 'Ct'];
-const MAX_YOKLAMA_GUN = 62;
+export const MAX_ARALIK_YOKLAMA_GUN = 62;
 
 type RangeDay = { key: string; y: number; m: number; d: number; label: string; wd: string };
 
@@ -464,30 +484,60 @@ function normalizeRange(startDate: string, endDate: string): { start: string; en
   return { start, end };
 }
 
+function resolveAralikYoklamaRows(
+  personeller: Personel[],
+  start: string,
+  end: string,
+  selectedIds?: string[]
+): Personel[] {
+  if (!selectedIds) {
+    return collectAralikYoklamaSahaPersonel(personeller, start, end);
+  }
+  const byId = new Map((personeller || []).map((p) => [p.id, p]));
+  const seen = new Set<string>();
+  const rows: Personel[] = [];
+  for (const id of selectedIds) {
+    if (!id || seen.has(id)) continue;
+    const p = byId.get(id);
+    if (!p || !isAralikYoklamaSahaPersonel(p)) continue;
+    seen.add(id);
+    rows.push(p);
+  }
+  return rows;
+}
+
 /**
- * Seçili aralığın yoklama / puantajını antetli Excel’e döker.
- * Yalnız Kibritçi ana firma saha kadrosu; taşeron yok.
+ * Seçili aralığın saha yoklamasını antetli Excel’e döker.
+ * İdari / taşeron yok; personel listesi seçimle daraltılabilir.
  */
 export async function exportAralikYoklamaExcel(options: {
   personeller: Personel[];
   yoklamalar: AylikYoklamaMap;
   startDate: string;
   endDate: string;
+  selectedIds?: string[];
 }): Promise<number> {
   const { start, end } = normalizeRange(options.startDate, options.endDate);
   const days = listDaysInRange(start, end);
   if (days.length === 0) {
     throw new Error('Geçerli bir tarih aralığı seçin.');
   }
-  if (days.length > MAX_YOKLAMA_GUN) {
-    throw new Error(`En fazla ${MAX_YOKLAMA_GUN} günlük yoklama dökülebilir. Aralığı kısaltın.`);
+  if (days.length > MAX_ARALIK_YOKLAMA_GUN) {
+    throw new Error(`En fazla ${MAX_ARALIK_YOKLAMA_GUN} günlük yoklama dökülebilir. Aralığı kısaltın.`);
   }
 
-  const rows = collectAktifAnaFirmaPersonelForRange(options.personeller, start, end).filter(
-    (p) => !isIdariPersonel(p) && !isSeramikEkibiPersonel(p)
+  const rows = resolveAralikYoklamaRows(
+    options.personeller,
+    start,
+    end,
+    options.selectedIds
   );
   if (rows.length === 0) {
-    throw new Error('Bu tarih aralığında dökülecek aktif Kibritçi puantaj kadrosu bulunamadı.');
+    throw new Error(
+      options.selectedIds
+        ? 'Excel için en az bir saha personeli seçin.'
+        : 'Bu tarih aralığında dökülecek aktif Kibritçi saha kadrosu bulunamadı.'
+    );
   }
 
   const donem =
@@ -496,7 +546,7 @@ export async function exportAralikYoklamaExcel(options: {
       : `${formatDateLabelTr(start)} — ${formatDateLabelTr(end)}`;
   const groups = groupAktifPersonel(rows);
   const stamp = new Date().toLocaleString('tr-TR');
-  const identCols = 4;
+  const identCols = 5;
   const totalCols = identCols + days.length + 2;
 
   const wb = await createExcelWorkbook();
@@ -511,6 +561,7 @@ export async function exportAralikYoklamaExcel(options: {
     { width: 26 },
     { width: 14 },
     { width: 20 },
+    { width: 12 },
     ...days.map(() => ({ width: 5.2 })),
     { width: 8 },
     { width: 8 },
@@ -518,8 +569,8 @@ export async function exportAralikYoklamaExcel(options: {
 
   const headerRow = await applyAntet(wb, ws, {
     title: `YOKLAMA / PUANTAJ — ${donem}`,
-    subtitle: `${CANONICAL_ANA_FIRMA_ADI} · taşeron hariç · G Geldi · Y Yok · İ İzinli · R Raporlu · P Pazar · T Tatil`,
-    metaLine: `Dönem: ${donem} · ${days.length} gün · ${rows.length} kişi · Oluşturma: ${stamp}`,
+    subtitle: `${CANONICAL_ANA_FIRMA_ADI} · saha kadrosu · görev/nitelik grubu · T.C. · G Geldi · Y Yok · İ İzinli · R Raporlu · P Pazar · T Tatil`,
+    metaLine: `Dönem: ${donem} · ${days.length} gün · ${rows.length} seçili saha personeli · Oluşturma: ${stamp}`,
     colCount: totalCols,
   });
   ws.pageSetup.orientation = 'landscape';
@@ -531,7 +582,7 @@ export async function exportAralikYoklamaExcel(options: {
 
   const head1 = headerRow;
   const head2 = headerRow + 1;
-  const identHeaders = ['#', 'Ad Soyad', 'T.C. Kimlik No', 'Görev'];
+  const identHeaders = ['#', 'Ad Soyad', 'T.C. Kimlik No', 'Görev', 'Grup'];
   identHeaders.forEach((h, i) => {
     ws.mergeCells(head1, i + 1, head2, i + 1);
     const cell = ws.getCell(head1, i + 1);
@@ -607,6 +658,7 @@ export async function exportAralikYoklamaExcel(options: {
         ws.getCell(r, 3).value = String(p.tcNo || '').trim() || '—';
         ws.getCell(r, 3).numFmt = '@';
         ws.getCell(r, 4).value = displayPersonelGorev(p);
+        ws.getCell(r, 5).value = personelGorevGrupLabel(resolvePersonelGorevGrubu(p));
 
         let geldi = 0;
         let mesaiToplam = 0;
@@ -662,7 +714,7 @@ export async function exportAralikYoklamaExcel(options: {
           };
           cell.alignment = {
             vertical: 'middle',
-            horizontal: c === 2 || c === 4 ? 'left' : 'center',
+            horizontal: c === 1 || c === 3 ? 'center' : 'left',
           };
           if (sira % 2 === 0 && c !== 3) setFill(cell, 'FFF8FAFC');
         }
@@ -670,6 +722,73 @@ export async function exportAralikYoklamaExcel(options: {
       }
     }
   }
+
+  const ozet = wb.addWorksheet('Görev Özeti', {
+    views: [{ state: 'frozen', ySplit: 10, showGridLines: false }],
+  });
+  ozet.columns = [
+    { width: 16 },
+    { width: 24 },
+    { width: 10 },
+    { width: 14 },
+    { width: 12 },
+  ];
+  await applyAntet(wb, ozet, {
+    title: `SAHA YOKLAMA ÖZETİ — ${donem}`,
+    subtitle: `${CANONICAL_ANA_FIRMA_ADI} · seçili kadro · görev / nitelik kırılımı`,
+    metaLine: `Dönem: ${donem} · ${rows.length} kişi · Oluşturma: ${stamp}`,
+    colCount: 5,
+  });
+  ['Grup', 'Görev', 'Kişi', 'Gelen gün', 'Mesai saat'].forEach((h, i) => {
+    const cell = ozet.getCell(10, i + 1);
+    cell.value = h;
+    cell.font = { bold: true, size: 9, color: { argb: 'FFFFFFFF' } };
+    cell.alignment = { horizontal: 'center', vertical: 'middle' };
+    setFill(cell, 'FF1E4E78');
+    cell.border = thinBorder();
+  });
+
+  let ozetGeldi = 0;
+  let ozetMesai = 0;
+  for (const grup of groups) {
+    for (const gorev of grup.gorevler) {
+      let geldiToplam = 0;
+      let mesaiToplam = 0;
+      for (const p of gorev.personeller) {
+        const map = options.yoklamalar[p.id];
+        days.forEach((day) => {
+          if (!isDayActiveForPersonel(p, day.y, day.m, day.d, map)) return;
+          const rec =
+            getYoklamaDay(map, day.y, day.m, day.d) ||
+            (map as Record<string, { durum?: YoklamaDurum; mesaiSaati?: number }> | undefined)?.[
+              String(day.d)
+            ];
+          if (rec?.durum === 'Geldi') geldiToplam += 1;
+          mesaiToplam += Number(rec?.mesaiSaati || 0);
+        });
+      }
+      ozetGeldi += geldiToplam;
+      ozetMesai += mesaiToplam;
+      const r = ozet.addRow([
+        grup.label,
+        gorev.gorev,
+        gorev.personeller.length,
+        geldiToplam,
+        Number(mesaiToplam.toFixed(1)),
+      ]);
+      r.eachCell((cell, col) => {
+        cell.font = { name: 'Arial', size: 10 };
+        cell.border = thinBorder();
+        cell.alignment = { vertical: 'middle', horizontal: col >= 3 ? 'center' : 'left' };
+      });
+    }
+  }
+  const tot = ozet.addRow(['TOPLAM', '', rows.length, ozetGeldi, Number(ozetMesai.toFixed(1))]);
+  tot.eachCell((cell) => {
+    cell.font = { name: 'Arial', size: 10, bold: true, color: { argb: 'FF0F172A' } };
+    setFill(cell, 'FFE2E8F0');
+    cell.border = thinBorder();
+  });
 
   const buffer = await wb.xlsx.writeBuffer();
   downloadBuffer(
