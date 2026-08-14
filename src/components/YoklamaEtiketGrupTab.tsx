@@ -1,8 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { FileText, Plus, Search, Tag, UserMinus, UserPlus } from 'lucide-react';
-import type { Personel } from '../types/erp';
+import type { AylikYoklamaMap, Personel, YoklamaDurum } from '../types/erp';
 import { displayPersonelGorev } from '../lib/guvenlikHelpers';
-import { formatDateLabelTr, normalizeDateKey } from '../lib/dateKeyUtils';
+import { getYoklamaDay } from '../lib/yoklamaUtils';
 import { rememberPersonelTakipEtiketleri, subscribePersonelTakipEtiketleri } from '../lib/personelTakipEtiketPersistence';
 import {
   collectUsedPersonelTakipEtiketleri,
@@ -12,6 +12,8 @@ import {
   personelHasTakipEtiketi,
   withPersonelTakipEtiketi,
 } from '../lib/personelTakipEtiketUtils';
+
+const WEEKDAY_TR = ['Pa', 'Pt', 'Sa', 'Ça', 'Pe', 'Cu', 'Ct'];
 
 function personelAd(p: Personel): string {
   return `${p.ad || ''} ${p.soyad || ''}`.trim();
@@ -24,6 +26,25 @@ function isAktifKadro(p: Personel): boolean {
     .toLocaleUpperCase('tr-TR');
   if (durum === 'PASIF' || durum === 'FALSE' || durum === '0') return false;
   return true;
+}
+
+function toStatusSymbol(durum?: YoklamaDurum | string): string {
+  if (durum === 'Geldi') return 'G';
+  if (durum === 'Yok') return 'Y';
+  if (durum === 'İzinli') return 'İ';
+  if (durum === 'Raporlu') return 'R';
+  if (durum === 'Pazar') return 'P';
+  if (durum === 'Tatil') return 'T';
+  return '·';
+}
+
+function statusCellClass(durum?: YoklamaDurum | string): string {
+  if (durum === 'Geldi') return 'bg-emerald-100 text-emerald-800';
+  if (durum === 'Yok') return 'bg-rose-100 text-rose-800';
+  if (durum === 'İzinli') return 'bg-sky-100 text-sky-800';
+  if (durum === 'Raporlu') return 'bg-amber-100 text-amber-800';
+  if (durum === 'Pazar' || durum === 'Tatil') return 'bg-orange-100 text-orange-800';
+  return 'bg-slate-50 text-slate-300';
 }
 
 function downloadNamesTxt(etiket: string, people: Personel[]) {
@@ -52,13 +73,17 @@ function downloadNamesTxt(etiket: string, people: Personel[]) {
 export const YoklamaEtiketGrupTab: React.FC<{
   personeller: Personel[];
   setPersoneller?: React.Dispatch<React.SetStateAction<Personel[]>>;
-}> = ({ personeller, setPersoneller }) => {
+  yoklamalar?: AylikYoklamaMap;
+}> = ({ personeller, setPersoneller, yoklamalar = {} }) => {
+  const now = new Date();
   const [kayitliEtiketler, setKayitliEtiketler] = useState<string[]>([]);
   const [selectedEtiket, setSelectedEtiket] = useState('ZER YAPI');
   const [yeniEtiket, setYeniEtiket] = useState('');
   const [listQuery, setListQuery] = useState('');
   const [addQuery, setAddQuery] = useState('');
   const [saving, setSaving] = useState(false);
+  const [viewMonth, setViewMonth] = useState(now.getMonth() + 1);
+  const [viewYear, setViewYear] = useState(now.getFullYear());
 
   useEffect(() => subscribePersonelTakipEtiketleri(setKayitliEtiketler), []);
 
@@ -74,6 +99,17 @@ export const YoklamaEtiketGrupTab: React.FC<{
   useEffect(() => {
     if (!selectedEtiket && katalog[0]) setSelectedEtiket(katalog[0]);
   }, [katalog, selectedEtiket]);
+
+  const daysInMonth = new Date(viewYear, viewMonth, 0).getDate();
+  const days = useMemo(
+    () =>
+      Array.from({ length: daysInMonth }, (_, i) => {
+        const d = i + 1;
+        const wd = new Date(viewYear, viewMonth - 1, d).getDay();
+        return { d, wd, label: String(d), week: WEEKDAY_TR[wd] };
+      }),
+    [daysInMonth, viewMonth, viewYear]
+  );
 
   const grup = useMemo(
     () =>
@@ -109,6 +145,24 @@ export const YoklamaEtiketGrupTab: React.FC<{
       .slice(0, 40);
   }, [addQuery, personeller, selectedEtiket]);
 
+  const ozet = useMemo(() => {
+    let geldi = 0;
+    let yok = 0;
+    let mesai = 0;
+    for (const p of gorunen) {
+      const map = yoklamalar[p.id];
+      for (const day of days) {
+        const rec =
+          getYoklamaDay(map, viewYear, viewMonth, day.d) ||
+          (map as Record<string, { durum?: string; mesaiSaati?: number }> | undefined)?.[String(day.d)];
+        if (rec?.durum === 'Geldi') geldi += 1;
+        if (rec?.durum === 'Yok') yok += 1;
+        mesai += Number(rec?.mesaiSaati || 0);
+      }
+    }
+    return { geldi, yok, mesai: Number(mesai.toFixed(1)) };
+  }, [gorunen, yoklamalar, days, viewYear, viewMonth]);
+
   const applyTag = async (personelId: string, on: boolean) => {
     if (!setPersoneller) {
       alert('Personel kaydı bu oturumda güncellenemiyor.');
@@ -143,6 +197,10 @@ export const YoklamaEtiketGrupTab: React.FC<{
   };
 
   const canEdit = Boolean(setPersoneller);
+  const donemLabel = new Date(viewYear, viewMonth - 1, 1).toLocaleDateString('tr-TR', {
+    month: 'long',
+    year: 'numeric',
+  });
 
   return (
     <div className="flex flex-col gap-4 min-h-0 flex-1">
@@ -152,10 +210,10 @@ export const YoklamaEtiketGrupTab: React.FC<{
             <Tag size={13} />
             Etiket grupları
           </div>
-          <h2 className="text-sm font-black text-slate-900 mt-0.5">Kadro takibi</h2>
+          <h2 className="text-sm font-black text-slate-900 mt-0.5">Grup tespiti ve yoklama takibi</h2>
           <p className="text-[11px] text-slate-500 mt-1 leading-relaxed max-w-3xl">
-            Bu sayfa yoklama almaz. Belirlediğiniz etikete (ör. ZER YAPI) sahip personeli bir arada
-            görür, ekler veya çıkarırsınız. Günlük puantaj eski yerinde durur.
+            Puantaj sistemi değişmez; yoklama yine oradan alınır. Burada yalnızca etiketlediğiniz
+            kadroyu (ör. ZER YAPI) ayırır, o grubun mevcut yoklamasını izlersiniz.
           </p>
         </div>
 
@@ -205,26 +263,64 @@ export const YoklamaEtiketGrupTab: React.FC<{
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1.45fr)_minmax(260px,0.8fr)] gap-4 min-h-0 flex-1">
+      <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1.55fr)_minmax(250px,0.7fr)] gap-4 min-h-0 flex-1">
         <div className="bg-white border border-slate-200 rounded-xl shadow-sm flex flex-col min-h-[420px] overflow-hidden">
           <div className="px-4 py-3 border-b border-slate-100 flex flex-wrap items-center gap-2">
             <div className="min-w-0">
               <div className="text-[10px] font-black uppercase tracking-widest text-slate-400">
-                Seçili etiket
+                {selectedEtiket || '—'} · yoklama takibi
               </div>
               <div className="text-sm font-black text-slate-900">
-                {selectedEtiket || '—'}
-                <span className="ml-2 text-[11px] font-bold text-slate-500">{grup.length} kişi</span>
+                {grup.length} kişi
+                <span className="ml-2 text-[11px] font-bold text-emerald-700">
+                  {donemLabel}: {ozet.geldi} geldi · {ozet.yok} yok
+                  {ozet.mesai > 0 ? ` · ${ozet.mesai}s mesai` : ''}
+                </span>
               </div>
             </div>
             <div className="ml-auto flex flex-wrap items-center gap-2">
+              <select
+                value={viewMonth}
+                onChange={(e) => setViewMonth(parseInt(e.target.value, 10))}
+                className="text-[11px] font-semibold border border-slate-200 rounded-lg p-1.5 bg-slate-50 cursor-pointer"
+              >
+                {[
+                  'Ocak',
+                  'Şubat',
+                  'Mart',
+                  'Nisan',
+                  'Mayıs',
+                  'Haziran',
+                  'Temmuz',
+                  'Ağustos',
+                  'Eylül',
+                  'Ekim',
+                  'Kasım',
+                  'Aralık',
+                ].map((ad, i) => (
+                  <option key={ad} value={i + 1}>
+                    {ad}
+                  </option>
+                ))}
+              </select>
+              <select
+                value={viewYear}
+                onChange={(e) => setViewYear(parseInt(e.target.value, 10))}
+                className="text-[11px] font-semibold border border-slate-200 rounded-lg p-1.5 bg-slate-50 cursor-pointer"
+              >
+                {[2024, 2025, 2026, 2027].map((y) => (
+                  <option key={y} value={y}>
+                    {y}
+                  </option>
+                ))}
+              </select>
               <div className="relative">
                 <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
                 <input
                   value={listQuery}
                   onChange={(e) => setListQuery(e.target.value)}
                   placeholder="Ad, T.C. veya görev"
-                  className="text-xs font-semibold border border-slate-200 rounded-lg pl-8 pr-3 py-1.5 bg-slate-50 w-48"
+                  className="text-xs font-semibold border border-slate-200 rounded-lg pl-8 pr-3 py-1.5 bg-slate-50 w-40"
                 />
               </div>
               <button
@@ -238,51 +334,103 @@ export const YoklamaEtiketGrupTab: React.FC<{
               </button>
             </div>
           </div>
-          <div className="flex-1 overflow-y-auto">
+          <div className="flex-1 overflow-auto">
             {gorunen.length === 0 ? (
               <p className="text-center text-slate-400 text-xs py-16 italic px-6">
                 Bu etikette henüz personel yok. Sağdan ad veya T.C. yazıp ekleyin.
               </p>
             ) : (
-              <table className="w-full text-left">
-                <thead className="sticky top-0 bg-slate-50 text-[10px] uppercase tracking-wide text-slate-500">
+              <table className="w-max min-w-full text-left">
+                <thead className="sticky top-0 bg-slate-50 text-[10px] uppercase tracking-wide text-slate-500 z-10">
                   <tr>
-                    <th className="px-3 py-2 font-bold w-8">#</th>
-                    <th className="px-3 py-2 font-bold">Ad Soyad</th>
-                    <th className="px-3 py-2 font-bold">T.C.</th>
-                    <th className="px-3 py-2 font-bold">Görev</th>
-                    <th className="px-3 py-2 font-bold">İşe giriş</th>
-                    {canEdit && <th className="px-3 py-2 font-bold w-24" />}
+                    <th className="px-2 py-2 font-bold sticky left-0 bg-slate-50 z-20">#</th>
+                    <th className="px-2 py-2 font-bold sticky left-6 bg-slate-50 z-20 min-w-[140px]">
+                      Ad Soyad
+                    </th>
+                    <th className="px-2 py-2 font-bold">T.C.</th>
+                    <th className="px-2 py-2 font-bold">Görev</th>
+                    {days.map((day) => (
+                      <th
+                        key={day.d}
+                        className={`px-0.5 py-1 font-bold text-center min-w-[22px] ${
+                          day.wd === 0 ? 'text-orange-700' : ''
+                        }`}
+                        title={`${day.label} ${day.week}`}
+                      >
+                        <div>{day.label}</div>
+                        <div className="text-[8px] font-semibold normal-case">{day.week}</div>
+                      </th>
+                    ))}
+                    <th className="px-2 py-2 font-bold text-center">Gelen</th>
+                    <th className="px-2 py-2 font-bold text-center">Mesai</th>
+                    {canEdit && <th className="px-2 py-2 font-bold" />}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {gorunen.map((p, i) => {
-                    const giris = normalizeDateKey(p.iseGirisTarihi);
+                    const map = yoklamalar[p.id];
+                    let geldi = 0;
+                    let mesaiToplam = 0;
+                    const cells = days.map((day) => {
+                      const rec =
+                        getYoklamaDay(map, viewYear, viewMonth, day.d) ||
+                        (map as Record<string, { durum?: YoklamaDurum; mesaiSaati?: number }> | undefined)?.[
+                          String(day.d)
+                        ];
+                      const durum = rec?.durum;
+                      const mesai = Number(rec?.mesaiSaati || 0);
+                      if (durum === 'Geldi') geldi += 1;
+                      mesaiToplam += mesai;
+                      return { day, durum, mesai };
+                    });
                     return (
                       <tr key={p.id} className="hover:bg-slate-50/80">
-                        <td className="px-3 py-2 text-[11px] text-slate-400 tabular-nums">{i + 1}</td>
-                        <td className="px-3 py-2">
-                          <div className="text-xs font-bold text-slate-900">{personelAd(p)}</div>
+                        <td className="px-2 py-1.5 text-[11px] text-slate-400 tabular-nums sticky left-0 bg-white">
+                          {i + 1}
+                        </td>
+                        <td className="px-2 py-1.5 sticky left-6 bg-white min-w-[140px]">
+                          <div className="text-xs font-bold text-slate-900 whitespace-nowrap">
+                            {personelAd(p)}
+                          </div>
                           {!isAktifKadro(p) && (
                             <span className="text-[8px] font-black uppercase text-rose-700">Pasif</span>
                           )}
                         </td>
-                        <td className="px-3 py-2 text-[11px] font-semibold tabular-nums text-slate-700">
+                        <td className="px-2 py-1.5 text-[11px] font-semibold tabular-nums text-slate-700 whitespace-nowrap">
                           {String(p.tcNo || '').trim() || '—'}
                         </td>
-                        <td className="px-3 py-2 text-[11px] font-semibold text-slate-600">
+                        <td className="px-2 py-1.5 text-[11px] font-semibold text-slate-600 whitespace-nowrap">
                           {displayPersonelGorev(p)}
                         </td>
-                        <td className="px-3 py-2 text-[11px] text-slate-500">
-                          {giris ? formatDateLabelTr(giris) : '—'}
+                        {cells.map(({ day, durum, mesai }) => (
+                          <td key={day.d} className="px-0.5 py-1 text-center">
+                            <span
+                              className={`inline-block min-w-[18px] text-[9px] font-black rounded px-0.5 ${statusCellClass(
+                                durum
+                              )}`}
+                              title={
+                                durum && durum !== 'Girilmedi'
+                                  ? `${durum}${mesai > 0 ? ` · ${mesai}s` : ''}`
+                                  : 'Girilmedi'
+                              }
+                            >
+                              {toStatusSymbol(durum)}
+                            </span>
+                          </td>
+                        ))}
+                        <td className="px-2 py-1.5 text-center text-[11px] font-black text-emerald-800">
+                          {geldi}
+                        </td>
+                        <td className="px-2 py-1.5 text-center text-[11px] font-bold text-amber-800">
+                          {mesaiToplam > 0 ? Number(mesaiToplam.toFixed(1)) : '—'}
                         </td>
                         {canEdit && (
-                          <td className="px-3 py-2 text-right">
+                          <td className="px-2 py-1.5 text-right">
                             <button
                               type="button"
                               disabled={saving}
                               onClick={() => void applyTag(p.id, false)}
-                              className="inline-flex items-center gap-1 text-[10px] font-bold text-rose-700 bg-rose-50 border border-rose-100 hover:bg-rose-100 rounded-lg px-2 py-1 cursor-pointer disabled:opacity-50"
+                              className="inline-flex items-center gap-1 text-[10px] font-bold text-rose-700 bg-rose-50 border border-rose-100 hover:bg-rose-100 rounded-lg px-2 py-1 cursor-pointer disabled:opacity-50 whitespace-nowrap"
                             >
                               <UserMinus size={11} />
                               Çıkar
@@ -306,7 +454,7 @@ export const YoklamaEtiketGrupTab: React.FC<{
             </div>
             <p className="text-[10px] text-slate-500 mb-2 leading-relaxed">
               {isBuiltinPersonelTakipEtiketi(selectedEtiket)
-                ? 'ZER YAPI kadrosunu buradan ayırın. Yoklama şart değil.'
+                ? 'ZER YAPI kadrosunu buradan ayırın. Yoklama Puantaj sayfasından alınmaya devam eder.'
                 : 'Bu etikete yazılacak kişiyi ad veya T.C. ile bulun.'}
             </p>
             <div className="relative">
