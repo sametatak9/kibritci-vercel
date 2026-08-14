@@ -1,5 +1,5 @@
 /**
- * Etiket grubu (ZER YAPI vb.) aylık hakediş Excel’i.
+ * Etiket grubu (ZER YAPI vb.) tarih aralıklı hakediş Excel’i.
  * Antet + logo, meslek grupları, puantaj cetveli — ödeme kaynağı.
  */
 import type { Workbook, Worksheet } from 'exceljs';
@@ -15,24 +15,13 @@ import { classifyFaaliyetKategori, kategoriSirasi } from './faaliyetKategoriUtil
 import { normalizeYoklamaEtiketi, YOKLAMA_ETIKETSIZ } from './yoklamaEtiketUtils';
 import { getYoklamaDay, isDayActiveForPersonel } from './yoklamaUtils';
 import { personelGorevGrupLabel, resolvePersonelGorevGrubu } from './personelGorevGrupUtils';
+import { formatDateLabelTr, normalizeDateKey } from './dateKeyUtils';
+
+export const MAX_GRUP_HAKEDIS_GUN = 62;
 
 const WEEKDAY_TR = ['Pa', 'Pt', 'Sa', 'Ça', 'Pe', 'Cu', 'Ct'];
-const AY_TR = [
-  'Ocak',
-  'Şubat',
-  'Mart',
-  'Nisan',
-  'Mayıs',
-  'Haziran',
-  'Temmuz',
-  'Ağustos',
-  'Eylül',
-  'Ekim',
-  'Kasım',
-  'Aralık',
-];
 
-type DayCol = { d: number; wd: string; sunday: boolean };
+type DayCol = { y: number; m: number; d: number; wd: string; sunday: boolean; label: string };
 
 type PersonHakedis = {
   p: Personel;
@@ -88,14 +77,57 @@ function personelAd(p: Personel): string {
   return `${p.ad || ''} ${p.soyad || ''}`.trim();
 }
 
-function daysInMonth(year: number, month: number): DayCol[] {
-  const n = new Date(year, month, 0).getDate();
+function pad2(n: number): string {
+  return String(n).padStart(2, '0');
+}
+
+function daysInRange(startDate: string, endDate: string): DayCol[] {
+  let start = normalizeDateKey(startDate);
+  let end = normalizeDateKey(endDate);
+  if (!start || !end) {
+    throw new Error('Başlangıç ve bitiş tarihi seçin.');
+  }
+  if (start > end) {
+    const tmp = start;
+    start = end;
+    end = tmp;
+  }
+  const [sy, sm, sd] = start.split('-').map(Number);
+  const [ey, em, ed] = end.split('-').map(Number);
+  const cursor = new Date(sy, sm - 1, sd);
+  const last = new Date(ey, em - 1, ed);
   const out: DayCol[] = [];
-  for (let d = 1; d <= n; d++) {
-    const dt = new Date(year, month - 1, d);
-    out.push({ d, wd: WEEKDAY_TR[dt.getDay()], sunday: dt.getDay() === 0 });
+  while (cursor.getTime() <= last.getTime()) {
+    const y = cursor.getFullYear();
+    const m = cursor.getMonth() + 1;
+    const d = cursor.getDate();
+    out.push({
+      y,
+      m,
+      d,
+      wd: WEEKDAY_TR[cursor.getDay()],
+      sunday: cursor.getDay() === 0,
+      label: `${pad2(d)}.${pad2(m)}`,
+    });
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  if (out.length === 0) {
+    throw new Error('Geçerli bir tarih aralığı seçin.');
+  }
+  if (out.length > MAX_GRUP_HAKEDIS_GUN) {
+    throw new Error(
+      `En fazla ${MAX_GRUP_HAKEDIS_GUN} günlük aralık raporlanır. Aralığı kısaltın (${out.length} gün seçildi).`
+    );
   }
   return out;
+}
+
+function monthBounds(year: number, month: number): { start: string; end: string } {
+  const last = new Date(year, month, 0).getDate();
+  return {
+    start: `${year}-${pad2(month)}-01`,
+    end: `${year}-${pad2(month)}-${pad2(last)}`,
+  };
 }
 
 function toSymbol(durum?: YoklamaDurum | string): string {
@@ -143,8 +175,6 @@ function dominantMeslek(gun: Map<string, number>): string {
 function buildHakedis(
   people: Personel[],
   yoklamalar: AylikYoklamaMap,
-  year: number,
-  month: number,
   days: DayCol[]
 ): PersonHakedis[] {
   return people
@@ -161,8 +191,8 @@ function buildHakedis(
       let girilmedi = 0;
       let mesai = 0;
       for (const day of days) {
-        if (!isDayActiveForPersonel(p, year, month, day.d, map)) continue;
-        const rec = getYoklamaDay(map, year, month, day.d);
+        if (!isDayActiveForPersonel(p, day.y, day.m, day.d, map)) continue;
+        const rec = getYoklamaDay(map, day.y, day.m, day.d);
         const durum = rec?.durum;
         const saat = Number(rec?.mesaiSaati || 0);
         if (durum === 'Geldi') {
@@ -319,14 +349,17 @@ function paintRow(
 }
 
 /**
- * Seçili etiket grubunun aylık antetli hakediş Excel’ini indirir.
+ * Seçili etiket grubunun antetli hakediş Excel’ini indirir.
+ * `startDate`/`endDate` (YYYY-MM-DD) verilirse o aralık; yoksa `year`/`month` tam ayı.
  */
 export async function exportGrupYoklamaHakedisExcel(options: {
   grupEtiket: string;
   personeller: Personel[];
   yoklamalar: AylikYoklamaMap;
-  year: number;
-  month: number;
+  startDate?: string;
+  endDate?: string;
+  year?: number;
+  month?: number;
 }): Promise<number> {
   const grup = String(options.grupEtiket || '').trim() || 'GRUP';
   const people = (options.personeller || []).filter((p) => p?.id);
@@ -335,14 +368,30 @@ export async function exportGrupYoklamaHakedisExcel(options: {
       `«${grup}» grubunda raporlanacak personel yok. Önce kadroyu işaretleyip kaydedin.`
     );
   }
-  const year = options.year;
-  const month = options.month;
-  if (!year || !month) throw new Error('Ay ve yıl seçin.');
 
-  const days = daysInMonth(year, month);
-  const donem = `${AY_TR[month - 1] || month} ${year}`;
+  let start = normalizeDateKey(options.startDate);
+  let end = normalizeDateKey(options.endDate);
+  if (!start || !end) {
+    if (!options.year || !options.month) {
+      throw new Error('Başlangıç / bitiş tarihi veya ay-yıl seçin.');
+    }
+    const bounds = monthBounds(options.year, options.month);
+    start = bounds.start;
+    end = bounds.end;
+  }
+  if (start > end) {
+    const tmp = start;
+    start = end;
+    end = tmp;
+  }
+
+  const days = daysInRange(start, end);
+  const donem =
+    start === end
+      ? formatDateLabelTr(start)
+      : `${formatDateLabelTr(start)} — ${formatDateLabelTr(end)}`;
   const stamp = new Date().toLocaleString('tr-TR');
-  const rows = buildHakedis(people, options.yoklamalar || {}, year, month, days);
+  const rows = buildHakedis(people, options.yoklamalar || {}, days);
 
   const totGeldi = rows.reduce((n, r) => n + r.geldi, 0);
   const totYok = rows.reduce((n, r) => n + r.yok, 0);
@@ -395,7 +444,7 @@ export async function exportGrupYoklamaHakedisExcel(options: {
     { width: 12 },
   ];
   await applyAntet(wb, ozet, {
-    title: `${grup} — AYLIK HAKEDİŞ / YOKLAMA RAPORU`,
+    title: `${grup} — HAKEDİŞ / YOKLAMA RAPORU`,
     subtitle: `${KIBRITCI_COMPANY.shortName}  ·  ${donem}  ·  meslek grupları (usta yardımcılığı, temizlik vb.) ayrı`,
     metaLine: `Kadro: ${rows.length} kişi  ·  Geldi gün: ${totGeldi}  ·  Yok: ${totYok}  ·  Mesai: ${totMesai} sa  ·  Düzenleme: ${stamp}`,
     colCount: ozetCols,
@@ -577,7 +626,7 @@ export async function exportGrupYoklamaHakedisExcel(options: {
   days.forEach((day, idx) => {
     const col = ident + idx + 1;
     const c1 = puantaj.getCell(h1, col);
-    c1.value = day.d;
+    c1.value = days.some((d) => d.y !== days[0].y || d.m !== days[0].m) ? day.label : day.d;
     c1.font = { bold: true, size: 8, color: { argb: 'FFFFFFFF' } };
     c1.alignment = { horizontal: 'center' };
     setFill(c1, day.sunday ? 'FF9A3412' : 'FF1E4E78');
@@ -628,13 +677,13 @@ export async function exportGrupYoklamaHakedisExcel(options: {
         const cell = puantaj.getCell(rn, col);
         cell.border = thinBorder();
         cell.alignment = { horizontal: 'center', vertical: 'middle' };
-        if (!isDayActiveForPersonel(r.p, year, month, day.d, map)) {
+        if (!isDayActiveForPersonel(r.p, day.y, day.m, day.d, map)) {
           cell.value = '—';
           setFill(cell, 'FFF1F5F9');
           cell.font = { name: 'Arial', size: 7, color: { argb: 'FF94A3B8' } };
           return;
         }
-        const rec = getYoklamaDay(map, year, month, day.d);
+        const rec = getYoklamaDay(map, day.y, day.m, day.d);
         const durum = rec?.durum;
         const saat = Number(rec?.mesaiSaati || 0);
         cell.value = saat > 0 ? `${toSymbol(durum)}\n${saat}` : toSymbol(durum);
@@ -693,11 +742,11 @@ export async function exportGrupYoklamaHakedisExcel(options: {
     'Açıklama',
   ]);
   for (const day of days) {
-    const tarih = `${String(day.d).padStart(2, '0')}.${String(month).padStart(2, '0')}.${year}`;
+    const tarih = `${pad2(day.d)}.${pad2(day.m)}.${day.y}`;
     for (const r of rows) {
       const map = options.yoklamalar[r.p.id];
-      if (!isDayActiveForPersonel(r.p, year, month, day.d, map)) continue;
-      const rec = getYoklamaDay(map, year, month, day.d);
+      if (!isDayActiveForPersonel(r.p, day.y, day.m, day.d, map)) continue;
+      const rec = getYoklamaDay(map, day.y, day.m, day.d);
       if (rec?.durum !== 'Geldi') continue;
       const meslek = meslekForGeldiDay(rec.isEtiketi, rec.aciklama);
       const excelRow = dokum.addRow([
@@ -721,7 +770,7 @@ export async function exportGrupYoklamaHakedisExcel(options: {
   const buffer = await wb.xlsx.writeBuffer();
   downloadBuffer(
     buffer as ArrayBuffer,
-    `Kibritci_${safeGrup}_Hakedis_${year}${String(month).padStart(2, '0')}.xlsx`
+    `Kibritci_${safeGrup}_Hakedis_${start.replace(/-/g, '')}_${end.replace(/-/g, '')}.xlsx`
   );
   return rows.length;
 }

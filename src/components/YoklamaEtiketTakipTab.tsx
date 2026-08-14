@@ -38,6 +38,19 @@ function parseDateKey(key: string): { year: number; month: number; day: number }
   return { year: parts[0] || 0, month: parts[1] || 0, day: parts[2] || 0 };
 }
 
+function monthStartKey(dateKey: string): string {
+  const { year, month } = parseDateKey(dateKey);
+  if (!year || !month) return dateKey;
+  return `${year}-${String(month).padStart(2, '0')}-01`;
+}
+
+function monthEndKey(dateKey: string): string {
+  const { year, month } = parseDateKey(dateKey);
+  if (!year || !month) return dateKey;
+  const last = new Date(year, month, 0).getDate();
+  return `${year}-${String(month).padStart(2, '0')}-${String(last).padStart(2, '0')}`;
+}
+
 function emptyDay(): YoklamaGunKaydi {
   return { durum: 'Girilmedi', mesaiSaati: 0 };
 }
@@ -78,6 +91,8 @@ export const YoklamaEtiketTakipTab: React.FC<{
     () => normalizePersonelTakipEtiketi(initialGrupEtiket) || 'ZER YAPI'
   );
   const [selectedDate, setSelectedDate] = useState(todayDateKey());
+  const [raporBaslangic, setRaporBaslangic] = useState(() => monthStartKey(todayDateKey()));
+  const [raporBitis, setRaporBitis] = useState(todayDateKey);
   const [listQuery, setListQuery] = useState('');
   const [listeFiltre, setListeFiltre] = useState<'ALL' | 'GELDI' | 'GIRILMEDI'>('ALL');
   const [bulkMeslek, setBulkMeslek] = useState('');
@@ -239,8 +254,8 @@ export const YoklamaEtiketTakipTab: React.FC<{
         grupEtiket,
         personeller: tagged,
         yoklamalar,
-        year,
-        month,
+        startDate: raporBaslangic,
+        endDate: raporBitis,
       });
     } catch (err) {
       console.error(err);
@@ -320,6 +335,63 @@ export const YoklamaEtiketTakipTab: React.FC<{
               </span>
             ))}
           </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50/70 p-2.5">
+          <Calendar size={13} className="text-emerald-800" />
+          <span className="text-[10px] font-black uppercase text-emerald-900">Rapor aralığı</span>
+          <label className="inline-flex items-center gap-1 text-[11px] font-bold text-slate-600">
+            Başlangıç
+            <input
+              type="date"
+              value={raporBaslangic}
+              onChange={(e) => setRaporBaslangic(e.target.value || raporBaslangic)}
+              className="text-xs font-semibold border border-emerald-200 rounded-lg px-2 py-1.5 bg-white"
+            />
+          </label>
+          <span className="text-slate-400 font-black">—</span>
+          <label className="inline-flex items-center gap-1 text-[11px] font-bold text-slate-600">
+            Bitiş
+            <input
+              type="date"
+              value={raporBitis}
+              onChange={(e) => setRaporBitis(e.target.value || raporBitis)}
+              className="text-xs font-semibold border border-emerald-200 rounded-lg px-2 py-1.5 bg-white"
+            />
+          </label>
+          <button
+            type="button"
+            onClick={() => {
+              setRaporBaslangic(monthStartKey(selectedDate));
+              setRaporBitis(monthEndKey(selectedDate));
+            }}
+            className="text-[10px] font-bold px-2 py-1.5 rounded-lg border border-emerald-300 bg-white text-emerald-800 cursor-pointer"
+          >
+            Bu ay
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setRaporBaslangic(monthStartKey(selectedDate));
+              setRaporBitis(selectedDate);
+            }}
+            className="text-[10px] font-bold px-2 py-1.5 rounded-lg border border-emerald-300 bg-white text-emerald-800 cursor-pointer"
+          >
+            Ay başı → seçili gün
+          </button>
+          <button
+            type="button"
+            disabled={tagged.length === 0 || exportingExcel}
+            onClick={() => void handleHakedisExcel()}
+            title="Seçilen tarih aralığının Kibritçi antetli hakediş Excel’i (meslek grupları ayrı)"
+            className="ml-auto text-[10px] font-black px-3 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white cursor-pointer disabled:opacity-40 inline-flex items-center gap-1"
+          >
+            {exportingExcel ? <Loader2 size={12} className="animate-spin" /> : <FileSpreadsheet size={12} />}
+            {exportingExcel ? 'Excel…' : 'Aralık Excel'}
+          </button>
+          <span className="text-[9px] text-emerald-800 font-medium w-full sm:w-auto">
+            {formatDateLabelTr(raporBaslangic)} — {formatDateLabelTr(raporBitis)} arası ödeme cetveli. En fazla 62 gün.
+          </span>
         </div>
 
         {meslekOzeti.length > 0 && ozet.toplam > 0 && (
@@ -435,7 +507,7 @@ export const YoklamaEtiketTakipTab: React.FC<{
               type="button"
               disabled={tagged.length === 0 || exportingExcel}
               onClick={() => void handleHakedisExcel()}
-              title="Seçili ayın Kibritçi antetli hakediş Excel’i — meslek grupları ayrı (ödeme cetveli)"
+              title="Üstteki rapor aralığı için antetli hakediş Excel"
               className="text-[10px] font-black px-2.5 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white cursor-pointer disabled:opacity-40 inline-flex items-center gap-1"
             >
               {exportingExcel ? <Loader2 size={12} className="animate-spin" /> : <FileSpreadsheet size={12} />}

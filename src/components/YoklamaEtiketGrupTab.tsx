@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { ClipboardList, FileSpreadsheet, FileText, Loader2, Save, Search, Tag } from 'lucide-react';
+import { Calendar, ClipboardList, FileSpreadsheet, FileText, Loader2, Save, Search, Tag } from 'lucide-react';
 import type { AylikYoklamaMap, Personel } from '../types/erp';
 import { collectAktifAnaFirmaPersonelNow } from '../lib/aktifPersonelListeExcel';
+import { formatDateLabelTr, todayDateKey } from '../lib/dateKeyUtils';
 import { displayPersonelGorev } from '../lib/guvenlikHelpers';
 import { rememberPersonelTakipEtiketleri, subscribePersonelTakipEtiketleri } from '../lib/personelTakipEtiketPersistence';
 import {
@@ -11,6 +12,19 @@ import {
   personelHasTakipEtiketi,
   withPersonelTakipEtiketi,
 } from '../lib/personelTakipEtiketUtils';
+
+function pad2(n: number): string {
+  return String(n).padStart(2, '0');
+}
+
+function monthStartFromYM(year: number, month: number): string {
+  return `${year}-${pad2(month)}-01`;
+}
+
+function monthEndFromYM(year: number, month: number): string {
+  const last = new Date(year, month, 0).getDate();
+  return `${year}-${pad2(month)}-${pad2(last)}`;
+}
 
 function personelAd(p: Personel): string {
   return `${p.ad || ''} ${p.soyad || ''}`.trim();
@@ -51,6 +65,10 @@ export const YoklamaEtiketGrupTab: React.FC<{
   const [draftIds, setDraftIds] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [exportingExcel, setExportingExcel] = useState(false);
+  const raporYear = year || new Date().getFullYear();
+  const raporMonth = month || new Date().getMonth() + 1;
+  const [raporBaslangic, setRaporBaslangic] = useState(() => monthStartFromYM(raporYear, raporMonth));
+  const [raporBitis, setRaporBitis] = useState(() => monthEndFromYM(raporYear, raporMonth));
 
   useEffect(() => subscribePersonelTakipEtiketleri(setKayitliEtiketler), []);
 
@@ -183,8 +201,6 @@ export const YoklamaEtiketGrupTab: React.FC<{
 
   const taggedPeople = aktif.filter((p) => draftSet.has(p.id));
   const canEdit = Boolean(setPersoneller);
-  const raporYear = year || new Date().getFullYear();
-  const raporMonth = month || new Date().getMonth() + 1;
 
   const handleHakedisExcel = async () => {
     if (taggedPeople.length === 0) {
@@ -199,8 +215,8 @@ export const YoklamaEtiketGrupTab: React.FC<{
         grupEtiket: selectedEtiket,
         personeller: taggedPeople,
         yoklamalar: yoklamalar || {},
-        year: raporYear,
-        month: raporMonth,
+        startDate: raporBaslangic,
+        endDate: raporBitis,
       });
     } catch (err) {
       console.error(err);
@@ -223,9 +239,8 @@ export const YoklamaEtiketGrupTab: React.FC<{
             Aşağıda aktif Kibritçi kadrosu durur. İstediğiniz kişileri bir kez «{selectedEtiket || 'ZER YAPI'}»
             diye işaretleyip kaydedin. Bu sayfa yoklama defterini değiştirmez; grubu tespit eder.
             İşaretli kadronun günlük yoklaması ve meslek etiketi «Grup Yoklama» sekmesinde, Puantaj ve
-            Formen ile aynı kayıttan takip edilir. Yeşil <span className="font-black text-emerald-800">Hakediş Excel</span> butonu
-            Kibritçi antetli / logolu aylık cetveli üretir (usta yardımcılığı, temizlik ve diğer meslek
-            grupları ayrı; ödeme kaynağı).
+            Formen ile aynı kayıttan takip edilir. Yeşil Excel, seçilen tarih aralığının Kibritçi antetli
+            hakediş cetvelini üretir (usta yardımcılığı, temizlik ve diğer meslek grupları ayrı; ödeme kaynağı).
           </p>
         </div>
 
@@ -272,6 +287,53 @@ export const YoklamaEtiketGrupTab: React.FC<{
             Etiket oluştur
           </button>
         </div>
+
+        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50/70 p-2.5">
+          <Calendar size={13} className="text-emerald-800" />
+          <span className="text-[10px] font-black uppercase text-emerald-900">Rapor aralığı</span>
+          <label className="inline-flex items-center gap-1 text-[11px] font-bold text-slate-600">
+            Başlangıç
+            <input
+              type="date"
+              value={raporBaslangic}
+              onChange={(e) => setRaporBaslangic(e.target.value || raporBaslangic)}
+              className="text-xs font-semibold border border-emerald-200 rounded-lg px-2 py-1.5 bg-white"
+            />
+          </label>
+          <span className="text-slate-400 font-black">—</span>
+          <label className="inline-flex items-center gap-1 text-[11px] font-bold text-slate-600">
+            Bitiş
+            <input
+              type="date"
+              value={raporBitis}
+              onChange={(e) => setRaporBitis(e.target.value || raporBitis)}
+              className="text-xs font-semibold border border-emerald-200 rounded-lg px-2 py-1.5 bg-white"
+            />
+          </label>
+          <button
+            type="button"
+            onClick={() => {
+              setRaporBaslangic(monthStartFromYM(raporYear, raporMonth));
+              setRaporBitis(monthEndFromYM(raporYear, raporMonth));
+            }}
+            className="text-[10px] font-bold px-2 py-1.5 rounded-lg border border-emerald-300 bg-white text-emerald-800 cursor-pointer"
+          >
+            Bu ay
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setRaporBaslangic(monthStartFromYM(raporYear, raporMonth));
+              setRaporBitis(todayDateKey());
+            }}
+            className="text-[10px] font-bold px-2 py-1.5 rounded-lg border border-emerald-300 bg-white text-emerald-800 cursor-pointer"
+          >
+            Ay başı → bugün
+          </button>
+          <span className="text-[9px] text-emerald-800 font-medium">
+            {formatDateLabelTr(raporBaslangic)} — {formatDateLabelTr(raporBitis)} · en fazla 62 gün
+          </span>
+        </div>
       </div>
 
       <div className="bg-white border border-slate-200 rounded-xl shadow-sm flex flex-col min-h-[480px] overflow-hidden">
@@ -282,7 +344,7 @@ export const YoklamaEtiketGrupTab: React.FC<{
               {selectedEtiket}: {taggedCount} işaretli
             </span>
             <span className="ml-2 font-semibold text-slate-500">
-              · Excel: {String(raporMonth).padStart(2, '0')}.{raporYear}
+              · Excel: {formatDateLabelTr(raporBaslangic)} — {formatDateLabelTr(raporBitis)}
             </span>
             {dirty && (
               <span className="ml-2 text-amber-700 font-bold">· kaydedilmemiş değişiklik</span>
@@ -339,7 +401,7 @@ export const YoklamaEtiketGrupTab: React.FC<{
               type="button"
               disabled={taggedPeople.length === 0 || exportingExcel}
               onClick={() => void handleHakedisExcel()}
-              title="Kibritçi antetli / logolu aylık hakediş Excel — meslek grupları ayrı (ödeme cetveli)"
+              title="Seçilen tarih aralığının Kibritçi antetli hakediş Excel’i — meslek grupları ayrı"
               className="text-[10px] font-black px-2.5 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white cursor-pointer disabled:opacity-40 inline-flex items-center gap-1"
             >
               {exportingExcel ? <Loader2 size={12} className="animate-spin" /> : <FileSpreadsheet size={12} />}
