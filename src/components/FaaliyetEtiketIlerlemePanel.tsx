@@ -298,7 +298,7 @@ export const FaaliyetEtiketIlerlemePanel: React.FC<FaaliyetEtiketIlerlemePanelPr
             ))}
           </div>
           <div className="flex flex-wrap gap-1 mt-1.5">
-            {FAALIYET_ETIKET_ONSETLERI.slice(0, 4).map((o) => (
+            {FAALIYET_ETIKET_ONSETLERI.map((o) => (
               <button
                 key={o}
                 type="button"

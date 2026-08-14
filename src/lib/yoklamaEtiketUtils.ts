@@ -1,6 +1,8 @@
 /** Günlük yoklama meslek / iş grubu etiketleri (görevden bağımsız: ne iş yaptıkları) */
 
 export const YOKLAMA_MESLEK_ETIKETLERI = [
+  'USTA YARDIMCILIĞI',
+  'TEMİZLİK',
   'KIRIM İŞLERİ',
   'DRENAJ İŞLERİ',
   'KABA İNŞAAT',
@@ -83,6 +85,10 @@ export function collectUsedYoklamaEtiketleri(
 export function yoklamaEtiketBadgeClass(etiket?: string | null): string {
   const k = normalizeYoklamaEtiketi(etiket);
   switch (k) {
+    case 'USTA YARDIMCILIĞI':
+      return 'bg-violet-50 text-violet-800 border-violet-200';
+    case 'TEMİZLİK':
+      return 'bg-teal-50 text-teal-800 border-teal-200';
     case 'KIRIM İŞLERİ':
       return 'bg-rose-50 text-rose-800 border-rose-200';
     case 'DRENAJ İŞLERİ':

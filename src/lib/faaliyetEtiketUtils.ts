@@ -1,6 +1,8 @@
-/** Saha faaliyet iş etiketleri (KIRIM / DRENAJ vb.) */
+/** Saha faaliyet iş etiketleri (usta yardımcılığı / temizlik + iş grubu) */
 
 export const FAALIYET_ETIKET_ONSETLERI = [
+  'USTA YARDIMCILIĞI',
+  'TEMİZLİK',
   'KIRIM İŞLERİ',
   'DRENAJ İŞLERİ',
   'KABA İNŞAAT',

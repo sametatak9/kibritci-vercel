@@ -798,6 +798,9 @@ export const GunlukFaaliyetProgramScreen: React.FC<GunlukFaaliyetProgramScreenPr
                 <label className="text-[9px] font-black uppercase text-slate-400 block mb-1">
                   İş Etiketi
                 </label>
+                <p className="text-[8px] font-semibold text-slate-400 mb-1">
+                  Usta yardımcılığı / temizlik seçilirse günlük raporda ayrı listelenir.
+                </p>
                 <select
                   value={isEtiketi}
                   onChange={(e) => setIsEtiketi(normalizeFaaliyetEtiketi(e.target.value))}
@@ -811,20 +814,31 @@ export const GunlukFaaliyetProgramScreen: React.FC<GunlukFaaliyetProgramScreenPr
                   ))}
                 </select>
                 <div className="flex flex-wrap gap-1 mt-1.5">
-                  {FAALIYET_ETIKET_ONSETLERI.map((o) => (
+                  {FAALIYET_ETIKET_ONSETLERI.map((o) => {
+                    const on = isEtiketi === o;
+                    const special =
+                      o === 'USTA YARDIMCILIĞI'
+                        ? on
+                          ? 'bg-violet-200 border-violet-500 text-violet-950'
+                          : 'bg-violet-50 border-violet-200 text-violet-700'
+                        : o === 'TEMİZLİK'
+                          ? on
+                            ? 'bg-teal-200 border-teal-500 text-teal-950'
+                            : 'bg-teal-50 border-teal-200 text-teal-800'
+                          : on
+                            ? 'bg-amber-200 border-amber-400 text-amber-950'
+                            : 'bg-white border-slate-200 text-slate-500';
+                    return (
                     <button
                       key={o}
                       type="button"
                       onClick={() => setIsEtiketi(o)}
-                      className={`text-[8px] font-bold px-1.5 py-0.5 rounded border cursor-pointer ${
-                        isEtiketi === o
-                          ? 'bg-amber-200 border-amber-400 text-amber-950'
-                          : 'bg-white border-slate-200 text-slate-500'
-                      }`}
+                      className={`text-[8px] font-bold px-1.5 py-0.5 rounded border cursor-pointer ${special}`}
                     >
                       {o}
                     </button>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             </div>
