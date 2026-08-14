@@ -16,6 +16,10 @@ import {
 } from '../lib/guvenlikHelpers';
 import { CANONICAL_ANA_FIRMA_ADI, isKibritciCompany, isTaseronPersonel } from '../lib/yoklamaUtils';
 import {
+  personelHasTakipEtiketi,
+  withPersonelTakipEtiketi,
+} from '../lib/personelTakipEtiketUtils';
+import {
   buildDedupedFirmaOptions,
   personelMatchesFirmaFilterKey,
 } from '../lib/firmaCanonicalUtils';
@@ -326,6 +330,7 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
     firmaTipi: 'ANA_FIRMA',
     firmaAdi: CANONICAL_ANA_FIRMA_ADI,
     personelGrubu: 'SAHA',
+    takipEtiketleri: [],
   };
 
   const [formData, setFormData] = useState<Omit<Personel, 'id'> | Personel>(emptyForm);
@@ -2106,6 +2111,23 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
                   <option value="IDARI">İdari — yoklama yok (izin/tutanak/araç)</option>
                 </select>
               </div>
+              <div className="col-span-2">
+                <label className="text-[10px] font-bold text-emerald-800 uppercase">Kadro etiketi</label>
+                <label className="mt-1 flex items-center gap-2 text-xs font-bold text-slate-800 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={personelHasTakipEtiketi(formData as Personel, 'ZER YAPI')}
+                    onChange={(e) =>
+                      setFormData((prev) => withPersonelTakipEtiketi(prev as Personel, 'ZER YAPI', e.target.checked))
+                    }
+                    className="w-4 h-4 accent-emerald-700 cursor-pointer"
+                  />
+                  ZER YAPI — bu personeli ZER YAPI grubunda takip et
+                </label>
+                <p className="text-[10px] text-slate-400 mt-1">
+                  Yoklamayı değiştirmez. Puantaj → Etiket Grupları listesinde görünür.
+                </p>
+              </div>
               <div>
                 <SmartCatalogField
                   kind="gorev"
@@ -2743,6 +2765,11 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
                         {(p.personelGrubu === 'IDARI' || p.departman === 'İDARİ') && (
                           <span className="bg-sky-50 text-sky-800 border border-sky-100 px-2 py-0.5 rounded-full font-bold">
                             İdari · Yoklama yok
+                          </span>
+                        )}
+                        {personelHasTakipEtiketi(p, 'ZER YAPI') && (
+                          <span className="bg-emerald-50 text-emerald-800 border border-emerald-200 px-2 py-0.5 rounded-full font-bold">
+                            ZER YAPI
                           </span>
                         )}
                       </div>

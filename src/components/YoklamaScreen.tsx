@@ -1290,11 +1290,7 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
     return (
       <div className="flex-grow p-3 sm:p-4 lg:p-6 min-h-[calc(100vh-52px)] overflow-y-auto flex flex-col font-sans gap-4 lg:gap-6 select-none bg-slate-50/50">
         {sayfaSekmeleri}
-        <YoklamaEtiketGrupTab
-          personeller={personeller}
-          setPersoneller={setPersoneller}
-          yoklamalar={draftYoklamalar}
-        />
+        <YoklamaEtiketGrupTab personeller={personeller} setPersoneller={setPersoneller} />
       </div>
     );
   }

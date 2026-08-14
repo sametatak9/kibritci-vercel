@@ -96,6 +96,13 @@ export function collectAktifAnaFirmaPersonelForRange(
     .sort(sortByName);
 }
 
+/** Bugün kadroda görünen aktif Kibritçi personeli (taşeron yok). */
+export function collectAktifAnaFirmaPersonelNow(personeller: Personel[]): Personel[] {
+  const now = new Date();
+  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  return collectAktifAnaFirmaPersonelForRange(personeller, today, today);
+}
+
 /** Aralık yoklama raporu: Kibritçi saha (idari / taşeron / seramik ekibi yok). */
 export function isAralikYoklamaSahaPersonel(p: Personel): boolean {
   return !isTaseronPersonel(p) && !isIdariPersonel(p) && !isSeramikEkibiPersonel(p);
