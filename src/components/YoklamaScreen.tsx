@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo, useRef } from 'react';
-import { Calendar, Trash2, ShieldAlert, CheckCircle, FileText, ChevronRight, RefreshCw, Database, Undo2, Redo2, Camera, DollarSign, Tag, Save } from 'lucide-react';
+import { Calendar, Trash2, ShieldAlert, CheckCircle, FileText, ChevronRight, RefreshCw, Database, Undo2, Redo2, Camera, DollarSign, Tag, Save, Users } from 'lucide-react';
 import { Personel, AylikYoklamaMap, YoklamaDurum, SahaFaaliyeti, KampFaaliyet } from '../types/erp';
 import { normalizeDateKey, formatDateLabelTr } from '../lib/dateKeyUtils';
 import {
@@ -18,6 +18,7 @@ import { loadKibritciLogoDataUrl } from '../lib/kibritciBrand';
 import { buildPersonelListForMonth, findPersonelByName, getBoundaryDayInMonth, getYoklamaDay, isDayActiveForPersonel, isPersonelVisibleInMonth, normalizeTurkishName, parseFlexibleDateParts, setYoklamaDay } from '../lib/yoklamaUtils';
 import { exportModernPuantajExcel } from '../lib/modernPuantajExcel';
 import { exportAktifPersonelMaasMesaiExcel } from '../lib/aktifPersonelMaasMesaiExcel';
+import { exportAktifPersonelListeExcel } from '../lib/aktifPersonelListeExcel';
 import { importAllLegacyExcelMonths, importLegacyExcelMonth, aiMonthlyDataToLegacyMonth, resolveStubPersonelFromLegacyId } from '../lib/legacyYoklamaImport';
 import { LEGACY_EXCEL_MONTHS } from '../data/legacyExcelYoklama';
 import { fetchApiJson } from '../lib/apiClient';
@@ -984,6 +985,34 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
     }
   };
 
+  const handleExportAktifPersonelListeExcel = async () => {
+    const periodLabel = new Date(selectedYear, selectedMonth - 1, 1).toLocaleDateString('tr-TR', {
+      month: 'long',
+      year: 'numeric',
+    });
+    if (
+      !window.confirm(
+        `${periodLabel} için AKTİF PERSONEL listesi Excel indirilsin mi?\n\n` +
+          `Yalnız aktif kadro (pasif / onay bekleyen hariç).\n` +
+          `Ana firma + taşeron · grup ve göreve göre ayrılır.\n` +
+          `Sütunlar: Ad Soyad, T.C., Görev, Firma, İşe Giriş.`
+      )
+    ) {
+      return;
+    }
+    try {
+      const count = await exportAktifPersonelListeExcel({
+        personeller,
+        year: selectedYear,
+        month: selectedMonth,
+        yoklamalar: draftYoklamalar,
+      });
+      alert(`${count} aktif personel, grup ve göreve göre Excel olarak indirildi.`);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Excel oluşturulamadı.');
+    }
+  };
+
   const handleBulkOvertime = (hours: number) => {
     const newYoklamalar = { ...draftYoklamalar };
     
@@ -1236,6 +1265,22 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
               <DollarSign size={13} />
               <span>
                 Alacak Maaş Excel —{' '}
+                {new Date(selectedYear, selectedMonth - 1, 1).toLocaleDateString('tr-TR', {
+                  month: 'long',
+                  year: 'numeric',
+                })}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => void handleExportAktifPersonelListeExcel()}
+              className="text-[11px] bg-[#0f2744] hover:bg-[#17365c] text-[#f4ead5] rounded-lg px-3 py-1.5 font-bold cursor-pointer transition flex items-center space-x-1 shadow-sm border border-[#c4a35a]/50"
+              title="Seçili ayın aktif personelini (görev + T.C.) grup ve göreve göre antetli Excel olarak indirir."
+            >
+              <Users size={13} />
+              <span>
+                Aktif Personel Excel —{' '}
                 {new Date(selectedYear, selectedMonth - 1, 1).toLocaleDateString('tr-TR', {
                   month: 'long',
                   year: 'numeric',
