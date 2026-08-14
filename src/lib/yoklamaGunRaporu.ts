@@ -19,6 +19,7 @@ import {
   buildYoklamaEtiketOzeti,
   normalizeYoklamaEtiketi,
   YOKLAMA_ETIKETSIZ,
+  YOKLAMA_MESLEK_ETIKETLERI,
 } from './yoklamaEtiketUtils';
 
 export interface GunlukYoklamaSatir {
@@ -361,4 +362,76 @@ export function openGunlukYoklamaRaporHtml(html: string, title: string): void {
   w.document.write(html);
   w.document.close();
   w.document.title = title;
+}
+
+export interface EtiketliGorevlendirmeGrubu {
+  etiket: string;
+  isimler: string[];
+}
+
+/** Geldi personelini meslek etiketine göre grupla — görevlendirme listesi */
+export function groupEtiketliGorevlendirme(
+  rows: GunlukYoklamaSatir[]
+): EtiketliGorevlendirmeGrubu[] {
+  const buckets = new Map<string, string[]>();
+  for (const r of rows) {
+    if (r.durum !== 'Geldi') continue;
+    const ad = String(r.adSoyad || '').trim();
+    if (!ad) continue;
+    const etiket = normalizeYoklamaEtiketi(r.isEtiketi) || YOKLAMA_ETIKETSIZ;
+    const list = buckets.get(etiket) || [];
+    if (!list.some((n) => n.localeCompare(ad, 'tr', { sensitivity: 'base' }) === 0)) {
+      list.push(ad);
+    }
+    buckets.set(etiket, list);
+  }
+
+  const known = YOKLAMA_MESLEK_ETIKETLERI as readonly string[];
+  return [...buckets.entries()]
+    .sort(([a], [b]) => {
+      if (a === YOKLAMA_ETIKETSIZ) return 1;
+      if (b === YOKLAMA_ETIKETSIZ) return -1;
+      const ia = known.indexOf(a);
+      const ib = known.indexOf(b);
+      if (ia >= 0 && ib >= 0) return ia - ib;
+      if (ia >= 0) return -1;
+      if (ib >= 0) return 1;
+      return a.localeCompare(b, 'tr');
+    })
+    .map(([etiket, isimler]) => ({
+      etiket,
+      isimler: isimler.slice().sort((x, y) => x.localeCompare(y, 'tr')),
+    }));
+}
+
+/** Yalnız etiket başlığı + isimler; WhatsApp / Not Defteri için düz metin */
+export function buildEtiketliGorevlendirmeTxt(
+  rows: GunlukYoklamaSatir[],
+  dateLabel: string
+): string {
+  const groups = groupEtiketliGorevlendirme(rows);
+  const nl = '\r\n';
+  const lines: string[] = [dateLabel, ''];
+  if (groups.length === 0) {
+    lines.push('Bu günde Geldi kaydı yok.');
+    return lines.join(nl) + nl;
+  }
+  for (const g of groups) {
+    lines.push(g.etiket === YOKLAMA_ETIKETSIZ ? 'ETİKETSİZ' : g.etiket);
+    for (const ad of g.isimler) lines.push(ad);
+    lines.push('');
+  }
+  return lines.join(nl);
+}
+
+export function downloadEtiketliGorevlendirmeTxt(text: string, fileName: string): void {
+  const blob = new Blob(['\uFEFF' + text], { type: 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = fileName;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }

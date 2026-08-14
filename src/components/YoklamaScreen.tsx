@@ -34,6 +34,8 @@ import {
   buildGunlukYoklamaOzet,
   buildGunlukYoklamaRaporHtml,
   buildGunlukYoklamaSatirlari,
+  buildEtiketliGorevlendirmeTxt,
+  downloadEtiketliGorevlendirmeTxt,
   groupGunlukYoklamaSatirlariByGorev,
   openGunlukYoklamaRaporHtml,
   type GunlukYoklamaRaporGrup,
@@ -913,6 +915,21 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
       return;
     }
     setPrintModal('GUN_RAPORU');
+  };
+
+  const handleDownloadEtiketliGorevlendirmeTxt = () => {
+    const geldi = gunRaporSatirlari.filter((r) => r.durum === 'Geldi');
+    if (geldi.length === 0) {
+      alert(
+        `${gunRaporLabel} için Geldi kaydı yok.\n\nÖnce yoklamayı alın, meslek grubunu etiketleyin; sonra görevlendirme listesini indirin.`
+      );
+      return;
+    }
+    const text = buildEtiketliGorevlendirmeTxt(gunRaporSatirlari, gunRaporLabel);
+    downloadEtiketliGorevlendirmeTxt(
+      text,
+      `Kibritci_Gorevlendirme_${gunRaporDateKey.replace(/-/g, '')}.txt`
+    );
   };
 
   const filteredPersonel = useMemo(() => {
@@ -1892,6 +1909,15 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
               <Calendar size={12} />
               Etiketli Rapor
             </button>
+            <button
+              type="button"
+              onClick={handleDownloadEtiketliGorevlendirmeTxt}
+              className="bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-[10px] px-3.5 py-1 rounded transition duration-100 shadow-sm cursor-pointer inline-flex items-center gap-1"
+              title="Seçili günün Geldi personelini meslek etiketine göre yalnızca isim listesi olarak .txt indirir."
+            >
+              <FileText size={12} />
+              Görevlendirme TXT
+            </button>
           </div>
         </div>
 
@@ -2532,6 +2558,15 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
                   className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-4 py-2 rounded-xl transition shadow cursor-pointer"
                 >
                   Yazdır / PDF
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDownloadEtiketliGorevlendirmeTxt}
+                  className="bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs px-4 py-2 rounded-xl transition shadow cursor-pointer inline-flex items-center gap-1.5"
+                  title="Meslek etiketine göre yalnızca isim listesi (.txt)"
+                >
+                  <FileText size={13} />
+                  Görevlendirme TXT
                 </button>
                 <button
                   type="button"

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Calendar, Tag } from 'lucide-react';
+import { Calendar, FileText, Tag } from 'lucide-react';
 import type { Personel } from '../types/erp';
 import {
   YOKLAMA_ACIKLAMA_MAX,
@@ -14,6 +14,7 @@ export function YoklamaMeslekEtiketBar({
   onCustomChange,
   onApply,
   onReport,
+  onTxtReport,
   compact,
 }: {
   etiket: string;
@@ -23,6 +24,7 @@ export function YoklamaMeslekEtiketBar({
   onCustomChange: (v: string) => void;
   onApply: () => void;
   onReport: () => void;
+  onTxtReport?: () => void;
   compact?: boolean;
 }) {
   return (
@@ -79,6 +81,17 @@ export function YoklamaMeslekEtiketBar({
           <Calendar size={12} />
           Etiketli Rapor
         </button>
+        {onTxtReport && (
+          <button
+            type="button"
+            onClick={onTxtReport}
+            className="bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-[10px] px-3 py-1.5 rounded-lg inline-flex items-center gap-1 cursor-pointer"
+            title="Meslek etiketine göre yalnızca isim listesi (.txt)"
+          >
+            <FileText size={12} />
+            Görevlendirme TXT
+          </button>
+        )}
       </div>
     </div>
   );
@@ -99,6 +112,7 @@ interface FormenEtiketliYoklamaTabProps {
   onBulkEtiketCustomChange: (v: string) => void;
   onBulkApply: () => void;
   onReport: () => void;
+  onTxtReport?: () => void;
   onEtiketChange: (personelId: string, etiket: string) => void;
   onAciklamaChange: (personelId: string, aciklama: string) => void;
   onMarkPresent: (personelId: string) => void;
@@ -123,6 +137,7 @@ export const FormenEtiketliYoklamaTab: React.FC<FormenEtiketliYoklamaTabProps> =
   onBulkEtiketCustomChange,
   onBulkApply,
   onReport,
+  onTxtReport,
   onEtiketChange,
   onAciklamaChange,
   onMarkPresent,
@@ -146,6 +161,7 @@ export const FormenEtiketliYoklamaTab: React.FC<FormenEtiketliYoklamaTabProps> =
         onCustomChange={onBulkEtiketCustomChange}
         onApply={onBulkApply}
         onReport={onReport}
+        onTxtReport={onTxtReport}
       />
 
       <p className="text-[9px] text-slate-500 leading-snug px-0.5">

@@ -45,9 +45,11 @@ import {
   subscribeYoklamaMeslekEtiketleri,
 } from '../lib/yoklamaMeslekEtiketPersistence';
 import {
+  buildEtiketliGorevlendirmeTxt,
   buildGunlukYoklamaOzet,
   buildGunlukYoklamaRaporHtml,
   buildGunlukYoklamaSatirlari,
+  downloadEtiketliGorevlendirmeTxt,
   openGunlukYoklamaRaporHtml,
 } from '../lib/yoklamaGunRaporu';
 
@@ -655,7 +657,7 @@ export const FormenScreen: React.FC<FormenScreenProps> = ({
     );
   };
 
-  const handleEtiketliRapor = () => {
+  const collectEtiketliRaporRows = () => {
     let overlay = yoklamalar;
     const ids = new Set([...presentIds, ...absentIds, ...Object.keys(personelEtiketleri), ...Object.keys(personelAciklamalari)]);
     for (const pid of ids) {
@@ -677,13 +679,31 @@ export const FormenScreen: React.FC<FormenScreenProps> = ({
         }),
       };
     }
-    const rows = buildGunlukYoklamaSatirlari(activeStaff, overlay, year, month, day);
+    return buildGunlukYoklamaSatirlari(activeStaff, overlay, year, month, day);
+  };
+
+  const handleEtiketliRapor = () => {
+    const rows = collectEtiketliRaporRows();
     if (rows.length === 0) {
       showStatus('error', 'Bu tarihte raporlanacak yoklama kaydı yok. Önce Geldi/Yok işaretleyin.');
       return;
     }
     const html = buildGunlukYoklamaRaporHtml(rows, buildGunlukYoklamaOzet(rows), year, month, day);
     openGunlukYoklamaRaporHtml(html, `Formen Etiketli Yoklama — ${formatDateLabelTr(selectedDate)}`);
+  };
+
+  const handleEtiketliGorevlendirmeTxt = () => {
+    const rows = collectEtiketliRaporRows();
+    const geldi = rows.filter((r) => r.durum === 'Geldi');
+    if (geldi.length === 0) {
+      showStatus('error', 'Bu tarihte Geldi kaydı yok. Önce yoklamayı alın ve meslek grubunu etiketleyin.');
+      return;
+    }
+    const text = buildEtiketliGorevlendirmeTxt(rows, formatDateLabelTr(selectedDate));
+    downloadEtiketliGorevlendirmeTxt(
+      text,
+      `Kibritci_Gorevlendirme_${String(selectedDate).replace(/-/g, '')}.txt`
+    );
   };
 
   // Digital Signature Save — yalnızca dokunulan personelin SEÇİLİ GÜNÜ yazılır (tam harita gönderme)
@@ -3339,6 +3359,7 @@ _Lütfen bu personelin sigorta giriş işlemlerini başlatınız._`}
                   onBulkEtiketCustomChange={setBulkEtiketCustom}
                   onBulkApply={handleBulkEtiketApply}
                   onReport={handleEtiketliRapor}
+                  onTxtReport={handleEtiketliGorevlendirmeTxt}
                   onEtiketChange={handlePersonelEtiketChange}
                   onAciklamaChange={handlePersonelAciklamaChange}
                   onMarkPresent={(id) => handleMarkPresent(id, mesaiSaatleri[id] || 0)}
