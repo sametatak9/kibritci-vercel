@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo, useRef } from 'react';
-import { Calendar, Trash2, ShieldAlert, CheckCircle, FileText, ChevronRight, RefreshCw, Database, Undo2, Redo2, Camera, DollarSign, Tag, Save, Users } from 'lucide-react';
+import { Calendar, Trash2, ShieldAlert, CheckCircle, FileText, ChevronRight, RefreshCw, Database, Undo2, Redo2, Camera, DollarSign, Tag, Save, Users, ClipboardList } from 'lucide-react';
 import { Personel, AylikYoklamaMap, YoklamaDurum, SahaFaaliyeti, KampFaaliyet } from '../types/erp';
 import { normalizeDateKey, formatDateLabelTr } from '../lib/dateKeyUtils';
 import {
@@ -21,6 +21,7 @@ import { exportAktifPersonelMaasMesaiExcel } from '../lib/aktifPersonelMaasMesai
 import { exportAktifPersonelListeExcel } from '../lib/aktifPersonelListeExcel';
 import { AralikYoklamaExcelModal } from './AralikYoklamaExcelModal';
 import { YoklamaEtiketGrupTab } from './YoklamaEtiketGrupTab';
+import { YoklamaEtiketTakipTab } from './YoklamaEtiketTakipTab';
 import { importAllLegacyExcelMonths, importLegacyExcelMonth, aiMonthlyDataToLegacyMonth, resolveStubPersonelFromLegacyId } from '../lib/legacyYoklamaImport';
 import { LEGACY_EXCEL_MONTHS } from '../data/legacyExcelYoklama';
 import { fetchApiJson } from '../lib/apiClient';
@@ -165,7 +166,8 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
     monthDateRangeKeys(new Date().getFullYear(), new Date().getMonth() + 1).end
   );
   const [aralikYoklamaOpen, setAralikYoklamaOpen] = useState(false);
-  const [yoklamaSayfa, setYoklamaSayfa] = useState<'puantaj' | 'etiket_grup'>('puantaj');
+  const [yoklamaSayfa, setYoklamaSayfa] = useState<'puantaj' | 'etiket_grup' | 'etiket_takip'>('puantaj');
+  const [takipGrupEtiket, setTakipGrupEtiket] = useState('ZER YAPI');
   const [searchTerm, setSearchTerm] = useState("");
   const [isEditMode, setIsEditMode] = useState(false);
   
@@ -1283,6 +1285,18 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
         <Tag size={12} />
         Etiket Grupları
       </button>
+      <button
+        type="button"
+        onClick={() => setYoklamaSayfa('etiket_takip')}
+        className={`text-[11px] font-bold px-3 py-1.5 rounded-lg cursor-pointer inline-flex items-center gap-1 ${
+          yoklamaSayfa === 'etiket_takip'
+            ? 'bg-[#0f2744] text-[#f4ead5]'
+            : 'text-slate-600 hover:bg-slate-50'
+        }`}
+      >
+        <ClipboardList size={12} />
+        Grup Yoklama
+      </button>
     </div>
   );
 
@@ -1290,7 +1304,49 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
     return (
       <div className="flex-grow p-3 sm:p-4 lg:p-6 min-h-[calc(100vh-52px)] overflow-y-auto flex flex-col font-sans gap-4 lg:gap-6 select-none bg-slate-50/50">
         {sayfaSekmeleri}
-        <YoklamaEtiketGrupTab personeller={personeller} setPersoneller={setPersoneller} />
+        <YoklamaEtiketGrupTab
+          personeller={personeller}
+          setPersoneller={setPersoneller}
+          onOpenGrupYoklama={(etiket) => {
+            setTakipGrupEtiket(etiket);
+            setYoklamaSayfa('etiket_takip');
+          }}
+        />
+      </div>
+    );
+  }
+
+  if (yoklamaSayfa === 'etiket_takip') {
+    return (
+      <div className="flex-grow p-3 sm:p-4 lg:p-6 min-h-[calc(100vh-52px)] overflow-y-auto flex flex-col font-sans gap-4 lg:gap-6 select-none bg-slate-50/50">
+        {sayfaSekmeleri}
+        <YoklamaEtiketTakipTab
+          personeller={personeller}
+          yoklamalar={draftYoklamalar}
+          etiketKatalogu={etiketKatalogu}
+          initialGrupEtiket={takipGrupEtiket}
+          hasPendingChanges={hasPendingChanges}
+          saving={savingDraft}
+          lastSavedAt={lastSavedAt}
+          onSave={handleSaveYoklamaToDb}
+          onPatchPersonDay={(personelId, year, month, day, patch) => {
+            updateDraftYoklama((prev) => {
+              const existing = getYoklamaDay(prev[personelId], year, month, day) || {
+                durum: 'Girilmedi' as YoklamaDurum,
+                mesaiSaati: 0,
+              };
+              return {
+                ...prev,
+                [personelId]: setYoklamaDay(prev[personelId], year, month, day, {
+                  ...existing,
+                  ...patch,
+                }),
+              };
+            });
+            const meslek = normalizeYoklamaEtiketi(patch.isEtiketi);
+            if (meslek) rememberEtiket(meslek);
+          }}
+        />
       </div>
     );
   }

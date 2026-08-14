@@ -5,6 +5,7 @@ import {
   YOKLAMA_ACIKLAMA_MAX,
   yoklamaEtiketBadgeClass,
 } from '../lib/yoklamaEtiketUtils';
+import { listPersonelTakipEtiketleri } from '../lib/personelTakipEtiketUtils';
 
 export function YoklamaMeslekEtiketBar({
   etiket,
@@ -195,6 +196,18 @@ export const FormenEtiketliYoklamaTab: React.FC<FormenEtiketliYoklamaTabProps> =
                   {p.gorev}
                   {mesaiSaatleri[p.id] ? ` · +${mesaiSaatleri[p.id]}s mesai` : ''}
                 </p>
+                {listPersonelTakipEtiketleri(p).length > 0 && (
+                  <div className="flex flex-wrap gap-0.5 mt-0.5">
+                    {listPersonelTakipEtiketleri(p).map((t) => (
+                      <span
+                        key={t}
+                        className="text-[7px] font-black uppercase px-1.5 py-0.5 rounded-full bg-indigo-50 text-indigo-800 border border-indigo-200"
+                      >
+                        {t}
+                      </span>
+                    ))}
+                  </div>
+                )}
               </div>
               <div className="flex gap-1 shrink-0">
                 <button
@@ -268,6 +281,14 @@ export const FormenEtiketliYoklamaTab: React.FC<FormenEtiketliYoklamaTabProps> =
                   {p.ad} {p.soyad}
                 </p>
                 <p className="text-[8px] text-slate-400 truncate">{p.gorev}</p>
+                {listPersonelTakipEtiketleri(p).map((t) => (
+                  <span
+                    key={t}
+                    className="inline-block text-[7px] font-black uppercase px-1.5 py-0.5 rounded-full bg-indigo-50 text-indigo-800 border border-indigo-200 mt-0.5"
+                  >
+                    {t}
+                  </span>
+                ))}
               </div>
               <div className="flex gap-1 shrink-0">
                 <button

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { FileText, Save, Search, Tag } from 'lucide-react';
+import { ClipboardList, FileText, Save, Search, Tag } from 'lucide-react';
 import type { Personel } from '../types/erp';
 import { collectAktifAnaFirmaPersonelNow } from '../lib/aktifPersonelListeExcel';
 import { displayPersonelGorev } from '../lib/guvenlikHelpers';
@@ -38,7 +38,8 @@ function downloadTaggedNamesTxt(etiket: string, people: Personel[]) {
 export const YoklamaEtiketGrupTab: React.FC<{
   personeller: Personel[];
   setPersoneller?: React.Dispatch<React.SetStateAction<Personel[]>>;
-}> = ({ personeller, setPersoneller }) => {
+  onOpenGrupYoklama?: (etiket: string) => void;
+}> = ({ personeller, setPersoneller, onOpenGrupYoklama }) => {
   const [kayitliEtiketler, setKayitliEtiketler] = useState<string[]>([]);
   const [selectedEtiket, setSelectedEtiket] = useState('ZER YAPI');
   const [yeniEtiket, setYeniEtiket] = useState('');
@@ -190,8 +191,9 @@ export const YoklamaEtiketGrupTab: React.FC<{
           <h2 className="text-sm font-black text-slate-900 mt-0.5">Aktif personel — grup tespiti</h2>
           <p className="text-[11px] text-slate-500 mt-1 leading-relaxed max-w-3xl">
             Aşağıda aktif Kibritçi kadrosu durur. İstediğiniz kişileri bir kez «{selectedEtiket || 'ZER YAPI'}»
-            diye işaretleyip kaydedin. Yoklama alma işleyişine dokunulmaz; amaç grubu tespit etmek, sonra
-            raporlamaktır. Yeni personel kaydında da aynı etiket seçilebilir.
+            diye işaretleyip kaydedin. Bu sayfa yoklama defterini değiştirmez; grubu tespit eder.
+            İşaretli kadronun günlük yoklaması ve meslek etiketi «Grup Yoklama» sekmesinde, Puantaj ve
+            Formen ile aynı kayıttan takip edilir.
           </p>
         </div>
 
@@ -298,14 +300,29 @@ export const YoklamaEtiketGrupTab: React.FC<{
               <FileText size={12} />
               TXT
             </button>
+            {onOpenGrupYoklama && (
+              <button
+                type="button"
+                onClick={() => onOpenGrupYoklama(selectedEtiket)}
+                className="text-[10px] font-bold px-2.5 py-1.5 rounded-lg bg-violet-600 hover:bg-violet-700 text-white cursor-pointer inline-flex items-center gap-1"
+              >
+                <ClipboardList size={12} />
+                Grup yoklama
+              </button>
+            )}
             <button
               type="button"
               disabled={!canEdit || saving || !dirty}
               onClick={handleSave}
+              title={
+                dirty
+                  ? 'Seçilen grubu personel kartına kaydet'
+                  : 'Değişiklik yok — grup zaten kayıtlı'
+              }
               className="text-[11px] font-black px-3 py-1.5 rounded-lg bg-[#0f2744] hover:bg-[#17365c] text-[#f4ead5] cursor-pointer disabled:opacity-40 inline-flex items-center gap-1"
             >
               <Save size={13} />
-              {saving ? 'Kaydediliyor…' : 'Kaydet'}
+              {saving ? 'Kaydediliyor…' : dirty ? 'Kaydet' : 'Kayıtlı'}
             </button>
           </div>
         </div>
