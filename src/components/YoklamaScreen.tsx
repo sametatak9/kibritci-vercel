@@ -18,7 +18,7 @@ import { loadKibritciLogoDataUrl } from '../lib/kibritciBrand';
 import { buildPersonelListForMonth, findPersonelByName, getBoundaryDayInMonth, getYoklamaDay, isDayActiveForPersonel, isPersonelVisibleInMonth, normalizeTurkishName, parseFlexibleDateParts, setYoklamaDay } from '../lib/yoklamaUtils';
 import { exportModernPuantajExcel } from '../lib/modernPuantajExcel';
 import { exportAktifPersonelMaasMesaiExcel } from '../lib/aktifPersonelMaasMesaiExcel';
-import { exportAktifPersonelListeExcel } from '../lib/aktifPersonelListeExcel';
+import { exportAktifPersonelListeExcel, exportAralikYoklamaExcel } from '../lib/aktifPersonelListeExcel';
 import { importAllLegacyExcelMonths, importLegacyExcelMonth, aiMonthlyDataToLegacyMonth, resolveStubPersonelFromLegacyId } from '../lib/legacyYoklamaImport';
 import { LEGACY_EXCEL_MONTHS } from '../data/legacyExcelYoklama';
 import { fetchApiJson } from '../lib/apiClient';
@@ -1041,6 +1041,42 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
     }
   };
 
+  const handleExportAralikYoklamaExcel = async () => {
+    const start = normalizeDateKey(aktifListeStart);
+    const end = normalizeDateKey(aktifListeEnd);
+    if (!start || !end) {
+      alert('Yoklama dökümü için başlangıç ve bitiş tarihi seçin.');
+      return;
+    }
+    const from = start <= end ? start : end;
+    const to = start <= end ? end : start;
+    const periodLabel =
+      from === to
+        ? formatDateLabelTr(from)
+        : `${formatDateLabelTr(from)} — ${formatDateLabelTr(to)}`;
+    if (
+      !window.confirm(
+        `${periodLabel} yoklaması Excel indirilsin mi?\n\n` +
+          `Yalnız Kibritçi saha kadrosu (taşeron / idari / seramik ekibi yok).\n` +
+          `Günler: G Geldi · Y Yok · İ İzinli · R Raporlu · P Pazar.\n` +
+          `Mesai saati gün hücresinde ve sağdaki Mesai sütununda görünür.`
+      )
+    ) {
+      return;
+    }
+    try {
+      const count = await exportAralikYoklamaExcel({
+        personeller,
+        yoklamalar: draftYoklamalar,
+        startDate: from,
+        endDate: to,
+      });
+      alert(`${count} kişi için ${periodLabel} yoklaması Excel olarak indirildi.`);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Excel oluşturulamadı.');
+    }
+  };
+
   const handleBulkOvertime = (hours: number) => {
     const newYoklamalar = { ...draftYoklamalar };
     
@@ -1302,7 +1338,7 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
 
             <div className="flex flex-wrap items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1">
               <span className="text-[10px] font-bold text-slate-500 uppercase whitespace-nowrap">
-                Aktif kadro
+                Tarih aralığı
               </span>
               <input
                 type="date"
@@ -1327,6 +1363,15 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
               >
                 <Users size={13} />
                 <span>Aktif Personel Excel</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleExportAralikYoklamaExcel()}
+                className="text-[11px] bg-[#1e4e78] hover:bg-[#2563a8] text-white rounded-lg px-3 py-1.5 font-bold cursor-pointer transition flex items-center space-x-1 shadow-sm border border-[#c4a35a]/40"
+                title="Seçili tarih aralığının yoklamasını (G/Y/İ/R/P + mesai) antetli Excel olarak indirir. En fazla 62 gün."
+              >
+                <Calendar size={13} />
+                <span>Aralık Yoklama Excel</span>
               </button>
             </div>
 

@@ -1,9 +1,9 @@
 /**
- * Puantaj — tarih aralığında aktif Kibritçi (ana firma) personel listesi.
- * Taşeron yok; grup ve göreve göre antetli Excel.
+ * Puantaj — tarih aralığında aktif Kibritçi personel listesi ve yoklama Excel’i.
+ * Taşeron yok; grup ve göreve göre antetli.
  */
 import type { Workbook, Worksheet } from 'exceljs';
-import type { Personel } from '../types/erp';
+import type { AylikYoklamaMap, Personel, YoklamaDurum } from '../types/erp';
 import { createExcelWorkbook } from './exceljsLoader';
 import { displayPersonelGorev } from './guvenlikHelpers';
 import { formatDateLabelTr, normalizeDateKey } from './dateKeyUtils';
@@ -20,7 +20,11 @@ import {
 } from './personelGorevGrupUtils';
 import {
   CANONICAL_ANA_FIRMA_ADI,
+  getYoklamaDay,
+  isDayActiveForPersonel,
+  isIdariPersonel,
   isPersonelActiveInDateRange,
+  isSeramikEkibiPersonel,
   isTaseronPersonel,
 } from './yoklamaUtils';
 
@@ -394,6 +398,283 @@ export async function exportAktifPersonelListeExcel(options: {
   downloadBuffer(
     buffer as ArrayBuffer,
     `Kibritci_Aktif_Personel_${start.replace(/-/g, '')}_${end.replace(/-/g, '')}.xlsx`
+  );
+  return rows.length;
+}
+
+const WEEKDAY_TR = ['Pa', 'Pt', 'Sa', 'Ça', 'Pe', 'Cu', 'Ct'];
+const MAX_YOKLAMA_GUN = 62;
+
+type RangeDay = { key: string; y: number; m: number; d: number; label: string; wd: string };
+
+function listDaysInRange(start: string, end: string): RangeDay[] {
+  const days: RangeDay[] = [];
+  const [sy, sm, sd] = start.split('-').map(Number);
+  const [ey, em, ed] = end.split('-').map(Number);
+  const cursor = new Date(sy, sm - 1, sd);
+  const last = new Date(ey, em - 1, ed);
+  while (cursor.getTime() <= last.getTime()) {
+    const y = cursor.getFullYear();
+    const m = cursor.getMonth() + 1;
+    const d = cursor.getDate();
+    const key = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    days.push({
+      key,
+      y,
+      m,
+      d,
+      label: `${String(d).padStart(2, '0')}.${String(m).padStart(2, '0')}`,
+      wd: WEEKDAY_TR[cursor.getDay()],
+    });
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return days;
+}
+
+function toStatusSymbol(durum?: YoklamaDurum | string): string {
+  if (durum === 'Geldi') return 'G';
+  if (durum === 'Yok') return 'Y';
+  if (durum === 'İzinli') return 'İ';
+  if (durum === 'Raporlu') return 'R';
+  if (durum === 'Pazar') return 'P';
+  if (durum === 'Tatil') return 'T';
+  return '-';
+}
+
+function statusFill(durum?: YoklamaDurum | string): string {
+  if (durum === 'Geldi') return 'FFDCFCE7';
+  if (durum === 'Yok') return 'FFFEE2E2';
+  if (durum === 'İzinli') return 'FFDBEAFE';
+  if (durum === 'Raporlu') return 'FFFEF9C3';
+  if (durum === 'Pazar' || durum === 'Tatil') return 'FFFED7AA';
+  return 'FFF8FAFC';
+}
+
+function normalizeRange(startDate: string, endDate: string): { start: string; end: string } {
+  let start = normalizeDateKey(startDate);
+  let end = normalizeDateKey(endDate);
+  if (!start || !end) {
+    throw new Error('Başlangıç ve bitiş tarihi seçin.');
+  }
+  if (start > end) {
+    const tmp = start;
+    start = end;
+    end = tmp;
+  }
+  return { start, end };
+}
+
+/**
+ * Seçili aralığın yoklama / puantajını antetli Excel’e döker.
+ * Yalnız Kibritçi ana firma saha kadrosu; taşeron yok.
+ */
+export async function exportAralikYoklamaExcel(options: {
+  personeller: Personel[];
+  yoklamalar: AylikYoklamaMap;
+  startDate: string;
+  endDate: string;
+}): Promise<number> {
+  const { start, end } = normalizeRange(options.startDate, options.endDate);
+  const days = listDaysInRange(start, end);
+  if (days.length === 0) {
+    throw new Error('Geçerli bir tarih aralığı seçin.');
+  }
+  if (days.length > MAX_YOKLAMA_GUN) {
+    throw new Error(`En fazla ${MAX_YOKLAMA_GUN} günlük yoklama dökülebilir. Aralığı kısaltın.`);
+  }
+
+  const rows = collectAktifAnaFirmaPersonelForRange(options.personeller, start, end).filter(
+    (p) => !isIdariPersonel(p) && !isSeramikEkibiPersonel(p)
+  );
+  if (rows.length === 0) {
+    throw new Error('Bu tarih aralığında dökülecek aktif Kibritçi puantaj kadrosu bulunamadı.');
+  }
+
+  const donem =
+    start === end
+      ? formatDateLabelTr(start)
+      : `${formatDateLabelTr(start)} — ${formatDateLabelTr(end)}`;
+  const groups = groupAktifPersonel(rows);
+  const stamp = new Date().toLocaleString('tr-TR');
+  const identCols = 4;
+  const totalCols = identCols + days.length + 2;
+
+  const wb = await createExcelWorkbook();
+  wb.creator = KIBRITCI_COMPANY.shortName;
+  wb.title = `Yoklama Puantaj — ${donem}`;
+
+  const ws = wb.addWorksheet('Yoklama', {
+    views: [{ state: 'frozen', ySplit: 11, xSplit: identCols, showGridLines: false }],
+  });
+  ws.columns = [
+    { width: 5 },
+    { width: 26 },
+    { width: 14 },
+    { width: 20 },
+    ...days.map(() => ({ width: 5.2 })),
+    { width: 8 },
+    { width: 8 },
+  ];
+
+  const headerRow = await applyAntet(wb, ws, {
+    title: `YOKLAMA / PUANTAJ — ${donem}`,
+    subtitle: `${CANONICAL_ANA_FIRMA_ADI} · taşeron hariç · G Geldi · Y Yok · İ İzinli · R Raporlu · P Pazar · T Tatil`,
+    metaLine: `Dönem: ${donem} · ${days.length} gün · ${rows.length} kişi · Oluşturma: ${stamp}`,
+    colCount: totalCols,
+  });
+  ws.pageSetup.orientation = 'landscape';
+  ws.pageSetup.printTitlesRow = `${headerRow}:${headerRow + 1}`;
+  ws.headerFooter = {
+    oddHeader: `&L${KIBRITCI_COMPANY.shortName}&CYoklama / Puantaj&R&D`,
+    oddFooter: `&L${KIBRITCI_COMPANY.web}&C&P / &N&R${KIBRITCI_COMPANY.email}`,
+  };
+
+  const head1 = headerRow;
+  const head2 = headerRow + 1;
+  const identHeaders = ['#', 'Ad Soyad', 'T.C. Kimlik No', 'Görev'];
+  identHeaders.forEach((h, i) => {
+    ws.mergeCells(head1, i + 1, head2, i + 1);
+    const cell = ws.getCell(head1, i + 1);
+    cell.value = h;
+    cell.font = { bold: true, size: 9, color: { argb: 'FFFFFFFF' } };
+    cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+    setFill(cell, 'FF1E4E78');
+    cell.border = thinBorder();
+  });
+  days.forEach((day, idx) => {
+    const col = identCols + idx + 1;
+    const c1 = ws.getCell(head1, col);
+    c1.value = day.label;
+    c1.font = { bold: true, size: 8, color: { argb: 'FFFFFFFF' } };
+    c1.alignment = { horizontal: 'center', vertical: 'middle' };
+    setFill(c1, day.wd === 'Pa' ? 'FF9A3412' : 'FF1E4E78');
+    c1.border = thinBorder();
+    const c2 = ws.getCell(head2, col);
+    c2.value = day.wd;
+    c2.font = { bold: true, size: 7, color: { argb: 'FFF4EAD5' } };
+    c2.alignment = { horizontal: 'center', vertical: 'middle' };
+    setFill(c2, day.wd === 'Pa' ? 'FF7C2D12' : 'FF0F2744');
+    c2.border = thinBorder();
+  });
+  ['Gelen', 'Mesai'].forEach((h, i) => {
+    const col = identCols + days.length + i + 1;
+    ws.mergeCells(head1, col, head2, col);
+    const cell = ws.getCell(head1, col);
+    cell.value = h;
+    cell.font = { bold: true, size: 9, color: { argb: 'FFFFFFFF' } };
+    cell.alignment = { horizontal: 'center', vertical: 'middle' };
+    setFill(cell, 'FF0F2744');
+    cell.border = thinBorder();
+  });
+  ws.getRow(head1).height = 16;
+  ws.getRow(head2).height = 14;
+
+  let sira = 0;
+  writeBanner(
+    ws,
+    `${CANONICAL_ANA_FIRMA_ADI}  ·  ${rows.length} kişi  ·  ${days.length} gün`,
+    'FF0F2744',
+    'FFF4EAD5',
+    12,
+    totalCols
+  );
+
+  for (const grup of groups) {
+    writeBanner(
+      ws,
+      `Grup: ${grup.label}  ·  ${grup.kisi} kişi`,
+      'FF1E4E78',
+      'FFFFFFFF',
+      11,
+      totalCols
+    );
+    for (const gorev of grup.gorevler) {
+      writeBanner(
+        ws,
+        `Görev: ${gorev.gorev}  ·  ${gorev.personeller.length} kişi`,
+        'FFECFDF5',
+        'FF065F46',
+        10,
+        totalCols
+      );
+      for (const p of gorev.personeller) {
+        sira += 1;
+        const map = options.yoklamalar[p.id];
+        const excelRow = ws.addRow([]);
+        const r = excelRow.number;
+        ws.getCell(r, 1).value = sira;
+        ws.getCell(r, 2).value = `${p.ad || ''} ${p.soyad || ''}`.trim();
+        ws.getCell(r, 3).value = String(p.tcNo || '').trim() || '—';
+        ws.getCell(r, 3).numFmt = '@';
+        ws.getCell(r, 4).value = displayPersonelGorev(p);
+
+        let geldi = 0;
+        let mesaiToplam = 0;
+        days.forEach((day, idx) => {
+          const col = identCols + idx + 1;
+          const cell = ws.getCell(r, col);
+          const active = isDayActiveForPersonel(p, day.y, day.m, day.d, map);
+          const rec =
+            getYoklamaDay(map, day.y, day.m, day.d) ||
+            (map as Record<string, { durum?: YoklamaDurum; mesaiSaati?: number }> | undefined)?.[
+              String(day.d)
+            ];
+          const durum = rec?.durum;
+          const mesai = Number(rec?.mesaiSaati || 0);
+          cell.border = thinBorder();
+          cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+          cell.font = { name: 'Arial', size: 8, bold: true };
+          if (!active) {
+            cell.value = '—';
+            setFill(cell, 'FFF1F5F9');
+            cell.font = { name: 'Arial', size: 8, color: { argb: 'FF94A3B8' } };
+            return;
+          }
+          const symbol = toStatusSymbol(durum);
+          cell.value = mesai > 0 ? `${symbol}\n${mesai}` : symbol;
+          setFill(cell, statusFill(durum));
+          if (durum === 'Geldi') geldi += 1;
+          mesaiToplam += mesai;
+        });
+
+        const geldiCell = ws.getCell(r, identCols + days.length + 1);
+        geldiCell.value = geldi;
+        geldiCell.font = { name: 'Arial', size: 9, bold: true };
+        geldiCell.alignment = { horizontal: 'center', vertical: 'middle' };
+        geldiCell.border = thinBorder();
+        setFill(geldiCell, 'FFDCFCE7');
+
+        const mesaiCell = ws.getCell(r, identCols + days.length + 2);
+        mesaiCell.value = mesaiToplam > 0 ? Number(mesaiToplam.toFixed(1)) : 0;
+        mesaiCell.font = { name: 'Arial', size: 9, bold: true };
+        mesaiCell.alignment = { horizontal: 'center', vertical: 'middle' };
+        mesaiCell.border = thinBorder();
+        setFill(mesaiCell, mesaiToplam > 0 ? 'FFFEF3C7' : 'FFF8FAFC');
+
+        for (let c = 1; c <= identCols; c++) {
+          const cell = ws.getCell(r, c);
+          cell.border = thinBorder();
+          cell.font = {
+            name: 'Arial',
+            size: 9,
+            bold: c === 2,
+            color: { argb: 'FF0F172A' },
+          };
+          cell.alignment = {
+            vertical: 'middle',
+            horizontal: c === 2 || c === 4 ? 'left' : 'center',
+          };
+          if (sira % 2 === 0 && c !== 3) setFill(cell, 'FFF8FAFC');
+        }
+        excelRow.height = 24;
+      }
+    }
+  }
+
+  const buffer = await wb.xlsx.writeBuffer();
+  downloadBuffer(
+    buffer as ArrayBuffer,
+    `Kibritci_Aralik_Yoklama_${start.replace(/-/g, '')}_${end.replace(/-/g, '')}.xlsx`
   );
   return rows.length;
 }
