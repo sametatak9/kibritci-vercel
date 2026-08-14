@@ -333,6 +333,41 @@ export function isDateInEmploymentRange(
   return true;
 }
 
+function dateKeyToVal(key: string): number | null {
+  const m = String(key || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return null;
+  return Number(m[1]) * 10000 + Number(m[2]) * 100 + Number(m[3]);
+}
+
+/** Personel, seçilen [başlangıç, bitiş] günlerinde kadroda mı? (işe giriş/çıkış örtüşmesi) */
+export function isPersonelActiveInDateRange(
+  p: Personel,
+  startDate: string,
+  endDate: string
+): boolean {
+  const startVal = dateKeyToVal(String(startDate || '').slice(0, 10));
+  const endVal = dateKeyToVal(String(endDate || '').slice(0, 10));
+  if (!startVal || !endVal) return false;
+  const from = Math.min(startVal, endVal);
+  const to = Math.max(startVal, endVal);
+
+  const hireTarih = p.iseGirisTarihi || (p as any).girisTarihi || (p as any).kayitTarihi;
+  const hire = parseFlexibleDateParts(hireTarih);
+  if (hire) {
+    const hireVal = hire.year * 10000 + hire.month * 100 + hire.day;
+    if (hireVal > to) return false;
+  }
+
+  const exitTarih = p.istenCikisTarihi || (p as any).cikisTarihi;
+  const exit = parseFlexibleDateParts(exitTarih);
+  if (exit) {
+    const exitVal = exit.year * 10000 + exit.month * 100 + exit.day;
+    if (exitVal < from) return false;
+  }
+
+  return true;
+}
+
 /** Kayıtlı yoklama, işe giriş/çıkış aralığı dışını açmaz — aralık dışı her zaman kapalı */
 export function isDayActiveForPersonel(
   p: Personel,

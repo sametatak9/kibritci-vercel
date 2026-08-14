@@ -73,6 +73,15 @@ const maskName = (name?: string): string => {
   return name || '';
 };
 
+function monthDateRangeKeys(year: number, month: number): { start: string; end: string } {
+  const mm = String(month).padStart(2, '0');
+  const last = new Date(year, month, 0).getDate();
+  return {
+    start: `${year}-${mm}-01`,
+    end: `${year}-${mm}-${String(last).padStart(2, '0')}`,
+  };
+}
+
 function YoklamaGunAciklamaInput({
   value,
   onCommit,
@@ -145,6 +154,12 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
   const MAX_MESAI_SAATI = 14;
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1);
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
+  const [aktifListeStart, setAktifListeStart] = useState(() =>
+    monthDateRangeKeys(new Date().getFullYear(), new Date().getMonth() + 1).start
+  );
+  const [aktifListeEnd, setAktifListeEnd] = useState(() =>
+    monthDateRangeKeys(new Date().getFullYear(), new Date().getMonth() + 1).end
+  );
   const [searchTerm, setSearchTerm] = useState("");
   const [isEditMode, setIsEditMode] = useState(false);
   
@@ -194,6 +209,12 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
 
   const [sahaPreviewPerson, setSahaPreviewPerson] = useState<Personel | null>(null);
   const [kampFaaliyetleri, setKampFaaliyetleri] = useState<KampFaaliyet[]>([]);
+
+  useEffect(() => {
+    const r = monthDateRangeKeys(selectedYear, selectedMonth);
+    setAktifListeStart(r.start);
+    setAktifListeEnd(r.end);
+  }, [selectedYear, selectedMonth]);
 
   useEffect(() => {
     const unsub = onSnapshot(collection(db, 'kampGunlukFaaliyetleri'), (snap) => {
@@ -986,16 +1007,24 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
   };
 
   const handleExportAktifPersonelListeExcel = async () => {
-    const periodLabel = new Date(selectedYear, selectedMonth - 1, 1).toLocaleDateString('tr-TR', {
-      month: 'long',
-      year: 'numeric',
-    });
+    const start = normalizeDateKey(aktifListeStart);
+    const end = normalizeDateKey(aktifListeEnd);
+    if (!start || !end) {
+      alert('Aktif personel raporu için başlangıç ve bitiş tarihi seçin.');
+      return;
+    }
+    const from = start <= end ? start : end;
+    const to = start <= end ? end : start;
+    const periodLabel =
+      from === to
+        ? formatDateLabelTr(from)
+        : `${formatDateLabelTr(from)} — ${formatDateLabelTr(to)}`;
     if (
       !window.confirm(
-        `${periodLabel} için AKTİF PERSONEL listesi Excel indirilsin mi?\n\n` +
-          `Yalnız aktif kadro (pasif / onay bekleyen hariç).\n` +
-          `Ana firma + taşeron · grup ve göreve göre ayrılır.\n` +
-          `Sütunlar: Ad Soyad, T.C., Görev, Firma, İşe Giriş.`
+        `${periodLabel} için AKTİF ANA FİRMA personel listesi Excel indirilsin mi?\n\n` +
+          `Yalnız Kibritçi İnşaat kadrosu (taşeron yok).\n` +
+          `Pasif / onay bekleyen kayıtlar hariç.\n` +
+          `Grup ve göreve göre ayrılır · Ad Soyad, T.C., Görev.`
       )
     ) {
       return;
@@ -1003,11 +1032,10 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
     try {
       const count = await exportAktifPersonelListeExcel({
         personeller,
-        year: selectedYear,
-        month: selectedMonth,
-        yoklamalar: draftYoklamalar,
+        startDate: from,
+        endDate: to,
       });
-      alert(`${count} aktif personel, grup ve göreve göre Excel olarak indirildi.`);
+      alert(`${count} aktif Kibritçi personeli, grup ve göreve göre Excel olarak indirildi.`);
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Excel oluşturulamadı.');
     }
@@ -1272,21 +1300,35 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
               </span>
             </button>
 
-            <button
-              type="button"
-              onClick={() => void handleExportAktifPersonelListeExcel()}
-              className="text-[11px] bg-[#0f2744] hover:bg-[#17365c] text-[#f4ead5] rounded-lg px-3 py-1.5 font-bold cursor-pointer transition flex items-center space-x-1 shadow-sm border border-[#c4a35a]/50"
-              title="Seçili ayın aktif personelini (görev + T.C.) grup ve göreve göre antetli Excel olarak indirir."
-            >
-              <Users size={13} />
-              <span>
-                Aktif Personel Excel —{' '}
-                {new Date(selectedYear, selectedMonth - 1, 1).toLocaleDateString('tr-TR', {
-                  month: 'long',
-                  year: 'numeric',
-                })}
+            <div className="flex flex-wrap items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1">
+              <span className="text-[10px] font-bold text-slate-500 uppercase whitespace-nowrap">
+                Aktif kadro
               </span>
-            </button>
+              <input
+                type="date"
+                value={aktifListeStart}
+                onChange={(e) => setAktifListeStart(e.target.value)}
+                className="text-[11px] font-semibold border border-slate-200 rounded-md px-1.5 py-1 bg-white text-slate-800 cursor-pointer"
+                title="Rapor başlangıç tarihi"
+              />
+              <span className="text-[10px] text-slate-400 font-bold">→</span>
+              <input
+                type="date"
+                value={aktifListeEnd}
+                onChange={(e) => setAktifListeEnd(e.target.value)}
+                className="text-[11px] font-semibold border border-slate-200 rounded-md px-1.5 py-1 bg-white text-slate-800 cursor-pointer"
+                title="Rapor bitiş tarihi"
+              />
+              <button
+                type="button"
+                onClick={() => void handleExportAktifPersonelListeExcel()}
+                className="text-[11px] bg-[#0f2744] hover:bg-[#17365c] text-[#f4ead5] rounded-lg px-3 py-1.5 font-bold cursor-pointer transition flex items-center space-x-1 shadow-sm border border-[#c4a35a]/50"
+                title="Seçili tarih aralığında aktif Kibritçi İnşaat personelini (taşeron hariç) görev + T.C. ile antetli Excel indirir."
+              >
+                <Users size={13} />
+                <span>Aktif Personel Excel</span>
+              </button>
+            </div>
 
             {/* Quick bulk actions */}
             <div className="flex flex-wrap items-center gap-2 border-l pl-4 border-slate-200">

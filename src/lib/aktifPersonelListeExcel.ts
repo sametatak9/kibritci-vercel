@@ -1,11 +1,12 @@
 /**
- * Puantaj — seçili ayın aktif personel listesi (görev + T.C.).
- * Grup ve göreve göre ayrılmış Kibritçi antetli Excel.
+ * Puantaj — tarih aralığında aktif Kibritçi (ana firma) personel listesi.
+ * Taşeron yok; grup ve göreve göre antetli Excel.
  */
 import type { Workbook, Worksheet } from 'exceljs';
-import type { AylikYoklamaMap, Personel } from '../types/erp';
+import type { Personel } from '../types/erp';
 import { createExcelWorkbook } from './exceljsLoader';
 import { displayPersonelGorev } from './guvenlikHelpers';
+import { formatDateLabelTr, normalizeDateKey } from './dateKeyUtils';
 import {
   KIBRITCI_COMPANY,
   loadKibritciAntetDataUrl,
@@ -19,24 +20,9 @@ import {
 } from './personelGorevGrupUtils';
 import {
   CANONICAL_ANA_FIRMA_ADI,
-  isPersonelVisibleInMonth,
+  isPersonelActiveInDateRange,
   isTaseronPersonel,
 } from './yoklamaUtils';
-
-const AY_ADLARI = [
-  'Ocak',
-  'Şubat',
-  'Mart',
-  'Nisan',
-  'Mayıs',
-  'Haziran',
-  'Temmuz',
-  'Ağustos',
-  'Eylül',
-  'Ekim',
-  'Kasım',
-  'Aralık',
-];
 
 function pngBase64(dataUrl: string | null): string | null {
   if (!dataUrl) return null;
@@ -88,72 +74,54 @@ function sortByName(a: Personel, b: Personel): number {
 
 function firmaEtiketi(p: Personel): string {
   const ad = String(p.firmaAdi || '').trim();
-  if (isTaseronPersonel(p)) return ad || 'TAŞERON';
   return ad || CANONICAL_ANA_FIRMA_ADI;
 }
 
-export function collectAktifPersonelForMonth(
+export function collectAktifAnaFirmaPersonelForRange(
   personeller: Personel[],
-  year: number,
-  month: number,
-  yoklamalar?: AylikYoklamaMap
+  startDate: string,
+  endDate: string
 ): Personel[] {
+  const start = normalizeDateKey(startDate);
+  const end = normalizeDateKey(endDate);
   return (personeller || [])
+    .filter((p) => !isTaseronPersonel(p))
     .filter((p) => isAktifPersonel(p))
-    .filter((p) => isPersonelVisibleInMonth(p, year, month, yoklamalar?.[p.id]))
+    .filter((p) => isPersonelActiveInDateRange(p, start, end))
     .slice()
     .sort(sortByName);
 }
 
 type GorevBucket = { gorev: string; personeller: Personel[] };
 type GrupBucket = { grup: PersonelGorevGrup; label: string; gorevler: GorevBucket[]; kisi: number };
-type KadroBucket = { kadro: 'ANA_FIRMA' | 'TASERON'; label: string; gruplar: GrupBucket[]; kisi: number };
 
-function groupAktifPersonel(rows: Personel[]): KadroBucket[] {
-  const kadrolar: Array<{ kadro: 'ANA_FIRMA' | 'TASERON'; label: string; pool: Personel[] }> = [
-    {
-      kadro: 'ANA_FIRMA',
-      label: `ANA FİRMA — ${CANONICAL_ANA_FIRMA_ADI}`,
-      pool: rows.filter((p) => !isTaseronPersonel(p)),
-    },
-    {
-      kadro: 'TASERON',
-      label: 'TAŞERON KADROSU',
-      pool: rows.filter((p) => isTaseronPersonel(p)),
-    },
-  ];
-
-  return kadrolar
-    .filter((k) => k.pool.length > 0)
-    .map((k) => {
-      const byGrup = new Map<PersonelGorevGrup, Personel[]>();
-      for (const p of k.pool) {
-        const grup = resolvePersonelGorevGrubu(p);
-        const list = byGrup.get(grup) || [];
-        list.push(p);
-        byGrup.set(grup, list);
-      }
-      const gruplar: GrupBucket[] = PERSONEL_GOREV_GRUP_ORDER.filter((g) => byGrup.has(g)).map((grup) => {
-        const people = (byGrup.get(grup) || []).slice().sort(sortByName);
-        const byGorev = new Map<string, Personel[]>();
-        for (const p of people) {
-          const gorev = displayPersonelGorev(p) || 'BELİRTİLMEDİ';
-          const list = byGorev.get(gorev) || [];
-          list.push(p);
-          byGorev.set(gorev, list);
-        }
-        const gorevler: GorevBucket[] = Array.from(byGorev.entries())
-          .sort(([a], [b]) => a.localeCompare(b, 'tr', { sensitivity: 'base' }))
-          .map(([gorev, personeller]) => ({ gorev, personeller }));
-        return {
-          grup,
-          label: personelGorevGrupLabel(grup),
-          gorevler,
-          kisi: people.length,
-        };
-      });
-      return { kadro: k.kadro, label: k.label, gruplar, kisi: k.pool.length };
-    });
+function groupAktifPersonel(rows: Personel[]): GrupBucket[] {
+  const byGrup = new Map<PersonelGorevGrup, Personel[]>();
+  for (const p of rows) {
+    const grup = resolvePersonelGorevGrubu(p);
+    const list = byGrup.get(grup) || [];
+    list.push(p);
+    byGrup.set(grup, list);
+  }
+  return PERSONEL_GOREV_GRUP_ORDER.filter((g) => byGrup.has(g)).map((grup) => {
+    const people = (byGrup.get(grup) || []).slice().sort(sortByName);
+    const byGorev = new Map<string, Personel[]>();
+    for (const p of people) {
+      const gorev = displayPersonelGorev(p) || 'BELİRTİLMEDİ';
+      const list = byGorev.get(gorev) || [];
+      list.push(p);
+      byGorev.set(gorev, list);
+    }
+    const gorevler: GorevBucket[] = Array.from(byGorev.entries())
+      .sort(([a], [b]) => a.localeCompare(b, 'tr', { sensitivity: 'base' }))
+      .map(([gorev, personeller]) => ({ gorev, personeller }));
+    return {
+      grup,
+      label: personelGorevGrupLabel(grup),
+      gorevler,
+      kisi: people.length,
+    };
+  });
 }
 
 async function applyAntet(
@@ -161,7 +129,7 @@ async function applyAntet(
   ws: Worksheet,
   opts: { title: string; subtitle: string; metaLine: string; colCount: number }
 ): Promise<number> {
-  const colCount = Math.max(4, opts.colCount);
+  const colCount = Math.max(3, opts.colCount);
   const [antetDataUrl, logoDataUrl] = await Promise.all([
     loadKibritciAntetDataUrl(),
     loadKibritciLogoDataUrl(),
@@ -273,28 +241,34 @@ function writeBanner(
 }
 
 /**
- * Seçili ayın aktif personelini grup + göreve göre antetli Excel olarak indirir.
- * @returns kişi sayısı
+ * Seçili tarih aralığındaki aktif Kibritçi (ana firma) personelini
+ * grup + göreve göre antetli Excel olarak indirir. Taşeron dahil edilmez.
  */
 export async function exportAktifPersonelListeExcel(options: {
   personeller: Personel[];
-  year: number;
-  month: number;
-  yoklamalar?: AylikYoklamaMap;
+  startDate: string;
+  endDate: string;
 }): Promise<number> {
-  const { year, month } = options;
-  const rows = collectAktifPersonelForMonth(
-    options.personeller,
-    year,
-    month,
-    options.yoklamalar
-  );
-  if (rows.length === 0) {
-    throw new Error('Bu dönemde listelenecek aktif personel bulunamadı.');
+  let start = normalizeDateKey(options.startDate);
+  let end = normalizeDateKey(options.endDate);
+  if (!start || !end) {
+    throw new Error('Başlangıç ve bitiş tarihi seçin.');
+  }
+  if (start > end) {
+    const tmp = start;
+    start = end;
+    end = tmp;
   }
 
-  const ayAdi = AY_ADLARI[month - 1] || String(month);
-  const donem = `${ayAdi} ${year}`;
+  const rows = collectAktifAnaFirmaPersonelForRange(options.personeller, start, end);
+  if (rows.length === 0) {
+    throw new Error('Bu tarih aralığında listelenecek aktif Kibritçi personeli bulunamadı.');
+  }
+
+  const donem =
+    start === end
+      ? formatDateLabelTr(start)
+      : `${formatDateLabelTr(start)} — ${formatDateLabelTr(end)}`;
   const groups = groupAktifPersonel(rows);
   const stamp = new Date().toLocaleString('tr-TR');
 
@@ -315,8 +289,8 @@ export async function exportAktifPersonelListeExcel(options: {
   ];
 
   const headerRow = await applyAntet(wb, ws, {
-    title: `AKTİF PERSONEL LİSTESİ — ${donem.toLocaleUpperCase('tr-TR')}`,
-    subtitle: 'Yalnız aktif kadro · grup ve göreve göre ayrılmış · T.C. kimlik no ile',
+    title: `AKTİF ANA FİRMA PERSONELİ — ${donem}`,
+    subtitle: `${CANONICAL_ANA_FIRMA_ADI} · taşeron hariç · grup ve göreve göre · T.C. kimlik no`,
     metaLine: `Dönem: ${donem} · Toplam: ${rows.length} kişi · Oluşturma: ${stamp}`,
     colCount: 6,
   });
@@ -324,53 +298,58 @@ export async function exportAktifPersonelListeExcel(options: {
   writeTableHeader(ws, headerRow);
 
   let sira = 0;
-  for (const kadro of groups) {
-    writeBanner(ws, `${kadro.label}  ·  ${kadro.kisi} kişi`, 'FF0F2744', 'FFF4EAD5', 12, 6);
-    for (const grup of kadro.gruplar) {
+  writeBanner(
+    ws,
+    `${CANONICAL_ANA_FIRMA_ADI}  ·  ${rows.length} kişi`,
+    'FF0F2744',
+    'FFF4EAD5',
+    12,
+    6
+  );
+  for (const grup of groups) {
+    writeBanner(
+      ws,
+      `Grup: ${grup.label}  ·  ${grup.kisi} kişi`,
+      'FF1E4E78',
+      'FFFFFFFF',
+      11,
+      6
+    );
+    for (const gorev of grup.gorevler) {
       writeBanner(
         ws,
-        `Grup: ${grup.label}  ·  ${grup.kisi} kişi`,
-        'FF1E4E78',
-        'FFFFFFFF',
-        11,
+        `Görev: ${gorev.gorev}  ·  ${gorev.personeller.length} kişi`,
+        'FFECFDF5',
+        'FF065F46',
+        10,
         6
       );
-      for (const gorev of grup.gorevler) {
-        writeBanner(
-          ws,
-          `Görev: ${gorev.gorev}  ·  ${gorev.personeller.length} kişi`,
-          'FFECFDF5',
-          'FF065F46',
-          10,
-          6
-        );
-        for (const p of gorev.personeller) {
-          sira += 1;
-          const excelRow = ws.addRow([
-            sira,
-            `${p.ad || ''} ${p.soyad || ''}`.trim(),
-            String(p.tcNo || '').trim() || '—',
-            displayPersonelGorev(p),
-            firmaEtiketi(p),
-            p.iseGirisTarihi || '—',
-          ]);
-          excelRow.height = 18;
-          excelRow.eachCell((cell, col) => {
-            cell.font = {
-              name: 'Arial',
-              size: 10,
-              bold: col === 2,
-              color: { argb: 'FF0F172A' },
-            };
-            cell.border = thinBorder();
-            cell.alignment = {
-              vertical: 'middle',
-              horizontal: col === 1 || col === 3 || col === 6 ? 'center' : 'left',
-            };
-            if (sira % 2 === 0) setFill(cell, 'FFF8FAFC');
-            if (col === 3) cell.numFmt = '@';
-          });
-        }
+      for (const p of gorev.personeller) {
+        sira += 1;
+        const excelRow = ws.addRow([
+          sira,
+          `${p.ad || ''} ${p.soyad || ''}`.trim(),
+          String(p.tcNo || '').trim() || '—',
+          displayPersonelGorev(p),
+          firmaEtiketi(p),
+          p.iseGirisTarihi || '—',
+        ]);
+        excelRow.height = 18;
+        excelRow.eachCell((cell, col) => {
+          cell.font = {
+            name: 'Arial',
+            size: 10,
+            bold: col === 2,
+            color: { argb: 'FF0F172A' },
+          };
+          cell.border = thinBorder();
+          cell.alignment = {
+            vertical: 'middle',
+            horizontal: col === 1 || col === 3 || col === 6 ? 'center' : 'left',
+          };
+          if (sira % 2 === 0) setFill(cell, 'FFF8FAFC');
+          if (col === 3) cell.numFmt = '@';
+        });
       }
     }
   }
@@ -378,14 +357,14 @@ export async function exportAktifPersonelListeExcel(options: {
   const ozet = wb.addWorksheet('Özet', {
     views: [{ state: 'frozen', ySplit: 8, showGridLines: false }],
   });
-  ozet.columns = [{ width: 28 }, { width: 18 }, { width: 28 }, { width: 10 }];
+  ozet.columns = [{ width: 18 }, { width: 28 }, { width: 10 }];
   await applyAntet(wb, ozet, {
-    title: `AKTİF PERSONEL ÖZETİ — ${donem.toLocaleUpperCase('tr-TR')}`,
-    subtitle: 'Kadro · grup · görev kırılımı',
+    title: `AKTİF ANA FİRMA ÖZETİ — ${donem}`,
+    subtitle: `${CANONICAL_ANA_FIRMA_ADI} · grup · görev kırılımı (taşeron yok)`,
     metaLine: `Dönem: ${donem} · Toplam: ${rows.length} kişi · Oluşturma: ${stamp}`,
-    colCount: 4,
+    colCount: 3,
   });
-  const ozetHeaders = ['Kadro', 'Grup', 'Görev', 'Kişi'];
+  const ozetHeaders = ['Grup', 'Görev', 'Kişi'];
   ozetHeaders.forEach((h, i) => {
     const cell = ozet.getCell(10, i + 1);
     cell.value = h;
@@ -394,19 +373,17 @@ export async function exportAktifPersonelListeExcel(options: {
     setFill(cell, 'FF1E4E78');
     cell.border = thinBorder();
   });
-  for (const kadro of groups) {
-    for (const grup of kadro.gruplar) {
-      for (const gorev of grup.gorevler) {
-        const r = ozet.addRow([kadro.label, grup.label, gorev.gorev, gorev.personeller.length]);
-        r.eachCell((cell, col) => {
-          cell.font = { name: 'Arial', size: 10 };
-          cell.border = thinBorder();
-          cell.alignment = { vertical: 'middle', horizontal: col === 4 ? 'center' : 'left' };
-        });
-      }
+  for (const grup of groups) {
+    for (const gorev of grup.gorevler) {
+      const r = ozet.addRow([grup.label, gorev.gorev, gorev.personeller.length]);
+      r.eachCell((cell, col) => {
+        cell.font = { name: 'Arial', size: 10 };
+        cell.border = thinBorder();
+        cell.alignment = { vertical: 'middle', horizontal: col === 3 ? 'center' : 'left' };
+      });
     }
   }
-  const tot = ozet.addRow(['TOPLAM', '', '', rows.length]);
+  const tot = ozet.addRow(['TOPLAM', '', rows.length]);
   tot.eachCell((cell) => {
     cell.font = { name: 'Arial', size: 10, bold: true, color: { argb: 'FF0F172A' } };
     setFill(cell, 'FFE2E8F0');
@@ -416,7 +393,7 @@ export async function exportAktifPersonelListeExcel(options: {
   const buffer = await wb.xlsx.writeBuffer();
   downloadBuffer(
     buffer as ArrayBuffer,
-    `Kibritci_Aktif_Personel_${ayAdi}_${year}.xlsx`
+    `Kibritci_Aktif_Personel_${start.replace(/-/g, '')}_${end.replace(/-/g, '')}.xlsx`
   );
   return rows.length;
 }
