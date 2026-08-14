@@ -20,6 +20,7 @@ import { exportModernPuantajExcel } from '../lib/modernPuantajExcel';
 import { exportAktifPersonelMaasMesaiExcel } from '../lib/aktifPersonelMaasMesaiExcel';
 import { exportAktifPersonelListeExcel } from '../lib/aktifPersonelListeExcel';
 import { AralikYoklamaExcelModal } from './AralikYoklamaExcelModal';
+import { YoklamaEtiketGrupTab } from './YoklamaEtiketGrupTab';
 import { importAllLegacyExcelMonths, importLegacyExcelMonth, aiMonthlyDataToLegacyMonth, resolveStubPersonelFromLegacyId } from '../lib/legacyYoklamaImport';
 import { LEGACY_EXCEL_MONTHS } from '../data/legacyExcelYoklama';
 import { fetchApiJson } from '../lib/apiClient';
@@ -164,6 +165,7 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
     monthDateRangeKeys(new Date().getFullYear(), new Date().getMonth() + 1).end
   );
   const [aralikYoklamaOpen, setAralikYoklamaOpen] = useState(false);
+  const [yoklamaSayfa, setYoklamaSayfa] = useState<'puantaj' | 'etiket_grup'>('puantaj');
   const [searchTerm, setSearchTerm] = useState("");
   const [isEditMode, setIsEditMode] = useState(false);
   
@@ -1256,9 +1258,47 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
     window.print();
   };
 
+  const sayfaSekmeleri = (
+    <div className="flex flex-wrap items-center gap-1 bg-white border border-slate-200 rounded-xl p-1 shadow-sm shrink-0 w-fit">
+      <button
+        type="button"
+        onClick={() => setYoklamaSayfa('puantaj')}
+        className={`text-[11px] font-bold px-3 py-1.5 rounded-lg cursor-pointer ${
+          yoklamaSayfa === 'puantaj'
+            ? 'bg-[#0f2744] text-[#f4ead5]'
+            : 'text-slate-600 hover:bg-slate-50'
+        }`}
+      >
+        Puantaj
+      </button>
+      <button
+        type="button"
+        onClick={() => setYoklamaSayfa('etiket_grup')}
+        className={`text-[11px] font-bold px-3 py-1.5 rounded-lg cursor-pointer inline-flex items-center gap-1 ${
+          yoklamaSayfa === 'etiket_grup'
+            ? 'bg-[#0f2744] text-[#f4ead5]'
+            : 'text-slate-600 hover:bg-slate-50'
+        }`}
+      >
+        <Tag size={12} />
+        Etiket Grupları
+      </button>
+    </div>
+  );
+
+  if (yoklamaSayfa === 'etiket_grup') {
+    return (
+      <div className="flex-grow p-3 sm:p-4 lg:p-6 min-h-[calc(100vh-52px)] overflow-y-auto flex flex-col font-sans gap-4 lg:gap-6 select-none bg-slate-50/50">
+        {sayfaSekmeleri}
+        <YoklamaEtiketGrupTab personeller={personeller} setPersoneller={setPersoneller} />
+      </div>
+    );
+  }
+
   return (
     <div className="flex-grow p-3 sm:p-4 lg:p-6 min-h-[calc(100vh-52px)] overflow-y-auto flex flex-col font-sans gap-4 lg:gap-6 select-none bg-slate-50/50">
-      
+      {sayfaSekmeleri}
+
       {/* Filters Row Card */}
       <div className="bg-white border border-[#e2e8f0] rounded-xl p-4 shadow-sm flex flex-col gap-4 shrink-0">
         

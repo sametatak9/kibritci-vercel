@@ -34,6 +34,8 @@ export interface Personel {
   kaynak?: string;
   /** Mesleki Yeterlilik Belgesi (MYK) durumu — taşeron sayım ekranından işaretlenir */
   mykDurumu?: 'VAR' | 'YOK' | 'BILINMIYOR';
+  /** Puantaj «Etiket Grupları» — kalıcı kadro etiketi (ör. ZER YAPI). Günlük yoklama iş etiketinden bağımsızdır. */
+  takipEtiketleri?: string[];
 }
 
 export type YoklamaDurum = 'Geldi' | 'Yok' | 'İzinli' | 'Raporlu' | 'Pazar' | 'Tatil' | 'Girilmedi';
