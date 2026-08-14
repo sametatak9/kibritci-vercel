@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { ClipboardList, FileText, Save, Search, Tag } from 'lucide-react';
-import type { Personel } from '../types/erp';
+import { ClipboardList, FileSpreadsheet, FileText, Loader2, Save, Search, Tag } from 'lucide-react';
+import type { AylikYoklamaMap, Personel } from '../types/erp';
 import { collectAktifAnaFirmaPersonelNow } from '../lib/aktifPersonelListeExcel';
 import { displayPersonelGorev } from '../lib/guvenlikHelpers';
 import { rememberPersonelTakipEtiketleri, subscribePersonelTakipEtiketleri } from '../lib/personelTakipEtiketPersistence';
@@ -37,9 +37,12 @@ function downloadTaggedNamesTxt(etiket: string, people: Personel[]) {
 
 export const YoklamaEtiketGrupTab: React.FC<{
   personeller: Personel[];
+  yoklamalar?: AylikYoklamaMap;
+  year?: number;
+  month?: number;
   setPersoneller?: React.Dispatch<React.SetStateAction<Personel[]>>;
   onOpenGrupYoklama?: (etiket: string) => void;
-}> = ({ personeller, setPersoneller, onOpenGrupYoklama }) => {
+}> = ({ personeller, yoklamalar, year, month, setPersoneller, onOpenGrupYoklama }) => {
   const [kayitliEtiketler, setKayitliEtiketler] = useState<string[]>([]);
   const [selectedEtiket, setSelectedEtiket] = useState('ZER YAPI');
   const [yeniEtiket, setYeniEtiket] = useState('');
@@ -47,6 +50,7 @@ export const YoklamaEtiketGrupTab: React.FC<{
   const [listeFiltre, setListeFiltre] = useState<'ALL' | 'TAGGED' | 'UNTAGGED'>('ALL');
   const [draftIds, setDraftIds] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
+  const [exportingExcel, setExportingExcel] = useState(false);
 
   useEffect(() => subscribePersonelTakipEtiketleri(setKayitliEtiketler), []);
 
@@ -179,6 +183,32 @@ export const YoklamaEtiketGrupTab: React.FC<{
 
   const taggedPeople = aktif.filter((p) => draftSet.has(p.id));
   const canEdit = Boolean(setPersoneller);
+  const raporYear = year || new Date().getFullYear();
+  const raporMonth = month || new Date().getMonth() + 1;
+
+  const handleHakedisExcel = async () => {
+    if (taggedPeople.length === 0) {
+      alert('Önce gruba personel işaretleyin.');
+      return;
+    }
+    if (exportingExcel) return;
+    setExportingExcel(true);
+    try {
+      const { exportGrupYoklamaHakedisExcel } = await import('../lib/grupYoklamaExcel');
+      await exportGrupYoklamaHakedisExcel({
+        grupEtiket: selectedEtiket,
+        personeller: taggedPeople,
+        yoklamalar: yoklamalar || {},
+        year: raporYear,
+        month: raporMonth,
+      });
+    } catch (err) {
+      console.error(err);
+      alert(err instanceof Error ? err.message : 'Excel oluşturulamadı.');
+    } finally {
+      setExportingExcel(false);
+    }
+  };
 
   return (
     <div className="flex flex-col gap-4 min-h-0 flex-1">
@@ -193,7 +223,9 @@ export const YoklamaEtiketGrupTab: React.FC<{
             Aşağıda aktif Kibritçi kadrosu durur. İstediğiniz kişileri bir kez «{selectedEtiket || 'ZER YAPI'}»
             diye işaretleyip kaydedin. Bu sayfa yoklama defterini değiştirmez; grubu tespit eder.
             İşaretli kadronun günlük yoklaması ve meslek etiketi «Grup Yoklama» sekmesinde, Puantaj ve
-            Formen ile aynı kayıttan takip edilir.
+            Formen ile aynı kayıttan takip edilir. Yeşil <span className="font-black text-emerald-800">Hakediş Excel</span> butonu
+            Kibritçi antetli / logolu aylık cetveli üretir (usta yardımcılığı, temizlik ve diğer meslek
+            grupları ayrı; ödeme kaynağı).
           </p>
         </div>
 
@@ -249,6 +281,9 @@ export const YoklamaEtiketGrupTab: React.FC<{
             <span className="ml-2 font-bold text-emerald-700">
               {selectedEtiket}: {taggedCount} işaretli
             </span>
+            <span className="ml-2 font-semibold text-slate-500">
+              · Excel: {String(raporMonth).padStart(2, '0')}.{raporYear}
+            </span>
             {dirty && (
               <span className="ml-2 text-amber-700 font-bold">· kaydedilmemiş değişiklik</span>
             )}
@@ -299,6 +334,16 @@ export const YoklamaEtiketGrupTab: React.FC<{
             >
               <FileText size={12} />
               TXT
+            </button>
+            <button
+              type="button"
+              disabled={taggedPeople.length === 0 || exportingExcel}
+              onClick={() => void handleHakedisExcel()}
+              title="Kibritçi antetli / logolu aylık hakediş Excel — meslek grupları ayrı (ödeme cetveli)"
+              className="text-[10px] font-black px-2.5 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white cursor-pointer disabled:opacity-40 inline-flex items-center gap-1"
+            >
+              {exportingExcel ? <Loader2 size={12} className="animate-spin" /> : <FileSpreadsheet size={12} />}
+              {exportingExcel ? 'Excel…' : 'Hakediş Excel'}
             </button>
             {onOpenGrupYoklama && (
               <button

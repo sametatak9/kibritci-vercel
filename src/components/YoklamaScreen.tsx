@@ -1306,6 +1306,9 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
         {sayfaSekmeleri}
         <YoklamaEtiketGrupTab
           personeller={personeller}
+          yoklamalar={draftYoklamalar}
+          year={selectedYear}
+          month={selectedMonth}
           setPersoneller={setPersoneller}
           onOpenGrupYoklama={(etiket) => {
             setTakipGrupEtiket(etiket);

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Calendar, ClipboardList, FileText, Save, Search, Tag } from 'lucide-react';
+import { Calendar, ClipboardList, FileSpreadsheet, FileText, Loader2, Save, Search, Tag } from 'lucide-react';
 import type { AylikYoklamaMap, Personel, YoklamaDurum } from '../types/erp';
 import { formatDateLabelTr, todayDateKey } from '../lib/dateKeyUtils';
 import { displayPersonelGorev } from '../lib/guvenlikHelpers';
@@ -84,6 +84,7 @@ export const YoklamaEtiketTakipTab: React.FC<{
   const [bulkMeslekYazi, setBulkMeslekYazi] = useState('');
   const [etiketYazanId, setEtiketYazanId] = useState<string | null>(null);
   const [etiketYazi, setEtiketYazi] = useState('');
+  const [exportingExcel, setExportingExcel] = useState(false);
 
   useEffect(() => subscribePersonelTakipEtiketleri(setKayitliGruplar), []);
 
@@ -223,6 +224,30 @@ export const YoklamaEtiketTakipTab: React.FC<{
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
+  };
+
+  const handleHakedisExcel = async () => {
+    if (tagged.length === 0) {
+      alert(`«${grupEtiket}» grubunda işaretli personel yok.`);
+      return;
+    }
+    if (exportingExcel) return;
+    setExportingExcel(true);
+    try {
+      const { exportGrupYoklamaHakedisExcel } = await import('../lib/grupYoklamaExcel');
+      await exportGrupYoklamaHakedisExcel({
+        grupEtiket,
+        personeller: tagged,
+        yoklamalar,
+        year,
+        month,
+      });
+    } catch (err) {
+      console.error(err);
+      alert(err instanceof Error ? err.message : 'Excel oluşturulamadı.');
+    } finally {
+      setExportingExcel(false);
+    }
   };
 
   const handleSave = async () => {
@@ -405,6 +430,16 @@ export const YoklamaEtiketTakipTab: React.FC<{
             >
               <FileText size={12} />
               TXT
+            </button>
+            <button
+              type="button"
+              disabled={tagged.length === 0 || exportingExcel}
+              onClick={() => void handleHakedisExcel()}
+              title="Seçili ayın Kibritçi antetli hakediş Excel’i — meslek grupları ayrı (ödeme cetveli)"
+              className="text-[10px] font-black px-2.5 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white cursor-pointer disabled:opacity-40 inline-flex items-center gap-1"
+            >
+              {exportingExcel ? <Loader2 size={12} className="animate-spin" /> : <FileSpreadsheet size={12} />}
+              {exportingExcel ? 'Excel…' : 'Hakediş Excel'}
             </button>
             <button
               type="button"
