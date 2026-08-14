@@ -140,6 +140,7 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
   const [soforSahaFaaliyetleri, setSoforSahaFaaliyetleri] = useState<SoforSahaFaaliyet[]>([]);
   const [operatorSahaFaaliyetleri, setOperatorSahaFaaliyetleri] = useState<OperatorSahaFaaliyet[]>([]);
   const [exportingExcel, setExportingExcel] = useState(false);
+  const [exportingPdf, setExportingPdf] = useState(false);
   const [exportingAylikRapor, setExportingAylikRapor] = useState(false);
   const [programFocusPersonId, setProgramFocusPersonId] = useState<string | null>(null);
   const [etiketFilter, setEtiketFilter] = useState('');
@@ -662,8 +663,24 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
       alert('Bu gün için raporlanacak faaliyet kaydı yok.');
       return;
     }
-    void import('../lib/faaliyetGunlukReport').then(
-      ({ buildFaaliyetGunlukReportHtml, openFaaliyetGunlukReportPdf }) => {
+    const preview = window.open('about:blank', '_blank');
+    if (preview) {
+      try {
+        preview.document.write(
+          '<p style="font-family:Segoe UI,sans-serif;padding:24px;color:#334155">Günlük saha faaliyeti detaylı raporu hazırlanıyor…</p>'
+        );
+      } catch {
+        /* ignore */
+      }
+    }
+    setExportingPdf(true);
+    void (async () => {
+      try {
+        const {
+          buildFaaliyetGunlukReportHtml,
+          fillFaaliyetGunlukReportWindow,
+          downloadFaaliyetGunlukReportHtml,
+        } = await import('../lib/faaliyetGunlukReport');
         const html = buildFaaliyetGunlukReportHtml({
           dateKey: selectedDate,
           sahaFaaliyetleri: daySahaFaaliyetleri,
@@ -671,9 +688,34 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
           personeller,
           yoklamalar,
         });
-        openFaaliyetGunlukReportPdf(html, `Günlük Faaliyet — ${dayLabel}`);
+        const title = `Günlük Saha Faaliyeti Detaylı Raporu — ${dayLabel}`;
+        if (preview && !preview.closed) {
+          const ok = fillFaaliyetGunlukReportWindow(preview, html, title);
+          if (!ok) {
+            preview.close();
+            downloadFaaliyetGunlukReportHtml(html, selectedDate);
+            alert('Rapor HTML olarak indirildi — dosyayı açıp Yazdır / PDF alın.');
+          }
+        } else {
+          downloadFaaliyetGunlukReportHtml(html, selectedDate);
+          alert('Pop-up engellendi. Rapor HTML olarak indirildi — dosyayı açıp Yazdır / PDF alın.');
+        }
+      } catch (err) {
+        try {
+          preview?.close();
+        } catch {
+          /* ignore */
+        }
+        try {
+          const { reportModuleLoadError } = await import('../lib/faaliyetGunlukReport');
+          alert(reportModuleLoadError(err));
+        } catch {
+          alert(err instanceof Error ? err.message : 'Rapor oluşturulamadı.');
+        }
+      } finally {
+        setExportingPdf(false);
       }
-    );
+    })();
   };
 
   const handleAyiRaporla = async () => {
@@ -724,7 +766,12 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
       });
     } catch (err) {
       console.error(err);
-      alert('Excel raporu oluşturulamadı. Tekrar deneyin.');
+      try {
+        const { reportModuleLoadError } = await import('../lib/faaliyetGunlukReport');
+        alert(reportModuleLoadError(err));
+      } catch {
+        alert(err instanceof Error ? err.message : 'Excel raporu oluşturulamadı.');
+      }
     } finally {
       setExportingExcel(false);
     }
@@ -1604,18 +1651,19 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
               <button
                 type="button"
                 onClick={handleDayPdfReport}
-                disabled={!dayHasRecords}
+                disabled={!dayHasRecords || exportingPdf}
                 className="inline-flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 text-white text-[10px] font-black px-3 py-2 rounded-xl disabled:opacity-40 cursor-pointer"
-                title="Yazdır / PDF olarak kaydet"
+                title="Günlük saha faaliyeti detaylı raporu (açıklama + fotoğraf) — Yazdır / PDF"
               >
-                <Printer size={13} />
-                PDF / Yazdır ({dayOzet.faaliyetSayisi})
+                {exportingPdf ? <Loader2 size={13} className="animate-spin" /> : <Printer size={13} />}
+                {exportingPdf ? 'Rapor…' : `PDF / Yazdır (${dayOzet.faaliyetSayisi})`}
               </button>
               <button
                 type="button"
                 onClick={() => void handleDayExcelReport()}
                 disabled={!dayHasRecords || exportingExcel}
                 className="inline-flex items-center gap-1.5 bg-emerald-700 hover:bg-emerald-800 text-white text-[10px] font-black px-3 py-2 rounded-xl disabled:opacity-40 cursor-pointer"
+                title="Günlük saha faaliyeti detaylı Excel (açıklama + gömülü fotoğraf)"
               >
                 {exportingExcel ? <Loader2 size={13} className="animate-spin" /> : <FileSpreadsheet size={13} />}
                 {exportingExcel ? 'Fotoğraflar…' : `Excel (${dayOzet.faaliyetSayisi})`}

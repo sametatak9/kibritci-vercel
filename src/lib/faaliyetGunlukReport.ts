@@ -88,6 +88,41 @@ function escapeHtml(value: string): string {
     .replace(/"/g, '&quot;');
 }
 
+function reportModuleLoadError(err: unknown): string {
+  const raw = err instanceof Error ? err.message : String(err || '');
+  const low = raw.toLowerCase();
+  if (
+    low.includes('failed to fetch dynamically imported module') ||
+    low.includes('importing a module') ||
+    low.includes('not a valid javascript mime') ||
+    low.includes('text/html')
+  ) {
+    return 'Sayfa güncellenmiş (eski önbellek). Ctrl+F5 ile yenileyip raporu tekrar deneyin.';
+  }
+  return raw || 'Rapor oluşturulamadı.';
+}
+
+export { reportModuleLoadError };
+
+function triggerBrowserDownload(blob: Blob, fileName: string): void {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = fileName;
+  a.rel = 'noopener';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 30_000);
+}
+
+function ilerlemeOzet(f: SahaFaaliyeti): string {
+  const list = (f.ilerlemeKayitlari || [])
+    .map((k) => String(k.yorum || '').trim())
+    .filter(Boolean);
+  return list.join(' · ');
+}
+
 function kaynakEtiket(kaynak?: string): string {
   const k = String(kaynak || '').toUpperCase();
   if (k === 'FORMEN_MOBIL') return 'Formen Mobil';
@@ -137,8 +172,8 @@ function renderSahaCard(
   index: number,
   personeller: Personel[]
 ): string {
-  const fotolar = getFaaliyetTumFotolar(f);
   const sabahFotolar = getFaaliyetFotolar(f);
+  const tumFotolar = getFaaliyetTumFotolar(f);
   const ekip = ekipLabel(f, personeller);
   const konum = [f.parsel && `Parsel ${f.parsel}`, f.blok && `Blok ${f.blok}`]
     .filter(Boolean)
@@ -154,6 +189,11 @@ function renderSahaCard(
         <div>
           <div style="font-size:11px;color:#64748b;font-weight:700;">#${index + 1} · Saha · ${escapeHtml(kaynakEtiket(f.kaynakEkran))}</div>
           <div style="font-size:15px;font-weight:800;color:#0f172a;margin-top:4px;">${escapeHtml(f.isNiteligi || 'İş niteliği belirtilmemiş')}</div>
+          ${
+            f.isEtiketi
+              ? `<div style="margin-top:4px;font-size:10px;font-weight:800;color:#6d28d9;">Etiket: ${escapeHtml(f.isEtiketi)}</div>`
+              : ''
+          }
           ${konum ? `<div style="font-size:11px;color:#475569;margin-top:4px;">📍 ${escapeHtml(konum)}</div>` : ''}
         </div>
         <div style="display:flex;flex-direction:column;gap:4px;align-items:flex-end">
@@ -172,16 +212,11 @@ function renderSahaCard(
       ${
         sabahFotolar.length > 0
           ? `<div style="margin-top:10px"><div style="font-size:10px;font-weight:800;color:#64748b;margin-bottom:6px">Sabah fotoğrafları (${sabahFotolar.length})</div>${renderFotoBlock(sabahFotolar)}</div>`
-          : ''
-      }
-      ${buildIlerlemeTimelineHtml(f)}
-      ${
-        fotolar.length > sabahFotolar.length
-          ? `<div style="margin-top:10px"><div style="font-size:10px;font-weight:800;color:#64748b;margin-bottom:6px">Tüm fotoğraflar (${fotolar.length})</div>${renderFotoBlock(fotolar)}</div>`
-          : sabahFotolar.length === 0
-            ? renderFotoBlock(fotolar)
+          : tumFotolar.length === 0
+            ? renderFotoBlock([])
             : ''
       }
+      ${buildIlerlemeTimelineHtml(f)}
     </article>`;
 }
 
@@ -217,6 +252,7 @@ export function buildFaaliyetGunlukReportHtml(options: {
   personeller: Personel[];
   yoklamalar?: AylikYoklamaMap;
   olusturan?: string;
+  atanmamisPersoneller?: Personel[];
 }): string {
   const label = formatDateLabelTr(options.dateKey);
   const saha = options.sahaFaaliyetleri || [];
@@ -228,8 +264,8 @@ export function buildFaaliyetGunlukReportHtml(options: {
     options.dateKey,
     options.yoklamalar || {}
   );
-  const title = 'GÜNLÜK FAALİYET RAPORU';
-  const subtitle = `${label} tarihli saha ve kamp iş kayıtları`;
+  const title = 'GÜNLÜK SAHA FAALİYETİ DETAYLI RAPORU';
+  const subtitle = `${label} — faaliyetler, açıklamalar ve saha fotoğrafları`;
 
   const personelRows = ozet.faaliyetliPersoneller
     .map(
@@ -270,6 +306,43 @@ export function buildFaaliyetGunlukReportHtml(options: {
       </tr>`
     )
     .join('');
+
+  const atanmamis = options.atanmamisPersoneller || [];
+  const atanmamisRows = atanmamis
+    .map(
+      (p, i) => `
+      <tr>
+        <td style="padding:8px 10px;border-bottom:1px solid #fde68a;text-align:center;color:#92400e;">${i + 1}</td>
+        <td style="padding:8px 10px;border-bottom:1px solid #fde68a;font-weight:700;color:#0f172a;">${escapeHtml(`${p.ad || ''} ${p.soyad || ''}`.trim())}</td>
+        <td style="padding:8px 10px;border-bottom:1px solid #fde68a;color:#475569;">${escapeHtml(p.gorev || '—')}</td>
+        <td style="padding:8px 10px;border-bottom:1px solid #fde68a;text-align:center;">
+          <span style="font-size:10px;font-weight:800;padding:2px 8px;border-radius:999px;background:#fef3c7;color:#92400e;">Atanmadı</span>
+        </td>
+      </tr>`
+    )
+    .join('');
+
+  const atanmamisPage =
+    atanmamis.length === 0
+      ? ''
+      : `
+    <section style="margin:20px 0 8px;">
+      <h2 style="font-size:14px;font-weight:900;color:#92400e;margin:0 0 6px;text-transform:uppercase;letter-spacing:0.04em;">
+        Geldi — henüz görevlendirilmeyen (${atanmamis.length})
+      </h2>
+      <p style="margin:0 0 12px;font-size:11px;color:#64748b;">Yoklamada Geldi, henüz saha kaydına bağlanmamış personel</p>
+      <table style="width:100%;border-collapse:collapse;font-size:11px;background:#fff;border:1px solid #fde68a;border-radius:10px;overflow:hidden;">
+        <thead>
+          <tr style="background:#b45309;color:#fff;">
+            <th style="padding:9px 10px;text-align:center;width:36px;">#</th>
+            <th style="padding:9px 10px;text-align:left;">Ad Soyad</th>
+            <th style="padding:9px 10px;text-align:left;">Görev</th>
+            <th style="padding:9px 10px;text-align:center;">Durum</th>
+          </tr>
+        </thead>
+        <tbody>${atanmamisRows}</tbody>
+      </table>
+    </section>`;
 
   const personelPage = `
     <section class="personel-page" style="page-break-before:always;margin-top:8px;">
@@ -350,6 +423,7 @@ export function buildFaaliyetGunlukReportHtml(options: {
     `Toplam kayıt: ${ozet.faaliyetSayisi} (saha ${ozet.sahaSayisi} · kamp ${ozet.kampSayisi})`,
     `Faaliyeti olan personel: ${ozet.personelSayisi}`,
     `Yok olan personel: ${ozet.yokSayisi}`,
+    atanmamis.length ? `Henüz görevlendirilmeyen Geldi: ${atanmamis.length}` : '',
     `Fotoğraf: ${ozet.fotoSayisi}`,
     `Oluşturan: ${options.olusturan || 'Faaliyet Personel'}`,
     `Basım: ${new Date().toLocaleString('tr-TR')}`,
@@ -384,8 +458,9 @@ export function buildFaaliyetGunlukReportHtml(options: {
   <div class="page">
     <div class="toolbar"><button type="button" onclick="window.print()">🖨 Yazdır / PDF</button></div>
     ${kibritciReportHeaderHtml(title, subtitle)}
-    <div class="meta">${meta.map((m) => `<p>${escapeHtml(m)}</p>`).join('')}<p style="margin-top:6px;font-weight:700;color:#1e3a5f">Fotoğrafa tıklayınca büyür.</p></div>
+    <div class="meta">${meta.filter(Boolean).map((m) => `<p>${escapeHtml(m)}</p>`).join('')}<p style="margin-top:6px;font-weight:700;color:#1e3a5f">Fotoğrafa tıklayınca büyür. Üstten Yazdır / PDF alın.</p></div>
     ${bodyParts.join('')}
+    ${atanmamisPage}
     ${personelPage}
     <footer style="margin-top:24px;padding-top:12px;border-top:1px solid #e2e8f0;font-size:10px;color:#94a3b8;text-align:center;">
       Kibritçi İnşaat ERP · Faaliyeti Olan Personeller
@@ -416,16 +491,43 @@ export function buildFaaliyetGunlukReportHtml(options: {
 </html>`;
 }
 
-/** Yazdır / PDF olarak kaydet (tarayıcı yazdırma diyaloğu) */
-export function openFaaliyetGunlukReportPdf(html: string, title: string): void {
-  const w = window.open('', '_blank');
-  if (!w) {
-    alert('Pop-up engellendi. Tarayıcı izinlerini kontrol edin.');
-    return;
+export function downloadFaaliyetGunlukReportHtml(html: string, dateKey: string): void {
+  triggerBrowserDownload(
+    new Blob([html], { type: 'text/html;charset=utf-8' }),
+    `Gunluk_Saha_Faaliyet_Detay_${dateKey}.html`
+  );
+}
+
+/** Tıklama anında açılmış pencereye raporu yazar (async import sonrası window.open engellenir). */
+export function fillFaaliyetGunlukReportWindow(w: Window, html: string, title: string): boolean {
+  try {
+    w.document.open();
+    w.document.write(html);
+    w.document.close();
+    w.document.title = title;
+    try {
+      w.focus();
+    } catch {
+      /* ignore */
+    }
+    return true;
+  } catch {
+    try {
+      const url = URL.createObjectURL(new Blob([html], { type: 'text/html;charset=utf-8' }));
+      w.location.replace(url);
+      return true;
+    } catch {
+      return false;
+    }
   }
-  w.document.write(html);
-  w.document.close();
-  w.document.title = title;
+}
+
+/** Yazdır / PDF — pop-up yoksa HTML indirir */
+export function openFaaliyetGunlukReportPdf(html: string, title: string, dateKey?: string): void {
+  const w = window.open('about:blank', '_blank');
+  if (w && fillFaaliyetGunlukReportWindow(w, html, title)) return;
+  downloadFaaliyetGunlukReportHtml(html, dateKey || 'rapor');
+  alert('Pop-up engellendi. Rapor HTML olarak indirildi — dosyayı açıp Yazdır / PDF alın.');
 }
 
 export async function exportFaaliyetGunlukExcel(options: {
@@ -453,9 +555,9 @@ export async function exportFaaliyetGunlukExcel(options: {
     },
   });
 
-  sheet.mergeCells('A1:J1');
+  sheet.mergeCells('A1:L1');
   const titleCell = sheet.getCell('A1');
-  titleCell.value = 'Günlük Faaliyet Raporu';
+  titleCell.value = 'Günlük Saha Faaliyeti Detaylı Raporu';
   titleCell.font = { name: 'Arial', size: 14, bold: true, color: { argb: 'FFFFFFFF' } };
   titleCell.fill = {
     type: 'pattern',
@@ -465,19 +567,21 @@ export async function exportFaaliyetGunlukExcel(options: {
   titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
   sheet.getRow(1).height = 28;
 
-  sheet.mergeCells('A2:J2');
+  sheet.mergeCells('A2:L2');
   const dateCell = sheet.getCell('A2');
-  dateCell.value = `Tarih: ${label} · Saha ${ozet.sahaSayisi} · Kamp ${ozet.kampSayisi} · Faaliyetli ${ozet.personelSayisi} · Yok ${ozet.yokSayisi} · Fotoğraflar gömülü (J sütunu + Fotoğraflar sekmesi)`;
+  dateCell.value = `Tarih: ${label} · Saha ${ozet.sahaSayisi} · Kamp ${ozet.kampSayisi} · Faaliyetli ${ozet.personelSayisi} · Yok ${ozet.yokSayisi} · Açıklama + fotoğraflar gömülü (L sütunu + Fotoğraflar sekmesi)`;
   dateCell.font = { name: 'Arial', size: 11, italic: true };
   dateCell.alignment = { horizontal: 'center', vertical: 'middle' };
 
   const headers = [
     'Kaynak',
     'Başlık / Yerleşke',
-    'Tip / Niteliği',
+    'Tip',
+    'İş etiketi',
     'Parsel / Blok',
     'Personel',
     'Açıklama',
+    'Gün içi not',
     'Kaydeden',
     'Foto adedi',
     'Foto URL',
@@ -503,10 +607,12 @@ export async function exportFaaliyetGunlukExcel(options: {
   sheet.columns = [
     { width: 14 },
     { width: 28 },
-    { width: 22 },
+    { width: 16 },
+    { width: 16 },
     { width: 16 },
     { width: 32 },
     { width: 36 },
+    { width: 32 },
     { width: 18 },
     { width: 10 },
     { width: 28 },
@@ -533,9 +639,11 @@ export async function exportFaaliyetGunlukExcel(options: {
     kaynak: string;
     baslik: string;
     tip: string;
+    etiket?: string;
     konum: string;
     personel: string;
     aciklama: string;
+    ilerleme?: string;
     kaydeden: string;
     fotolar: string[];
     highlightKamp?: boolean;
@@ -544,15 +652,17 @@ export async function exportFaaliyetGunlukExcel(options: {
       opts.kaynak,
       opts.baslik,
       opts.tip,
+      opts.etiket || '—',
       opts.konum,
       opts.personel,
       opts.aciklama,
+      opts.ilerleme || '—',
       opts.kaydeden,
       opts.fotolar.length,
       opts.fotolar[0] || '—',
       opts.fotolar.length ? '' : '—',
     ]);
-    row.height = opts.fotolar.length > 0 ? 88 : 22;
+    row.height = opts.fotolar.length > 0 ? 88 : 28;
     row.eachCell((cell, colNumber) => {
       cell.border = thinBorder;
       cell.alignment = { vertical: 'top', wrapText: true };
@@ -573,13 +683,12 @@ export async function exportFaaliyetGunlukExcel(options: {
       mainRowNumber: row.number,
     });
 
-    // İlk fotoğrafı satıra göm (J sütunu = col 9, 0-based)
     if (opts.fotolar[0]) {
       const b64 = await loadImageAsJpegBase64(opts.fotolar[0]);
       if (b64) {
         const imageId = workbook.addImage({ base64: b64, extension: 'jpeg' });
         sheet.addImage(imageId, {
-          tl: { col: 9, row: row.number - 1 },
+          tl: { col: 11, row: row.number - 1 },
           ext: { width: 118, height: 78 },
           editAs: 'oneCell',
         });
@@ -588,15 +697,17 @@ export async function exportFaaliyetGunlukExcel(options: {
   };
 
   for (const f of options.sahaFaaliyetleri) {
-    const fotolar = getFaaliyetFotolar(f);
+    const fotolar = getFaaliyetTumFotolar(f);
     await addMainRow({
       kaynak: kaynakEtiket(f.kaynakEkran),
       baslik: f.isNiteligi || '—',
       tip: kaynakEtiket(f.kaynakEkran) + (isMesaiSahaFaaliyet(f) ? ' · Mesai' : ''),
+      etiket: f.isEtiketi || '',
       konum:
         [f.parsel && `P:${f.parsel}`, f.blok && `B:${f.blok}`].filter(Boolean).join(' ') || '—',
       personel: ekipLabel(f, options.personeller) || '—',
       aciklama: f.aciklama || '—',
+      ilerleme: ilerlemeOzet(f),
       kaydeden: f.kaydedenFormen || f.kaydeden || '—',
       fotolar,
     });
@@ -619,7 +730,7 @@ export async function exportFaaliyetGunlukExcel(options: {
   }
 
   if (options.sahaFaaliyetleri.length === 0 && options.kampFaaliyetleri.length === 0) {
-    sheet.addRow(['—', 'Bu gün için kayıt yok', '', '', '', '', '', 0, '', '']);
+    sheet.addRow(['—', 'Bu gün için kayıt yok', '', '', '', '', '', '', '', 0, '', '']);
   }
 
   // Fotoğraflar albüm sayfası — her kayıt için büyük görseller
@@ -637,7 +748,7 @@ export async function exportFaaliyetGunlukExcel(options: {
   fotoSheet.mergeCells('A2:E2');
   const fHint = fotoSheet.getCell('A2');
   fHint.value =
-    'Her kaydın fotoğrafları aşağıda gömülüdür. Ana sayfada da J sütununda ilk fotoğraf görünür.';
+    'Her kaydın fotoğrafları aşağıda gömülüdür. Ana sayfada L sütununda ilk fotoğraf görünür.';
   fHint.font = { name: 'Arial', size: 10, italic: true, color: { argb: 'FF475569' } };
 
   fotoSheet.columns = [
@@ -792,13 +903,10 @@ export async function exportFaaliyetGunlukExcel(options: {
   }
 
   const buffer = await workbook.xlsx.writeBuffer();
-  const blob = new Blob([buffer as BlobPart], {
-    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-  });
-  const url = window.URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `Gunluk_Faaliyet_${options.dateKey}.xlsx`;
-  a.click();
-  window.URL.revokeObjectURL(url);
+  triggerBrowserDownload(
+    new Blob([buffer as BlobPart], {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    }),
+    `Gunluk_Saha_Faaliyet_Detay_${options.dateKey}.xlsx`
+  );
 }
