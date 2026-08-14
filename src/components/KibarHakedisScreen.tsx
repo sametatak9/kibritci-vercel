@@ -9,9 +9,9 @@ import { Personel, AylikYoklamaMap, SahaKolajFoto, ProgramliFaaliyet, TesisatciF
 import { tesisatciToSaha, mermerciToSaha, seramikToSaha } from '../lib/mobilFaaliyetAdapter';
 import { CorporateReportLayout } from './CorporateReportLayout';
 import { CORPORATE_COMPANY, getCorporateReportCss } from '../lib/corporateReportHtml';
-import { buildPersonelListForMonth, isDayActiveForPersonel, normalizeTurkishName } from '../lib/yoklamaUtils';
-import { resolveStubPersonelFromLegacyId } from '../lib/legacyYoklamaImport';
+import { isDayActiveForPersonel } from '../lib/yoklamaUtils';
 import { normalizeGorev, isUstaGorev } from '../lib/gorevUtils';
+import { personelHasTakipEtiketi } from '../lib/personelTakipEtiketUtils';
 import {
   prepareSahaFaaliyetRaporu,
   prepareKampFaaliyetRaporu,
@@ -470,26 +470,21 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
   }, [birlesikKolajFotolari]);
 
   const buildRowsForMonth = (year: number, month: number): StaffHakedisRow[] => {
-    const monthPersoneller = buildPersonelListForMonth(personeller, yoklamaSource, year, month, resolveStubPersonelFromLegacyId);
-    const rows: StaffHakedisRow[] = [];
-
-    monthPersoneller.forEach((p) => {
+    const tagged = (personeller || []).filter((p) => personelHasTakipEtiketi(p, 'ZER YAPI'));
+    const rows: StaffHakedisRow[] = tagged.map((p) => {
       const personMap = yoklamaSource[p.id] as Record<string, { durum?: string; mesaiSaati?: number }> | undefined;
       const { geldiGun, mesaiSaat } = sumStrictMonthAttendance(p, personMap, year, month);
-
-      if (geldiGun > 0) {
-        const gunKazanci = calcGunKazanci(p, geldiGun, year, month);
-        const mesaiKazanci = calcMesaiKazanci(p, mesaiSaat, year, month);
-        rows.push({
-          personel: p,
-          geldiGun,
-          mesaiSaat,
-          gunKazanci,
-          mesaiKazanci,
-          toplamKazanc: gunKazanci + mesaiKazanci,
-          zerYapiHakedis: geldiGun * ZER_YAPI_GUNLUK,
-        });
-      }
+      const gunKazanci = calcGunKazanci(p, geldiGun, year, month);
+      const mesaiKazanci = calcMesaiKazanci(p, mesaiSaat, year, month);
+      return {
+        personel: p,
+        geldiGun,
+        mesaiSaat,
+        gunKazanci,
+        mesaiKazanci,
+        toplamKazanc: gunKazanci + mesaiKazanci,
+        zerYapiHakedis: geldiGun * ZER_YAPI_GUNLUK,
+      };
     });
 
     return rows.sort((a, b) =>
@@ -2003,7 +1998,7 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
               <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">DÖNEM: {donemLabel}</span>
               <h3 className="text-xs font-black text-slate-800 mt-0.5">Personel Listesi ({allStaffRows.length})</h3>
               <p className="text-[10px] text-slate-500 mt-1 leading-relaxed">
-                Seçilen ayda en az 1 gün &quot;Geldi&quot; kaydı olan personeller. Hakedişten çıkarmak istediklerinizi işaretleyin.
+                Puantaj / Grup Yoklama’da «ZER YAPI» etiketi atanmış personeller. Hakedişten çıkarmak istediklerinizi işaretleyin.
               </p>
               <p className="text-[10px] text-amber-800 font-semibold mt-1.5">
                 Aktif: Ustalı {ustaliRows.length} · Ustasız {ustasizRows.length}
@@ -2013,7 +2008,7 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
             <div className="space-y-1.5 max-h-96 overflow-y-auto pr-1">
               {allStaffRows.length === 0 ? (
                 <div className="text-center py-8 text-slate-400 italic text-[11px]">
-                  {donemLabel} döneminde yoklama kaydı bulunamadı. Yoklama ekranından Excel aktarımını yapın.
+                  «ZER YAPI» etiketi atanmış personel yok. Puantaj → Etiket Grupları’ndan kadroyu işaretleyip kaydedin.
                 </div>
               ) : (
                 allStaffRows.map(({ personel: p, geldiGun, mesaiSaat, gunKazanci, mesaiKazanci, toplamKazanc, zerYapiHakedis }) => {
