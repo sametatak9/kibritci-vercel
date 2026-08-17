@@ -80,4 +80,10 @@ export const FIRESTORE_COLLECTIONS = [
   'yoklamaArsivleri',
   'sahaFaaliyetArsivleri',
   'programVeriYedekleri',
+  'temizlikDaireleri',
+  'temizlikTespitleri',
+  'temizlikUygulamalari',
+  'temizlikBacalar',
+  'temizlikBacaTespitleri',
+  'temizlikBacaUygulamalari',
 ];

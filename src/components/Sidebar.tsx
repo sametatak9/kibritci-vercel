@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Building2, Users, CalendarCheck2, CreditCard, ShoppingCart, Truck, KeySquare, FileText, Tent, Mail, ChartBar as BarChart3, BookOpen, Contact as Contact2, Package, LogOut, Moon, Sun, Wallet, Hop as Home, ShieldCheck, PenTool, MessageSquare, Smartphone, HardHat, Banknote, Images, Sparkles, Link2, ChevronDown, ChevronRight, Search, Pin, PinOff, Wrench, Gem, Camera, Layers, ClipboardList } from 'lucide-react';
+import { Building2, Users, CalendarCheck2, CreditCard, ShoppingCart, Truck, KeySquare, FileText, Tent, Mail, ChartBar as BarChart3, BookOpen, Contact as Contact2, Package, LogOut, Moon, Sun, Wallet, Hop as Home, ShieldCheck, PenTool, MessageSquare, Smartphone, HardHat, Banknote, Images, Sparkles, Link2, ChevronDown, ChevronRight, Search, Pin, PinOff, Wrench, Gem, Camera, Layers, ClipboardList, Droplets } from 'lucide-react';
 import {
   canAccessOnayHavuzu,
   canAccessUyelikAdminPanel,
@@ -98,6 +98,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         { key: "lojistik_ekrani", label: "Şöför Mobil Paneli", icon: Truck },
         { key: "depocu_ekrani", label: "Depocu Mobil Paneli", icon: Package },
         { key: "imalat_terminali", label: "İmalat Terminali", icon: Smartphone },
+        { key: "temizlik_kirim", label: "Temizlik / Kırım", icon: Droplets },
       ]
     },
     {

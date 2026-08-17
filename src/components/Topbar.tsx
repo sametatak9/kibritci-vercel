@@ -91,7 +91,8 @@ export const Topbar: React.FC<TopbarProps> = ({
       fatura_giris: "Fatura Girişi",
       irsaliye_giris: "İrsaliye ve Fiş Girişi",
       t_cetveli: "T Cetveli",
-      imalat_terminali: "İmalat Terminali"
+      imalat_terminali: "İmalat Terminali",
+      temizlik_kirim: "Temizlik / Kırım Tespiti"
     };
     return labels[tab] || tab;
   };

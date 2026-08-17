@@ -1235,3 +1235,101 @@ export interface KampTaseronSayim {
   onaylayanYetki?: string;
   onayTarihi?: string;
 }
+
+/** Temizlik / kırım — daire ve baca kart özet durumu */
+export type TemizlikKartDurum = 'TESPIT_BEKLIYOR' | 'PLANLANDI' | 'UYGULAMA_DEVAM' | 'TAMAMLANDI';
+export type TemizlikIsTipi = 'TEMIZLIK' | 'KIRIM' | 'TEMIZLIK_VE_KIRIM';
+export type TemizlikOdaDurum = 'KIRLI' | 'ORTA' | 'TEMIZ' | 'KIRIM_GEREKIYOR';
+export type TemizlikBacaKirlilik = 'KIRLI' | 'ORTA' | 'TEMIZ' | 'AGIR_CAMUR';
+export type TemizlikUygulamaDurum = 'DEVAM' | 'EKSIK' | 'TAMAMLANDI';
+
+export interface TemizlikOdaTespit {
+  id: string;
+  ad: string;
+  durum: TemizlikOdaDurum;
+  yorum?: string;
+  fotoUrls: string[];
+}
+
+export interface TemizlikDaire {
+  id: string;
+  parsel: string;
+  blok: string;
+  daireNo: string;
+  kat?: string;
+  ozetDurum: TemizlikKartDurum;
+  kayitTarihi: string;
+  kaydeden?: string;
+  guncellemeTarihi?: string;
+}
+
+export interface TemizlikTespit {
+  id: string;
+  daireId: string;
+  parsel: string;
+  blok: string;
+  daireNo: string;
+  isTipi: TemizlikIsTipi;
+  odalar: TemizlikOdaTespit[];
+  genelYorum?: string;
+  planlananYevmiye: number;
+  planNotu?: string;
+  tarih: string;
+  kaydeden?: string;
+}
+
+export interface TemizlikUygulama {
+  id: string;
+  daireId: string;
+  tespitId?: string;
+  parsel: string;
+  blok: string;
+  daireNo: string;
+  tarih: string;
+  harcananYevmiye: number;
+  durum: TemizlikUygulamaDurum;
+  aciklama?: string;
+  fotoUrls: string[];
+  kaydeden?: string;
+}
+
+export interface TemizlikBaca {
+  id: string;
+  parsel: string;
+  blok?: string;
+  etiket: string;
+  yerTarifi: string;
+  ozetDurum: TemizlikKartDurum;
+  kayitTarihi: string;
+  kaydeden?: string;
+  guncellemeTarihi?: string;
+}
+
+export interface TemizlikBacaTespit {
+  id: string;
+  bacaId: string;
+  parsel: string;
+  blok?: string;
+  etiket: string;
+  fotoUrls: string[];
+  kirlilikDurumu: TemizlikBacaKirlilik;
+  iscilikYorumu?: string;
+  planlananYevmiye: number;
+  planNotu?: string;
+  tarih: string;
+  kaydeden?: string;
+}
+
+export interface TemizlikBacaUygulama {
+  id: string;
+  bacaId: string;
+  tespitId?: string;
+  parsel: string;
+  etiket: string;
+  tarih: string;
+  harcananYevmiye: number;
+  durum: TemizlikUygulamaDurum;
+  aciklama?: string;
+  fotoUrls: string[];
+  kaydeden?: string;
+}

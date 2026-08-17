@@ -34,6 +34,7 @@ const TAB_META: Record<string, { label: string; icon: React.ElementType }> = {
   depocu_ekrani: { label: 'Depocu', icon: Package },
   formen_ekrani: { label: 'Formen', icon: Users },
   imalat_terminali: { label: 'İmalat', icon: Settings },
+  temizlik_kirim: { label: 'Temizlik / Kırım', icon: ClipboardList },
   sohbet: { label: 'Sohbet', icon: MessageSquare },
   eposta: { label: 'E-Posta', icon: MessageSquare },
   admin: { label: 'Admin', icon: Settings },

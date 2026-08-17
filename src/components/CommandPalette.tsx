@@ -41,6 +41,7 @@ const ROUTES = [
   { key: 'depocu_ekrani', label: 'Depocu', icon: Package },
   { key: 'formen_ekrani', label: 'Formen Ekranı', icon: Users },
   { key: 'imalat_terminali', label: 'İmalat Terminali', icon: Settings },
+  { key: 'temizlik_kirim', label: 'Temizlik / Kırım Tespiti', icon: ClipboardList },
   { key: 'sohbet', label: 'Sohbet', icon: MessageSquare },
   { key: 'eposta', label: 'E-Posta', icon: MessageSquare },
   { key: 'admin', label: 'Üyelik Onay & İmza', icon: Settings },
