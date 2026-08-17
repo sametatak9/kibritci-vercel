@@ -68,18 +68,18 @@ export type TemizlikParselOzet = {
   kalanYevmiye: number;
 };
 
-export function ozetDaireParsel(
-  parsel: string,
+export type TemizlikBlokOzet = TemizlikParselOzet & { blok: string };
+
+function ozetFromDaireler(
   daireler: TemizlikDaire[],
   tespitler: TemizlikTespit[],
   uygulamalar: TemizlikUygulama[]
-): TemizlikParselOzet {
-  const mine = daireler.filter((d) => d.parsel === parsel);
+): Omit<TemizlikParselOzet, 'parsel'> {
   let plan = 0;
   let harcanan = 0;
   let tespitli = 0;
   let tamamlanan = 0;
-  for (const d of mine) {
+  for (const d of daireler) {
     const t = latestByDate(tespitler.filter((x) => x.daireId === d.id));
     const u = uygulamalar.filter((x) => x.daireId === d.id);
     const h = sumYevmiye(u);
@@ -96,13 +96,46 @@ export function ozetDaireParsel(
     if (durum === 'TAMAMLANDI') tamamlanan += 1;
   }
   return {
-    parsel,
-    adet: mine.length,
+    adet: daireler.length,
     tespitli,
     tamamlanan,
     planYevmiye: plan,
     harcananYevmiye: harcanan,
     kalanYevmiye: Math.max(0, plan - harcanan),
+  };
+}
+
+export function ozetDaireParsel(
+  parsel: string,
+  daireler: TemizlikDaire[],
+  tespitler: TemizlikTespit[],
+  uygulamalar: TemizlikUygulama[]
+): TemizlikParselOzet {
+  return {
+    parsel,
+    ...ozetFromDaireler(
+      daireler.filter((d) => d.parsel === parsel),
+      tespitler,
+      uygulamalar
+    ),
+  };
+}
+
+export function ozetDaireBlok(
+  parsel: string,
+  blok: string,
+  daireler: TemizlikDaire[],
+  tespitler: TemizlikTespit[],
+  uygulamalar: TemizlikUygulama[]
+): TemizlikBlokOzet {
+  return {
+    parsel,
+    blok,
+    ...ozetFromDaireler(
+      daireler.filter((d) => d.parsel === parsel && d.blok === blok),
+      tespitler,
+      uygulamalar
+    ),
   };
 }
 
@@ -142,6 +175,10 @@ export function ozetBacaParsel(
     harcananYevmiye: harcanan,
     kalanYevmiye: Math.max(0, plan - harcanan),
   };
+}
+
+export function parselKisaAd(parsel: string): string {
+  return String(parsel || '').replace(/^Parsel Bölge\s+/i, '').trim() || parsel;
 }
 
 export function nextBacaEtiket(parsel: string, bacalar: TemizlikBaca[]): string {

@@ -13,7 +13,9 @@ import {
   deriveKartDurum,
   latestByDate,
   ozetBacaParsel,
+  ozetDaireBlok,
   ozetDaireParsel,
+  parselKisaAd,
   sumYevmiye,
 } from './temizlikKirimUtils';
 
@@ -36,6 +38,35 @@ function imgRow(urls: string[]): string {
     .join('')}</div>`;
 }
 
+function ozetTabloHtml(
+  headers: string[],
+  rows: (string | number)[][]
+): string {
+  return `<table style="width:100%;border-collapse:collapse;font-size:12px;margin:0 0 16px">
+    <thead>
+      <tr>${headers
+        .map(
+          (h, i) =>
+            `<th style="text-align:${i === 0 ? 'left' : 'right'};border-bottom:1px solid #e2e8f0;padding:6px 8px;font-size:10px;text-transform:uppercase;color:#64748b">${escapeHtml(h)}</th>`
+        )
+        .join('')}</tr>
+    </thead>
+    <tbody>
+      ${rows
+        .map(
+          (r) =>
+            `<tr>${r
+              .map(
+                (c, i) =>
+                  `<td style="text-align:${i === 0 ? 'left' : 'right'};border-bottom:1px solid #f1f5f9;padding:6px 8px;font-weight:${i === 0 ? 800 : 700}">${escapeHtml(c)}</td>`
+              )
+              .join('')}</tr>`
+        )
+        .join('')}
+    </tbody>
+  </table>`;
+}
+
 export function buildDaireParselRaporHtml(opts: {
   parsel: string;
   daireler: TemizlikDaire[];
@@ -48,9 +79,16 @@ export function buildDaireParselRaporHtml(opts: {
     .sort((a, b) => `${a.blok} ${a.daireNo}`.localeCompare(`${b.blok} ${b.daireNo}`, 'tr'));
 
   const blocks = Array.from(new Set(daireler.map((d) => d.blok)));
+  const blokOzet = blocks.map((blok) =>
+    ozetDaireBlok(opts.parsel, blok, opts.daireler, opts.tespitler, opts.uygulamalar)
+  );
   const body = `
     <h1 style="font-size:18px;font-weight:900;margin:0 0 6px">${escapeHtml(opts.parsel)} — Daire Temizlik Tespiti ve Uygulama Raporu</h1>
-    <p style="font-size:12px;color:#475569;margin:0 0 16px">Daire ${ozet.adet} · Tespit ${ozet.tespitli} · Tamamlanan ${ozet.tamamlanan} · Plan ${ozet.planYevmiye} yevmiye · Harcanan ${ozet.harcananYevmiye} · Kalan ${ozet.kalanYevmiye}</p>
+    <p style="font-size:12px;color:#475569;margin:0 0 12px">${escapeHtml(parselKisaAd(opts.parsel))}: ${ozet.adet} daire · ${ozet.tespitli} tespit · plan ${ozet.planYevmiye} yevmiye · kalan ${ozet.kalanYevmiye}</p>
+    ${ozetTabloHtml(
+      ['Blok', 'Daire', 'Tespit', 'İş (yevmiye)', 'Kalan'],
+      blokOzet.map((b) => [b.blok, b.adet, `${b.tespitli}/${b.adet}`, b.planYevmiye, b.kalanYevmiye])
+    )}
     ${blocks
       .map((blok) => {
         const rows = daireler.filter((d) => d.blok === blok);
@@ -112,7 +150,11 @@ export function buildBacaParselRaporHtml(opts: {
 
   const body = `
     <h1 style="font-size:18px;font-weight:900;margin:0 0 6px">${escapeHtml(opts.parsel)} — Baca Çukur Temizlik Tespiti ve Planı</h1>
-    <p style="font-size:12px;color:#475569;margin:0 0 16px">Baca ${ozet.adet} · Tespit ${ozet.tespitli} · Tamamlanan ${ozet.tamamlanan} · Plan ${ozet.planYevmiye} yevmiye · Harcanan ${ozet.harcananYevmiye} · Kalan ${ozet.kalanYevmiye}</p>
+    <p style="font-size:12px;color:#475569;margin:0 0 12px">${escapeHtml(parselKisaAd(opts.parsel))}: ${ozet.adet} baca · ${ozet.tespitli} tespit · plan ${ozet.planYevmiye} yevmiye · kalan ${ozet.kalanYevmiye}</p>
+    ${ozetTabloHtml(
+      ['Parsel', 'Baca', 'Tespit', 'İş (yevmiye)', 'Kalan'],
+      [[parselKisaAd(opts.parsel), ozet.adet, `${ozet.tespitli}/${ozet.adet}`, ozet.planYevmiye, ozet.kalanYevmiye]]
+    )}
     ${bacalar
       .map((d) => {
         const t = latestByDate(opts.tespitler.filter((x) => x.bacaId === d.id));

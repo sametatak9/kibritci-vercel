@@ -29,7 +29,9 @@ import {
   newTemizlikId,
   nextBacaEtiket,
   ozetBacaParsel,
+  ozetDaireBlok,
   ozetDaireParsel,
+  parselKisaAd,
   sumYevmiye,
 } from '../lib/temizlikKirimUtils';
 import {
@@ -120,6 +122,69 @@ const FotoAlani: React.FC<{
         />
       </label>
     )}
+  </div>
+);
+
+function fmtYev(n: number): string {
+  const v = Number(n) || 0;
+  return Number.isInteger(v) ? String(v) : v.toLocaleString('tr-TR', { maximumFractionDigits: 1 });
+}
+
+const IsYukuTablo: React.FC<{
+  title: string;
+  adetBaslik: string;
+  rows: {
+    key: string;
+    title: string;
+    adet: number;
+    tespitli: number;
+    planYevmiye: number;
+    kalanYevmiye: number;
+  }[];
+  activeKey?: string;
+  onSelect?: (key: string) => void;
+}> = ({ title, adetBaslik, rows, activeKey, onSelect }) => (
+  <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
+    <div className="px-3 py-2 border-b border-slate-100">
+      <p className="text-[9px] font-black uppercase tracking-wider text-slate-500">{title}</p>
+    </div>
+    <div className="overflow-x-auto">
+      <table className="w-full text-left">
+        <thead>
+          <tr className="text-[8px] font-black uppercase tracking-wider text-slate-400 border-b border-slate-100">
+            <th className="px-3 py-2 font-black">Yer</th>
+            <th className="px-2 py-2 font-black text-right">{adetBaslik}</th>
+            <th className="px-2 py-2 font-black text-right">Tespit</th>
+            <th className="px-2 py-2 font-black text-right">İş (yevmiye)</th>
+            <th className="px-3 py-2 font-black text-right">Kalan</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => {
+            const active = r.key === activeKey;
+            return (
+              <tr
+                key={r.key}
+                onClick={() => onSelect?.(r.key)}
+                className={`${onSelect ? 'cursor-pointer' : ''} ${
+                  active ? 'bg-teal-50' : 'hover:bg-slate-50'
+                }`}
+              >
+                <td className="px-3 py-2 text-xs font-black text-slate-800">{r.title}</td>
+                <td className="px-2 py-2 text-xs font-black text-right">{r.adet}</td>
+                <td className="px-2 py-2 text-[11px] font-bold text-right text-slate-500">
+                  {r.tespitli}/{r.adet}
+                </td>
+                <td className="px-2 py-2 text-xs font-black text-right">{fmtYev(r.planYevmiye)}</td>
+                <td className="px-3 py-2 text-xs font-black text-right text-amber-800">
+                  {fmtYev(r.kalanYevmiye)}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
   </div>
 );
 
@@ -220,6 +285,18 @@ export const TemizlikKirimScreen: React.FC<Props> = ({ currentUser }) => {
         .filter((b) => b.parsel === parsel)
         .sort((a, b) => a.etiket.localeCompare(b.etiket, 'tr', { numeric: true })),
     [bacalar, parsel]
+  );
+  const blokOzetler = useMemo(
+    () => bloklar.map((blok) => ozetDaireBlok(parsel, blok, daireler, tespitler, uygulamalar)),
+    [bloklar, parsel, daireler, tespitler, uygulamalar]
+  );
+  const parselDaireOzetler = useMemo(
+    () => PARSEL_SECENEK.map((p) => ozetDaireParsel(p, daireler, tespitler, uygulamalar)),
+    [daireler, tespitler, uygulamalar]
+  );
+  const parselBacaOzetler = useMemo(
+    () => PARSEL_SECENEK.map((p) => ozetBacaParsel(p, bacalar, bacaTespitler, bacaUygulamalar)),
+    [bacalar, bacaTespitler, bacaUygulamalar]
   );
 
   const selectedDaire = daireler.find((d) => d.id === selectedDaireId) || null;
@@ -605,7 +682,9 @@ export const TemizlikKirimScreen: React.FC<Props> = ({ currentUser }) => {
           </div>
           <div>
             <h1 className="text-sm font-black text-slate-900 uppercase tracking-wide">Temizlik / Kırım Tespiti</h1>
-            <p className="text-[10px] text-slate-500">Daire ve baca çukurları · yerinde tespit · yevmiye planı · uygulama</p>
+            <p className="text-[10px] text-slate-500">
+              Bloklarda kaç daire ve ne kadar temizlik · parsellerde kaç baca ve ne kadar iş
+            </p>
           </div>
         </div>
       </div>
@@ -689,26 +768,83 @@ export const TemizlikKirimScreen: React.FC<Props> = ({ currentUser }) => {
       {mainTab === 'daire' && (() => {
         const o = ozetDaireParsel(parsel, daireler, tespitler, uygulamalar);
         return (
-          <div className="flex flex-wrap gap-2">
-            {ozetKart('Daire', o.adet)}
-            {ozetKart('Tespit', o.tespitli)}
-            {ozetKart('Tamamlanan', o.tamamlanan)}
-            {ozetKart('Plan yevmiye', o.planYevmiye)}
-            {ozetKart('Harcanan', o.harcananYevmiye)}
-            {ozetKart('Kalan', o.kalanYevmiye)}
+          <div className="space-y-3">
+            <div className="flex flex-wrap gap-2">
+              {ozetKart('Açık daire', o.adet, `${parselKisaAd(parsel)} toplam`)}
+              {ozetKart('Tespit', o.tespitli, 'İş planı yazılan')}
+              {ozetKart('Tamamlanan', o.tamamlanan)}
+              {ozetKart('Temizlik işi', fmtYev(o.planYevmiye), 'Plan yevmiye')}
+              {ozetKart('Harcanan', fmtYev(o.harcananYevmiye))}
+              {ozetKart('Kalan iş', fmtYev(o.kalanYevmiye))}
+            </div>
+            <IsYukuTablo
+              title="Üç parsel — daire ve temizlik işi"
+              adetBaslik="Daire"
+              activeKey={parsel}
+              onSelect={(p) => {
+                setParsel(p);
+                setSelectedDaireId(null);
+                setSelectedBacaId(null);
+              }}
+              rows={parselDaireOzetler.map((x) => ({
+                key: x.parsel,
+                title: parselKisaAd(x.parsel),
+                adet: x.adet,
+                tespitli: x.tespitli,
+                planYevmiye: x.planYevmiye,
+                kalanYevmiye: x.kalanYevmiye,
+              }))}
+            />
+            <IsYukuTablo
+              title={`${parselKisaAd(parsel)} blokları — kaç daire, ne kadar temizlik`}
+              adetBaslik="Daire"
+              activeKey={selectedBlok}
+              onSelect={(b) => {
+                setSelectedBlok(b);
+                setSelectedDaireId(null);
+              }}
+              rows={blokOzetler.map((x) => ({
+                key: x.blok,
+                title: x.blok,
+                adet: x.adet,
+                tespitli: x.tespitli,
+                planYevmiye: x.planYevmiye,
+                kalanYevmiye: x.kalanYevmiye,
+              }))}
+            />
           </div>
         );
       })()}
       {mainTab === 'baca' && (() => {
         const o = ozetBacaParsel(parsel, bacalar, bacaTespitler, bacaUygulamalar);
         return (
-          <div className="flex flex-wrap gap-2">
-            {ozetKart('Baca', o.adet, 'Parselde tespit edilen çukur')}
-            {ozetKart('Tespit', o.tespitli)}
-            {ozetKart('Tamamlanan', o.tamamlanan)}
-            {ozetKart('Plan yevmiye', o.planYevmiye)}
-            {ozetKart('Harcanan', o.harcananYevmiye)}
-            {ozetKart('Kalan', o.kalanYevmiye)}
+          <div className="space-y-3">
+            <div className="flex flex-wrap gap-2">
+              {ozetKart('Baca', o.adet, `${parselKisaAd(parsel)} çukur`)}
+              {ozetKart('Tespit', o.tespitli)}
+              {ozetKart('Tamamlanan', o.tamamlanan)}
+              {ozetKart('Baca işi', fmtYev(o.planYevmiye), 'Plan yevmiye')}
+              {ozetKart('Harcanan', fmtYev(o.harcananYevmiye))}
+              {ozetKart('Kalan iş', fmtYev(o.kalanYevmiye))}
+            </div>
+            <IsYukuTablo
+              title="Üç parsel — kaç baca, ne kadar iş"
+              adetBaslik="Baca"
+              activeKey={parsel}
+              onSelect={(p) => {
+                setParsel(p);
+                setSelectedBacaId(null);
+                setSelectedDaireId(null);
+              }}
+              rows={parselBacaOzetler.map((x) => ({
+                key: x.parsel,
+                title: parselKisaAd(x.parsel),
+                adet: x.adet,
+                tespitli: x.tespitli,
+                planYevmiye: x.planYevmiye,
+                kalanYevmiye: x.kalanYevmiye,
+              }))}
+            />
           </div>
         );
       })()}
@@ -717,34 +853,35 @@ export const TemizlikKirimScreen: React.FC<Props> = ({ currentUser }) => {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <div className="space-y-3">
             <div className="flex flex-wrap gap-1.5">
-              {bloklar.map((b) => {
-                const n = parselDaireler.filter((d) => d.blok === b).length;
-                const done = parselDaireler.filter((d) => d.blok === b && daireDurumOf(d) === 'TAMAMLANDI').length;
-                const pct = n ? Math.round((done / n) * 100) : 0;
+              {blokOzetler.map((o) => {
+                const pct = o.adet ? Math.round((o.tamamlanan / o.adet) * 100) : 0;
                 return (
                   <button
-                    key={b}
+                    key={o.blok}
                     type="button"
                     onClick={() => {
-                      setSelectedBlok(b);
+                      setSelectedBlok(o.blok);
                       setSelectedDaireId(null);
                     }}
-                    className={`px-3 py-2 rounded-xl text-[10px] font-black border cursor-pointer min-w-[72px] ${
-                      selectedBlok === b
+                    className={`px-3 py-2 rounded-xl text-[10px] font-black border cursor-pointer min-w-[88px] ${
+                      selectedBlok === o.blok
                         ? 'bg-teal-700 text-white border-teal-700'
                         : 'bg-white text-slate-600 border-slate-200'
                     }`}
                   >
                     <span className="block">
-                      {b} <span className="opacity-70">{done}/{n}</span>
+                      {o.blok} <span className="opacity-70">{o.adet} daire</span>
+                    </span>
+                    <span className="block text-[8px] font-bold opacity-80 mt-0.5">
+                      {fmtYev(o.planYevmiye)} yevmiye · kalan {fmtYev(o.kalanYevmiye)}
                     </span>
                     <span
                       className={`mt-1 block h-1 rounded-full overflow-hidden ${
-                        selectedBlok === b ? 'bg-white/25' : 'bg-slate-200'
+                        selectedBlok === o.blok ? 'bg-white/25' : 'bg-slate-200'
                       }`}
                     >
                       <span
-                        className={`block h-full ${selectedBlok === b ? 'bg-white' : 'bg-teal-600'}`}
+                        className={`block h-full ${selectedBlok === o.blok ? 'bg-white' : 'bg-teal-600'}`}
                         style={{ width: `${pct}%` }}
                       />
                     </span>
