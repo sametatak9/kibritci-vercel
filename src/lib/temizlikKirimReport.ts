@@ -10,12 +10,16 @@ import { wrapCorporateReportHtml } from './corporateReportHtml';
 import { formatDateLabelTr } from './dateKeyUtils';
 import {
   TEMIZLIK_KART_DURUM_LABEL,
+  bacaYerSatiri,
   deriveKartDurum,
+  koridorlarForParsel,
   latestByDate,
+  ozetBacaKoridor,
   ozetBacaParsel,
   ozetDaireBlok,
   ozetDaireParsel,
   parselKisaAd,
+  sortBacalar,
   sumYevmiye,
 } from './temizlikKirimUtils';
 
@@ -144,16 +148,24 @@ export function buildBacaParselRaporHtml(opts: {
   uygulamalar: TemizlikBacaUygulama[];
 }): string {
   const ozet = ozetBacaParsel(opts.parsel, opts.bacalar, opts.tespitler, opts.uygulamalar);
-  const bacalar = opts.bacalar
-    .filter((d) => d.parsel === opts.parsel)
-    .sort((a, b) => a.etiket.localeCompare(b.etiket, 'tr'));
+  const koridorlar = koridorlarForParsel(opts.parsel);
+  const bacalar = sortBacalar(opts.bacalar.filter((d) => d.parsel === opts.parsel));
+  const koridorOzet = koridorlar.map((k) =>
+    ozetBacaKoridor(opts.parsel, k.id, opts.bacalar, opts.tespitler, opts.uygulamalar)
+  );
 
   const body = `
     <h1 style="font-size:18px;font-weight:900;margin:0 0 6px">${escapeHtml(opts.parsel)} — Baca Çukur Temizlik Tespiti ve Planı</h1>
     <p style="font-size:12px;color:#475569;margin:0 0 12px">${escapeHtml(parselKisaAd(opts.parsel))}: ${ozet.adet} baca · ${ozet.tespitli} tespit · plan ${ozet.planYevmiye} yevmiye · kalan ${ozet.kalanYevmiye}</p>
     ${ozetTabloHtml(
-      ['Parsel', 'Baca', 'Tespit', 'İş (yevmiye)', 'Kalan'],
-      [[parselKisaAd(opts.parsel), ozet.adet, `${ozet.tespitli}/${ozet.adet}`, ozet.planYevmiye, ozet.kalanYevmiye]]
+      ['Koridor', 'Baca', 'Tespit', 'İş (yevmiye)', 'Kalan'],
+      koridorOzet.map((k, i) => [
+        koridorlar[i]?.baslik || k.parsel,
+        k.adet,
+        `${k.tespitli}/${k.adet}`,
+        k.planYevmiye,
+        k.kalanYevmiye,
+      ])
     )}
     ${bacalar
       .map((d) => {
@@ -167,14 +179,23 @@ export function buildBacaParselRaporHtml(opts: {
           harcananYevmiye: h,
           uygulamalar: u,
         });
+        const uygulanan = u
+          .sort((a, b) => String(b.tarih).localeCompare(String(a.tarih)))
+          .map(
+            (x) =>
+              `<li>${escapeHtml(x.tarih)} · ${escapeHtml(x.harcananYevmiye)} yevmiye · ${escapeHtml(x.durum)}${x.aciklama ? ` — ${escapeHtml(x.aciklama)}` : ''}</li>`
+          )
+          .join('');
         return `
           <div style="border:1px solid #e2e8f0;border-radius:12px;padding:12px;margin-bottom:10px">
-            <p style="font-weight:800;margin:0">${escapeHtml(d.etiket)}${d.blok ? ` · ${escapeHtml(d.blok)}` : ''} — ${TEMIZLIK_KART_DURUM_LABEL[durum]}</p>
-            <p style="font-size:12px;margin:4px 0"><strong>Yer:</strong> ${escapeHtml(d.yerTarifi)}</p>
+            <p style="font-weight:800;margin:0;font-size:16px">${escapeHtml(d.etiket)} — ${TEMIZLIK_KART_DURUM_LABEL[durum]}</p>
+            <p style="font-size:12px;margin:4px 0"><strong>Adres:</strong> ${escapeHtml(bacaYerSatiri(d))}${d.koridor ? ` · ${escapeHtml(d.koridor)}` : ''}</p>
             <p style="font-size:12px;color:#475569;margin:4px 0">Kirlilik: ${escapeHtml(t?.kirlilikDurumu || '—')} · Plan ${p} yevmiye · Harcanan ${h} · Kalan ${Math.max(0, p - h)}</p>
-            ${t?.iscilikYorumu ? `<p style="font-size:12px">${escapeHtml(t.iscilikYorumu)}</p>` : ''}
+            ${t?.iscilikYorumu ? `<p style="font-size:12px"><strong>Tespit:</strong> ${escapeHtml(t.iscilikYorumu)}</p>` : ''}
             ${t?.planNotu ? `<p style="font-size:12px"><strong>Plan:</strong> ${escapeHtml(t.planNotu)}</p>` : ''}
             ${imgRow(t?.fotoUrls || [])}
+            ${uygulanan ? `<p style="font-size:12px;font-weight:800;margin:10px 0 4px">Ne yapıldı</p><ul style="font-size:12px;margin:0">${uygulanan}</ul>` : ''}
+            ${u.flatMap((x) => x.fotoUrls || []).length ? imgRow(u.flatMap((x) => x.fotoUrls || [])) : ''}
           </div>`;
       })
       .join('')}

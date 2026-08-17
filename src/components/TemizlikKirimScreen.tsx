@@ -1,8 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
-  Camera, Droplets, MapPin, Plus, Printer, Trash2, X,
+  Camera, Droplets, MapPin, Plus, Printer, Trash2, X, Layers, CheckCircle2,
 } from 'lucide-react';
-import { collection, deleteDoc, doc, onSnapshot } from 'firebase/firestore';
+import { collection, onSnapshot } from 'firebase/firestore';
 import {
   TemizlikBaca,
   TemizlikBacaTespit,
@@ -15,8 +15,11 @@ import {
   TemizlikUygulama,
   TemizlikUygulamaDurum,
   TemizlikBacaKirlilik,
+  TemizlikBacaKonumTipi,
+  TemizlikBacaKoridor,
 } from '../types/erp';
-import { db, cleanUndefined, saveDocument } from '../lib/firebase';
+import { db, cleanUndefined, removeDocument, saveDocument } from '../lib/firebase';
+import { assertErpWriteAuth, formatFirestoreWriteError } from '../lib/authWriteGuard';
 import { todayDateKey } from '../lib/dateKeyUtils';
 import { PARSEL_LIST, blokListForParsel } from '../data/parselBlokMap';
 import { uploadTemizlikKirimFoto } from '../lib/temizlikKirimFotoStorage';
@@ -24,14 +27,22 @@ import {
   TEMIZLIK_DEFAULT_PARSEL,
   TEMIZLIK_KART_DURUM_LABEL,
   TEMIZLIK_ODA_CHIPS,
+  BACA_KONUM_SECENEK,
+  bacaYerSatiri,
+  buildBacaKod,
+  buildBacaYerOzeti,
   deriveKartDurum,
+  koridorlarForParsel,
   latestByDate,
   newTemizlikId,
-  nextBacaEtiket,
+  nextBacaSiraNo,
+  ozetBacaKoridor,
   ozetBacaParsel,
   ozetDaireBlok,
   ozetDaireParsel,
   parselKisaAd,
+  konumTipiLabel,
+  sortBacalar,
   sumYevmiye,
 } from '../lib/temizlikKirimUtils';
 import {
@@ -61,15 +72,33 @@ async function persistFotoUrls(
   entityId: string,
   asama: string,
   urls: string[]
-): Promise<string[]> {
+): Promise<{ urls: string[]; atlanan: number }> {
   const out: string[] = [];
+  let atlanan = 0;
   for (let i = 0; i < urls.length; i++) {
     const u = urls[i];
     if (!u) continue;
-    if (/^https?:\/\//i.test(u)) out.push(u);
-    else out.push(await uploadTemizlikKirimFoto(kind, entityId, `${asama}_${i}`, u));
+    if (/^https?:\/\//i.test(u)) {
+      out.push(u);
+      continue;
+    }
+    const uploaded = await uploadTemizlikKirimFoto(kind, entityId, `${asama}_${i}`, u);
+    if (/^https?:\/\//i.test(uploaded)) out.push(uploaded);
+    else atlanan += 1;
   }
-  return out;
+  return { urls: out, atlanan };
+}
+
+function fotoKayitNotu(kayitOk: string, atlanan: number): string {
+  if (atlanan <= 0) return kayitOk;
+  return `${kayitOk} ${atlanan} foto yüklenemedi (zayıf internet / Storage). Kart duruyor — fotoğrafları sonra ekleyin.`;
+}
+
+function durumBadgeClass(durum: string): string {
+  if (durum === 'TAMAMLANDI') return 'bg-emerald-100 text-emerald-800';
+  if (durum === 'UYGULAMA_DEVAM') return 'bg-sky-100 text-sky-800';
+  if (durum === 'PLANLANDI') return 'bg-amber-100 text-amber-900';
+  return 'bg-slate-100 text-slate-600';
 }
 
 function readFilesAsDataUrls(files: FileList | null, max: number, existing: string[]): Promise<string[]> {
@@ -92,36 +121,39 @@ const FotoAlani: React.FC<{
   onChange: (next: string[]) => void;
   max?: number;
 }> = ({ urls, onChange, max = 4 }) => (
-  <div className="flex flex-wrap gap-2">
-    {urls.map((u, i) => (
-      <div key={`${u.slice(0, 24)}_${i}`} className="relative w-20 h-16 rounded-xl overflow-hidden border border-slate-200">
-        <img src={u} alt="" className="w-full h-full object-cover" />
-        <button
-          type="button"
-          onClick={() => onChange(urls.filter((_, j) => j !== i))}
-          className="absolute top-0.5 right-0.5 bg-rose-600 text-white rounded-full w-4 h-4 text-[9px] font-bold cursor-pointer"
-        >
-          ×
-        </button>
-      </div>
-    ))}
-    {urls.length < max && (
-      <label className="w-20 h-16 rounded-xl border-2 border-dashed border-slate-300 bg-slate-50 flex flex-col items-center justify-center text-slate-400 cursor-pointer">
-        <Camera size={16} />
-        <span className="text-[8px] font-bold mt-0.5">Foto</span>
-        <input
-          type="file"
-          accept="image/*"
-          capture="environment"
-          multiple
-          className="hidden"
-          onChange={(e) => {
-            void readFilesAsDataUrls(e.target.files, max, urls).then(onChange);
-            e.target.value = '';
-          }}
-        />
-      </label>
-    )}
+  <div className="space-y-1.5">
+    <div className="flex flex-wrap gap-2">
+      {urls.map((u, i) => (
+        <div key={`${u.slice(0, 24)}_${i}`} className="relative w-24 h-20 rounded-xl overflow-hidden border border-slate-200 shadow-sm">
+          <img src={u} alt="" className="w-full h-full object-cover" />
+          <button
+            type="button"
+            onClick={() => onChange(urls.filter((_, j) => j !== i))}
+            className="absolute top-0.5 right-0.5 bg-rose-600 text-white rounded-full w-5 h-5 text-[10px] font-bold cursor-pointer"
+          >
+            ×
+          </button>
+        </div>
+      ))}
+      {urls.length < max && (
+        <label className="w-24 h-20 rounded-xl border-2 border-dashed border-slate-300 bg-slate-50 flex flex-col items-center justify-center text-slate-400 cursor-pointer hover:border-teal-400 hover:text-teal-700">
+          <Camera size={18} />
+          <span className="text-[8px] font-bold mt-0.5">Foto çek</span>
+          <input
+            type="file"
+            accept="image/*"
+            capture="environment"
+            multiple
+            className="hidden"
+            onChange={(e) => {
+              void readFilesAsDataUrls(e.target.files, max, urls).then(onChange);
+              e.target.value = '';
+            }}
+          />
+        </label>
+      )}
+    </div>
+    <p className="text-[9px] text-slate-400">Foto Storage’a gider, karta base64 yazılmaz. Zayıf internette foto atlanır, yazı kaydı durur.</p>
   </div>
 );
 
@@ -201,7 +233,9 @@ export const TemizlikKirimScreen: React.FC<Props> = ({ currentUser }) => {
   const [selectedBacaId, setSelectedBacaId] = useState<string | null>(null);
   const [kartTab, setKartTab] = useState<'tespit' | 'uygulama'>('tespit');
   const [busy, setBusy] = useState(false);
+  const [busyLabel, setBusyLabel] = useState('');
   const [msg, setMsg] = useState<string | null>(null);
+  const [msgKind, setMsgKind] = useState<'ok' | 'err' | 'warn'>('ok');
 
   const [daireler, setDaireler] = useState<TemizlikDaire[]>([]);
   const [tespitler, setTespitler] = useState<TemizlikTespit[]>([]);
@@ -214,6 +248,10 @@ export const TemizlikKirimScreen: React.FC<Props> = ({ currentUser }) => {
   const [yeniKat, setYeniKat] = useState('');
   const [yeniBacaYer, setYeniBacaYer] = useState('');
   const [yeniBacaBlok, setYeniBacaBlok] = useState('');
+  const [yeniBacaBlok2, setYeniBacaBlok2] = useState('');
+  const [yeniBacaKoridor, setYeniBacaKoridor] = useState<TemizlikBacaKoridor>('K1');
+  const [yeniBacaKonum, setYeniBacaKonum] = useState<TemizlikBacaKonumTipi>('BLOK_ARKASI');
+  const [bacaKoridorFiltre, setBacaKoridorFiltre] = useState<'ALL' | TemizlikBacaKoridor>('ALL');
 
   const [isTipi, setIsTipi] = useState<TemizlikIsTipi>('TEMIZLIK');
   const [odalar, setOdalar] = useState<TemizlikOdaTespit[]>([]);
@@ -235,23 +273,40 @@ export const TemizlikKirimScreen: React.FC<Props> = ({ currentUser }) => {
   const [uygFotolar, setUygFotolar] = useState<string[]>([]);
 
   useEffect(() => {
-    const u1 = onSnapshot(collection(db, 'temizlikDaireleri'), (s) =>
-      setDaireler(s.docs.map((d) => ({ id: d.id, ...(d.data() as any) })))
+    const onErr = (err: unknown) => {
+      console.warn('Temizlik listesi dinlenemedi', err);
+      setMsgKind('err');
+      setMsg(formatFirestoreWriteError(err, 'Liste alınamadı. Ağı kontrol edip sekmeyi yenileyin.'));
+    };
+    const u1 = onSnapshot(
+      collection(db, 'temizlikDaireleri'),
+      (s) => setDaireler(s.docs.map((d) => ({ id: d.id, ...(d.data() as any) }))),
+      onErr
     );
-    const u2 = onSnapshot(collection(db, 'temizlikTespitleri'), (s) =>
-      setTespitler(s.docs.map((d) => ({ id: d.id, ...(d.data() as any) })))
+    const u2 = onSnapshot(
+      collection(db, 'temizlikTespitleri'),
+      (s) => setTespitler(s.docs.map((d) => ({ id: d.id, ...(d.data() as any) }))),
+      onErr
     );
-    const u3 = onSnapshot(collection(db, 'temizlikUygulamalari'), (s) =>
-      setUygulamalar(s.docs.map((d) => ({ id: d.id, ...(d.data() as any) })))
+    const u3 = onSnapshot(
+      collection(db, 'temizlikUygulamalari'),
+      (s) => setUygulamalar(s.docs.map((d) => ({ id: d.id, ...(d.data() as any) }))),
+      onErr
     );
-    const u4 = onSnapshot(collection(db, 'temizlikBacalar'), (s) =>
-      setBacalar(s.docs.map((d) => ({ id: d.id, ...(d.data() as any) })))
+    const u4 = onSnapshot(
+      collection(db, 'temizlikBacalar'),
+      (s) => setBacalar(s.docs.map((d) => ({ id: d.id, ...(d.data() as any) }))),
+      onErr
     );
-    const u5 = onSnapshot(collection(db, 'temizlikBacaTespitleri'), (s) =>
-      setBacaTespitler(s.docs.map((d) => ({ id: d.id, ...(d.data() as any) })))
+    const u5 = onSnapshot(
+      collection(db, 'temizlikBacaTespitleri'),
+      (s) => setBacaTespitler(s.docs.map((d) => ({ id: d.id, ...(d.data() as any) }))),
+      onErr
     );
-    const u6 = onSnapshot(collection(db, 'temizlikBacaUygulamalari'), (s) =>
-      setBacaUygulamalar(s.docs.map((d) => ({ id: d.id, ...(d.data() as any) })))
+    const u6 = onSnapshot(
+      collection(db, 'temizlikBacaUygulamalari'),
+      (s) => setBacaUygulamalar(s.docs.map((d) => ({ id: d.id, ...(d.data() as any) }))),
+      onErr
     );
     return () => {
       u1();
@@ -268,6 +323,24 @@ export const TemizlikKirimScreen: React.FC<Props> = ({ currentUser }) => {
     if (!bloklar.includes(selectedBlok)) setSelectedBlok(bloklar[0] || 'A1');
   }, [parsel, bloklar, selectedBlok]);
 
+  useEffect(() => {
+    setYeniBacaKoridor('K1');
+    setBacaKoridorFiltre('ALL');
+    setYeniBacaBlok2('');
+  }, [parsel]);
+
+  useEffect(() => {
+    const suggested = koridorlarForParsel(parsel).find((k) => k.id === yeniBacaKoridor)?.bloklar || [];
+    setYeniBacaBlok((prev) => {
+      if (prev && suggested.includes(prev)) return prev;
+      return suggested[0] || '';
+    });
+    setYeniBacaBlok2('');
+    if (parsel === 'Parsel Bölge 157/46' && yeniBacaKoridor === 'K2') setYeniBacaKonum('AVLU');
+    else if (parsel === 'Parsel Bölge 157/46' && yeniBacaKoridor === 'K3') setYeniBacaKonum('BLOK_ARASI');
+    else setYeniBacaKonum('BLOK_ARKASI');
+  }, [parsel, yeniBacaKoridor]);
+
   const parselDaireler = useMemo(
     () => daireler.filter((d) => d.parsel === parsel),
     [daireler, parsel]
@@ -280,12 +353,31 @@ export const TemizlikKirimScreen: React.FC<Props> = ({ currentUser }) => {
     [parselDaireler, selectedBlok]
   );
   const parselBacalar = useMemo(
-    () =>
-      bacalar
-        .filter((b) => b.parsel === parsel)
-        .sort((a, b) => a.etiket.localeCompare(b.etiket, 'tr', { numeric: true })),
+    () => sortBacalar(bacalar.filter((b) => b.parsel === parsel)),
     [bacalar, parsel]
   );
+  const koridorlar = useMemo(() => koridorlarForParsel(parsel), [parsel]);
+  const gorunenBacalar = useMemo(
+    () =>
+      bacaKoridorFiltre === 'ALL'
+        ? parselBacalar
+        : parselBacalar.filter((b) => b.koridor === bacaKoridorFiltre),
+    [parselBacalar, bacaKoridorFiltre]
+  );
+  const koridorOzetler = useMemo(
+    () => koridorlar.map((k) => ozetBacaKoridor(parsel, k.id, bacalar, bacaTespitler, bacaUygulamalar)),
+    [koridorlar, parsel, bacalar, bacaTespitler, bacaUygulamalar]
+  );
+  const onizlemeSira = nextBacaSiraNo(parsel, yeniBacaKoridor, bacalar);
+  const onizlemeKod = buildBacaKod(parsel, yeniBacaKoridor, onizlemeSira);
+  const onizlemeYer = buildBacaYerOzeti({
+    konumTipi: yeniBacaKonum,
+    blok: yeniBacaBlok,
+    blok2: yeniBacaBlok2,
+    ekstra: yeniBacaYer,
+  });
+  const koridorBloklar =
+    koridorlar.find((k) => k.id === yeniBacaKoridor)?.bloklar.filter(Boolean) || bloklar;
   const blokOzetler = useMemo(
     () => bloklar.map((blok) => ozetDaireBlok(parsel, blok, daireler, tespitler, uygulamalar)),
     [bloklar, parsel, daireler, tespitler, uygulamalar]
@@ -336,9 +428,19 @@ export const TemizlikKirimScreen: React.FC<Props> = ({ currentUser }) => {
     setKartTab('tespit');
   }, [selectedBacaId, bacaTespit?.id]);
 
-  const showMsg = (text: string) => {
+  const showMsg = (text: string, kind: 'ok' | 'err' | 'warn' = 'ok') => {
+    setMsgKind(kind);
     setMsg(text);
-    window.setTimeout(() => setMsg(null), 3500);
+    window.setTimeout(() => setMsg(null), kind === 'ok' ? 4000 : 9000);
+  };
+
+  const guardWrite = async (): Promise<boolean> => {
+    const block = await assertErpWriteAuth();
+    if (block) {
+      showMsg(block, 'err');
+      return false;
+    }
+    return true;
   };
 
   const addOda = (ad: string) => {
@@ -354,14 +456,16 @@ export const TemizlikKirimScreen: React.FC<Props> = ({ currentUser }) => {
   const handleDaireAc = async () => {
     const no = yeniDaireNo.trim();
     if (!no) {
-      showMsg('Daire numarası yazın.');
+      showMsg('Daire numarası yazın.', 'err');
       return;
     }
     if (blokDaireler.some((d) => d.daireNo.toLocaleLowerCase('tr-TR') === no.toLocaleLowerCase('tr-TR'))) {
-      showMsg('Bu blokta bu daire zaten açık.');
+      showMsg('Bu blokta bu daire zaten açık.', 'err');
       return;
     }
+    if (!(await guardWrite())) return;
     setBusy(true);
+    setBusyLabel('Daire kartı kaydediliyor…');
     try {
       const row: TemizlikDaire = {
         id: newTemizlikId('td'),
@@ -378,59 +482,81 @@ export const TemizlikKirimScreen: React.FC<Props> = ({ currentUser }) => {
       setYeniKat('');
       setSelectedDaireId(row.id);
       showMsg(`Daire ${no} açıldı.`);
-    } catch (e: any) {
-      showMsg(e?.message || 'Daire açılamadı.');
+    } catch (e: unknown) {
+      showMsg(formatFirestoreWriteError(e, 'Daire açılamadı.'), 'err');
     } finally {
       setBusy(false);
+      setBusyLabel('');
     }
   };
 
   const handleBacaAc = async () => {
-    const yer = yeniBacaYer.trim();
-    if (!yer) {
-      showMsg('Yer tarifini yazın (ör. C3 kuzey, merdiven dibi).');
+    if (yeniBacaKonum === 'BLOK_ARASI') {
+      if (!yeniBacaBlok.trim() || !yeniBacaBlok2.trim()) {
+        showMsg('Blok arası için iki blok seçin (ör. C3 ve C4).', 'err');
+        return;
+      }
+    } else if (yeniBacaKonum !== 'AVLU' && !yeniBacaBlok.trim()) {
+      showMsg('Hangi bloğun önü / arkası / merdiven dibi olduğunu seçin.', 'err');
       return;
     }
+    if (!(await guardWrite())) return;
     setBusy(true);
+    setBusyLabel('Baca kartı kaydediliyor…');
     try {
-      const etiket = nextBacaEtiket(parsel, bacalar);
+      const siraNo = nextBacaSiraNo(parsel, yeniBacaKoridor, bacalar);
+      const etiket = buildBacaKod(parsel, yeniBacaKoridor, siraNo);
+      const yerOzeti = buildBacaYerOzeti({
+        konumTipi: yeniBacaKonum,
+        blok: yeniBacaBlok,
+        blok2: yeniBacaBlok2,
+        ekstra: yeniBacaYer,
+      });
       const row: TemizlikBaca = {
         id: newTemizlikId('tb'),
         parsel,
         blok: yeniBacaBlok.trim() || undefined,
+        blok2: yeniBacaKonum === 'BLOK_ARASI' ? (yeniBacaBlok2.trim() || undefined) : undefined,
+        koridor: yeniBacaKoridor,
+        konumTipi: yeniBacaKonum,
+        siraNo,
         etiket,
-        yerTarifi: yer,
+        yerTarifi: yeniBacaYer.trim(),
         ozetDurum: 'TESPIT_BEKLIYOR',
         kayitTarihi: new Date().toISOString(),
         kaydeden,
       };
       await saveDocument('temizlikBacalar', cleanUndefined(row));
       setYeniBacaYer('');
-      setYeniBacaBlok('');
       setSelectedBacaId(row.id);
-      showMsg(`${etiket} tespit edildi.`);
-    } catch (e: any) {
-      showMsg(e?.message || 'Baca kaydı açılamadı.');
+      setKartTab('tespit');
+      showMsg(`${etiket} açıldı — ${yerOzeti || konumTipiLabel(yeniBacaKonum)}`);
+    } catch (e: unknown) {
+      showMsg(formatFirestoreWriteError(e, 'Baca kartı açılamadı.'), 'err');
     } finally {
       setBusy(false);
+      setBusyLabel('');
     }
   };
 
   const handleSaveDaireTespit = async () => {
     if (!selectedDaire) return;
     if (odalar.length === 0) {
-      showMsg('En az bir oda ekleyin.');
+      showMsg('En az bir oda ekleyin.', 'err');
       return;
     }
+    if (!(await guardWrite())) return;
     setBusy(true);
+    setBusyLabel('Foto yükleniyor, sonra tespit kaydedilecek…');
     try {
       const persistedOdalar: TemizlikOdaTespit[] = [];
+      let atlanan = 0;
       for (const o of odalar) {
-        persistedOdalar.push({
-          ...o,
-          fotoUrls: await persistFotoUrls('daire', selectedDaire.id, `oda_${o.id}`, o.fotoUrls || []),
-        });
+        const foto = await persistFotoUrls('daire', selectedDaire.id, `oda_${o.id}`, o.fotoUrls || []);
+        atlanan += foto.atlanan;
+        persistedOdalar.push({ ...o, fotoUrls: foto.urls });
       }
+      setBusyLabel('Tespit kaydı yazılıyor…');
       const t: TemizlikTespit = {
         id: daireTespit?.id || newTemizlikId('tt'),
         daireId: selectedDaire.id,
@@ -457,31 +583,40 @@ export const TemizlikKirimScreen: React.FC<Props> = ({ currentUser }) => {
         'temizlikDaireleri',
         cleanUndefined({ ...selectedDaire, ozetDurum, guncellemeTarihi: new Date().toISOString() })
       );
-      setOdalar(persistedOdalar);
-      showMsg('Tespit kaydedildi.');
-    } catch (e: any) {
-      showMsg(e?.message || 'Tespit kaydedilemedi.');
+      setOdalar(
+        persistedOdalar.map((o, i) => {
+          const leftover = (odalar[i]?.fotoUrls || []).filter((u) => String(u).startsWith('data:'));
+          return leftover.length ? { ...o, fotoUrls: [...o.fotoUrls, ...leftover] } : o;
+        })
+      );
+      showMsg(fotoKayitNotu('Tespit kaydedildi.', atlanan), atlanan ? 'warn' : 'ok');
+    } catch (e: unknown) {
+      showMsg(formatFirestoreWriteError(e, 'Tespit kaydedilemedi.'), 'err');
     } finally {
       setBusy(false);
+      setBusyLabel('');
     }
   };
 
   const handleSaveBacaTespit = async () => {
     if (!selectedBaca) return;
-    if (bacaFotolar.length === 0) {
-      showMsg('En az bir fotoğraf çekin.');
+    if (bacaFotolar.length === 0 && !bacaYorum.trim()) {
+      showMsg('En az bir fotoğraf veya açıklama girin.', 'err');
       return;
     }
+    if (!(await guardWrite())) return;
     setBusy(true);
+    setBusyLabel('Foto yükleniyor, sonra tespit kaydedilecek…');
     try {
-      const fotoUrls = await persistFotoUrls('baca', selectedBaca.id, 'tespit', bacaFotolar);
+      const foto = await persistFotoUrls('baca', selectedBaca.id, 'tespit', bacaFotolar);
+      setBusyLabel('Tespit kaydı yazılıyor…');
       const t: TemizlikBacaTespit = {
         id: bacaTespit?.id || newTemizlikId('btt'),
         bacaId: selectedBaca.id,
         parsel: selectedBaca.parsel,
         blok: selectedBaca.blok,
         etiket: selectedBaca.etiket,
-        fotoUrls,
+        fotoUrls: foto.urls,
         kirlilikDurumu: bacaKirlilik,
         iscilikYorumu: bacaYorum.trim() || undefined,
         planlananYevmiye: Number(bacaPlanYevmiye) || 0,
@@ -501,23 +636,28 @@ export const TemizlikKirimScreen: React.FC<Props> = ({ currentUser }) => {
         'temizlikBacalar',
         cleanUndefined({ ...selectedBaca, ozetDurum, guncellemeTarihi: new Date().toISOString() })
       );
-      setBacaFotolar(fotoUrls);
-      showMsg('Baca tespiti kaydedildi.');
-    } catch (e: any) {
-      showMsg(e?.message || 'Tespit kaydedilemedi.');
+      const leftover = bacaFotolar.filter((u) => String(u).startsWith('data:'));
+      setBacaFotolar([...foto.urls, ...leftover].slice(0, 6));
+      showMsg(fotoKayitNotu('Baca tespiti kaydedildi.', foto.atlanan), foto.atlanan ? 'warn' : 'ok');
+    } catch (e: unknown) {
+      showMsg(formatFirestoreWriteError(e, 'Tespit kaydedilemedi.'), 'err');
     } finally {
       setBusy(false);
+      setBusyLabel('');
     }
   };
 
   const handleSaveDaireUygulama = async () => {
     if (!selectedDaire || !daireTespit) {
-      showMsg('Önce tespit kaydedin.');
+      showMsg('Önce tespit kaydedin.', 'err');
       return;
     }
+    if (!(await guardWrite())) return;
     setBusy(true);
+    setBusyLabel('Foto yükleniyor, sonra uygulama kaydedilecek…');
     try {
-      const fotoUrls = await persistFotoUrls('daire', selectedDaire.id, 'uyg', uygFotolar);
+      const foto = await persistFotoUrls('daire', selectedDaire.id, 'uyg', uygFotolar);
+      setBusyLabel('Uygulama kaydı yazılıyor…');
       const row: TemizlikUygulama = {
         id: newTemizlikId('tu'),
         daireId: selectedDaire.id,
@@ -529,7 +669,7 @@ export const TemizlikKirimScreen: React.FC<Props> = ({ currentUser }) => {
         harcananYevmiye: Number(uygYevmiye) || 0,
         durum: uygDurum,
         aciklama: uygAciklama.trim() || undefined,
-        fotoUrls,
+        fotoUrls: foto.urls,
         kaydeden,
       };
       await saveDocument('temizlikUygulamalari', cleanUndefined(row));
@@ -547,22 +687,30 @@ export const TemizlikKirimScreen: React.FC<Props> = ({ currentUser }) => {
       );
       setUygAciklama('');
       setUygFotolar([]);
-      showMsg('Uygulama kaydedildi.');
-    } catch (e: any) {
-      showMsg(e?.message || 'Uygulama kaydedilemedi.');
+      showMsg(fotoKayitNotu('Uygulama kaydedildi — ne yapıldığı karta işlendi.', foto.atlanan), foto.atlanan ? 'warn' : 'ok');
+    } catch (e: unknown) {
+      showMsg(formatFirestoreWriteError(e, 'Uygulama kaydedilemedi.'), 'err');
     } finally {
       setBusy(false);
+      setBusyLabel('');
     }
   };
 
   const handleSaveBacaUygulama = async () => {
     if (!selectedBaca || !bacaTespit) {
-      showMsg('Önce baca tespitini kaydedin.');
+      showMsg('Önce baca tespitini kaydedin.', 'err');
       return;
     }
+    if (!uygAciklama.trim() && uygFotolar.length === 0) {
+      showMsg('Ne yapıldığını yazın veya foto ekleyin.', 'err');
+      return;
+    }
+    if (!(await guardWrite())) return;
     setBusy(true);
+    setBusyLabel('Foto yükleniyor, sonra uygulama kaydedilecek…');
     try {
-      const fotoUrls = await persistFotoUrls('baca', selectedBaca.id, 'uyg', uygFotolar);
+      const foto = await persistFotoUrls('baca', selectedBaca.id, 'uyg', uygFotolar);
+      setBusyLabel('Uygulama kaydı yazılıyor…');
       const row: TemizlikBacaUygulama = {
         id: newTemizlikId('bu'),
         bacaId: selectedBaca.id,
@@ -573,7 +721,7 @@ export const TemizlikKirimScreen: React.FC<Props> = ({ currentUser }) => {
         harcananYevmiye: Number(uygYevmiye) || 0,
         durum: uygDurum,
         aciklama: uygAciklama.trim() || undefined,
-        fotoUrls,
+        fotoUrls: foto.urls,
         kaydeden,
       };
       await saveDocument('temizlikBacaUygulamalari', cleanUndefined(row));
@@ -591,51 +739,58 @@ export const TemizlikKirimScreen: React.FC<Props> = ({ currentUser }) => {
       );
       setUygAciklama('');
       setUygFotolar([]);
-      showMsg('Baca uygulaması kaydedildi.');
-    } catch (e: any) {
-      showMsg(e?.message || 'Uygulama kaydedilemedi.');
+      showMsg(fotoKayitNotu('Baca uygulaması kaydedildi — ne yapıldığı karta işlendi.', foto.atlanan), foto.atlanan ? 'warn' : 'ok');
+    } catch (e: unknown) {
+      showMsg(formatFirestoreWriteError(e, 'Uygulama kaydedilemedi.'), 'err');
     } finally {
       setBusy(false);
+      setBusyLabel('');
     }
   };
 
   const handleDeleteDaire = async (d: TemizlikDaire) => {
     if (!window.confirm(`Daire ${d.daireNo} silinsin mi? Tespit ve uygulamalar da gider.`)) return;
+    if (!(await guardWrite())) return;
     setBusy(true);
+    setBusyLabel('Kart siliniyor…');
     try {
       for (const t of tespitler.filter((x) => x.daireId === d.id)) {
-        await deleteDoc(doc(db, 'temizlikTespitleri', t.id));
+        await removeDocument('temizlikTespitleri', t.id);
       }
       for (const u of uygulamalar.filter((x) => x.daireId === d.id)) {
-        await deleteDoc(doc(db, 'temizlikUygulamalari', u.id));
+        await removeDocument('temizlikUygulamalari', u.id);
       }
-      await deleteDoc(doc(db, 'temizlikDaireleri', d.id));
+      await removeDocument('temizlikDaireleri', d.id);
       if (selectedDaireId === d.id) setSelectedDaireId(null);
       showMsg('Daire silindi.');
-    } catch (e: any) {
-      showMsg(e?.message || 'Silinemedi.');
+    } catch (e: unknown) {
+      showMsg(formatFirestoreWriteError(e, 'Silinemedi.'), 'err');
     } finally {
       setBusy(false);
+      setBusyLabel('');
     }
   };
 
   const handleDeleteBaca = async (b: TemizlikBaca) => {
-    if (!window.confirm(`${b.etiket} silinsin mi?`)) return;
+    if (!window.confirm(`${b.etiket} silinsin mi? Tespit ve yapılan işler de gider.`)) return;
+    if (!(await guardWrite())) return;
     setBusy(true);
+    setBusyLabel('Kart siliniyor…');
     try {
       for (const t of bacaTespitler.filter((x) => x.bacaId === b.id)) {
-        await deleteDoc(doc(db, 'temizlikBacaTespitleri', t.id));
+        await removeDocument('temizlikBacaTespitleri', t.id);
       }
       for (const u of bacaUygulamalar.filter((x) => x.bacaId === b.id)) {
-        await deleteDoc(doc(db, 'temizlikBacaUygulamalari', u.id));
+        await removeDocument('temizlikBacaUygulamalari', u.id);
       }
-      await deleteDoc(doc(db, 'temizlikBacalar', b.id));
+      await removeDocument('temizlikBacalar', b.id);
       if (selectedBacaId === b.id) setSelectedBacaId(null);
-      showMsg('Baca silindi.');
-    } catch (e: any) {
-      showMsg(e?.message || 'Silinemedi.');
+      showMsg('Baca kartı silindi.');
+    } catch (e: unknown) {
+      showMsg(formatFirestoreWriteError(e, 'Silinemedi.'), 'err');
     } finally {
       setBusy(false);
+      setBusyLabel('');
     }
   };
 
@@ -683,14 +838,29 @@ export const TemizlikKirimScreen: React.FC<Props> = ({ currentUser }) => {
           <div>
             <h1 className="text-sm font-black text-slate-900 uppercase tracking-wide">Temizlik / Kırım Tespiti</h1>
             <p className="text-[10px] text-slate-500">
-              Bloklarda kaç daire ve ne kadar temizlik · parsellerde kaç baca ve ne kadar iş
+              Her daire ve her baca bir karttır: önce tespit (foto + açıklama), sonra ne yapıldığı.
             </p>
           </div>
         </div>
       </div>
 
+      {busy && busyLabel ? (
+        <div className="bg-amber-50 border border-amber-200 text-amber-900 text-xs font-bold px-3 py-2 rounded-xl">
+          {busyLabel} Zayıf internette 30 sn’ye kadar 3 deneme yapılır. İkinci kez basmayın.
+        </div>
+      ) : null}
       {msg && (
-        <div className="bg-teal-50 border border-teal-200 text-teal-800 text-xs font-bold px-3 py-2 rounded-xl">{msg}</div>
+        <div
+          className={`text-xs font-bold px-3 py-2 rounded-xl border ${
+            msgKind === 'err'
+              ? 'bg-rose-50 border-rose-200 text-rose-800'
+              : msgKind === 'warn'
+                ? 'bg-amber-50 border-amber-200 text-amber-900'
+                : 'bg-teal-50 border-teal-200 text-teal-800'
+          }`}
+        >
+          {msg}
+        </div>
       )}
 
       <div className="flex gap-2">
@@ -819,6 +989,14 @@ export const TemizlikKirimScreen: React.FC<Props> = ({ currentUser }) => {
         const o = ozetBacaParsel(parsel, bacalar, bacaTespitler, bacaUygulamalar);
         return (
           <div className="space-y-3">
+            <div className="rounded-2xl border border-amber-200 bg-gradient-to-br from-amber-50 to-white p-3">
+              <p className="text-[10px] font-black uppercase tracking-wide text-amber-800">Bağırarak adres</p>
+              <p className="text-[11px] text-slate-600 mt-1 leading-relaxed">
+                Baca blokların arasında durur. Önce koridor (K1 / K2 / K3), sonra konum
+                (blok arkası, önü, arası, avlu, merdiven dibi). Kod batıdan doğuya artar:
+                <span className="font-black text-slate-800"> {onizlemeKod}</span> gibi. Eski numaralar değişmez.
+              </p>
+            </div>
             <div className="flex flex-wrap gap-2">
               {ozetKart('Baca', o.adet, `${parselKisaAd(parsel)} çukur`)}
               {ozetKart('Tespit', o.tespitli)}
@@ -843,6 +1021,24 @@ export const TemizlikKirimScreen: React.FC<Props> = ({ currentUser }) => {
                 tespitli: x.tespitli,
                 planYevmiye: x.planYevmiye,
                 kalanYevmiye: x.kalanYevmiye,
+              }))}
+            />
+            <IsYukuTablo
+              title={`${parselKisaAd(parsel)} koridorları`}
+              adetBaslik="Baca"
+              activeKey={bacaKoridorFiltre === 'ALL' ? '' : bacaKoridorFiltre}
+              onSelect={(k) => {
+                setBacaKoridorFiltre(k as TemizlikBacaKoridor);
+                setYeniBacaKoridor(k as TemizlikBacaKoridor);
+                setSelectedBacaId(null);
+              }}
+              rows={koridorlar.map((k, i) => ({
+                key: k.id,
+                title: k.baslik,
+                adet: koridorOzetler[i]?.adet || 0,
+                tespitli: koridorOzetler[i]?.tespitli || 0,
+                planYevmiye: koridorOzetler[i]?.planYevmiye || 0,
+                kalanYevmiye: koridorOzetler[i]?.kalanYevmiye || 0,
               }))}
             />
           </div>
@@ -953,13 +1149,16 @@ export const TemizlikKirimScreen: React.FC<Props> = ({ currentUser }) => {
           </div>
 
           {selectedDaire && (
-            <div className="bg-white border border-teal-200 rounded-2xl p-4 space-y-3">
+            <div className="bg-white border border-teal-200 rounded-2xl p-4 space-y-3 shadow-sm">
               <div className="flex justify-between items-start">
                 <div>
                   <p className="text-[8px] font-black uppercase text-teal-700">
                     {selectedDaire.parsel.replace('Parsel Bölge ', '')} · {selectedDaire.blok}
                   </p>
-                  <p className="font-black text-sm">Daire {selectedDaire.daireNo}</p>
+                  <p className="font-black text-lg leading-tight">Daire {selectedDaire.daireNo}</p>
+                  <span className={`inline-block mt-1 text-[8px] font-black uppercase px-2 py-0.5 rounded-full ${durumBadgeClass(daireDurumOf(selectedDaire))}`}>
+                    {TEMIZLIK_KART_DURUM_LABEL[daireDurumOf(selectedDaire)]}
+                  </span>
                 </div>
                 <div className="flex gap-1">
                   <button
@@ -983,7 +1182,7 @@ export const TemizlikKirimScreen: React.FC<Props> = ({ currentUser }) => {
                     kartTab === 'tespit' ? 'bg-white shadow-sm' : 'text-slate-500'
                   }`}
                 >
-                  Tespit
+                  1. Tespit
                 </button>
                 <button
                   type="button"
@@ -992,9 +1191,14 @@ export const TemizlikKirimScreen: React.FC<Props> = ({ currentUser }) => {
                     kartTab === 'uygulama' ? 'bg-white shadow-sm' : 'text-slate-500'
                   }`}
                 >
-                  Uygulama
+                  2. Ne yapıldı
                 </button>
               </div>
+              <p className="text-[10px] text-slate-500 leading-relaxed">
+                {kartTab === 'tespit'
+                  ? 'Odaları, fotoğrafları ve plan yevmiyeyi bu karta yazın. Aynı kart sonra sahada doldurulur.'
+                  : 'Bu dairede bugün / o gün ne yapıldığını foto ve açıklama ile işleyin.'}
+              </p>
 
               {kartTab === 'tespit' && (
                 <div className="space-y-3">
@@ -1156,7 +1360,7 @@ export const TemizlikKirimScreen: React.FC<Props> = ({ currentUser }) => {
                   <textarea
                     value={uygAciklama}
                     onChange={(e) => setUygAciklama(e.target.value)}
-                    placeholder="Yapılan iş"
+                    placeholder="Ne yapıldı? (ör. salon kırım bitti, mutfak yarım)"
                     rows={2}
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs"
                   />
@@ -1167,15 +1371,33 @@ export const TemizlikKirimScreen: React.FC<Props> = ({ currentUser }) => {
                     onClick={() => void handleSaveDaireUygulama()}
                     className="w-full bg-slate-900 text-white font-black text-[11px] py-2.5 rounded-xl cursor-pointer disabled:opacity-50"
                   >
-                    {busy ? 'Kaydediliyor…' : 'Uygulamayı kaydet'}
+                    {busy ? 'Kaydediliyor…' : 'Yapılan işi karta işle'}
                   </button>
-                  <div className="space-y-1 max-h-40 overflow-y-auto">
-                    {daireUyg.map((u) => (
-                      <div key={u.id} className="text-[10px] border border-slate-100 rounded-lg p-2 bg-slate-50">
-                        {u.tarih} · {u.harcananYevmiye} yevmiye · {u.durum}
-                        {u.aciklama ? ` — ${u.aciklama}` : ''}
-                      </div>
-                    ))}
+                  <div className="space-y-2 max-h-56 overflow-y-auto">
+                    {daireUyg.length === 0 ? (
+                      <p className="text-[11px] text-slate-400 italic">Henüz uygulama yok.</p>
+                    ) : (
+                      [...daireUyg]
+                        .sort((a, b) => String(b.tarih).localeCompare(String(a.tarih)))
+                        .map((u) => (
+                          <div key={u.id} className="text-[10px] border border-slate-100 rounded-xl p-2.5 bg-slate-50 space-y-1.5">
+                            <div className="flex justify-between gap-2">
+                              <span className="font-black text-slate-800">{u.tarih}</span>
+                              <span className="font-bold text-slate-500">
+                                {u.harcananYevmiye} yevmiye · {u.durum}
+                              </span>
+                            </div>
+                            {u.aciklama ? <p className="text-slate-700">{u.aciklama}</p> : null}
+                            {(u.fotoUrls || []).length > 0 ? (
+                              <div className="flex flex-wrap gap-1">
+                                {u.fotoUrls.map((src) => (
+                                  <img key={src} src={src} alt="" className="w-14 h-12 object-cover rounded-lg border border-slate-200" />
+                                ))}
+                              </div>
+                            ) : null}
+                          </div>
+                        ))
+                    )}
                   </div>
                 </div>
               )}
@@ -1186,79 +1408,187 @@ export const TemizlikKirimScreen: React.FC<Props> = ({ currentUser }) => {
 
       {mainTab === 'baca' && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <div className="bg-white border border-slate-200 rounded-2xl p-4 space-y-3">
-            <p className="text-[10px] font-black uppercase text-slate-500 flex items-center gap-1">
-              <MapPin size={12} /> Parselde baca tespit et
-            </p>
-            <textarea
-              value={yeniBacaYer}
-              onChange={(e) => setYeniBacaYer(e.target.value)}
-              placeholder="Yer tarifi — örn. C3 kuzey cephe, merdiven dibi"
-              rows={2}
-              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold"
-            />
-            <select
-              value={yeniBacaBlok}
-              onChange={(e) => setYeniBacaBlok(e.target.value)}
-              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold"
-            >
-              <option value="">Yakın blok (isteğe bağlı)</option>
-              {bloklar.map((b) => (
-                <option key={b} value={b}>
-                  {b}
-                </option>
-              ))}
-            </select>
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => void handleBacaAc()}
-              className="w-full bg-amber-700 text-white font-black text-[11px] py-2.5 rounded-xl cursor-pointer disabled:opacity-50"
-            >
-              <span className="inline-flex items-center justify-center gap-1">
-                <Plus size={13} /> Baca tespit et
-              </span>
-            </button>
-            <div className="space-y-1.5 max-h-80 overflow-y-auto">
-              {parselBacalar.length === 0 ? (
-                <p className="text-[11px] text-slate-400 italic py-4 text-center">
-                  Bu parselde henüz baca yok. Dolaşıp yer tarifini yazın.
-                </p>
-              ) : (
-                parselBacalar.map((b) => {
-                  const durum = bacaDurumOf(b);
+          <div className="space-y-3">
+            <div className="bg-white border border-slate-200 rounded-2xl p-4 space-y-3">
+              <p className="text-[10px] font-black uppercase text-slate-500 flex items-center gap-1">
+                <Layers size={12} /> Koridor — {parselKisaAd(parsel)}
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                {koridorlar.map((k) => {
+                  const active = yeniBacaKoridor === k.id;
                   return (
                     <button
-                      key={b.id}
+                      key={k.id}
                       type="button"
-                      onClick={() => setSelectedBacaId(b.id)}
-                      className={`w-full text-left border rounded-xl p-2.5 cursor-pointer ${
-                        selectedBacaId === b.id ? 'border-amber-500 bg-amber-50' : 'border-slate-100 bg-slate-50/70'
+                      onClick={() => {
+                        setYeniBacaKoridor(k.id);
+                        setBacaKoridorFiltre(k.id);
+                      }}
+                      className={`text-left rounded-2xl border p-2.5 cursor-pointer ${
+                        active ? 'border-amber-500 bg-amber-50' : 'border-slate-200 bg-slate-50/80'
                       }`}
                     >
-                      <div className="flex justify-between gap-2">
-                        <span className="font-black text-xs text-slate-900">
-                          {b.etiket}
-                          {b.blok ? ` · ${b.blok}` : ''}
-                        </span>
-                        <span className="text-[8px] font-black uppercase text-slate-500">
-                          {TEMIZLIK_KART_DURUM_LABEL[durum]}
-                        </span>
-                      </div>
-                      <p className="text-[10px] text-slate-500 mt-0.5 truncate">{b.yerTarifi}</p>
+                      <span className="block text-xs font-black text-slate-900">{k.baslik}</span>
+                      <span className="block text-[10px] text-slate-500 mt-0.5 leading-snug">{k.aciklama}</span>
                     </button>
                   );
-                })
-              )}
+                })}
+              </div>
+              <p className="text-[10px] font-black uppercase text-slate-400">Konum</p>
+              <div className="flex flex-wrap gap-1.5">
+                {BACA_KONUM_SECENEK.map((k) => (
+                  <button
+                    key={k.id}
+                    type="button"
+                    onClick={() => setYeniBacaKonum(k.id)}
+                    className={`px-2.5 py-1.5 rounded-xl text-[10px] font-black border cursor-pointer ${
+                      yeniBacaKonum === k.id
+                        ? 'bg-amber-700 text-white border-amber-700'
+                        : 'bg-white text-slate-600 border-slate-200'
+                    }`}
+                    title={k.hint}
+                  >
+                    {k.label}
+                  </button>
+                ))}
+              </div>
+              <p className="text-[10px] text-slate-500">{BACA_KONUM_SECENEK.find((x) => x.id === yeniBacaKonum)?.hint}</p>
+              <div className={`grid gap-2 ${yeniBacaKonum === 'BLOK_ARASI' ? 'grid-cols-2' : 'grid-cols-1'}`}>
+                <select
+                  value={yeniBacaBlok}
+                  onChange={(e) => setYeniBacaBlok(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold"
+                >
+                  <option value="">{yeniBacaKonum === 'AVLU' ? 'Avlu / blok (ops.)' : 'Blok'}</option>
+                  {(koridorBloklar.length ? koridorBloklar : bloklar).map((b) => (
+                    <option key={b} value={b}>
+                      {b}
+                    </option>
+                  ))}
+                  {yeniBacaBlok && !(koridorBloklar.includes(yeniBacaBlok) || bloklar.includes(yeniBacaBlok)) ? (
+                    <option value={yeniBacaBlok}>{yeniBacaBlok}</option>
+                  ) : null}
+                </select>
+                {yeniBacaKonum === 'BLOK_ARASI' ? (
+                  <select
+                    value={yeniBacaBlok2}
+                    onChange={(e) => setYeniBacaBlok2(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold"
+                  >
+                    <option value="">İkinci blok</option>
+                    {bloklar
+                      .filter((b) => b !== yeniBacaBlok)
+                      .map((b) => (
+                        <option key={b} value={b}>
+                          {b}
+                        </option>
+                      ))}
+                  </select>
+                ) : null}
+              </div>
+              <textarea
+                value={yeniBacaYer}
+                onChange={(e) => setYeniBacaYer(e.target.value)}
+                placeholder="Ek tarifi (ops.) — örn. merdiven dibi, 3. çukur"
+                rows={2}
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold"
+              />
+              <div className="rounded-2xl bg-slate-900 text-white p-3">
+                <p className="text-[8px] font-black uppercase tracking-wider text-amber-300">Sahaya bağırılacak adres</p>
+                <p className="text-lg font-black tracking-tight mt-0.5">{onizlemeKod}</p>
+                <p className="text-[11px] text-slate-200 mt-0.5">{onizlemeYer || konumTipiLabel(yeniBacaKonum)}</p>
+              </div>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => void handleBacaAc()}
+                className="w-full bg-amber-700 text-white font-black text-[11px] py-2.5 rounded-xl cursor-pointer disabled:opacity-50"
+              >
+                <span className="inline-flex items-center justify-center gap-1">
+                  <Plus size={13} /> Baca kartı aç
+                </span>
+              </button>
+            </div>
+
+            <div className="bg-white border border-slate-200 rounded-2xl p-4 space-y-3">
+              <div className="flex flex-wrap gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setBacaKoridorFiltre('ALL')}
+                  className={`px-2.5 py-1 rounded-lg text-[10px] font-black border cursor-pointer ${
+                    bacaKoridorFiltre === 'ALL' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white border-slate-200 text-slate-500'
+                  }`}
+                >
+                  Tümü ({parselBacalar.length})
+                </button>
+                {koridorlar.map((k, i) => (
+                  <button
+                    key={k.id}
+                    type="button"
+                    onClick={() => setBacaKoridorFiltre(k.id)}
+                    className={`px-2.5 py-1 rounded-lg text-[10px] font-black border cursor-pointer ${
+                      bacaKoridorFiltre === k.id ? 'bg-amber-700 text-white border-amber-700' : 'bg-white border-slate-200 text-slate-500'
+                    }`}
+                  >
+                    {k.id} ({koridorOzetler[i]?.adet || 0})
+                  </button>
+                ))}
+              </div>
+              <div className="space-y-1.5 max-h-80 overflow-y-auto">
+                {gorunenBacalar.length === 0 ? (
+                  <p className="text-[11px] text-slate-400 italic py-4 text-center">
+                    Bu hatta henüz baca yok. Koridor + konum seçip kart açın.
+                  </p>
+                ) : (
+                  gorunenBacalar.map((b) => {
+                    const durum = bacaDurumOf(b);
+                    return (
+                      <button
+                        key={b.id}
+                        type="button"
+                        onClick={() => setSelectedBacaId(b.id)}
+                        className={`w-full text-left border rounded-xl p-2.5 cursor-pointer ${
+                          selectedBacaId === b.id ? 'border-amber-500 bg-amber-50' : 'border-slate-100 bg-slate-50/70'
+                        }`}
+                      >
+                        <div className="flex justify-between gap-2 items-start">
+                          <span className="font-black text-sm text-slate-900 tracking-tight">{b.etiket}</span>
+                          <span className={`text-[8px] font-black uppercase px-2 py-0.5 rounded-full ${durumBadgeClass(durum)}`}>
+                            {TEMIZLIK_KART_DURUM_LABEL[durum]}
+                          </span>
+                        </div>
+                        <p className="text-[10px] text-slate-600 mt-0.5 truncate flex items-center gap-1">
+                          <MapPin size={10} /> {bacaYerSatiri(b)}
+                        </p>
+                      </button>
+                    );
+                  })
+                )}
+              </div>
             </div>
           </div>
 
+          {selectedBaca ? null : (
+            <div className="hidden lg:flex flex-col items-center justify-center border-2 border-dashed border-amber-200 rounded-2xl bg-amber-50/40 p-8 text-center min-h-[280px]">
+              <MapPin className="text-amber-700 mb-2" size={28} />
+              <p className="font-black text-sm text-slate-800">Baca kartı</p>
+              <p className="text-[11px] text-slate-500 mt-1 max-w-xs leading-relaxed">
+                Soldan bir baca seçin veya koridor + konum ile yeni kart açın. Tespit foto/açıklama, sonra bu konuda ne yapıldığı aynı kartta durur.
+              </p>
+            </div>
+          )}
           {selectedBaca && (
-            <div className="bg-white border border-amber-200 rounded-2xl p-4 space-y-3">
+            <div className="bg-white border border-amber-200 rounded-2xl p-4 space-y-3 shadow-sm">
               <div className="flex justify-between items-start">
                 <div>
-                  <p className="text-[8px] font-black uppercase text-amber-700">{selectedBaca.etiket}</p>
-                  <p className="font-bold text-xs text-slate-800">{selectedBaca.yerTarifi}</p>
+                  <p className="text-[8px] font-black uppercase text-amber-700">
+                    {selectedBaca.koridor || 'Koridor yok'} · {parselKisaAd(selectedBaca.parsel)}
+                  </p>
+                  <p className="font-black text-2xl tracking-tight leading-none mt-0.5">{selectedBaca.etiket}</p>
+                  <p className="font-bold text-xs text-slate-700 mt-1">{bacaYerSatiri(selectedBaca)}</p>
+                  <span className={`inline-block mt-1.5 text-[8px] font-black uppercase px-2 py-0.5 rounded-full ${durumBadgeClass(bacaDurumOf(selectedBaca))}`}>
+                    {TEMIZLIK_KART_DURUM_LABEL[bacaDurumOf(selectedBaca)]}
+                  </span>
                 </div>
                 <div className="flex gap-1">
                   <button type="button" onClick={() => void handleDeleteBaca(selectedBaca)} className="p-1.5 text-rose-600 cursor-pointer">
@@ -1277,7 +1607,7 @@ export const TemizlikKirimScreen: React.FC<Props> = ({ currentUser }) => {
                     kartTab === 'tespit' ? 'bg-white shadow-sm' : 'text-slate-500'
                   }`}
                 >
-                  Tespit
+                  1. Tespit
                 </button>
                 <button
                   type="button"
@@ -1286,29 +1616,37 @@ export const TemizlikKirimScreen: React.FC<Props> = ({ currentUser }) => {
                     kartTab === 'uygulama' ? 'bg-white shadow-sm' : 'text-slate-500'
                   }`}
                 >
-                  Uygulama
+                  2. Ne yapıldı
                 </button>
               </div>
 
               {kartTab === 'tespit' && (
                 <div className="space-y-3">
-                  <select
-                    value={bacaKirlilik}
-                    onChange={(e) => setBacaKirlilik(e.target.value as TemizlikBacaKirlilik)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold"
-                  >
+                  <p className="text-[10px] text-slate-500 leading-relaxed">
+                    Foto ve açıklama bu karta yazılır. Zayıf internette foto yüklenemezse tespit yine kaydolur.
+                  </p>
+                  <div className="flex flex-wrap gap-1.5">
                     {BACA_KIRLILIK.map((x) => (
-                      <option key={x.id} value={x.id}>
+                      <button
+                        key={x.id}
+                        type="button"
+                        onClick={() => setBacaKirlilik(x.id)}
+                        className={`px-2.5 py-1.5 rounded-xl text-[10px] font-black border cursor-pointer ${
+                          bacaKirlilik === x.id
+                            ? 'bg-amber-700 text-white border-amber-700'
+                            : 'bg-white text-slate-600 border-slate-200'
+                        }`}
+                      >
                         {x.label}
-                      </option>
+                      </button>
                     ))}
-                  </select>
+                  </div>
                   <FotoAlani urls={bacaFotolar} onChange={setBacaFotolar} max={6} />
                   <textarea
                     value={bacaYorum}
                     onChange={(e) => setBacaYorum(e.target.value)}
-                    placeholder="İşçilik / kirlilik yorumu"
-                    rows={2}
+                    placeholder="Tespit açıklaması — kirlilik, çamur, erişim, işçilik notu"
+                    rows={3}
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs"
                   />
                   <input
@@ -1323,7 +1661,7 @@ export const TemizlikKirimScreen: React.FC<Props> = ({ currentUser }) => {
                   <textarea
                     value={bacaPlanNotu}
                     onChange={(e) => setBacaPlanNotu(e.target.value)}
-                    placeholder="Parsel baca temizlik plan notu"
+                    placeholder="Plan: kaç kişi, hangi gün, pompa / el…"
                     rows={2}
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs"
                   />
@@ -1333,13 +1671,18 @@ export const TemizlikKirimScreen: React.FC<Props> = ({ currentUser }) => {
                     onClick={() => void handleSaveBacaTespit()}
                     className="w-full bg-amber-700 text-white font-black text-[11px] py-2.5 rounded-xl cursor-pointer disabled:opacity-50"
                   >
-                    {busy ? 'Kaydediliyor…' : 'Baca tespitini kaydet'}
+                    {busy ? 'Kaydediliyor…' : 'Tespiti karta kaydet'}
                   </button>
                 </div>
               )}
 
               {kartTab === 'uygulama' && (
                 <div className="space-y-3">
+                  {!bacaTespit ? (
+                    <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-xl p-3">
+                      Önce tespit sekmesinden foto / açıklama kaydedin. Uygulama o kartın üzerine işlenir.
+                    </p>
+                  ) : null}
                   <p className="text-[10px] text-slate-500">
                     Plan {bacaPlan} yevmiye · Harcanan {bacaHarcanan} · Kalan {Math.max(0, bacaPlan - bacaHarcanan)}
                   </p>
@@ -1371,25 +1714,46 @@ export const TemizlikKirimScreen: React.FC<Props> = ({ currentUser }) => {
                   <textarea
                     value={uygAciklama}
                     onChange={(e) => setUygAciklama(e.target.value)}
-                    placeholder="Yapılan iş"
-                    rows={2}
+                    placeholder="Ne yapıldı? (ör. çamur alındı, ızgara takıldı, yarım kaldı)"
+                    rows={3}
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs"
                   />
                   <FotoAlani urls={uygFotolar} onChange={setUygFotolar} />
                   <button
                     type="button"
-                    disabled={busy}
+                    disabled={busy || !bacaTespit}
                     onClick={() => void handleSaveBacaUygulama()}
                     className="w-full bg-slate-900 text-white font-black text-[11px] py-2.5 rounded-xl cursor-pointer disabled:opacity-50"
                   >
-                    {busy ? 'Kaydediliyor…' : 'Uygulamayı kaydet'}
+                    {busy ? 'Kaydediliyor…' : 'Yapılan işi karta işle'}
                   </button>
-                  <div className="space-y-1 max-h-40 overflow-y-auto">
-                    {bacaUyg.map((u) => (
-                      <div key={u.id} className="text-[10px] border border-slate-100 rounded-lg p-2 bg-slate-50">
-                        {u.tarih} · {u.harcananYevmiye} yevmiye · {u.durum}
-                      </div>
-                    ))}
+                  <div className="space-y-2 max-h-56 overflow-y-auto">
+                    {bacaUyg.length === 0 ? (
+                      <p className="text-[11px] text-slate-400 italic">Bu bacada henüz yapılan iş yok.</p>
+                    ) : (
+                      [...bacaUyg]
+                        .sort((a, b) => String(b.tarih).localeCompare(String(a.tarih)))
+                        .map((u) => (
+                          <div key={u.id} className="text-[10px] border border-slate-100 rounded-xl p-2.5 bg-slate-50 space-y-1.5">
+                            <div className="flex justify-between gap-2">
+                              <span className="font-black text-slate-800 inline-flex items-center gap-1">
+                                <CheckCircle2 size={12} className="text-emerald-600" /> {u.tarih}
+                              </span>
+                              <span className="font-bold text-slate-500">
+                                {u.harcananYevmiye} yevmiye · {u.durum}
+                              </span>
+                            </div>
+                            {u.aciklama ? <p className="text-slate-700">{u.aciklama}</p> : null}
+                            {(u.fotoUrls || []).length > 0 ? (
+                              <div className="flex flex-wrap gap-1">
+                                {u.fotoUrls.map((src) => (
+                                  <img key={src} src={src} alt="" className="w-14 h-12 object-cover rounded-lg border border-slate-200" />
+                                ))}
+                              </div>
+                            ) : null}
+                          </div>
+                        ))
+                    )}
                   </div>
                 </div>
               )}

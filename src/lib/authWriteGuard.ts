@@ -13,8 +13,8 @@ export function formatFirestoreWriteError(err: unknown, fallback = 'Kayıt yazı
   ) {
     return 'Oturum yetkisiz (Firestore). Anonim oturum kaydedemez — e-posta ile yeniden giriş yapın.';
   }
-  if (blob.includes('firestore_timeout') || blob.includes('timeout')) {
-    return 'Bağlantı zaman aşımı. Ağınızı kontrol edip tekrar deneyin.';
+  if (blob.includes('firestore_timeout') || blob.includes('timeout') || blob.includes('zaman aşımı')) {
+    return 'Kayıt zaman aşımı. Şantiye interneti zayıf olabilir — sistem 3 kez denedi. Kartı kontrol edin; yazıldıysa tekrar basmayın.';
   }
   return msg || fallback;
 }

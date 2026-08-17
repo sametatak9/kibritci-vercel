@@ -2,6 +2,25 @@ import { getDownloadURL, ref, uploadString } from 'firebase/storage';
 import { storage } from './firebase';
 import { compressImage } from './imageCompress';
 
+const UPLOAD_TIMEOUT_MS = 18000;
+const URL_TIMEOUT_MS = 8000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${label} zaman aşımı`)), ms);
+    promise.then(
+      (v) => {
+        clearTimeout(timer);
+        resolve(v);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      }
+    );
+  });
+}
+
 export async function uploadTemizlikKirimFoto(
   kind: 'daire' | 'baca',
   entityId: string,
@@ -12,13 +31,32 @@ export async function uploadTemizlikKirimFoto(
   if (!raw) return '';
   if (/^https?:\/\//i.test(raw)) return raw;
 
-  const compressed = await compressImage(raw, 1280, 1280, 0.72, 7000);
+  let compressed = raw;
+  try {
+    compressed = await withTimeout(
+      compressImage(raw, 1280, 1280, 0.72, 7000),
+      8000,
+      'Foto sıkıştırma'
+    );
+  } catch {
+    compressed = raw;
+  }
+
   const safeAsama = String(asama || 'foto').replace(/[^\w.-]+/g, '_');
   const storageRef = ref(storage, `temizlik-kirim/${kind}/${entityId}/${safeAsama}_${Date.now()}.jpg`);
-  await uploadString(storageRef, compressed, 'data_url', {
-    contentType: compressed.includes('image/png') ? 'image/png' : 'image/jpeg',
-  });
-  return getDownloadURL(storageRef);
+  try {
+    await withTimeout(
+      uploadString(storageRef, compressed, 'data_url', {
+        contentType: compressed.includes('image/png') ? 'image/png' : 'image/jpeg',
+      }),
+      UPLOAD_TIMEOUT_MS,
+      'Foto yükleme'
+    );
+    return await withTimeout(getDownloadURL(storageRef), URL_TIMEOUT_MS, 'Foto adresi');
+  } catch (err) {
+    console.warn('Temizlik foto Storage atlandı (Firestore’a base64 yazılmayacak):', entityId, err);
+    return '';
+  }
 }
 
 export async function uploadTemizlikKirimFotolar(

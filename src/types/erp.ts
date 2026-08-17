@@ -1242,6 +1242,13 @@ export type TemizlikIsTipi = 'TEMIZLIK' | 'KIRIM' | 'TEMIZLIK_VE_KIRIM';
 export type TemizlikOdaDurum = 'KIRLI' | 'ORTA' | 'TEMIZ' | 'KIRIM_GEREKIYOR';
 export type TemizlikBacaKirlilik = 'KIRLI' | 'ORTA' | 'TEMIZ' | 'AGIR_CAMUR';
 export type TemizlikUygulamaDurum = 'DEVAM' | 'EKSIK' | 'TAMAMLANDI';
+export type TemizlikBacaKoridor = 'K1' | 'K2' | 'K3';
+export type TemizlikBacaKonumTipi =
+  | 'BLOK_ONU'
+  | 'BLOK_ARKASI'
+  | 'BLOK_ARASI'
+  | 'AVLU'
+  | 'MERDIVEN';
 
 export interface TemizlikOdaTespit {
   id: string;
@@ -1297,6 +1304,10 @@ export interface TemizlikBaca {
   id: string;
   parsel: string;
   blok?: string;
+  blok2?: string;
+  koridor?: TemizlikBacaKoridor;
+  konumTipi?: TemizlikBacaKonumTipi;
+  siraNo?: number;
   etiket: string;
   yerTarifi: string;
   ozetDurum: TemizlikKartDurum;
