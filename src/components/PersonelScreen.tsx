@@ -14,7 +14,7 @@ import {
   personelNameKey,
   resolveAkvizyonGorev,
 } from '../lib/guvenlikHelpers';
-import { CANONICAL_ANA_FIRMA_ADI, isKibritciCompany, isTaseronPersonel } from '../lib/yoklamaUtils';
+import { CANONICAL_ANA_FIRMA_ADI, isIdariPersonel, isKibritciCompany, isPendingKampPersonel, isTaseronPersonel } from '../lib/yoklamaUtils';
 import {
   personelHasTakipEtiketi,
   withPersonelTakipEtiketi,
@@ -38,8 +38,10 @@ import {
 import { findPersonelByTcInList, loadPersonellerForDedup, upsertPersonelAvoidDuplicate } from '../lib/personelMatchUtils';
 import {
   applyPersonelDuplicateMerge,
+  planManualPersonelMerge,
   planPersonelDuplicateMerge,
 } from '../lib/personelDuplicateMerge';
+import { REMOVED_IDARI_PLACEHOLDER_TCS } from '../lib/personelSeedSuppress';
 import {
   buildPersonelKaliteIndex,
   formatPersonelKaliteOzet,
@@ -186,6 +188,8 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
   const [sortMode, setSortMode] = useState<'NAME_ASC' | 'NAME_DESC' | 'DATE_NEWEST' | 'DATE_OLDEST'>('NAME_ASC');
   const [repairingKampTaseron, setRepairingKampTaseron] = useState(false);
   const [repairingDuplicates, setRepairingDuplicates] = useState(false);
+  const [mergeKeepId, setMergeKeepId] = useState('');
+  const [mergeDropId, setMergeDropId] = useState('');
   const [exportingListe, setExportingListe] = useState<'excel' | 'html' | null>(null);
   const [screenView, setScreenView] = useState<PersonelScreenView>('liste');
 
@@ -938,17 +942,23 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
       );
       if (!ok) return;
     }
-    if (!isTaseronForm && !formData.tcNo) {
-      alert('Ana firma personeli için TC Kimlik No zorunludur.');
+    const isIdariForm =
+      formData.personelGrubu === 'IDARI' || formData.departman === 'İDARİ' || isIdariPersonel(formData as Personel);
+    if (!isTaseronForm && !isIdariForm && !formData.tcNo) {
+      alert('Ana firma personeli için TC Kimlik No zorunludur. İdari kadroda TC sonra girilebilir.');
       return;
     }
 
     const normalizedTc = String(formData.tcNo || '').trim();
+    if (REMOVED_IDARI_PLACEHOLDER_TCS.has(normalizedTc)) {
+      alert('Bu TC eski placeholder kayıttır (İDARİ KAYIT-18/22). Gerçek TC girin; sahte 11 hane yazmayın.');
+      return;
+    }
     if (normalizedTc && !validateTC(normalizedTc)) {
       alert('TC Kimlik No tam 11 haneli ve sadece rakamlardan oluşmalıdır!');
       return;
     }
-    if (!isTaseronForm && !validateTC(normalizedTc)) {
+    if (!isTaseronForm && !isIdariForm && !validateTC(normalizedTc)) {
       alert('TC Kimlik No tam 11 haneli ve sadece rakamlardan oluşmalıdır!');
       return;
     }
@@ -1022,7 +1032,7 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
     const finalIban = inputIban && inputIban !== 'TR' ? inputIban : prevIban;
     const isAnaFirmaAktif =
       firmaFields.firmaTipi === 'ANA_FIRMA' && is_aktif_status(formData.durum);
-    if (isAnaFirmaAktif && !validateIBAN(finalIban)) {
+    if (isAnaFirmaAktif && !isIdariForm && !validateIBAN(finalIban)) {
       alert('Ana firma aktif personeli için geçerli TR IBAN zorunludur (TR + 24 hane, toplam 26 karakter).');
       return;
     }
@@ -1191,8 +1201,7 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
   const matchesKadroMode = (p: Personel) =>
     kadroMode === 'ana_firma' ? !isTaseronPersonel(p) : isTaseronPersonel(p);
 
-  const isHiddenPendingKampci = (p: Personel) =>
-    p.onayDurumu === 'ONAY BEKLİYOR' && p.kaynak === 'KAMPCI' && !isTaseronPersonel(p);
+  const isHiddenPendingKampci = (p: Personel) => isPendingKampPersonel(p);
 
   /** Kampçı "KAMP PERSONEL" diye kaydetmiş ama kamp/cari taşeron olanlar */
   const misclassifiedKampTaseron = useMemo(() => {
@@ -1378,14 +1387,50 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
         kampKayitlari
       );
       setPersoneller(result.personeller);
-      if (saveYoklamalarNow && result.yoklamalar !== yoklamalar) {
+      if (!result.yoklamaPersisted && saveYoklamalarNow && result.yoklamalar !== yoklamalar) {
         await saveYoklamalarNow(result.yoklamalar);
       }
       alert(
-        `${result.mergedCount} personel birleştirildi, ${result.deletedCount} mükerrer kayıt silindi.`
+        `${result.mergedCount} personel birleştirildi, ${result.deletedCount} mükerrer kayıt silindi.` +
+          (result.archivePatched ? ` ${result.archivePatched} yoklama arşivi güncellendi.` : '')
       );
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Mükerrer birleştirme başarısız.');
+    } finally {
+      setRepairingDuplicates(false);
+    }
+  };
+
+  const handleManualPersonelMerge = async () => {
+    const keep = personeller.find((p) => p.id === mergeKeepId);
+    const drop = personeller.find((p) => p.id === mergeDropId);
+    if (!keep || !drop || keep.id === drop.id) {
+      alert('Birleştirmek için kalan kart ve silinecek kopyayı seçin (iki farklı kayıt).');
+      return;
+    }
+    if (
+      !window.confirm(
+        `"${drop.ad} ${drop.soyad}" (${drop.id}) silinip "${keep.ad} ${keep.soyad}" (${keep.id}) kartına birleşecek.\n\nYoklama, kamp oda bağlantısı ve yoklama arşivleri kalan karta taşınır. Devam?`
+      )
+    ) {
+      return;
+    }
+    setRepairingDuplicates(true);
+    try {
+      const plan = planManualPersonelMerge(keep, [drop], yoklamalar, kampKayitlari);
+      const result = await applyPersonelDuplicateMerge(personeller, [plan], yoklamalar, kampKayitlari);
+      setPersoneller(result.personeller);
+      if (!result.yoklamaPersisted && saveYoklamalarNow && result.yoklamalar !== yoklamalar) {
+        await saveYoklamalarNow(result.yoklamalar);
+      }
+      setMergeKeepId('');
+      setMergeDropId('');
+      alert(
+        `Birleştirildi. Kalan kart: ${keep.ad} ${keep.soyad}.` +
+          (result.archivePatched ? ` ${result.archivePatched} arşiv güncellendi.` : '')
+      );
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Manuel birleştirme başarısız.');
     } finally {
       setRepairingDuplicates(false);
     }
@@ -1836,7 +1881,9 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="text-[10px] font-bold text-slate-500 uppercase">
-                  {formData.firmaTipi === 'TASERON' ? 'TC Kimlik No (opsiyonel)' : 'TC Kimlik No *'}
+                  {formData.firmaTipi === 'TASERON' || formData.personelGrubu === 'IDARI' || formData.departman === 'İDARİ'
+                    ? 'TC Kimlik No (idari: sonra girilebilir)'
+                    : 'TC Kimlik No *'}
                 </label>
                 <input
                   type="text"
@@ -1845,7 +1892,11 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
                   value={formData.tcNo}
                   onChange={handleInputChange}
                   className="w-full text-xs font-medium border border-[#e2e8f0] rounded-lg mt-1 p-2 bg-slate-50  transition duration-150"
-                  placeholder={formData.firmaTipi === 'TASERON' ? 'Zorunlu değil' : '11 Hane'}
+                  placeholder={
+                    formData.firmaTipi === 'TASERON' || formData.personelGrubu === 'IDARI' || formData.departman === 'İDARİ'
+                      ? 'Boş bırakılabilir — sahte 11 hane yazmayın'
+                      : '11 Hane'
+                  }
                 />
               </div>
               <div>
@@ -2613,6 +2664,46 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
                     : `Mükerrerleri Birleştir (${duplicateMergePlanCount})`}
                 </button>
               )}
+              <div className="flex flex-wrap items-center gap-1.5">
+                <select
+                  value={mergeKeepId}
+                  onChange={(e) => setMergeKeepId(e.target.value)}
+                  className="text-[10px] border border-slate-200 rounded-lg px-2 py-1.5 bg-white max-w-[140px]"
+                >
+                  <option value="">Kalan kart</option>
+                  {personeller
+                    .filter((p) => matchesKadroMode(p))
+                    .slice(0, 400)
+                    .map((p) => (
+                      <option key={`k-${p.id}`} value={p.id}>
+                        {p.ad} {p.soyad}
+                      </option>
+                    ))}
+                </select>
+                <select
+                  value={mergeDropId}
+                  onChange={(e) => setMergeDropId(e.target.value)}
+                  className="text-[10px] border border-slate-200 rounded-lg px-2 py-1.5 bg-white max-w-[140px]"
+                >
+                  <option value="">Silinecek kopya</option>
+                  {personeller
+                    .filter((p) => matchesKadroMode(p) && p.id !== mergeKeepId)
+                    .slice(0, 400)
+                    .map((p) => (
+                      <option key={`d-${p.id}`} value={p.id}>
+                        {p.ad} {p.soyad}
+                      </option>
+                    ))}
+                </select>
+                <button
+                  type="button"
+                  disabled={repairingDuplicates || !mergeKeepId || !mergeDropId}
+                  onClick={() => void handleManualPersonelMerge()}
+                  className="text-[10px] font-bold px-3 py-2 rounded-xl border cursor-pointer bg-white text-sky-800 border-sky-300 hover:bg-sky-50 disabled:opacity-60"
+                >
+                  Manuel birleştir
+                </button>
+              </div>
               <button
                 type="button"
                 onClick={toggleProblematicFilter}
@@ -2774,7 +2865,7 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
                         )}
                       </div>
                       <p className="text-[10px] text-slate-400 font-medium mt-1">
-                        TC: {p.tcNo || '—'} · Görev: <span className="text-slate-600 font-bold">{displayPersonelGorev(p)}</span>
+                        TC: {p.tcNo || (isIdariPersonel(p) ? 'sonra girilecek' : '—')} · Görev: <span className="text-slate-600 font-bold">{displayPersonelGorev(p)}</span>
                       </p>
                       <div className="flex flex-wrap gap-1.5 mt-2">
                         <span className="inline-flex items-center gap-1 bg-emerald-50 border border-emerald-200 text-emerald-800 px-2 py-0.5 rounded font-bold font-mono text-[9px]">

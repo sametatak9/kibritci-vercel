@@ -1,14 +1,20 @@
 import { Personel } from '../types/erp';
 import { isPersonelTcSuppressed, loadSuppressedPersonelTcs, REMOVED_IDARI_PLACEHOLDER_TCS } from '../lib/personelSeedSuppress';
 
+import { personelAdSoyadKey } from '../lib/personelKayitKaliteUtils';
+import { isTaseronPersonel } from '../lib/yoklamaUtils';
+
 /** İdari kadro — yoklamaya girmez; izin / tutanak / araç tahsis vb. evraklarda seçilebilir */
 type IdariRow = {
   ad: string;
   soyad: string;
   tcNo: string;
+  ibanNo?: string;
   iseGirisTarihi: string; // YYYY-MM-DD
   gorev: string;
   cinsiyet?: 'Erkek' | 'Kadın';
+  /** TC henüz girilmedi — sahte 11 hane yazılmaz; eşleşme id + isim ile */
+  tcBekleniyor?: boolean;
 };
 
 function trDate(d: string): string {
@@ -41,13 +47,87 @@ const ROWS: IdariRow[] = [
   { ad: 'EMRE YUNUS', soyad: 'BOZYİĞİT', tcNo: '18158908178', iseGirisTarihi: trDate('27.10.2025'), gorev: 'İnşaat Mühendisi' },
   // YEDİTEPE taşeron → Kibritçi idari transfer
   { ad: 'OLCAY', soyad: 'DÜZENLİ', tcNo: '46366841604', iseGirisTarihi: trDate('12.08.2026'), gorev: 'Peyzaj Mimarı' },
+  // TC sonra girilecek — 11 haneli placeholder YAZILMAZ (Büşra/Buğra Excel TC’leri eski İDARİ KAYIT-22/18).
+  // Birhan Velioğlu açılmıyor. IBAN Excel listesinden (ödeme); yoklama personel.id ile bağlı.
+  {
+    ad: 'BÜŞRA',
+    soyad: 'ÖZBİLEK',
+    tcNo: '',
+    ibanNo: 'TR910006200152200006629862',
+    iseGirisTarihi: '2026-08-17',
+    gorev: 'Mimar',
+    cinsiyet: 'Kadın',
+    tcBekleniyor: true,
+  },
+  {
+    ad: 'GÜRSOY',
+    soyad: 'MAZLUM',
+    tcNo: '',
+    ibanNo: 'TR860006200046700006628825',
+    iseGirisTarihi: '2026-08-17',
+    gorev: 'Genel Koordinatör',
+    tcBekleniyor: true,
+  },
+  {
+    ad: 'HATİCE BEGÜM',
+    soyad: 'ASNA',
+    tcNo: '',
+    ibanNo: 'TR660001009010797675805001',
+    iseGirisTarihi: '2026-08-17',
+    gorev: 'Stajyer Mimar',
+    cinsiyet: 'Kadın',
+    tcBekleniyor: true,
+  },
+  {
+    ad: 'KÜBRA',
+    soyad: 'OK',
+    tcNo: '',
+    ibanNo: 'TR140006200073900006618867',
+    iseGirisTarihi: '2026-08-17',
+    gorev: 'İnşaat Mühendisi',
+    cinsiyet: 'Kadın',
+    tcBekleniyor: true,
+  },
+  {
+    ad: 'MEHMET BUĞRA',
+    soyad: 'ARDIÇ',
+    tcNo: '',
+    ibanNo: 'TR540006200041700006838395',
+    iseGirisTarihi: '2026-08-17',
+    gorev: 'Mimar',
+    tcBekleniyor: true,
+  },
+  {
+    ad: 'MEHMET MURAT',
+    soyad: 'ASLAN',
+    tcNo: '',
+    ibanNo: 'TR350006200017400006621896',
+    iseGirisTarihi: '2026-08-17',
+    gorev: 'Proje Müdürü',
+    tcBekleniyor: true,
+  },
+  {
+    ad: 'YAHYA EREN',
+    soyad: 'TURGAY',
+    tcNo: '',
+    ibanNo: 'TR280006200078800006812661',
+    iseGirisTarihi: '2026-08-17',
+    gorev: 'Peyzaj Mimarı',
+    tcBekleniyor: true,
+  },
 ];
+
+function idariPendingId(row: IdariRow): string {
+  const key = personelAdSoyadKey(row).replace(/\s+/g, '-') || 'X';
+  return `PRS-IDARI-PENDING-${key}`;
+}
 
 function toPersonel(row: IdariRow, index: number): Personel {
   const tc = String(row.tcNo || '').trim();
+  const pending = Boolean(row.tcBekleniyor) || !tc;
   return {
-    id: `PRS-IDARI-${tc || index}`,
-    tcNo: tc,
+    id: pending ? idariPendingId(row) : `PRS-IDARI-${tc || index}`,
+    tcNo: pending ? '' : tc,
     ad: row.ad,
     soyad: row.soyad,
     babaAdi: '',
@@ -63,10 +143,10 @@ function toPersonel(row: IdariRow, index: number): Personel {
     cinsiyet: row.cinsiyet || 'Erkek',
     maas: 0,
     ucretTipi: 'Aylık',
-    sgkDurumu: "SGK'lı",
+    sgkDurumu: row.gorev.toLocaleLowerCase('tr-TR').includes('stajyer') ? 'Stajyer' : "SGK'lı",
     bankaAdi: '',
     subeAdi: '',
-    ibanNo: '',
+    ibanNo: String(row.ibanNo || '').replace(/\s+/g, '').toUpperCase(),
     durum: true,
     firmaTipi: 'ANA_FIRMA',
     firmaAdi: 'Kibritçi İnşaat',
@@ -79,9 +159,8 @@ export function getIdariPersonelSeed(): Personel[] {
 }
 
 /**
- * Mevcut listeye idari kadroyu TC ile birleştirir.
- * - TC yoksa ekler
- * - TC varsa idari alanları (grup/departman/görev/firma) günceller, diğer alanları korur
+ * Mevcut listeye idari kadroyu TC veya (TC yoksa) id/isim ile birleştirir.
+ * Sahte 11 haneli TC yazılmaz; boş TC’li satırlar isim + pending id ile tek kart kalır.
  */
 export function mergeIdariIntoPersonelList(
   existing: Personel[],
@@ -103,16 +182,29 @@ export function mergeIdariIntoPersonelList(
 
   for (const s of seed) {
     const tc = String(s.tcNo || '').trim();
-    if (!tc) continue;
-    if (suppressed.has(tc) || isPersonelTcSuppressed(tc)) continue;
-    if (REMOVED_IDARI_PLACEHOLDER_TCS.has(tc)) continue;
-    const found = byTc.get(tc);
+    if (tc && (suppressed.has(tc) || isPersonelTcSuppressed(tc) || REMOVED_IDARI_PLACEHOLDER_TCS.has(tc))) {
+      continue;
+    }
+    let found: Personel | undefined = tc ? byTc.get(tc) : undefined;
+    if (!found) found = next.find((p) => p.id === s.id);
+    if (!found) {
+      const nameKey = personelAdSoyadKey(s);
+      found = next.find(
+        (p) =>
+          !isTaseronPersonel(p) &&
+          personelAdSoyadKey(p) === nameKey &&
+          (p.personelGrubu === 'IDARI' || p.departman === 'İDARİ' || !String(p.tcNo || '').trim())
+      );
+    }
     if (!found) {
       next.push(s);
-      byTc.set(tc, s);
+      if (tc) byTc.set(tc, s);
       toSave.push(s);
       continue;
     }
+    const foundTc = String(found.tcNo || '').trim();
+    const safeTc = REMOVED_IDARI_PLACEHOLDER_TCS.has(foundTc) ? '' : foundTc || tc;
+    const seedIban = String(s.ibanNo || '').replace(/\s+/g, '').toUpperCase();
     const wasTaseron =
       found.firmaTipi === 'TASERON' ||
       (found.personelGrubu !== 'IDARI' && found.departman !== 'İDARİ');
@@ -122,7 +214,8 @@ export function mergeIdariIntoPersonelList(
       found.firmaTipi !== 'ANA_FIRMA' ||
       (found.ad || '') !== s.ad ||
       (found.soyad || '') !== s.soyad ||
-      // Taşeron→idari geçişte görev seed’den alınır; aksi halde yalnızca boşsa doldur
+      foundTc !== safeTc ||
+      (seedIban && String(found.ibanNo || '').replace(/\s+/g, '').toUpperCase() !== seedIban) ||
       (wasTaseron && !!(s.gorev || '').trim() && (found.gorev || '').trim() !== s.gorev) ||
       (!(found.gorev || '').trim() && !!(s.gorev || '').trim());
 
@@ -134,6 +227,8 @@ export function mergeIdariIntoPersonelList(
           s.soyad.startsWith('KAYIT-') && found.soyad && !found.soyad.startsWith('KAYIT-')
             ? found.soyad
             : s.soyad,
+        tcNo: safeTc,
+        ibanNo: String(found.ibanNo || '').trim() || seedIban || found.ibanNo,
         gorev: wasTaseron ? s.gorev || found.gorev : (found.gorev || '').trim() || s.gorev,
         iseGirisTarihi: found.iseGirisTarihi || s.iseGirisTarihi,
         departman: 'İDARİ',
@@ -146,7 +241,7 @@ export function mergeIdariIntoPersonelList(
       const idx = next.findIndex((p) => p.id === found.id);
       if (idx >= 0) next[idx] = patched;
       toSave.push(patched);
-      byTc.set(tc, patched);
+      if (safeTc) byTc.set(safeTc, patched);
     }
   }
 

@@ -46,7 +46,8 @@ export type YoklamaSaveSource =
   | 'evrak'
   | 'legacy_bootstrap'
   | 'restore'
-  | 'sync';
+  | 'sync'
+  | 'personel_merge';
 
 export interface YoklamaSaveResult {
   ok: boolean;
@@ -83,6 +84,71 @@ export function parseYoklamaDataJson(raw: Record<string, unknown> | undefined): 
     }
   }
   return (raw.data as AylikYoklamaMap) || {};
+}
+
+/** Silinen personel id'lerinin günlerini kalan karta taşır; eski anahtarı düşürür. */
+export function remapYoklamaMapPersonelIds(
+  map: AylikYoklamaMap,
+  fromIds: string[],
+  keepId: string
+): AylikYoklamaMap {
+  const next: AylikYoklamaMap = { ...map };
+  for (const fromId of fromIds) {
+    if (!fromId || fromId === keepId) continue;
+    const dupe = next[fromId];
+    if (!dupe) continue;
+    const keep = { ...(next[keepId] || {}) };
+    for (const [day, data] of Object.entries(dupe)) {
+      if (!data) continue;
+      const existing = keep[Number(day)] || keep[day as unknown as number];
+      if (!existing || !existing.durum || existing.durum === 'Girilmedi') {
+        keep[Number.isNaN(Number(day)) ? (day as unknown as number) : Number(day)] = data;
+      }
+    }
+    next[keepId] = keep;
+    delete next[fromId];
+  }
+  return next;
+}
+
+/** Son yoklama arşivlerinde aynı id taşımasını yapar (birleştirme sonrası tek kayıt). */
+export async function remapYoklamaArchivesPersonelIds(
+  fromIds: string[],
+  keepId: string
+): Promise<number> {
+  const ids = fromIds.filter((id) => id && id !== keepId);
+  if (!ids.length || !keepId) return 0;
+  const colRef = collection(db, YOKLAMA_ARCHIVE_COLLECTION);
+  const snapshot = await withTimeout(
+    getDocs(query(colRef, orderBy('olusturmaTarihi', 'desc'), limit(40)))
+  );
+  let patched = 0;
+  for (const snap of snapshot.docs) {
+    const raw = snap.data() as Record<string, unknown>;
+    const map = parseYoklamaDataJson(raw);
+    if (!ids.some((id) => Object.prototype.hasOwnProperty.call(map, id))) continue;
+    const next = remapYoklamaMapPersonelIds(map, ids, keepId);
+    try {
+      await withTimeout(
+        setDoc(
+          snap.ref,
+          cleanUndefined({
+            ...raw,
+            dataJson: JSON.stringify(next),
+            personelSayisi: countYoklamaPersons(next),
+            gunSayisi: countYoklamaDayEntries(next),
+            doluGunSayisi: countYoklamaFilledDays(next),
+          }),
+          { merge: true }
+        ),
+        20000
+      );
+      patched += 1;
+    } catch (err) {
+      console.warn('Yoklama arşivi id taşıması atlandı', snap.id, err);
+    }
+  }
+  return patched;
 }
 
 export function yoklamaMonthDocId(yearMonth: string): string {
@@ -509,7 +575,8 @@ async function loadRemoteForWrite(): Promise<AylikYoklamaMap> {
 
 export async function persistYoklamaDocument(
   localMap: AylikYoklamaMap,
-  kaynak: YoklamaSaveSource = 'sync'
+  kaynak: YoklamaSaveSource = 'sync',
+  options?: { dropPersonelIds?: string[] }
 ): Promise<YoklamaSaveResult> {
   let remote: AylikYoklamaMap;
 
@@ -527,9 +594,13 @@ export async function persistYoklamaDocument(
   }
 
   const remoteNonEmpty = Object.keys(remote).length > 0;
-  const payload = remoteNonEmpty
+  const payloadRaw = remoteNonEmpty
     ? (mergeYoklamaMaps(remote, localMap) as AylikYoklamaMap)
     : localMap;
+  const dropIds = (options?.dropPersonelIds || []).filter(Boolean);
+  const payload: AylikYoklamaMap = dropIds.length
+    ? Object.fromEntries(Object.entries(payloadRaw).filter(([id]) => !dropIds.includes(id)))
+    : payloadRaw;
 
   if (remoteNonEmpty) {
     const guard = shouldBlockYoklamaMassWrite(remote, payload);

@@ -448,8 +448,7 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
         (nextTel && phoneMatchKey(best.telefonNo || '') !== phoneMatchKey(nextTel)) ||
         best.firmaTipi !== firmaTipi ||
         !firmaEslesir(best.firmaAdi || '', nextFirmaAdi) ||
-        (firmaTipi === 'TASERON' && best.gorev !== targetGorev) ||
-        (firmaTipi === 'TASERON' && best.onayDurumu === 'ONAY BEKLİYOR');
+        (firmaTipi === 'TASERON' && best.gorev !== targetGorev);
 
       if (needsPatch) {
         const patched = withTaseronPersonelGorev({
@@ -460,7 +459,7 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
           firmaAdi: nextFirmaAdi,
           departman: firmaTipi === 'TASERON' ? TASERON_PERSONEL_DEPARTMAN : best.departman || 'SAHA',
           gorev: targetGorev,
-          onayDurumu: firmaTipi === 'TASERON' ? 'ONAYLANDI' : best.onayDurumu,
+          onayDurumu: best.onayDurumu,
           durum: best.durum === false ? true : best.durum,
         });
         await saveDocument('personeller', patched);
@@ -519,7 +518,7 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
       durum: true,
       firmaTipi,
       firmaAdi: normalizedFirma,
-      onayDurumu: firmaTipi === 'TASERON' ? 'ONAYLANDI' : 'ONAY BEKLİYOR',
+      onayDurumu: 'ONAY BEKLİYOR',
       kaynak: 'KAMPCI',
     } as Personel);
 
@@ -1154,10 +1153,7 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
               nextFirmaTipi === 'TASERON'
                 ? resolveTaseronPersonelGorev({ firmaAdi: nextFirmaAdi, firmaTipi: 'TASERON' })
                 : matchedPersonel.gorev,
-            onayDurumu:
-              nextFirmaTipi === 'TASERON'
-                ? 'ONAYLANDI'
-                : matchedPersonel.onayDurumu,
+            onayDurumu: matchedPersonel.onayDurumu,
           });
           await saveDocument('personeller', patched);
           setPersoneller?.((prev) => prev.map((p) => (p.id === patched.id ? patched : p)));
@@ -1188,7 +1184,9 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
       setSelectedFirma('');
       setManualFirma('');
       setPlacementModalRoom(null);
-      const dbNote = createdPersonel ? ' (personel DB)' : '';
+      const dbNote = createdPersonel
+        ? ' (yeni personel yönetici onayına düştü — yoklamaya işlenmez)'
+        : '';
       showStatus('success', `${personelIsim} başarıyla ${targetRoom.odaNo} no'lu odaya yerleştirildi.${dbNote}`);
     } catch (err) {
       console.error(err);
@@ -1600,7 +1598,7 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
           firmaAdi,
           gorev: kayitGorev,
           departman: firmaTipi === 'TASERON' ? TASERON_PERSONEL_DEPARTMAN : resolved.personel.departman || 'SAHA',
-          onayDurumu: firmaTipi === 'TASERON' ? 'ONAYLANDI' : resolved.personel.onayDurumu,
+          onayDurumu: resolved.personel.onayDurumu || 'ONAY BEKLİYOR',
         });
         await saveDocument('personeller', patched);
         setPersoneller?.((prev) =>

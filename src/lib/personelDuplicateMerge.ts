@@ -4,6 +4,7 @@ import { removeDocument, saveDocument } from './firebase';
 import { validateTC } from './personelOdemeUtils';
 import { canonicalFirmaUnvan } from './firmaCanonicalUtils';
 import { asYoklamaGunMap } from './yoklamaUtils';
+import { fetchYoklamaMap, persistYoklamaDocument, remapYoklamaArchivesPersonelIds } from './yoklamaPersistence';
 import { firmaEslesir, isTaseronPersonelRecord, withTaseronPersonelGorev } from './taseronUtils';
 
 const digitsOnly = (raw: string) => String(raw || '').replace(/\D/g, '');
@@ -191,11 +192,32 @@ export function planPersonelDuplicateMerge(
   return plans;
 }
 
+export function planManualPersonelMerge(
+  keep: Personel,
+  duplicates: Personel[],
+  yoklamalar?: AylikYoklamaMap,
+  kampKayitlari: KampKaydi[] = []
+): PersonelDuplicateMergePlan {
+  const members = [keep, ...duplicates.filter((p) => p.id && p.id !== keep.id)];
+  const deleteIds = members.filter((p) => p.id !== keep.id).map((p) => p.id);
+  return {
+    keepId: keep.id,
+    deleteIds,
+    merged: { ...mergePersonelFields(members, yoklamalar), id: keep.id },
+    label: `${keep.ad} ${keep.soyad} (manuel ×${members.length})`,
+    kampPatchIds: kampKayitlari
+      .filter((k) => deleteIds.includes(k.personelId || ''))
+      .map((k) => k.id),
+  };
+}
+
 export type PersonelDuplicateMergeResult = {
   personeller: Personel[];
   yoklamalar: AylikYoklamaMap;
   mergedCount: number;
   deletedCount: number;
+  yoklamaPersisted: boolean;
+  archivePatched: number;
 };
 
 export async function applyPersonelDuplicateMerge(
@@ -206,11 +228,19 @@ export async function applyPersonelDuplicateMerge(
 ): Promise<PersonelDuplicateMergeResult> {
   let nextPersoneller = [...personeller];
   let nextYoklamalar: AylikYoklamaMap = { ...yoklamalar };
+  if (Object.keys(nextYoklamalar).length === 0) {
+    try {
+      nextYoklamalar = await fetchYoklamaMap();
+    } catch {
+      nextYoklamalar = {};
+    }
+  }
   let mergedCount = 0;
   let deletedCount = 0;
+  let archivePatched = 0;
 
   for (const plan of plans) {
-    const merged = { ...plan.merged, id: plan.keepId };
+    const merged = { ...plan.merged, id: plan.keepId, onayDurumu: plan.merged.onayDurumu === 'ONAY BEKLİYOR' ? 'ONAYLANDI' : plan.merged.onayDurumu };
     await saveDocument('personeller', merged);
     nextPersoneller = nextPersoneller.map((p) => (p.id === plan.keepId ? merged : p));
     mergedCount += 1;
@@ -233,7 +263,35 @@ export async function applyPersonelDuplicateMerge(
       const patched = { ...kamp, personelId: plan.keepId };
       await saveDocument('kampKayitlari', patched);
     }
+
+    try {
+      archivePatched += await remapYoklamaArchivesPersonelIds(plan.deleteIds, plan.keepId);
+    } catch (err) {
+      console.warn('Yoklama arşivi birleştirme atlandı', plan.keepId, err);
+    }
   }
 
-  return { personeller: nextPersoneller, yoklamalar: nextYoklamalar, mergedCount, deletedCount };
+  const allDeleteIds = plans.flatMap((p) => p.deleteIds);
+  let yoklamaPersisted = false;
+  if (allDeleteIds.length > 0 || mergedCount > 0) {
+    try {
+      const persist = await persistYoklamaDocument(nextYoklamalar, 'personel_merge', {
+        dropPersonelIds: allDeleteIds,
+      });
+      yoklamaPersisted = Boolean(persist.ok);
+      if (persist.ok && persist.map) nextYoklamalar = persist.map;
+      else if (!persist.ok) console.warn('Yoklama birleştirme yazılamadı:', persist.error);
+    } catch (err) {
+      console.warn('Yoklama birleştirme yazısı atlandı', err);
+    }
+  }
+
+  return {
+    personeller: nextPersoneller,
+    yoklamalar: nextYoklamalar,
+    mergedCount,
+    deletedCount,
+    yoklamaPersisted,
+    archivePatched,
+  };
 }

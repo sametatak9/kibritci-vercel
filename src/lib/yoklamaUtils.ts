@@ -484,6 +484,11 @@ export function isTaseronPersonel(p?: Personel): boolean {
   return !isKibritciCompany(firmaAdi);
 }
 
+/** Kampçının kurduğu, yönetici onayı bekleyen kart — yoklama/puantaja girmez */
+export function isPendingKampPersonel(p?: Personel): boolean {
+  return !!p && p.onayDurumu === 'ONAY BEKLİYOR' && p.kaynak === 'KAMPCI';
+}
+
 /** İdari kadro — ana firma puantaj/yoklamasına girmez; izin/tutanak/araç tahsis vb. evraklarda seçilir */
 export function isIdariPersonel(p?: Personel): boolean {
   if (!p) return false;
@@ -569,7 +574,7 @@ export function buildPersonelListForMonth(
   personeller.forEach(p => {
     // Taşeron + idari kadro yoklama/puantaj listesine girmez.
     // Götürü / seramik ekibi ayrı koleksiyonda (goturuYoklamalari) tutulur.
-    if (isTaseronPersonel(p) || isIdariPersonel(p) || isSeramikEkibiPersonel(p)) return;
+    if (isTaseronPersonel(p) || isIdariPersonel(p) || isSeramikEkibiPersonel(p) || isPendingKampPersonel(p)) return;
     if (isPersonelVisibleInMonth(p, year, month, asYoklamaGunMap(yoklamalar[p.id]))) ids.add(p.id);
   });
   Object.entries(yoklamalar).forEach(([id, map]) => {
@@ -577,7 +582,7 @@ export function buildPersonelListForMonth(
     // Bu, "kayıtlı olmayan personel yoklamada görünüyor" ve mükerrer satır riskini azaltır.
     const existing = byId.get(id);
     if (!existing) return;
-    if (isTaseronPersonel(existing) || isIdariPersonel(existing) || isSeramikEkibiPersonel(existing)) return;
+    if (isTaseronPersonel(existing) || isIdariPersonel(existing) || isSeramikEkibiPersonel(existing) || isPendingKampPersonel(existing)) return;
     const personMap = asYoklamaGunMap(map);
     if (!personHasYoklamaInMonth(personMap, year, month)) return;
     if (!isPersonelVisibleInMonth(existing, year, month, personMap)) return;

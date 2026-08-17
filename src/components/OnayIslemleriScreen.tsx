@@ -91,7 +91,8 @@ import {
   markTaseronSayimRejected,
   validateTaseronSayimSession,
 } from '../lib/kampTaseronSayimOnayUtils';
-import { loadPersonellerForDedup, upsertPersonelAvoidDuplicate } from '../lib/personelMatchUtils';
+import { loadPersonellerForDedup, upsertPersonelAvoidDuplicate, findPersonelMatches, pickBestPersonelMatch, formatPersonelMatchLabel } from '../lib/personelMatchUtils';
+import { applyPersonelDuplicateMerge, planManualPersonelMerge } from '../lib/personelDuplicateMerge';
 import { resolveTaseronPersonelGorev, withTaseronPersonelGorev } from '../lib/taseronUtils';
 
 interface OnayIslemleriScreenProps {
@@ -833,6 +834,45 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
     } catch (err) {
       console.error(err);
       alert('Onaylama sırasında hata oluştu.');
+    }
+  };
+
+  const handleMergeKampPersonel = async (pendingId: string) => {
+    const pending = bekleyenKampPersonelleri.find((x) => x.id === pendingId);
+    if (!pending) return;
+    const matches = findPersonelMatches(
+      (personeller || []).filter((p) => p.id !== pendingId),
+      {
+        rawName: `${pending.ad || ''} ${pending.soyad || ''}`.trim(),
+        tcNo: pending.tcNo,
+        telefonNo: pending.telefonNo,
+        firmaAdi: pending.firmaAdi,
+        firmaTipi: pending.firmaTipi,
+      }
+    );
+    const best = pickBestPersonelMatch(matches);
+    if (!best) {
+      alert('Birleştirilecek mevcut kart bulunamadı. Ayrı kart olarak onaylayın veya Personel ekranından manuel birleştirin.');
+      return;
+    }
+    const keep = best.personel;
+    if (
+      !window.confirm(
+        `Kampçı kaydı "${pending.ad} ${pending.soyad}" mevcut karta birleşecek:\n\n${formatPersonelMatchLabel(best)}\n\nYoklama, kamp odası ve yoklama arşivleri kalan karta taşınır. Kampçı kopyası silinir.`
+      )
+    ) {
+      return;
+    }
+    try {
+      const plan = planManualPersonelMerge(keep, [pending], undefined, kampKayitlari);
+      const result = await applyPersonelDuplicateMerge(personeller || [], [plan], {}, kampKayitlari);
+      setPersoneller?.(result.personeller);
+      alert(
+        `Birleştirildi → ${keep.ad} ${keep.soyad}.` +
+          (result.archivePatched ? ` ${result.archivePatched} yoklama arşivi güncellendi.` : '')
+      );
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Birleştirme başarısız.');
     }
   };
 
@@ -3295,14 +3335,27 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
                   <div className="space-y-1">
                     <span className="text-amber-700 font-bold block text-[11px] tracking-widest uppercase">👤 Kampçı Personel Onayları ({bekleyenKampPersonelleri.length})</span>
                     <p className="text-slate-500 leading-relaxed text-[11px]">
-                      Kampçının eklediği yeni personeller (yazım hatası riski nedeniyle) yönetici onayı olmadan sisteme işlenmez. Onaylayın veya reddedin.
+                      Kampçının eklediği yeni personeller yönetici onayı olmadan yoklamaya/kadrolara işlenmez. Aynı kişi ana programda varsa «Birleştir» ile tek karta (yoklama + arşiv) alın.
                     </p>
                   </div>
                 </div>
 
                 {bekleyenKampPersonelleri.length > 0 && (
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-4">
-                    {bekleyenKampPersonelleri.map((p) => (
+                    {bekleyenKampPersonelleri.map((p) => {
+                      const match = pickBestPersonelMatch(
+                        findPersonelMatches(
+                          (personeller || []).filter((x) => x.id !== p.id),
+                          {
+                            rawName: `${p.ad || ''} ${p.soyad || ''}`.trim(),
+                            tcNo: p.tcNo,
+                            telefonNo: p.telefonNo,
+                            firmaAdi: p.firmaAdi,
+                            firmaTipi: p.firmaTipi,
+                          }
+                        )
+                      );
+                      return (
                       <div key={p.id} className="border border-amber-200 bg-amber-50/40 rounded-xl p-3 flex flex-col justify-between space-y-2">
                         <div>
                           <div className="flex items-center justify-between">
@@ -3312,6 +3365,11 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
                           <p className="text-[10.5px] text-slate-500 mt-1">Görev: {p.gorev || '—'} · Firma: {p.firmaAdi || (p.firmaTipi === 'TASERON' ? 'Taşeron' : 'Kibritçi')}</p>
                           <p className="text-[10.5px] text-slate-500">TC: {p.tcNo || '—'} · Tel: {p.telefonNo || '—'}</p>
                           <p className="text-[9px] text-amber-700/80 mt-0.5 font-mono">Kaynak: KAMPÇI · Giriş: {p.iseGirisTarihi || '—'}</p>
+                          {match ? (
+                            <p className="text-[10px] text-sky-800 mt-1 font-bold">
+                              Mevcut kart: {formatPersonelMatchLabel(match)}
+                            </p>
+                          ) : null}
                         </div>
                         <div className="flex gap-2 pt-1 border-t border-amber-100">
                           <button
@@ -3321,16 +3379,26 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
                           >
                             <X size={11} /> Reddet
                           </button>
+                          {match ? (
+                            <button
+                              type="button"
+                              onClick={() => void handleMergeKampPersonel(p.id)}
+                              className="flex-1 bg-sky-700 hover:bg-sky-800 text-white py-1.5 px-3 rounded-lg text-[10px] font-black tracking-widest transition flex items-center justify-center gap-1 cursor-pointer"
+                            >
+                              Birleştir
+                            </button>
+                          ) : null}
                           <button
                             type="button"
                             onClick={() => handleApproveKampPersonel(p.id)}
                             className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white py-1.5 px-3 rounded-lg text-[10px] font-black tracking-widest transition flex items-center justify-center gap-1 cursor-pointer"
                           >
-                            <Check size={11} /> Onayla ve Sisteme İşle
+                            <Check size={11} /> Onayla
                           </button>
                         </div>
                       </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>
