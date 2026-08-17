@@ -1,14 +1,16 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Camera, Droplets, MapPin, Plus, Printer, Trash2, X, Layers, CheckCircle2,
+  Camera, Droplets, MapPin, Plus, Printer, Trash2, X, Layers, CheckCircle2, ImagePlus, Pencil,
 } from 'lucide-react';
 import { collection, onSnapshot } from 'firebase/firestore';
 import {
   TemizlikBaca,
   TemizlikBacaTespit,
   TemizlikBacaUygulama,
+  TemizlikBlokKart,
   TemizlikDaire,
   TemizlikIsTipi,
+  TemizlikKoridorKart,
   TemizlikOdaDurum,
   TemizlikOdaTespit,
   TemizlikTespit,
@@ -21,7 +23,7 @@ import {
 import { db, cleanUndefined, removeDocument, saveDocument } from '../lib/firebase';
 import { assertErpWriteAuth, formatFirestoreWriteError } from '../lib/authWriteGuard';
 import { todayDateKey } from '../lib/dateKeyUtils';
-import { PARSEL_LIST, blokListForParsel } from '../data/parselBlokMap';
+import { PARSEL_LIST } from '../data/parselBlokMap';
 import { uploadTemizlikKirimFoto } from '../lib/temizlikKirimFotoStorage';
 import {
   TEMIZLIK_DEFAULT_PARSEL,
@@ -32,7 +34,6 @@ import {
   buildBacaKod,
   buildBacaYerOzeti,
   deriveKartDurum,
-  koridorlarForParsel,
   latestByDate,
   newTemizlikId,
   nextBacaSiraNo,
@@ -45,6 +46,16 @@ import {
   sortBacalar,
   sumYevmiye,
 } from '../lib/temizlikKirimUtils';
+import {
+  blokKartId,
+  koridorKartId,
+  nextKoridorKod,
+  resolveBlokAdlari,
+  resolveKoridorlar,
+  seedBlokKartlari,
+  seedKoridorKartlari,
+} from '../lib/temizlikLayoutCards';
+import { BacaKusBakisiPlan } from './BacaKusBakisiPlan';
 import {
   buildBacaParselRaporHtml,
   buildDaireParselRaporHtml,
@@ -120,42 +131,73 @@ const FotoAlani: React.FC<{
   urls: string[];
   onChange: (next: string[]) => void;
   max?: number;
-}> = ({ urls, onChange, max = 4 }) => (
-  <div className="space-y-1.5">
-    <div className="flex flex-wrap gap-2">
-      {urls.map((u, i) => (
-        <div key={`${u.slice(0, 24)}_${i}`} className="relative w-24 h-20 rounded-xl overflow-hidden border border-slate-200 shadow-sm">
-          <img src={u} alt="" className="w-full h-full object-cover" />
-          <button
-            type="button"
-            onClick={() => onChange(urls.filter((_, j) => j !== i))}
-            className="absolute top-0.5 right-0.5 bg-rose-600 text-white rounded-full w-5 h-5 text-[10px] font-bold cursor-pointer"
-          >
-            ×
-          </button>
+}> = ({ urls, onChange, max = 6 }) => {
+  const [lightbox, setLightbox] = useState<string | null>(null);
+  return (
+    <div className="space-y-1.5">
+      <div className="flex flex-wrap gap-2">
+        {urls.map((u, i) => (
+          <div key={`${u.slice(0, 24)}_${i}`} className="relative w-24 h-20 rounded-xl overflow-hidden border border-slate-200 shadow-sm">
+            <button type="button" className="w-full h-full cursor-pointer" onClick={() => setLightbox(u)}>
+              <img src={u} alt="" className="w-full h-full object-cover" />
+            </button>
+            <button
+              type="button"
+              onClick={() => onChange(urls.filter((_, j) => j !== i))}
+              className="absolute top-0.5 right-0.5 bg-rose-600 text-white rounded-full w-5 h-5 text-[10px] font-bold cursor-pointer"
+            >
+              ×
+            </button>
+          </div>
+        ))}
+        {urls.length < max && (
+          <>
+            <label className="w-24 h-20 rounded-xl border-2 border-dashed border-teal-400 bg-teal-50 flex flex-col items-center justify-center text-teal-700 cursor-pointer hover:bg-teal-100">
+              <Camera size={18} />
+              <span className="text-[8px] font-black mt-0.5">Kamera</span>
+              <input
+                type="file"
+                accept="image/*"
+                capture="environment"
+                multiple
+                className="hidden"
+                onChange={(e) => {
+                  void readFilesAsDataUrls(e.target.files, max, urls).then(onChange);
+                  e.target.value = '';
+                }}
+              />
+            </label>
+            <label className="w-24 h-20 rounded-xl border-2 border-dashed border-slate-300 bg-white flex flex-col items-center justify-center text-slate-500 cursor-pointer hover:border-teal-400 hover:text-teal-700">
+              <ImagePlus size={18} />
+              <span className="text-[8px] font-black mt-0.5">Galeriden</span>
+              <input
+                type="file"
+                accept="image/*"
+                multiple
+                className="hidden"
+                onChange={(e) => {
+                  void readFilesAsDataUrls(e.target.files, max, urls).then(onChange);
+                  e.target.value = '';
+                }}
+              />
+            </label>
+          </>
+        )}
+      </div>
+      <p className="text-[9px] text-slate-500 font-semibold">
+        Fotoğraf ekleyin — kartta küçük görünür, tıklayınca büyür. Storage’a gider; zayıf net’te foto atlanır, yazı kaydı durur.
+      </p>
+      {lightbox ? (
+        <div
+          className="fixed inset-0 z-[80] bg-black/80 flex items-center justify-center p-4 cursor-pointer"
+          onClick={() => setLightbox(null)}
+        >
+          <img src={lightbox} alt="" className="max-h-[90vh] max-w-[94vw] rounded-xl object-contain" />
         </div>
-      ))}
-      {urls.length < max && (
-        <label className="w-24 h-20 rounded-xl border-2 border-dashed border-slate-300 bg-slate-50 flex flex-col items-center justify-center text-slate-400 cursor-pointer hover:border-teal-400 hover:text-teal-700">
-          <Camera size={18} />
-          <span className="text-[8px] font-bold mt-0.5">Foto çek</span>
-          <input
-            type="file"
-            accept="image/*"
-            capture="environment"
-            multiple
-            className="hidden"
-            onChange={(e) => {
-              void readFilesAsDataUrls(e.target.files, max, urls).then(onChange);
-              e.target.value = '';
-            }}
-          />
-        </label>
-      )}
+      ) : null}
     </div>
-    <p className="text-[9px] text-slate-400">Foto Storage’a gider, karta base64 yazılmaz. Zayıf internette foto atlanır, yazı kaydı durur.</p>
-  </div>
-);
+  );
+};
 
 function fmtYev(n: number): string {
   const v = Number(n) || 0;
@@ -243,6 +285,15 @@ export const TemizlikKirimScreen: React.FC<Props> = ({ currentUser }) => {
   const [bacalar, setBacalar] = useState<TemizlikBaca[]>([]);
   const [bacaTespitler, setBacaTespitler] = useState<TemizlikBacaTespit[]>([]);
   const [bacaUygulamalar, setBacaUygulamalar] = useState<TemizlikBacaUygulama[]>([]);
+  const [koridorKartlar, setKoridorKartlar] = useState<TemizlikKoridorKart[]>([]);
+  const [blokKartlar, setBlokKartlar] = useState<TemizlikBlokKart[]>([]);
+  const [yeniBlokAd, setYeniBlokAd] = useState('');
+  const [yeniKoridorBaslik, setYeniKoridorBaslik] = useState('');
+  const [editingKoridorKod, setEditingKoridorKod] = useState<string | null>(null);
+  const [editKoridorBaslik, setEditKoridorBaslik] = useState('');
+  const [daireGenelFotolar, setDaireGenelFotolar] = useState<string[]>([]);
+  const [layoutSnapReady, setLayoutSnapReady] = useState(false);
+  const layoutSeedRef = useRef(new Set<string>());
 
   const [yeniDaireNo, setYeniDaireNo] = useState('');
   const [yeniKat, setYeniKat] = useState('');
@@ -308,6 +359,22 @@ export const TemizlikKirimScreen: React.FC<Props> = ({ currentUser }) => {
       (s) => setBacaUygulamalar(s.docs.map((d) => ({ id: d.id, ...(d.data() as any) }))),
       onErr
     );
+    const u7 = onSnapshot(
+      collection(db, 'temizlikKoridorKartlari'),
+      (s) => {
+        setKoridorKartlar(s.docs.map((d) => ({ id: d.id, ...(d.data() as any) })));
+        setLayoutSnapReady(true);
+      },
+      onErr
+    );
+    const u8 = onSnapshot(
+      collection(db, 'temizlikBlokKartlari'),
+      (s) => {
+        setBlokKartlar(s.docs.map((d) => ({ id: d.id, ...(d.data() as any) })));
+        setLayoutSnapReady(true);
+      },
+      onErr
+    );
     return () => {
       u1();
       u2();
@@ -315,13 +382,51 @@ export const TemizlikKirimScreen: React.FC<Props> = ({ currentUser }) => {
       u4();
       u5();
       u6();
+      u7();
+      u8();
     };
   }, []);
 
-  const bloklar = useMemo(() => blokListForParsel(parsel).filter((b) => b !== 'GENEL SAHA'), [parsel]);
+  const bloklar = useMemo(() => {
+    const extra = daireler.filter((d) => d.parsel === parsel).map((d) => d.blok);
+    return resolveBlokAdlari(parsel, blokKartlar, extra);
+  }, [parsel, blokKartlar, daireler]);
   useEffect(() => {
     if (!bloklar.includes(selectedBlok)) setSelectedBlok(bloklar[0] || 'A1');
   }, [parsel, bloklar, selectedBlok]);
+
+  useEffect(() => {
+    if (!layoutSnapReady) return;
+    const now = new Date().toISOString();
+    const korKey = `kor:${parsel}`;
+    const blokKey = `blok:${parsel}`;
+    if (!layoutSeedRef.current.has(korKey) && !koridorKartlar.some((k) => k.parsel === parsel)) {
+      layoutSeedRef.current.add(korKey);
+      void (async () => {
+        for (const row of seedKoridorKartlari(parsel, now)) {
+          try {
+            await saveDocument('temizlikKoridorKartlari', cleanUndefined(row));
+          } catch (e) {
+            console.warn('Koridor seed atlandı', row.id, e);
+          }
+        }
+      })();
+    }
+    if (!layoutSeedRef.current.has(blokKey) && !blokKartlar.some((k) => k.parsel === parsel)) {
+      layoutSeedRef.current.add(blokKey);
+      void (async () => {
+        for (const row of seedBlokKartlari(parsel, now)) {
+          try {
+            await saveDocument('temizlikBlokKartlari', cleanUndefined(row));
+          } catch (e) {
+            console.warn('Blok seed atlandı', row.id, e);
+          }
+        }
+      })();
+    }
+  }, [parsel, layoutSnapReady, koridorKartlar, blokKartlar]);
+
+  const koridorlar = useMemo(() => resolveKoridorlar(parsel, koridorKartlar), [parsel, koridorKartlar]);
 
   useEffect(() => {
     setYeniBacaKoridor('K1');
@@ -330,7 +435,7 @@ export const TemizlikKirimScreen: React.FC<Props> = ({ currentUser }) => {
   }, [parsel]);
 
   useEffect(() => {
-    const suggested = koridorlarForParsel(parsel).find((k) => k.id === yeniBacaKoridor)?.bloklar || [];
+    const suggested = koridorlar.find((k) => k.id === yeniBacaKoridor)?.bloklar || [];
     setYeniBacaBlok((prev) => {
       if (prev && suggested.includes(prev)) return prev;
       return suggested[0] || '';
@@ -339,7 +444,7 @@ export const TemizlikKirimScreen: React.FC<Props> = ({ currentUser }) => {
     if (parsel === 'Parsel Bölge 157/46' && yeniBacaKoridor === 'K2') setYeniBacaKonum('AVLU');
     else if (parsel === 'Parsel Bölge 157/46' && yeniBacaKoridor === 'K3') setYeniBacaKonum('BLOK_ARASI');
     else setYeniBacaKonum('BLOK_ARKASI');
-  }, [parsel, yeniBacaKoridor]);
+  }, [parsel, yeniBacaKoridor, koridorlar]);
 
   const parselDaireler = useMemo(
     () => daireler.filter((d) => d.parsel === parsel),
@@ -356,7 +461,6 @@ export const TemizlikKirimScreen: React.FC<Props> = ({ currentUser }) => {
     () => sortBacalar(bacalar.filter((b) => b.parsel === parsel)),
     [bacalar, parsel]
   );
-  const koridorlar = useMemo(() => koridorlarForParsel(parsel), [parsel]);
   const gorunenBacalar = useMemo(
     () =>
       bacaKoridorFiltre === 'ALL'
@@ -412,6 +516,7 @@ export const TemizlikKirimScreen: React.FC<Props> = ({ currentUser }) => {
     setGenelYorum(t?.genelYorum || '');
     setPlanYevmiye(String(t?.planlananYevmiye ?? 1));
     setPlanNotu(t?.planNotu || '');
+    setDaireGenelFotolar(t?.fotoUrls || []);
     setKartTab('tespit');
   }, [selectedDaireId, daireTespit?.id]);
 
@@ -539,10 +644,115 @@ export const TemizlikKirimScreen: React.FC<Props> = ({ currentUser }) => {
     }
   };
 
+  const handleBlokAc = async () => {
+    const ad = yeniBlokAd.trim().toLocaleUpperCase('tr-TR');
+    if (!ad) {
+      showMsg('Blok adı yazın.', 'err');
+      return;
+    }
+    const existing = bloklar.find((b) => b.toLocaleUpperCase('tr-TR') === ad);
+    if (existing) {
+      setSelectedBlok(existing);
+      setYeniBlokAd('');
+      showMsg(`${existing} zaten açık — kopya yazılmadı.`);
+      return;
+    }
+    if (!(await guardWrite())) return;
+    try {
+      await saveDocument(
+        'temizlikBlokKartlari',
+        cleanUndefined({
+          id: blokKartId(parsel, ad),
+          parsel,
+          blok: ad,
+          kayitTarihi: new Date().toISOString(),
+        })
+      );
+      setSelectedBlok(ad);
+      setYeniBlokAd('');
+      showMsg(`${ad} blok kartı kaydedildi.`);
+    } catch (e: unknown) {
+      showMsg(formatFirestoreWriteError(e, 'Blok açılamadı.'), 'err');
+    }
+  };
+
+  const handleKoridorEkle = async () => {
+    const kod = nextKoridorKod(koridorlar);
+    const baslik = yeniKoridorBaslik.trim() || `${kod} · Yeni hat`;
+    if (!(await guardWrite())) return;
+    try {
+      await saveDocument(
+        'temizlikKoridorKartlari',
+        cleanUndefined({
+          id: koridorKartId(parsel, kod),
+          parsel,
+          kod,
+          baslik,
+          aciklama: '',
+          bloklar: [],
+          sira: koridorlar.length + 1,
+          kayitTarihi: new Date().toISOString(),
+        } satisfies TemizlikKoridorKart)
+      );
+      setYeniKoridorBaslik('');
+      setYeniBacaKoridor(kod);
+      showMsg(`${baslik} eklendi.`);
+    } catch (e: unknown) {
+      showMsg(formatFirestoreWriteError(e, 'Koridor eklenemedi.'), 'err');
+    }
+  };
+
+  const handleKoridorKaydet = async (kod: string) => {
+    const found = koridorKartlar.find((k) => k.parsel === parsel && k.kod === kod);
+    const fallback = koridorlar.find((k) => k.id === kod);
+    if (!(await guardWrite())) return;
+    try {
+      await saveDocument(
+        'temizlikKoridorKartlari',
+        cleanUndefined({
+          id: found?.id || koridorKartId(parsel, kod),
+          parsel,
+          kod,
+          baslik: editKoridorBaslik.trim() || found?.baslik || fallback?.baslik || kod,
+          aciklama: found?.aciklama || fallback?.aciklama || '',
+          bloklar: found?.bloklar || fallback?.bloklar || [],
+          sira: found?.sira || koridorlar.findIndex((k) => k.id === kod) + 1,
+          kayitTarihi: found?.kayitTarihi || new Date().toISOString(),
+        } satisfies TemizlikKoridorKart)
+      );
+      setEditingKoridorKod(null);
+      showMsg('Koridor adı kaydedildi.');
+    } catch (e: unknown) {
+      showMsg(formatFirestoreWriteError(e, 'Koridor kaydedilemedi.'), 'err');
+    }
+  };
+
+  const handleKoridorSil = async (kod: string) => {
+    const n = bacalar.filter((b) => b.parsel === parsel && b.koridor === kod).length;
+    if (n > 0) {
+      showMsg(`Bu koridorda ${n} baca kartı var. Önce bacaları silin veya taşıyın.`, 'err');
+      return;
+    }
+    const found = koridorKartlar.find((k) => k.parsel === parsel && k.kod === kod);
+    if (!found) {
+      showMsg('Silinecek kayıtlı koridor kartı yok.', 'err');
+      return;
+    }
+    if (!window.confirm(`${found.baslik} silinsin mi?`)) return;
+    if (!(await guardWrite())) return;
+    try {
+      await removeDocument('temizlikKoridorKartlari', found.id);
+      if (yeniBacaKoridor === kod) setYeniBacaKoridor(koridorlar[0]?.id || 'K1');
+      showMsg('Koridor silindi.');
+    } catch (e: unknown) {
+      showMsg(formatFirestoreWriteError(e, 'Koridor silinemedi.'), 'err');
+    }
+  };
+
   const handleSaveDaireTespit = async () => {
     if (!selectedDaire) return;
-    if (odalar.length === 0) {
-      showMsg('En az bir oda ekleyin.', 'err');
+    if (odalar.length === 0 && daireGenelFotolar.length === 0 && !genelYorum.trim()) {
+      showMsg('Oda, fotoğraf veya açıklama girin.', 'err');
       return;
     }
     if (!(await guardWrite())) return;
@@ -551,6 +761,8 @@ export const TemizlikKirimScreen: React.FC<Props> = ({ currentUser }) => {
     try {
       const persistedOdalar: TemizlikOdaTespit[] = [];
       let atlanan = 0;
+      const genel = await persistFotoUrls('daire', selectedDaire.id, 'genel', daireGenelFotolar);
+      atlanan += genel.atlanan;
       for (const o of odalar) {
         const foto = await persistFotoUrls('daire', selectedDaire.id, `oda_${o.id}`, o.fotoUrls || []);
         atlanan += foto.atlanan;
@@ -565,6 +777,7 @@ export const TemizlikKirimScreen: React.FC<Props> = ({ currentUser }) => {
         daireNo: selectedDaire.daireNo,
         isTipi,
         odalar: persistedOdalar,
+        fotoUrls: genel.urls,
         genelYorum: genelYorum.trim() || undefined,
         planlananYevmiye: Number(planYevmiye) || 0,
         planNotu: planNotu.trim() || undefined,
@@ -589,6 +802,8 @@ export const TemizlikKirimScreen: React.FC<Props> = ({ currentUser }) => {
           return leftover.length ? { ...o, fotoUrls: [...o.fotoUrls, ...leftover] } : o;
         })
       );
+      const leftoverGenel = daireGenelFotolar.filter((u) => String(u).startsWith('data:'));
+      setDaireGenelFotolar([...genel.urls, ...leftoverGenel].slice(0, 8));
       showMsg(fotoKayitNotu('Tespit kaydedildi.', atlanan), atlanan ? 'warn' : 'ok');
     } catch (e: unknown) {
       showMsg(formatFirestoreWriteError(e, 'Tespit kaydedilemedi.'), 'err');
@@ -1041,6 +1256,18 @@ export const TemizlikKirimScreen: React.FC<Props> = ({ currentUser }) => {
                 kalanYevmiye: koridorOzetler[i]?.kalanYevmiye || 0,
               }))}
             />
+            <BacaKusBakisiPlan
+              parsel={parsel}
+              koridorlar={koridorlar}
+              bacalar={parselBacalar}
+              tespitler={bacaTespitler}
+              uygulamalar={bacaUygulamalar}
+              selectedId={selectedBacaId}
+              onSelect={(id) => {
+                setSelectedBacaId(id);
+                setKartTab('tespit');
+              }}
+            />
           </div>
         );
       })()}
@@ -1084,6 +1311,22 @@ export const TemizlikKirimScreen: React.FC<Props> = ({ currentUser }) => {
                   </button>
                 );
               })}
+            </div>
+            <div className="flex gap-2">
+              <input
+                value={yeniBlokAd}
+                onChange={(e) => setYeniBlokAd(e.target.value)}
+                placeholder="Yeni blok adı (ör. J1)"
+                className="flex-1 bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold"
+              />
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => void handleBlokAc()}
+                className="bg-slate-900 text-white rounded-xl px-3 text-[10px] font-black cursor-pointer disabled:opacity-50"
+              >
+                Blok kartı aç
+              </button>
             </div>
 
             <div className="bg-white border border-slate-200 rounded-2xl p-4 space-y-3">
@@ -1211,6 +1454,10 @@ export const TemizlikKirimScreen: React.FC<Props> = ({ currentUser }) => {
                     <option value="KIRIM">Kırım</option>
                     <option value="TEMIZLIK_VE_KIRIM">Temizlik + kırım</option>
                   </select>
+                  <div className="rounded-xl border border-teal-100 bg-teal-50/50 p-2.5 space-y-1.5">
+                    <p className="text-[9px] font-black uppercase text-teal-800">Daire fotoğrafları</p>
+                    <FotoAlani urls={daireGenelFotolar} onChange={setDaireGenelFotolar} max={8} />
+                  </div>
                   <div className="flex flex-wrap gap-1">
                     {TEMIZLIK_ODA_CHIPS.map((c) => (
                       <button
@@ -1416,23 +1663,91 @@ export const TemizlikKirimScreen: React.FC<Props> = ({ currentUser }) => {
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                 {koridorlar.map((k) => {
                   const active = yeniBacaKoridor === k.id;
+                  const editing = editingKoridorKod === k.id;
                   return (
-                    <button
+                    <div
                       key={k.id}
-                      type="button"
-                      onClick={() => {
-                        setYeniBacaKoridor(k.id);
-                        setBacaKoridorFiltre(k.id);
-                      }}
-                      className={`text-left rounded-2xl border p-2.5 cursor-pointer ${
+                      className={`rounded-2xl border p-2.5 ${
                         active ? 'border-amber-500 bg-amber-50' : 'border-slate-200 bg-slate-50/80'
                       }`}
                     >
-                      <span className="block text-xs font-black text-slate-900">{k.baslik}</span>
-                      <span className="block text-[10px] text-slate-500 mt-0.5 leading-snug">{k.aciklama}</span>
-                    </button>
+                      {editing ? (
+                        <div className="space-y-1.5">
+                          <input
+                            value={editKoridorBaslik}
+                            onChange={(e) => setEditKoridorBaslik(e.target.value)}
+                            className="w-full bg-white border border-slate-200 rounded-lg px-2 py-1 text-[11px] font-bold"
+                          />
+                          <div className="flex gap-1">
+                            <button
+                              type="button"
+                              onClick={() => void handleKoridorKaydet(k.id)}
+                              className="flex-1 bg-amber-700 text-white text-[9px] font-black py-1 rounded-lg cursor-pointer"
+                            >
+                              Kaydet
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setEditingKoridorKod(null)}
+                              className="px-2 text-[9px] font-black text-slate-500 cursor-pointer"
+                            >
+                              Vazgeç
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setYeniBacaKoridor(k.id);
+                              setBacaKoridorFiltre(k.id);
+                            }}
+                            className="w-full text-left cursor-pointer"
+                          >
+                            <span className="block text-xs font-black text-slate-900">{k.baslik}</span>
+                            <span className="block text-[10px] text-slate-500 mt-0.5 leading-snug">{k.aciklama}</span>
+                          </button>
+                          <div className="flex gap-1 mt-1.5">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditingKoridorKod(k.id);
+                                setEditKoridorBaslik(k.baslik);
+                              }}
+                              className="inline-flex items-center gap-0.5 text-[9px] font-black text-slate-500 cursor-pointer"
+                            >
+                              <Pencil size={10} /> Ad
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => void handleKoridorSil(k.id)}
+                              className="text-[9px] font-black text-rose-600 cursor-pointer"
+                            >
+                              Sil
+                            </button>
+                          </div>
+                        </>
+                      )}
+                    </div>
                   );
                 })}
+              </div>
+              <div className="flex gap-2">
+                <input
+                  value={yeniKoridorBaslik}
+                  onChange={(e) => setYeniKoridorBaslik(e.target.value)}
+                  placeholder="Yeni koridor adı (ör. K4 · Batı hat)"
+                  className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold"
+                />
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void handleKoridorEkle()}
+                  className="bg-amber-700 text-white rounded-xl px-3 text-[10px] font-black cursor-pointer disabled:opacity-50"
+                >
+                  Koridor ekle
+                </button>
               </div>
               <p className="text-[10px] font-black uppercase text-slate-400">Konum</p>
               <div className="flex flex-wrap gap-1.5">

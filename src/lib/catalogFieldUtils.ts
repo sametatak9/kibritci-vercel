@@ -1,6 +1,6 @@
 import { levenshteinDistance, normalizeCardName } from './duplicateNameUtils';
 
-export type CatalogKind = 'gorev' | 'birim' | 'alan';
+export type CatalogKind = 'gorev' | 'birim' | 'alan' | 'nitelik';
 
 export const DEFAULT_GOREV_PRESETS = [
   'DÜZ İŞÇİ',
@@ -37,6 +37,22 @@ export const DEFAULT_BIRIM_PRESETS = [
   'ÇUVAL',
   'SET',
   'TAKIM',
+] as const;
+
+export const DEFAULT_NITELIK_PRESETS = [
+  'ALÇI SIVA USTASI',
+  'SIVA USTASI',
+  'ALÇI USTASI',
+  'BOYA USTASI',
+  'KALIP USTASI',
+  'DEMİR USTASI',
+  'SERAMİK USTASI',
+  'TESİSAT USTASI',
+  'ELEKTRİK USTASI',
+  'KAYNAK USTASI',
+  'DUVARCI',
+  'FAYANSÇI',
+  'YARDIMCI USTA',
 ] as const;
 
 export const DEFAULT_ALAN_PRESETS = [
@@ -111,7 +127,13 @@ export function findCatalogMatch(
 
 export function formatCatalogMergeHint(kind: CatalogKind, match: CatalogSimilarityMatch): string {
   const label =
-    kind === 'gorev' ? 'görev' : kind === 'birim' ? 'birim' : 'kullanım alanı';
+    kind === 'gorev'
+      ? 'görev'
+      : kind === 'nitelik'
+        ? 'nitelik'
+        : kind === 'birim'
+          ? 'birim'
+          : 'kullanım alanı';
   if (match.reason === 'exact') return `"${match.canonical}" mevcut ${label} kaydıyla eşleşti.`;
   return `"${match.input}" ile "${match.canonical}" benzer görünüyor. Birleştirmek ister misiniz?`;
 }

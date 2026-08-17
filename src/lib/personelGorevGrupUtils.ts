@@ -1,5 +1,5 @@
 import type { AylikYoklamaMap, Personel, YoklamaDurum } from '../types/erp';
-import { displayPersonelGorev } from './guvenlikHelpers';
+import { kadroPersonelGorev } from './guvenlikHelpers';
 import { isUstaGorev, normalizeGorev } from './gorevUtils';
 import {
   getYoklamaDay,
@@ -102,7 +102,7 @@ export function personelGorevGrupChipClass(grup: PersonelGorevGrup, active: bool
 /** Personel kaydından görev grubu (idari öncelikli) */
 export function resolvePersonelGorevGrubu(p: Personel): PersonelGorevGrup {
   if (isIdariPersonel(p)) return 'IDARI';
-  return resolvePersonelGorevGrubuFromGorev(displayPersonelGorev(p));
+  return resolvePersonelGorevGrubuFromGorev(kadroPersonelGorev(p));
 }
 
 /** Ham görev metninden grup — idari kontrolü ayrı yapılır */

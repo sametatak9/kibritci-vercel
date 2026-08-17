@@ -441,10 +441,47 @@ export function resolveAkvizyonGorev(firmaAdi?: string | null, currentGorev?: st
   return String(currentGorev || '').trim() || 'DÜZ İŞÇİ';
 }
 
+/** Kadro görevi (nitelik hariç) — puantaj / USTA grubu bununla hesaplanır */
+export function kadroPersonelGorev(p?: Personel): string {
+  if (!p) return '—';
+  return normalizeGorev(resolveAkvizyonGorev(p.firmaAdi, p.gorev));
+}
+
+export function displayPersonelNitelik(p?: Personel): string {
+  return String(p?.nitelik || '').trim();
+}
+
 export function displayPersonelGorev(p?: Personel): string {
   if (!p) return '—';
-  // Kampçı / KAMPÇI / kamp görevlisi → tek etiket (KAMPÇI)
-  return normalizeGorev(resolveAkvizyonGorev(p.firmaAdi, p.gorev));
+  const gorev = kadroPersonelGorev(p);
+  const nitelik = displayPersonelNitelik(p);
+  if (!nitelik) return gorev || '—';
+  const n = nitelik.toLocaleUpperCase('tr-TR');
+  if (!n || n === gorev.toLocaleUpperCase('tr-TR')) return gorev || '—';
+  return `${gorev} · ${n}`;
+}
+
+/** Personel araması: DURUKHAN / DURUKAN yazım farkı + görev/nitelik */
+export function personelMatchesTextSearch(
+  p: Pick<Personel, 'ad' | 'soyad' | 'tcNo' | 'gorev' | 'nitelik' | 'firmaAdi'>,
+  term: string
+): boolean {
+  const q = term.trim().toLocaleLowerCase('tr-TR');
+  if (!q) return true;
+  const digitsTerm = q.replace(/\D/g, '');
+  const tcDigits = String(p.tcNo || '').replace(/\D/g, '');
+  if (digitsTerm.length >= 5 && tcDigits.includes(digitsTerm)) return true;
+  const hay = [
+    `${p.ad || ''} ${p.soyad || ''}`,
+    p.tcNo || '',
+    displayPersonelGorev(p as Personel),
+    p.nitelik || '',
+  ]
+    .join(' ')
+    .toLocaleLowerCase('tr-TR');
+  if (hay.includes(q)) return true;
+  const expanded = hay.replace(/durukhan/g, 'durukhan durukan').replace(/durukan/g, 'durukan durukhan');
+  return expanded.includes(q);
 }
 
 /** YYYY-MM-DD için işe giriş / işten çıkış penceresi */

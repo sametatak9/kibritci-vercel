@@ -5,6 +5,7 @@ import {
   DEFAULT_ALAN_PRESETS,
   DEFAULT_BIRIM_PRESETS,
   DEFAULT_GOREV_PRESETS,
+  DEFAULT_NITELIK_PRESETS,
   mergeCatalogOptions,
   normalizeCatalogValue,
 } from './catalogFieldUtils';
@@ -13,12 +14,14 @@ const COLLECTION = 'programKataloglari';
 
 function docIdForKind(kind: CatalogKind): string {
   if (kind === 'gorev') return 'gorevler';
+  if (kind === 'nitelik') return 'nitelikler';
   if (kind === 'birim') return 'birimler';
   return 'kullanimAlanlari';
 }
 
 function defaultsForKind(kind: CatalogKind): string[] {
   if (kind === 'gorev') return [...DEFAULT_GOREV_PRESETS];
+  if (kind === 'nitelik') return [...DEFAULT_NITELIK_PRESETS];
   if (kind === 'birim') return [...DEFAULT_BIRIM_PRESETS];
   return [...DEFAULT_ALAN_PRESETS];
 }

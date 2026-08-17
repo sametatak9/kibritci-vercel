@@ -406,6 +406,8 @@ function App() {
   const deltaKapiCariSeedRef = useRef(false);
   const yeditepePersonelSeedRef = useRef(false);
   const yeditepeCariSeedRef = useRef(false);
+  const yurtPersonelSeedRef = useRef(false);
+  const yurtCariSeedRef = useRef(false);
   const cariDedupRanRef = useRef(false);
   const kampRepairInFlightRef = useRef(false);
   const yoklamaJsonSeenRef = useRef<string | null>(null);
@@ -919,12 +921,18 @@ function App() {
         // YEDİTEPE taşeron personeli: TC ile mükerrersiz seed
         const { mergeYeditepeIntoPersonelList, ensureYeditepeCari } = await import('./data/yeditepePersonelSeed');
         const yeditepeMerged = mergeYeditepeIntoPersonelList(deltaMerged.list);
-        setPersoneller(yeditepeMerged.list);
+        const { restoreUgurDurukhan } = await import('./data/ugurDurukhanRestore');
+        const ugurRestored = restoreUgurDurukhan(yeditepeMerged.list);
+        const { mergeYurtIntoPersonelList, ensureYurtCari } = await import('./data/yurtPersonelSeed');
+        const yurtMerged = mergeYurtIntoPersonelList(ugurRestored.list);
+        setPersoneller(yurtMerged.list);
         if (
           idariMerged.toSave.length > 0 ||
           kuterMerged.toSave.length > 0 ||
           deltaMerged.toSave.length > 0 ||
-          yeditepeMerged.toSave.length > 0
+          yeditepeMerged.toSave.length > 0 ||
+          ugurRestored.toSave.length > 0 ||
+          yurtMerged.toSave.length > 0
         ) {
           void (async () => {
             for (const p of idariMerged.toSave) {
@@ -967,6 +975,26 @@ function App() {
             if (yeditepeMerged.toSave.length > 0) {
               console.log(`YEDİTEPE personel senkronu: ${yeditepeMerged.toSave.length} kayıt`);
             }
+            for (const p of ugurRestored.toSave) {
+              try {
+                await saveDocument('personeller', p);
+              } catch (e) {
+                console.warn('Uğur Durukhan geri yükleme atlandı:', e);
+              }
+            }
+            if (ugurRestored.toSave.length > 0) {
+              console.log(`Uğur Durukhan geri yükleme: ${ugurRestored.toSave.length} kayıt`);
+            }
+            for (const p of yurtMerged.toSave) {
+              try {
+                await saveDocument('personeller', withTaseronPersonelGorev(p));
+              } catch (e) {
+                console.warn('YURT MEKANİK personel kaydı atlandı:', p.tcNo, e);
+              }
+            }
+            if (yurtMerged.toSave.length > 0) {
+              console.log(`YURT MEKANİK personel senkronu: ${yurtMerged.toSave.length} kayıt`);
+            }
           })();
         }
         const kuterCari = ensureKuterCari(companyData as CariKart[]);
@@ -996,8 +1024,17 @@ function App() {
             console.warn('YEDİTEPE cari kaydı atlandı:', e)
           );
         }
-        const cariDedupPlans = planCariKartDedup(companyDataWithYeditepe, yeditepeMerged.list);
-        const companyDataDeduped = applyCariDedupPlansInMemory(companyDataWithYeditepe, cariDedupPlans);
+        const yurtCari = ensureYurtCari(companyDataWithYeditepe);
+        const companyDataWithYurt = yurtCari
+          ? [...companyDataWithYeditepe, yurtCari]
+          : companyDataWithYeditepe;
+        if (yurtCari) {
+          void saveDocument('cariKartlar', yurtCari).catch((e) =>
+            console.warn('YURT MEKANİK cari kaydı atlandı:', e)
+          );
+        }
+        const cariDedupPlans = planCariKartDedup(companyDataWithYurt, yurtMerged.list);
+        const companyDataDeduped = applyCariDedupPlansInMemory(companyDataWithYurt, cariDedupPlans);
         if (cariDedupPlans.length > 0) {
           cariDedupRanRef.current = true;
           void (async () => {
@@ -1516,6 +1553,24 @@ function App() {
           })();
         });
       }
+
+      if (!yurtPersonelSeedRef.current) {
+        yurtPersonelSeedRef.current = true;
+        void import('./data/yurtPersonelSeed').then(({ mergeYurtIntoPersonelList }) => {
+          const { toSave } = mergeYurtIntoPersonelList(list);
+          if (toSave.length === 0) return;
+          void (async () => {
+            for (const p of toSave) {
+              try {
+                await saveDocument('personeller', withTaseronPersonelGorev(p));
+              } catch (e) {
+                console.warn('YURT MEKANİK personel snapshot senkronu atlandı:', p.tcNo, e);
+              }
+            }
+            console.log(`YURT MEKANİK personel snapshot senkronu: ${toSave.length} kayıt`);
+          })();
+        });
+      }
     }, markDashboardSnapshotError('personeller'));
 
     const unsubYoklamalar = onSnapshot(
@@ -1682,6 +1737,17 @@ function App() {
           if (!cari) return;
           void saveDocument('cariKartlar', cari).catch((e) =>
             console.warn('YEDİTEPE cari snapshot senkronu atlandı:', e)
+          );
+        });
+      }
+
+      if (!yurtCariSeedRef.current) {
+        yurtCariSeedRef.current = true;
+        void import('./data/yurtPersonelSeed').then(({ ensureYurtCari }) => {
+          const cari = ensureYurtCari(list);
+          if (!cari) return;
+          void saveDocument('cariKartlar', cari).catch((e) =>
+            console.warn('YURT MEKANİK cari snapshot senkronu atlandı:', e)
           );
         });
       }

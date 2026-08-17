@@ -75,7 +75,13 @@ export const SmartCatalogField: React.FC<SmartCatalogFieldProps> = ({
   }, []);
 
   const kindLabel =
-    kind === 'gorev' ? 'görev' : kind === 'birim' ? 'birim' : 'kullanım alanı';
+    kind === 'gorev'
+      ? 'görev'
+      : kind === 'nitelik'
+        ? 'nitelik'
+        : kind === 'birim'
+          ? 'birim'
+          : 'kullanım alanı';
 
   const handleMerge = () => {
     if (!mergeMatch) return;

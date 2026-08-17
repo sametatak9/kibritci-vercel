@@ -12,6 +12,8 @@ export interface Personel {
   ilce: string;
   departman: string;
   gorev: string;
+  /** Meslek niteliği / detay etiket (ör. ALÇI SIVA USTASI) — kadro görevinin yanında raporlarda görünür */
+  nitelik?: string;
   iseGirisTarihi: string;
   istenCikisTarihi?: string;
   cinsiyet: string;
@@ -1242,13 +1244,33 @@ export type TemizlikIsTipi = 'TEMIZLIK' | 'KIRIM' | 'TEMIZLIK_VE_KIRIM';
 export type TemizlikOdaDurum = 'KIRLI' | 'ORTA' | 'TEMIZ' | 'KIRIM_GEREKIYOR';
 export type TemizlikBacaKirlilik = 'KIRLI' | 'ORTA' | 'TEMIZ' | 'AGIR_CAMUR';
 export type TemizlikUygulamaDurum = 'DEVAM' | 'EKSIK' | 'TAMAMLANDI';
-export type TemizlikBacaKoridor = 'K1' | 'K2' | 'K3';
+export type TemizlikBacaKoridor = string;
 export type TemizlikBacaKonumTipi =
   | 'BLOK_ONU'
   | 'BLOK_ARKASI'
   | 'BLOK_ARASI'
   | 'AVLU'
   | 'MERDIVEN';
+
+/** Parsel koridor kartı — K1/K2/K3 seed; elle eklenir / düzenlenir */
+export interface TemizlikKoridorKart {
+  id: string;
+  parsel: string;
+  kod: string;
+  baslik: string;
+  aciklama?: string;
+  bloklar: string[];
+  sira: number;
+  kayitTarihi: string;
+}
+
+/** Parsel blok kartı — A1–I seed; elle yeni blok açılır, mükerrer yazılmaz */
+export interface TemizlikBlokKart {
+  id: string;
+  parsel: string;
+  blok: string;
+  kayitTarihi: string;
+}
 
 export interface TemizlikOdaTespit {
   id: string;
@@ -1278,6 +1300,8 @@ export interface TemizlikTespit {
   daireNo: string;
   isTipi: TemizlikIsTipi;
   odalar: TemizlikOdaTespit[];
+  /** Daire geneli foto (oda kartından bağımsız) */
+  fotoUrls?: string[];
   genelYorum?: string;
   planlananYevmiye: number;
   planNotu?: string;

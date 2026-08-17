@@ -1,6 +1,5 @@
 import type { Personel } from '../types/erp';
-import { displayPersonelGorev } from './guvenlikHelpers';
-import { normalizeGorev } from './gorevUtils';
+import { kadroPersonelGorev, displayPersonelNitelik } from './guvenlikHelpers';
 import {
   buildKibritciReportHtml,
   openKibritciReportPrint,
@@ -33,7 +32,7 @@ function sortByName(a: Personel, b: Personel): number {
 export function groupPersonelByGorev(personeller: Personel[]): GorevPersonelGroup[] {
   const map = new Map<string, Personel[]>();
   for (const p of personeller) {
-    const gorev = normalizeGorev(displayPersonelGorev(p));
+    const gorev = kadroPersonelGorev(p);
     const list = map.get(gorev) || [];
     list.push(p);
     map.set(gorev, list);
@@ -89,6 +88,7 @@ export function buildAnaFirmaGorevPersonelReportHtml(
           (p, idx) => `<tr>
           <td style="${cell};text-align:center;width:28px">${idx + 1}</td>
           <td style="${cell};font-weight:600">${esc(p.ad)} ${esc(p.soyad)}</td>
+          <td style="${cell}">${esc(displayPersonelNitelik(p) || '—')}</td>
           <td style="${cell};font-family:ui-monospace,monospace;font-size:10px">${esc(p.tcNo || '—')}</td>
           <td style="${cell}">${esc(p.telefonNo || '—')}</td>
           <td style="${cell}">${esc(p.iseGirisTarihi || '—')}</td>
@@ -102,7 +102,7 @@ export function buildAnaFirmaGorevPersonelReportHtml(
       <table style="width:100%;border-collapse:collapse;font-size:11px;margin:${gi === 0 ? '0' : '8px'} 0 0">
         <thead>
           <tr>
-            <th colspan="6" style="background:#1e3a5f;color:#fff;padding:4px 8px;text-align:left;border:1px solid #1e3a5f;font-size:11px;font-weight:800;letter-spacing:0.03em;text-transform:uppercase">
+            <th colspan="7" style="background:#1e3a5f;color:#fff;padding:4px 8px;text-align:left;border:1px solid #1e3a5f;font-size:11px;font-weight:800;letter-spacing:0.03em;text-transform:uppercase">
               ${esc(g.gorev)}
               <span style="float:right;font-size:10px;font-weight:700;background:rgba(255,255,255,0.15);padding:1px 7px;border-radius:999px;text-transform:none;letter-spacing:0">${g.personeller.length} kişi</span>
             </th>
@@ -110,6 +110,7 @@ export function buildAnaFirmaGorevPersonelReportHtml(
           <tr style="background:#f1f5f9">
             <th style="${th};text-align:center">#</th>
             <th style="${th};text-align:left">Ad Soyad</th>
+            <th style="${th};text-align:left">Nitelik</th>
             <th style="${th};text-align:left">TC</th>
             <th style="${th};text-align:left">Telefon</th>
             <th style="${th};text-align:left">İşe Giriş</th>

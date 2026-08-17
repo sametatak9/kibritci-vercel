@@ -11,6 +11,7 @@ import {
   AKVIZYON_GOREV,
   displayPersonelGorev,
   isAkvizyonFirmaAdi,
+  personelMatchesTextSearch,
   personelNameKey,
   resolveAkvizyonGorev,
 } from '../lib/guvenlikHelpers';
@@ -322,6 +323,7 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
     ilce: "",
     departman: "Şantiye",
     gorev: "DÜZ İŞÇİ",
+    nitelik: "",
     iseGirisTarihi: new Date().toISOString().split('T')[0],
     cinsiyet: "Erkek",
     maas: 30000,
@@ -611,7 +613,7 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
       islemTipi: 'DIGER',
       islemId: personel.id,
       islemBaslik: action === 'create' ? 'Taşeron Personel Kaydı' : 'Taşeron Personel Güncelleme',
-      islemDetay: `${personel.ad} ${personel.soyad} · ${personel.gorev || 'Görev yok'} · TC ${personel.tcNo}${note ? ` · ${note}` : ''}`,
+      islemDetay: `${personel.ad} ${personel.soyad} · ${displayPersonelGorev(personel)} · TC ${personel.tcNo}${note ? ` · ${note}` : ''}`,
       tarih: new Date().toISOString().split('T')[0],
     };
     setCariIslemGecmisi((prev) => [islem, ...prev]);
@@ -721,6 +723,10 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
   const handleGorevChange = (value: string) => {
     if (isAkvizyonFirmaAdi(formData.firmaAdi)) return;
     setFormData((prev) => ({ ...prev, gorev: normalizePersonelGorev(value) }));
+  };
+
+  const handleNitelikChange = (value: string) => {
+    setFormData((prev) => ({ ...prev, nitelik: value }));
   };
 
   const resolveTaseronCariOnSave = async (
@@ -1053,6 +1059,7 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
               : normalizePersonelGorev(
                   resolveAkvizyonGorev(firmaFields.firmaAdi, (formData as any).gorev)
                 ),
+          nitelik: String((formData as Personel).nitelik || '').trim().toLocaleUpperCase('tr-TR'),
           firmaTipi: firmaFields.firmaTipi,
           firmaAdi: firmaFields.firmaAdi,
         }
@@ -1066,6 +1073,7 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
               : normalizePersonelGorev(
                   resolveAkvizyonGorev(firmaFields.firmaAdi, (formData as any).gorev)
                 ),
+          nitelik: String((formData as Personel).nitelik || '').trim().toLocaleUpperCase('tr-TR'),
           firmaTipi: firmaFields.firmaTipi,
           firmaAdi: firmaFields.firmaAdi,
         };
@@ -1149,6 +1157,15 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
     personeller.forEach((p) => {
       const g = normalizePersonelGorev(String(p.gorev || '')).trim();
       if (g) set.add(g);
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b, 'tr'));
+  }, [personeller]);
+
+  const existingNitelikOptions = useMemo(() => {
+    const set = new Set<string>();
+    personeller.forEach((p) => {
+      const n = String(p.nitelik || '').trim();
+      if (n) set.add(n);
     });
     return Array.from(set).sort((a, b) => a.localeCompare(b, 'tr'));
   }, [personeller]);
@@ -1444,16 +1461,8 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
   const filteredPersonel = useMemo(
     () =>
       personeller.filter((p) => {
-        const term = searchTerm.toLowerCase().trim();
-        const digitsTerm = term.replace(/\D/g, '');
-        const fullName = `${p.ad} ${p.soyad}`.toLowerCase();
-        const tcDigits = String(p.tcNo || '').replace(/\D/g, '');
-        const matchesSearch =
-          !term ||
-          fullName.includes(term) ||
-          String(p.tcNo || '').toLowerCase().includes(term) ||
-          (digitsTerm.length >= 5 && tcDigits.includes(digitsTerm)) ||
-          displayPersonelGorev(p).toLowerCase().includes(term);
+        const term = searchTerm.trim();
+        const matchesSearch = !term || personelMatchesTextSearch(p, searchTerm);
 
         // Kampçı onay bekleyen kayıtlar varsayılan listede gizli; TC/isim aramasında bulunur
         if (isHiddenPendingKampci(p)) {
@@ -2179,7 +2188,7 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
                   Yoklamayı değiştirmez. Puantaj → Etiket Grupları listesinde görünür.
                 </p>
               </div>
-              <div>
+              <div className="col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <SmartCatalogField
                   kind="gorev"
                   name="gorev"
@@ -2199,6 +2208,16 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
                       ? 'Akvizyon personeli için görev sabittir: GÜVENLİK'
                       : `${existingGorevOptions.length} kayıtlı görev — listeden seçin veya benzer yazım uyarısını dikkate alın`
                   }
+                />
+                <SmartCatalogField
+                  kind="nitelik"
+                  name="nitelik"
+                  label="Nitelik / detay etiket"
+                  value={(formData as Personel).nitelik || ''}
+                  onChange={handleNitelikChange}
+                  extraOptions={existingNitelikOptions}
+                  placeholder="Örn. ALÇI SIVA USTASI"
+                  hint="Görevin yanında raporlarda görünür. Puantaj grubunu değiştirmez."
                 />
               </div>
             </div>
