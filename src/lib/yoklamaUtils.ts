@@ -379,6 +379,29 @@ export function isDayActiveForPersonel(
   return isDateInEmploymentRange(p, year, month, day);
 }
 
+function isAktifPersonelDurum(durum: unknown): boolean {
+  if (durum === true) return true;
+  const norm = normalizeTurkishName(String(durum || ''));
+  return norm === 'TRUE' || norm === 'AKTIF' || norm === '1';
+}
+
+/**
+ * Günlük yoklama kuyruğu (Formen / Kampçı «Yoklama Al»).
+ * Pasif olup çıkış tarihi girilmemiş kayıtlar ay içinde yoklama geçmişi olsa bile
+ * sıradaki personele dönmesin.
+ */
+export function isEligibleForDailyYoklama(
+  p: Personel,
+  year: number,
+  month: number,
+  day: number
+): boolean {
+  if (!isDateInEmploymentRange(p, year, month, day)) return false;
+  if (isAktifPersonelDurum(p.durum)) return true;
+  const exitTarih = p.istenCikisTarihi || (p as { cikisTarihi?: string }).cikisTarihi;
+  return Boolean(parseFlexibleDateParts(exitTarih));
+}
+
 export function iterateMonthYoklama(
   personMap: PersonelYoklamaMap | undefined,
   year: number,

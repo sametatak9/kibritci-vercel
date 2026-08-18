@@ -7,7 +7,7 @@ import {
   buildPersonelListForMonth,
   buildSeramikPersonelListForMonth,
   getYoklamaDay, 
-  isDayActiveForPersonel, 
+  isEligibleForDailyYoklama, 
   isTaseronPersonel, 
   setYoklamaDay, 
   isKampciYoklamaKapsami,
@@ -93,7 +93,7 @@ export const KampGunlukYoklamaTab: React.FC<KampGunlukYoklamaTabProps> = ({
     return monthPersonelList.filter((p) => {
       if (personelKapsami === 'seramik') {
         if (!isSeramikEkibiPersonel(p)) return false;
-        return isDayActiveForPersonel(p, year, month, day, yoklamalar[p.id] as any);
+        return isEligibleForDailyYoklama(p, year, month, day);
       }
       if (isTaseronPersonel(p)) return false;
       if (personelKapsami === 'tesisatci') {
@@ -109,7 +109,7 @@ export const KampGunlukYoklamaTab: React.FC<KampGunlukYoklamaTabProps> = ({
         if (isSoforGorev(p.gorev) || isOperatorGorev(p.gorev)) return false;
         if (!isKampciYoklamaKapsami(p.gorev)) return false;
       }
-      return isDayActiveForPersonel(p, year, month, day, yoklamalar[p.id] as any);
+      return isEligibleForDailyYoklama(p, year, month, day);
     });
   }, [monthPersonelList, year, month, day, yoklamalar, personelKapsami]);
 
