@@ -169,6 +169,7 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
   const [yoklamaSayfa, setYoklamaSayfa] = useState<'puantaj' | 'etiket_grup' | 'etiket_takip'>('puantaj');
   const [takipGrupEtiket, setTakipGrupEtiket] = useState('ZER YAPI');
   const [searchTerm, setSearchTerm] = useState("");
+  const [selectedPersonelIds, setSelectedPersonelIds] = useState<string[]>([]);
   const [isEditMode, setIsEditMode] = useState(false);
   
   // Custom Overtime state variables
@@ -734,6 +735,90 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
     [personeller, draftYoklamalar, selectedYear, selectedMonth]
   );
 
+  const filteredPersonel = useMemo(() => {
+    const term = searchTerm.toLowerCase();
+    const base = monthPersoneller.filter((p) => {
+      const fullName = `${p.ad} ${p.soyad}`.toLowerCase();
+      return fullName.includes(term) || p.tcNo.includes(term) || (p.gorev || '').toLowerCase().includes(term);
+    });
+
+    // Aynı isim farklı ID ile gelirse (legacy/stub vb.) listede tek satır göster.
+    const byName = new Map<string, Personel>();
+    const score = (p: Personel) => {
+      let s = 0;
+      if ((p.tcNo || '').trim()) s += 100;
+      if (!p.id.startsWith('PRS-LEGACY')) s += 50;
+      if (p.durum === true || String(p.durum).toLowerCase() === 'true') s += 10;
+      return s;
+    };
+    for (const p of base) {
+      const key = normalizeTurkishName(`${p.ad} ${p.soyad}`);
+      const prev = byName.get(key);
+      if (!prev || score(p) > score(prev)) {
+        byName.set(key, p);
+      }
+    }
+    return Array.from(byName.values());
+  }, [monthPersoneller, searchTerm]);
+
+  const selectedPersonelIdSet = useMemo(() => new Set(selectedPersonelIds), [selectedPersonelIds]);
+  const hasPersonelSelection = selectedPersonelIds.length > 0;
+  const selectedMonthPersonel = useMemo(
+    () => monthPersoneller.filter((p) => selectedPersonelIdSet.has(p.id)),
+    [monthPersoneller, selectedPersonelIdSet]
+  );
+  /** Excel / yazdırma: kutu işaretliyse yalnız seçilenler, değilse arama filtresindeki liste. */
+  const reportPersonel = hasPersonelSelection ? selectedMonthPersonel : filteredPersonel;
+  /** Toplu puantaj: kutu işaretliyse yalnız seçilenler, değilse ayın tam kadrosu. */
+  const bulkPersonel = hasPersonelSelection ? selectedMonthPersonel : monthPersoneller;
+  const visibleSelectedCount = useMemo(
+    () => filteredPersonel.filter((p) => selectedPersonelIdSet.has(p.id)).length,
+    [filteredPersonel, selectedPersonelIdSet]
+  );
+  const allVisibleSelected =
+    filteredPersonel.length > 0 && visibleSelectedCount === filteredPersonel.length;
+  const someVisibleSelected = visibleSelectedCount > 0 && !allVisibleSelected;
+  const selectAllVisibleRef = useRef<HTMLInputElement>(null);
+  const reportScopeNote = hasPersonelSelection
+    ? `Seçili personel: ${reportPersonel.length}`
+    : `Personel: ${reportPersonel.length} (listede görünenler)`;
+
+  useEffect(() => {
+    setSelectedPersonelIds((prev) => {
+      if (prev.length === 0) return prev;
+      const valid = new Set(monthPersoneller.map((p) => p.id));
+      const next = prev.filter((id) => valid.has(id));
+      return next.length === prev.length ? prev : next;
+    });
+  }, [selectedYear, selectedMonth, monthPersoneller]);
+
+  useEffect(() => {
+    if (selectAllVisibleRef.current) {
+      selectAllVisibleRef.current.indeterminate = someVisibleSelected;
+    }
+  }, [someVisibleSelected]);
+
+  const togglePersonelSelected = (id: string) => {
+    setSelectedPersonelIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    );
+  };
+
+  const toggleSelectVisiblePersonel = () => {
+    const visibleIds = filteredPersonel.map((p) => p.id);
+    if (visibleIds.length === 0) return;
+    if (allVisibleSelected) {
+      const drop = new Set(visibleIds);
+      setSelectedPersonelIds((prev) => prev.filter((id) => !drop.has(id)));
+      return;
+    }
+    setSelectedPersonelIds((prev) => {
+      const next = new Set(prev);
+      for (const id of visibleIds) next.add(id);
+      return Array.from(next);
+    });
+  };
+
   const faaliyetPersonelCount = useMemo(
     () =>
       buildFaaliyetPersoneller(
@@ -828,7 +913,9 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
     if (status === 'Girilmedi') {
       if (
         !window.confirm(
-          'Seçili ayın TÜM aktif personel günleri sıfırlanacak (Girilmedi).\nBu işlem kayıt sırasında güvenlik kontrolünden geçer; büyük silmeler engellenebilir.\nDevam?'
+          hasPersonelSelection
+            ? `Seçili ${bulkPersonel.length} kişinin ay içindeki günleri sıfırlanacak (Girilmedi).\nBu işlem kayıt sırasında güvenlik kontrolünden geçer; büyük silmeler engellenebilir.\nDevam?`
+            : 'Seçili ayın TÜM aktif personel günleri sıfırlanacak (Girilmedi).\nBu işlem kayıt sırasında güvenlik kontrolünden geçer; büyük silmeler engellenebilir.\nDevam?'
         )
       ) {
         return;
@@ -836,7 +923,7 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
     }
     const newYoklamalar = { ...draftYoklamalar };
     
-    monthPersoneller.forEach(p => {
+    bulkPersonel.forEach(p => {
       let personMap = { ...(newYoklamalar[p.id] || {}) };
       daysArray.forEach(d => {
         if (!isDayActiveForEmployee(p, d)) return;
@@ -852,9 +939,17 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
     });
     
     updateDraftYoklama(newYoklamalar);
-    alert(`Seçili ayın tüm günleri aktif personeller için topluca "${status}" olarak güncellendi. Kaydet ile veritabanına gönderin.`);
+    alert(
+      hasPersonelSelection
+        ? `Seçili ${bulkPersonel.length} kişi için ayın günleri topluca "${status}" yapıldı. Kaydet ile veritabanına gönderin.`
+        : `Seçili ayın tüm günleri aktif personeller için topluca "${status}" olarak güncellendi. Kaydet ile veritabanına gönderin.`
+    );
     if (addNotification) {
-      addNotification(`${selectedMonth}. Ay / ${selectedYear} dönemi tüm yoklama durumları topluca "${status}" yapıldı.`);
+      addNotification(
+        hasPersonelSelection
+          ? `${selectedMonth}. Ay / ${selectedYear} — seçili ${bulkPersonel.length} kişi "${status}" yapıldı.`
+          : `${selectedMonth}. Ay / ${selectedYear} dönemi tüm yoklama durumları topluca "${status}" yapıldı.`
+      );
     }
   };
 
@@ -863,13 +958,13 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
   const gunRaporSatirlari = useMemo(
     () =>
       buildGunlukYoklamaSatirlari(
-        personeller,
+        reportPersonel,
         draftYoklamalar,
         selectedYear,
         selectedMonth,
         overtimeDay
       ),
-    [personeller, draftYoklamalar, selectedYear, selectedMonth, overtimeDay]
+    [reportPersonel, draftYoklamalar, selectedYear, selectedMonth, overtimeDay]
   );
 
   const gunRaporOzet = useMemo(() => buildGunlukYoklamaOzet(gunRaporSatirlari), [gunRaporSatirlari]);
@@ -914,7 +1009,9 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
   const handleOpenGunRapor = () => {
     if (gunRaporSatirlari.length === 0) {
       alert(
-        `${gunRaporLabel} için yoklama kaydı bulunamadı.\n\nMesai panelindeki gün numarasını kontrol edin veya önce yoklama girin.`
+        hasPersonelSelection
+          ? `${gunRaporLabel} için seçili kişilerde yoklama kaydı yok.\n\nKutuları kontrol edin veya önce yoklama girin.`
+          : `${gunRaporLabel} için yoklama kaydı bulunamadı.\n\nMesai panelindeki gün numarasını kontrol edin veya önce yoklama girin.`
       );
       return;
     }
@@ -936,32 +1033,6 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
     );
   };
 
-  const filteredPersonel = useMemo(() => {
-    const term = searchTerm.toLowerCase();
-    const base = monthPersoneller.filter((p) => {
-      const fullName = `${p.ad} ${p.soyad}`.toLowerCase();
-      return fullName.includes(term) || p.tcNo.includes(term) || (p.gorev || '').toLowerCase().includes(term);
-    });
-
-    // Aynı isim farklı ID ile gelirse (legacy/stub vb.) listede tek satır göster.
-    const byName = new Map<string, Personel>();
-    const score = (p: Personel) => {
-      let s = 0;
-      if ((p.tcNo || '').trim()) s += 100;
-      if (!p.id.startsWith('PRS-LEGACY')) s += 50;
-      if (p.durum === true || String(p.durum).toLowerCase() === 'true') s += 10;
-      return s;
-    };
-    for (const p of base) {
-      const key = normalizeTurkishName(`${p.ad} ${p.soyad}`);
-      const prev = byName.get(key);
-      if (!prev || score(p) > score(prev)) {
-        byName.set(key, p);
-      }
-    }
-    return Array.from(byName.values());
-  }, [monthPersoneller, searchTerm]);
-
   const handleExportExcelTables = async (emptyMode: boolean = false) => {
     // onClick={fn} event nesnesini 1. argüman yapar; yalnızca true boş şablon demektir.
     const isEmptyTemplate = emptyMode === true;
@@ -975,14 +1046,14 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
         isEmptyTemplate
           ? `${periodLabel} için BOŞ puantaj şablonu indirilsin mi?\n(Gün/mesai hücreleri boş kalır.)`
           : `${periodLabel} dönemi Excel puantajı indirilsin mi?\n` +
-              `Personel: ${filteredPersonel.length} · Dolu gün kaydı: ${filled}\n` +
+              `${reportScopeNote} · Dolu gün kaydı: ${filled}\n` +
               `Rapor seçili aya göredir (basım tarihi yalnızca yazdırma anıdır).`
       )
     ) {
       return;
     }
     await exportModernPuantajExcel({
-      personeller: filteredPersonel,
+      personeller: reportPersonel,
       yoklamalar: draftYoklamalar,
       year: selectedYear,
       month: selectedMonth,
@@ -993,11 +1064,15 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
   };
 
   const handleExportMaasMesaiExcel = async () => {
-    const aktif = filteredPersonel.filter(
+    const aktif = reportPersonel.filter(
       (p) => p.durum !== false && String(p.durum).toLowerCase() !== 'pasif'
     );
     if (aktif.length === 0) {
-      alert('Aktif personel bulunamadı. Filtreyi kontrol edin.');
+      alert(
+        hasPersonelSelection
+          ? 'Seçili kişiler arasında aktif personel yok. Kutuları kontrol edin.'
+          : 'Aktif personel bulunamadı. Filtreyi kontrol edin.'
+      );
       return;
     }
     const periodLabel = new Date(selectedYear, selectedMonth - 1, 1).toLocaleDateString('tr-TR', {
@@ -1009,7 +1084,7 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
         `${periodLabel} için ALACAK MAAŞ Excel indirilsin mi?\n` +
           `Formül: (Maaş÷30) × min(Geldi,30) + Mesai Hakediş\n` +
           `(Ay 31 gün olsa bile yevmiye en fazla 30 gündür)\n` +
-          `Kişi: ${aktif.length} (idari hariç)\n` +
+          `Kişi: ${aktif.length}${hasPersonelSelection ? ' (seçim)' : ' (idari hariç)'}\n` +
           `Sayfalar: Alacak Maaş + Tarih Cetveli`
       )
     ) {
@@ -1045,7 +1120,9 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
     if (
       !window.confirm(
         `${periodLabel} için AKTİF ANA FİRMA personel listesi Excel indirilsin mi?\n\n` +
-          `Yalnız Kibritçi İnşaat kadrosu (taşeron yok).\n` +
+          (hasPersonelSelection
+            ? `Seçili ${reportPersonel.length} kişi içinden Kibritçi kadrosu alınır.\n`
+            : `Yalnız Kibritçi İnşaat kadrosu (taşeron yok).\n`) +
           `Pasif / onay bekleyen kayıtlar hariç.\n` +
           `Grup ve göreve göre ayrılır · Ad Soyad, T.C., Görev.`
       )
@@ -1054,7 +1131,7 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
     }
     try {
       const count = await exportAktifPersonelListeExcel({
-        personeller,
+        personeller: hasPersonelSelection ? reportPersonel : personeller,
         startDate: from,
         endDate: to,
       });
@@ -1077,7 +1154,7 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
   const handleBulkOvertime = (hours: number) => {
     const newYoklamalar = { ...draftYoklamalar };
     
-    monthPersoneller.forEach(p => {
+    bulkPersonel.forEach(p => {
       let personMap = { ...(newYoklamalar[p.id] || {}) };
       daysArray.forEach(d => {
         if (!isDayActiveForEmployee(p, d)) return;
@@ -1093,9 +1170,17 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
     });
 
     updateDraftYoklama(newYoklamalar);
-    alert(`Seçili ayın tüm iş günlerine aktif personeller için topluca günlük ${hours} saat fazla mesai işlendi. Kaydet ile veritabanına gönderin.`);
+    alert(
+      hasPersonelSelection
+        ? `Seçili ${bulkPersonel.length} kişi için iş günlerine topluca günlük ${hours} saat fazla mesai işlendi. Kaydet ile veritabanına gönderin.`
+        : `Seçili ayın tüm iş günlerine aktif personeller için topluca günlük ${hours} saat fazla mesai işlendi. Kaydet ile veritabanına gönderin.`
+    );
     if (addNotification) {
-      addNotification(`${selectedMonth}. Ay / ${selectedYear} dönemi tüm iş günlerine topluca günlük ${hours} saat fazla mesai yazıldı.`);
+      addNotification(
+        hasPersonelSelection
+          ? `${selectedMonth}. Ay / ${selectedYear} — seçili ${bulkPersonel.length} kişiye günlük ${hours} saat fazla mesai yazıldı.`
+          : `${selectedMonth}. Ay / ${selectedYear} dönemi tüm iş günlerine topluca günlük ${hours} saat fazla mesai yazıldı.`
+      );
     }
   };
 
@@ -1124,7 +1209,7 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
       };
 
       if (overtimeStaffId === 'ALL') {
-        personeller.forEach(p => applyToPerson(p.id));
+        (hasPersonelSelection ? selectedMonthPersonel : personeller).forEach(p => applyToPerson(p.id));
       } else {
         applyToPerson(overtimeStaffId);
       }
@@ -1135,7 +1220,11 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
     alert(`Seçilen ${overtimeDay}. güne fiili +${overtimeHours} saat mesai taslağı işlendi. Kaydet ile veritabanına gönderin.`);
     if (addNotification) {
       if (overtimeStaffId === 'ALL') {
-        addNotification(`${selectedMonth}. Ay / ${selectedYear} dönemi ${overtimeDay}. günü için tüm şantiyeye +${overtimeHours} saat mesai yazıldı.`);
+        addNotification(
+          hasPersonelSelection
+            ? `${selectedMonth}. Ay / ${selectedYear} dönemi ${overtimeDay}. günü için seçili ${selectedMonthPersonel.length} kişiye +${overtimeHours} saat mesai yazıldı.`
+            : `${selectedMonth}. Ay / ${selectedYear} dönemi ${overtimeDay}. günü için tüm şantiyeye +${overtimeHours} saat mesai yazıldı.`
+        );
       } else {
         const p = personeller.find(emp => emp.id === overtimeStaffId);
         addNotification(`${p ? maskName(`${p.ad} ${p.soyad}`) : 'Personel'} için ${overtimeDay}. güne +${overtimeHours} saat mesai yazıldı.`);
@@ -1220,7 +1309,9 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
     }
 
     const targetIds =
-      overtimeStaffId === 'ALL' ? monthPersoneller.map((p) => p.id) : [overtimeStaffId];
+      overtimeStaffId === 'ALL'
+        ? bulkPersonel.map((p) => p.id)
+        : [overtimeStaffId];
     const eligibleIds = targetIds.filter((pid) => {
       const p = personeller.find((emp) => emp.id === pid);
       if (!p || !isEmployeeVisibleInMonth(p) || !isDayActiveForEmployee(p, overtimeDay)) return false;
@@ -1400,7 +1491,7 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
               type="button"
               onClick={() => void handleExportExcelTables(false)}
               className="text-[11px] bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg px-3 py-1.5 font-bold cursor-pointer transition flex items-center space-x-1 shadow-sm border border-emerald-800"
-              title={`Seçili dönem (${selectedMonth}/${selectedYear}) gün + mesai + hakediş Excel puantajı. Basım tarihi raporu etkilemez.`}
+              title={`Seçili dönem (${selectedMonth}/${selectedYear}) gün + mesai + hakediş Excel puantajı. Satır kutusu işaretliyse yalnız seçilenler. Basım tarihi raporu etkilemez.`}
             >
               <FileText size={13} />
               <span>
@@ -1416,7 +1507,7 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
               type="button"
               onClick={() => void handleExportMaasMesaiExcel()}
               className="text-[11px] bg-amber-600 hover:bg-amber-700 text-white rounded-lg px-3 py-1.5 font-bold cursor-pointer transition flex items-center space-x-1 shadow-sm border border-amber-800"
-              title="SADECE bu buton: Alacak = (Maaş÷30)×min(Geldi,30) + mesai×1,5. Max 30 yevmiye. Modern Excel değişmez."
+              title="SADECE bu buton: Alacak = (Maaş÷30)×min(Geldi,30) + mesai×1,5. Max 30 yevmiye. Satır kutusu işaretliyse yalnız seçilenler."
             >
               <DollarSign size={13} />
               <span>
@@ -1451,7 +1542,7 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
                 type="button"
                 onClick={() => void handleExportAktifPersonelListeExcel()}
                 className="text-[11px] bg-[#0f2744] hover:bg-[#17365c] text-[#f4ead5] rounded-lg px-3 py-1.5 font-bold cursor-pointer transition flex items-center space-x-1 shadow-sm border border-[#c4a35a]/50"
-                title="Seçili tarih aralığında aktif Kibritçi İnşaat personelini (taşeron hariç) görev + T.C. ile antetli Excel indirir."
+                title="Seçili tarih aralığında aktif Kibritçi İnşaat personelini (taşeron hariç) görev + T.C. ile antetli Excel indirir. Satır kutusu işaretliyse yalnız seçilenler."
               >
                 <Users size={13} />
                 <span>Aktif Personel Excel</span>
@@ -1460,7 +1551,7 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
                 type="button"
                 onClick={handleOpenAralikYoklamaExcel}
                 className="text-[11px] bg-[#1e4e78] hover:bg-[#2563a8] text-white rounded-lg px-3 py-1.5 font-bold cursor-pointer transition flex items-center space-x-1 shadow-sm border border-[#c4a35a]/40"
-                title="Seçili aralığın saha yoklamasını görev/T.C. ile Excel’e dökmeden önce personel ekleyip çıkarabilirsiniz."
+                title="Seçili aralığın saha yoklamasını görev/T.C. ile Excel’e döker. Tabloda kutu işaretliyse modal o seçimle açılır."
               >
                 <Calendar size={13} />
                 <span>Aralık Yoklama Excel</span>
@@ -1474,20 +1565,20 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
                 onClick={() => handleBulkSetStatus('Geldi')}
                 className="text-[10px] bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-150 rounded-lg px-2 py-1 font-bold cursor-pointer transition"
               >
-                ✓ Herkesi Geldi Yap
+                ✓ {hasPersonelSelection ? `Seçilenleri Geldi Yap (${bulkPersonel.length})` : 'Herkesi Geldi Yap'}
               </button>
               <button 
                 onClick={() => handleBulkOvertime(2)}
                 className="text-[10px] bg-slate-50 text-slate-800 hover:bg-slate-100 border border-slate-200 rounded-lg px-2 py-1 font-bold cursor-pointer transition"
                 title="Her iş gününe stabil 2 saat fazla mesai yazar"
               >
-                ⏱ Herkese +2sa Mesai Girişi
+                ⏱ {hasPersonelSelection ? `Seçilenlere +2sa Mesai (${bulkPersonel.length})` : 'Herkese +2sa Mesai Girişi'}
               </button>
               <button 
                 onClick={() => handleBulkSetStatus('Girilmedi')}
                 className="text-[10px] bg-slate-100 hover:bg-slate-200 text-slate-500 border border-slate-150 rounded-lg px-2 py-1 font-bold cursor-pointer transition"
               >
-                Sıfırla
+                {hasPersonelSelection ? 'Seçilenleri Sıfırla' : 'Sıfırla'}
               </button>
             </div>
           </div>
@@ -1571,7 +1662,7 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
             <button
               onClick={() => setPrintModal('MAAS_RAPORU')}
               className="text-[11px] bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg px-3 py-1.5 font-bold cursor-pointer transition flex items-center space-x-1 shadow-sm"
-              title="Puantaj ve maaş detaylarını içeren genel rapor."
+              title="Puantaj ve maaş detaylarını içeren genel rapor. Satır kutusu işaretliyse yalnız seçilenler."
             >
               <FileText size={13} className="text-white" />
               <span>Puantaj Raporu</span>
@@ -1580,7 +1671,7 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
               type="button"
               onClick={handleOpenGunRapor}
               className="text-[11px] bg-amber-600 hover:bg-amber-700 text-white rounded-lg px-3 py-1.5 font-bold cursor-pointer transition flex items-center space-x-1 shadow-sm"
-              title={`Mesai panelindeki ${overtimeDay}. günün yoklama kayıtlarını listeler (${gunRaporLabel}).`}
+              title={`Mesai panelindeki ${overtimeDay}. günün yoklama kayıtlarını listeler (${gunRaporLabel}). Satır kutusu işaretliyse yalnız seçilenler.`}
             >
               <Calendar size={13} className="text-white" />
               <span>Günü Raporla ({String(overtimeDay).padStart(2, '0')})</span>
@@ -1899,7 +1990,11 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
                 onChange={(e) => setOvertimeStaffId(e.target.value)}
                 className="text-[11px] font-bold bg-white border border-slate-200 rounded p-1"
               >
-                <option value="ALL">📋 Tüm Şantiye Kadrosu</option>
+                <option value="ALL">
+                  {hasPersonelSelection
+                    ? `📋 Seçili ${selectedMonthPersonel.length} kişi`
+                    : '📋 Tüm Şantiye Kadrosu'}
+                </option>
                 {monthPersoneller.map(p => (
                   <option key={p.id} value={p.id}>👤 {p.ad} {p.soyad} ({p.gorev})</option>
                 ))}
@@ -2094,9 +2189,29 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
 
         {/* Personel list header */}
         <div className="px-4 pt-3 pb-2 border-b border-slate-100 bg-white flex flex-wrap items-center justify-between gap-2">
-          <div className="text-[11px] font-bold text-slate-800">
-            Tüm Personel
-            <span className="ml-1.5 text-[9px] font-extrabold text-slate-500">({monthPersoneller.length})</span>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="text-[11px] font-bold text-slate-800">
+              Tüm Personel
+              <span className="ml-1.5 text-[9px] font-extrabold text-slate-500">({monthPersoneller.length})</span>
+            </div>
+            {hasPersonelSelection ? (
+              <span className="text-[10px] font-extrabold text-amber-900 bg-amber-50 border border-amber-200 rounded-full px-2.5 py-0.5">
+                {selectedMonthPersonel.length} kişi seçili · raporlar bu seçime göre
+              </span>
+            ) : (
+              <span className="text-[10px] font-semibold text-slate-500 bg-slate-50 border border-slate-200 rounded-full px-2.5 py-0.5">
+                Kutudan seçin, Excel / Puantaj Raporu yalnız onları basar
+              </span>
+            )}
+            {hasPersonelSelection && (
+              <button
+                type="button"
+                onClick={() => setSelectedPersonelIds([])}
+                className="text-[10px] font-bold text-slate-600 hover:text-rose-700 border border-slate-200 hover:border-rose-200 rounded-lg px-2 py-0.5 cursor-pointer"
+              >
+                Seçimi temizle
+              </button>
+            )}
           </div>
           {onOpenFaaliyetPersonel && (
             <button
@@ -2150,8 +2265,23 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
                 <thead className="sticky top-0 z-30 bg-slate-50 font-display text-[10px] font-bold text-slate-600 tracking-wider">
                   <tr>
                     <th scope="col" className="px-3 py-3 text-left w-56 sticky top-0 left-0 bg-slate-50 box-shadow z-40 shadow-[2px_0_5px_rgba(0,0,0,0.03)] border-r">
-                      <div>Personel Künyesi</div>
-                      <div className="text-[8px] font-normal text-slate-400 normal-case tracking-normal mt-0.5">Çift tık: saha faaliyetleri</div>
+                      <div className="flex items-center gap-2">
+                        <input
+                          ref={selectAllVisibleRef}
+                          type="checkbox"
+                          checked={allVisibleSelected}
+                          onChange={toggleSelectVisiblePersonel}
+                          className="w-3.5 h-3.5 accent-amber-600 cursor-pointer shrink-0"
+                          title={allVisibleSelected ? 'Görünenlerin seçimini kaldır' : 'Görünen personeli seç'}
+                          aria-label="Görünen personeli seç"
+                        />
+                        <div>
+                          <div>Personel Künyesi</div>
+                          <div className="text-[8px] font-normal text-slate-400 normal-case tracking-normal mt-0.5">
+                            Kutu: rapor seçimi · Çift tık: saha faaliyetleri
+                          </div>
+                        </div>
+                      </div>
                     </th>
                     {daysArray.map(day => {
                       const dayName = dayOfWeekAbbreviation(day);
@@ -2316,14 +2446,26 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
                     });
 
                     return (
-                      <tr key={p.id} className="hover:bg-slate-50/50 transition">
+                      <tr key={p.id} className={selectedPersonelIdSet.has(p.id) ? 'bg-amber-50/80 hover:bg-amber-50 transition' : 'hover:bg-slate-50/50 transition'}>
                         
                         {/* Static Personel Name column */}
                         <td
-                          className="px-3 py-3 whitespace-nowrap font-medium text-slate-900 sticky left-0 bg-white shadow-[2px_0_5px_rgba(0,0,0,0.02)] z-10 border-r cursor-pointer hover:bg-slate-50/40 transition-colors select-none"
-                          title="Çift tık: saha faaliyetleri ve fotoğraflar"
+                          className={`px-3 py-3 whitespace-nowrap font-medium text-slate-900 sticky left-0 shadow-[2px_0_5px_rgba(0,0,0,0.02)] z-10 border-r cursor-pointer hover:bg-slate-50/40 transition-colors select-none ${
+                            selectedPersonelIdSet.has(p.id) ? 'bg-amber-50' : 'bg-white'
+                          }`}
+                          title="Kutu: rapor seçimi · Çift tık: saha faaliyetleri ve fotoğraflar"
                           onDoubleClick={() => handlePersonDoubleClick(p)}
                         >
+                          <div className="flex items-start gap-2">
+                            <input
+                              type="checkbox"
+                              checked={selectedPersonelIdSet.has(p.id)}
+                              onChange={() => togglePersonelSelected(p.id)}
+                              onClick={(e) => e.stopPropagation()}
+                              onDoubleClick={(e) => e.stopPropagation()}
+                              className="mt-0.5 w-3.5 h-3.5 accent-amber-600 cursor-pointer shrink-0"
+                              aria-label={`${p.ad} ${p.soyad} rapor için seç`}
+                            />
                           <div className="flex flex-col">
                             <span className="font-semibold text-slate-800">{p.ad} {p.soyad}</span>
                             <span className="text-[9px] text-[#2563EB] font-bold">{p.gorev} · {p.departman}</span>
@@ -2347,6 +2489,7 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
                                 <div className="text-rose-700 font-semibold">Çıkış: {p.istenCikisTarihi}</div>
                               )}
                             </div>
+                          </div>
                           </div>
                         </td>
 
@@ -2382,6 +2525,7 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
                 <span className="text-xl">🖨️</span>
                 <h3 className="font-display font-bold text-sm">
                   Genel Puantaj ve Maaş Hakediş Raporu
+                  {hasPersonelSelection ? ` · ${reportPersonel.length} kişi (seçim)` : ''}
                 </h3>
               </div>
               <div className="flex flex-wrap items-center gap-2">
@@ -2493,7 +2637,7 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredPersonel.map((p, idx) => {
+                    {reportPersonel.map((p, idx) => {
                       const personYoklama = draftYoklamalar[p.id] || {};
                       let geldiGun = 0;
                       let hakedisGun = 0;
@@ -2578,7 +2722,10 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
                 <Calendar size={18} />
                 <div>
                   <h3 className="font-display font-bold text-sm">Günlük Yoklama Raporu</h3>
-                  <p className="text-[10px] text-amber-100 font-semibold">{gunRaporLabel}</p>
+                  <p className="text-[10px] text-amber-100 font-semibold">
+                    {gunRaporLabel}
+                    {hasPersonelSelection ? ` · ${reportPersonel.length} kişi seçili` : ''}
+                  </p>
                 </div>
               </div>
               <div className="flex flex-wrap items-center gap-2">
@@ -3208,6 +3355,7 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
         yoklamalar={draftYoklamalar}
         startDate={aktifListeStart}
         endDate={aktifListeEnd}
+        preselectedIds={hasPersonelSelection ? selectedPersonelIds : undefined}
       />
     </div>
   );

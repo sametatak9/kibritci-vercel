@@ -39,7 +39,8 @@ export const AralikYoklamaExcelModal: React.FC<{
   yoklamalar: AylikYoklamaMap;
   startDate: string;
   endDate: string;
-}> = ({ open, onClose, personeller, yoklamalar, startDate, endDate }) => {
+  preselectedIds?: string[];
+}> = ({ open, onClose, personeller, yoklamalar, startDate, endDate, preselectedIds }) => {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [listQuery, setListQuery] = useState('');
   const [addQuery, setAddQuery] = useState('');
@@ -84,7 +85,10 @@ export const AralikYoklamaExcelModal: React.FC<{
 
   useEffect(() => {
     if (!open) return;
-    setSelectedIds(collectAralikYoklamaSahaPersonel(personeller, start, end).map((p) => p.id));
+    const defaults = collectAralikYoklamaSahaPersonel(personeller, start, end).map((p) => p.id);
+    const havuzIds = new Set(collectAralikYoklamaSahaHavuz(personeller).map((p) => p.id));
+    const preset = (preselectedIds || []).filter((id) => havuzIds.has(id));
+    setSelectedIds(preset.length > 0 ? preset : defaults);
     setListQuery('');
     setAddQuery('');
     setGrupFilter('ALL');
