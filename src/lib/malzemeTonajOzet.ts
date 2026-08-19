@@ -32,15 +32,15 @@ export type MalzemeAyOzet = {
   ayKey: string;
   ayLabel: string;
   adet: number;
-  ton: number;
+  kg: number;
   micirAdet: number;
-  micirTon: number;
+  micirKg: number;
   tasTozuAdet: number;
-  tasTozuTon: number;
+  tasTozuKg: number;
   stabilizeAdet: number;
-  stabilizeTon: number;
+  stabilizeKg: number;
   digerAdet: number;
-  digerTon: number;
+  digerKg: number;
 };
 
 export type MalzemeOzet = {
@@ -100,20 +100,20 @@ function emptyAy(ayKey: string): MalzemeAyOzet {
     ayKey,
     ayLabel: monthTitle(ayKey),
     adet: 0,
-    ton: 0,
+    kg: 0,
     micirAdet: 0,
-    micirTon: 0,
+    micirKg: 0,
     tasTozuAdet: 0,
-    tasTozuTon: 0,
+    tasTozuKg: 0,
     stabilizeAdet: 0,
-    stabilizeTon: 0,
+    stabilizeKg: 0,
     digerAdet: 0,
-    digerTon: 0,
+    digerKg: 0,
   };
 }
 
-export function fmtTon(n: number): string {
-  return Number(n || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 3 });
+export function fmtKg(n: number): string {
+  return Number(n || 0).toLocaleString('tr-TR', { maximumFractionDigits: 2 });
 }
 
 export function computeMalzemeOzet(items: MalzemeOzetKalem[]): MalzemeOzet {
@@ -139,7 +139,7 @@ export function computeMalzemeOzet(items: MalzemeOzetKalem[]): MalzemeOzet {
   for (const it of items) {
     const tip = tipOf(it.tip);
     const ton = Number(it.ton) || 0;
-    const kg = Number(it.kg) || (ton ? ton * 1000 : 0);
+    const kg = Number(it.kg) > 0 ? Number(it.kg) : ton > 0 ? ton * 1000 : 0;
     const bucket = tipMap[tip];
     bucket.adet += 1;
     bucket.ton += ton;
@@ -168,19 +168,19 @@ export function computeMalzemeOzet(items: MalzemeOzetKalem[]): MalzemeOzet {
     const ym = dk ? dk.slice(0, 7) : '0000-00';
     const ay = ayMap.get(ym) || emptyAy(ym);
     ay.adet += 1;
-    ay.ton += ton;
+    ay.kg += kg;
     if (tip === 'MICIR') {
       ay.micirAdet += 1;
-      ay.micirTon += ton;
+      ay.micirKg += kg;
     } else if (tip === 'TAS_TOZU') {
       ay.tasTozuAdet += 1;
-      ay.tasTozuTon += ton;
+      ay.tasTozuKg += kg;
     } else if (tip === 'STABILIZE') {
       ay.stabilizeAdet += 1;
-      ay.stabilizeTon += ton;
+      ay.stabilizeKg += kg;
     } else {
       ay.digerAdet += 1;
-      ay.digerTon += ton;
+      ay.digerKg += kg;
     }
     ayMap.set(ym, ay);
 
@@ -200,7 +200,7 @@ export function computeMalzemeOzet(items: MalzemeOzetKalem[]): MalzemeOzet {
       bekleyen: b.bekleyen,
       onayli: b.onayli,
       plakaAdet: b.plaka.size,
-      pay: toplamTon > 0 ? (b.ton / toplamTon) * 100 : 0,
+      pay: toplamKg > 0 ? (b.kg / toplamKg) * 100 : 0,
     };
   });
 
@@ -224,71 +224,36 @@ export function computeMalzemeOzet(items: MalzemeOzetKalem[]): MalzemeOzet {
   };
 }
 
+const MAIN_TIPS: MalzemeOzetTip[] = ['MICIR', 'STABILIZE', 'TAS_TOZU'];
+
 export function malzemeOzetHtml(ozet: MalzemeOzet): string {
-  const cards = ozet.byTip
-    .filter((t) => t.adet > 0 || t.ton > 0)
+  const rows = MAIN_TIPS.map((tip) => ozet.byTip.find((t) => t.tip === tip) || {
+    tip,
+    label: tipLabel(tip),
+    adet: 0,
+    ton: 0,
+    kg: 0,
+    faturali: 0,
+    bekleyen: 0,
+    onayli: 0,
+    plakaAdet: 0,
+    pay: 0,
+  });
+  const cards = rows
     .map((t) => {
       const bg =
-        t.tip === 'MICIR'
-          ? '#d1fae5'
-          : t.tip === 'TAS_TOZU'
-            ? '#e7e5e4'
-            : t.tip === 'STABILIZE'
-              ? '#fef3c7'
-              : '#e2e8f0';
-      return `<div style="flex:1;min-width:160px;padding:12px 14px;border-radius:12px;background:${bg};border:1px solid #cbd5e1">
-        <div style="font-size:10px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:#334155">${t.label}</div>
-        <div style="font-size:20px;font-weight:800;color:#0f172a;margin-top:4px">${fmtTon(t.ton)} <span style="font-size:12px;font-weight:700">ton</span></div>
-        <div style="font-size:11px;color:#475569;margin-top:4px">${t.adet} irsaliye · ${t.plakaAdet} plaka · pay %${t.pay.toFixed(1)}</div>
-        <div style="font-size:11px;color:#475569">${t.faturali} faturalı · ${t.bekleyen} bekleyen · ${fmtTon(t.kg)} kg</div>
+        t.tip === 'MICIR' ? '#d1fae5' : t.tip === 'TAS_TOZU' ? '#e7e5e4' : '#fef3c7';
+      return `<div style="flex:1;min-width:180px;padding:14px 16px;border-radius:12px;background:${bg};border:1px solid #cbd5e1">
+        <div style="font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:#334155">${t.label}</div>
+        <div style="font-size:22px;font-weight:800;color:#0f172a;margin-top:6px">${fmtKg(t.kg)} <span style="font-size:13px;font-weight:700">kg</span></div>
+        <div style="font-size:12px;color:#475569;margin-top:4px">${t.adet} evrak</div>
       </div>`;
     })
     .join('');
 
-  const ayRows = ozet.aylar
-    .map(
-      (a) => `<tr>
-        <td style="padding:6px 8px;border:1px solid #e2e8f0">${a.ayLabel}</td>
-        <td style="padding:6px 8px;border:1px solid #e2e8f0;text-align:right">${a.adet}</td>
-        <td style="padding:6px 8px;border:1px solid #e2e8f0;text-align:right;font-weight:700">${fmtTon(a.ton)}</td>
-        <td style="padding:6px 8px;border:1px solid #e2e8f0;text-align:right">${a.micirAdet} / ${fmtTon(a.micirTon)}</td>
-        <td style="padding:6px 8px;border:1px solid #e2e8f0;text-align:right">${a.tasTozuAdet} / ${fmtTon(a.tasTozuTon)}</td>
-        <td style="padding:6px 8px;border:1px solid #e2e8f0;text-align:right">${a.stabilizeAdet} / ${fmtTon(a.stabilizeTon)}</td>
-      </tr>`
-    )
-    .join('');
-
-  const evrak =
-    ozet.evrakTipleri.length > 0
-      ? `<p style="font-size:12px;color:#334155;margin:8px 0 0">${ozet.evrakTipleri
-          .map((e) => `${e.tip}: <strong>${e.adet}</strong>`)
-          .join(' · ')}</p>`
-      : '';
-
   return `<section style="margin-bottom:22px">
-    <h2 style="margin:0 0 10px;font-size:14px;color:#1e3a8a">Malzeme özeti — Mıcır / Taş Tozu / Stabilize</h2>
-    <p style="margin:0 0 12px;font-size:12px;color:#334155">
-      ${ozet.toplamAdet} kayıt · <strong>${fmtTon(ozet.toplamTon)} ton</strong> · ${fmtTon(ozet.toplamKg)} kg
-      · ${ozet.plakaAdet} farklı plaka · ${ozet.faturali} faturalı / ${ozet.bekleyen} bekleyen
-      · dönem ${ozet.ilkTarih} — ${ozet.sonTarih}
-    </p>
-    <div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:16px">${cards}</div>
-    ${evrak}
-    ${
-      ozet.aylar.length
-        ? `<table style="width:100%;border-collapse:collapse;font-size:11px;margin-top:12px">
-      <thead><tr style="background:#1e3a8a;color:#fff">
-        <th style="padding:7px 8px;text-align:left">Ay</th>
-        <th style="padding:7px 8px;text-align:right">Adet</th>
-        <th style="padding:7px 8px;text-align:right">Toplam ton</th>
-        <th style="padding:7px 8px;text-align:right">Mıcır (adet / ton)</th>
-        <th style="padding:7px 8px;text-align:right">Taş Tozu (adet / ton)</th>
-        <th style="padding:7px 8px;text-align:right">Stabilize (adet / ton)</th>
-      </tr></thead>
-      <tbody>${ayRows}</tbody>
-    </table>`
-        : ''
-    }
+    <h2 style="margin:0 0 10px;font-size:14px;color:#1e3a8a">Gelen kilo özeti</h2>
+    <div style="display:flex;flex-wrap:wrap;gap:10px">${cards}</div>
   </section>`;
 }
 
@@ -316,46 +281,15 @@ export function writeMalzemeOzetSheetContent(
   ws: Worksheet,
   ozet: MalzemeOzet,
   startRow: number,
-  opts?: { kayitAdet?: number; irsaliyeAdet?: number }
+  _opts?: { kayitAdet?: number; irsaliyeAdet?: number }
 ): number {
   let row = startRow;
-  const kayit = opts?.kayitAdet ?? ozet.toplamAdet;
-  const irsAdet = opts?.irsaliyeAdet ?? ozet.toplamAdet;
-
-  ws.mergeCells(row, 1, row, 9);
-  ws.getCell(row, 1).value = 'GENEL — MALZEME ÖZETİ (Mıcır / Taş Tozu / Stabilize ayrı)';
+  ws.mergeCells(row, 1, row, 4);
+  ws.getCell(row, 1).value = 'GELEN KİLO';
   ws.getCell(row, 1).font = { bold: true, size: 11, color: { argb: 'FF1E3A8A' } };
   row += 1;
 
-  const genel: Array<[string, string | number]> = [
-    ['Toplam geçmiş kayıt', kayit],
-    ['İrsaliye adedi', irsAdet],
-    ['Toplam ağırlık (ton)', Number(ozet.toplamTon.toFixed(3))],
-    ['Toplam ağırlık (kg)', Number(ozet.toplamKg.toFixed(1))],
-    ['Dönem (ilk — son)', `${ozet.ilkTarih} — ${ozet.sonTarih}`],
-    ['Farklı plaka', ozet.plakaAdet],
-    ['Faturalı', ozet.faturali],
-    ['Fatura bekleyen', ozet.bekleyen],
-    ['Onaylı', ozet.onayli],
-  ];
-  for (const [label, val] of genel) {
-    ws.getCell(row, 1).value = label;
-    ws.getCell(row, 1).font = { bold: true, size: 10 };
-    ws.mergeCells(row, 2, row, 4);
-    ws.getCell(row, 2).value = val;
-    ws.getCell(row, 2).font = { size: 10, bold: label.includes('Toplam') };
-    if (label.includes('Toplam')) fillCell(ws.getCell(row, 2), 'FFDBEAFE');
-    row += 1;
-  }
-  row += 1;
-
-  ws.mergeCells(row, 1, row, 8);
-  ws.getCell(row, 1).value = 'MALZEME TİPLERİ — TONAJ AYRI';
-  ws.getCell(row, 1).font = { bold: true, size: 11, color: { argb: 'FF1E3A8A' } };
-  row += 1;
-
-  const tipHeaders = ['Malzeme', 'Adet', 'Ton', 'Kg', 'Pay %', 'Faturalı', 'Bekleyen', 'Plaka'];
-  tipHeaders.forEach((h, i) => {
+  ['Malzeme', 'Toplam kg', 'Evrak'].forEach((h, i) => {
     const c = ws.getCell(row, i + 1);
     c.value = h;
     c.font = { bold: true, size: 9, color: { argb: 'FFFFFFFF' } };
@@ -364,101 +298,17 @@ export function writeMalzemeOzetSheetContent(
   });
   row += 1;
 
-  for (const t of ozet.byTip) {
-    if (t.adet === 0 && t.ton === 0) continue;
-    const vals: Array<string | number> = [
-      t.label,
-      t.adet,
-      Number(t.ton.toFixed(3)),
-      Number(t.kg.toFixed(1)),
-      Number(t.pay.toFixed(1)),
-      t.faturali,
-      t.bekleyen,
-      t.plakaAdet,
-    ];
+  for (const tip of MAIN_TIPS) {
+    const t = ozet.byTip.find((x) => x.tip === tip);
+    const vals: Array<string | number> = [tipLabel(tip), Number((t?.kg || 0).toFixed(2)), t?.adet || 0];
     vals.forEach((val, i) => {
       const c = ws.getCell(row, i + 1);
       c.value = val;
-      c.font = { size: 9, bold: i <= 2 };
-      fillCell(c, TIP_FILL[t.tip]);
+      c.font = { size: 11, bold: true };
+      fillCell(c, TIP_FILL[tip]);
       borderCell(c);
     });
     row += 1;
   }
-  row += 1;
-
-  ws.mergeCells(row, 1, row, 9);
-  ws.getCell(row, 1).value = 'AYLIK DÖKÜM';
-  ws.getCell(row, 1).font = { bold: true, size: 11, color: { argb: 'FF1E3A8A' } };
-  row += 1;
-
-  const ayHeaders = [
-    'Ay',
-    'Adet',
-    'Toplam ton',
-    'Mıcır adet',
-    'Mıcır ton',
-    'Taş tozu adet',
-    'Taş tozu ton',
-    'Stabilize adet',
-    'Stabilize ton',
-  ];
-  ayHeaders.forEach((h, i) => {
-    const c = ws.getCell(row, i + 1);
-    c.value = h;
-    c.font = { bold: true, size: 9, color: { argb: 'FFFFFFFF' } };
-    fillCell(c, 'FF1E3A8A');
-    borderCell(c);
-  });
-  row += 1;
-  for (const a of ozet.aylar) {
-    const vals: Array<string | number> = [
-      a.ayLabel,
-      a.adet,
-      Number(a.ton.toFixed(3)),
-      a.micirAdet,
-      Number(a.micirTon.toFixed(3)),
-      a.tasTozuAdet,
-      Number(a.tasTozuTon.toFixed(3)),
-      a.stabilizeAdet,
-      Number(a.stabilizeTon.toFixed(3)),
-    ];
-    vals.forEach((val, i) => {
-      const c = ws.getCell(row, i + 1);
-      c.value = val;
-      c.font = { size: 9, bold: i === 2 };
-      borderCell(c);
-      if (i === 3 || i === 4) fillCell(c, 'FFD1FAE5');
-      if (i === 5 || i === 6) fillCell(c, 'FFE7E5E4');
-      if (i === 7 || i === 8) fillCell(c, 'FFFEF3C7');
-    });
-    row += 1;
-  }
-
-  if (ozet.evrakTipleri.length) {
-    row += 1;
-    ws.mergeCells(row, 1, row, 4);
-    ws.getCell(row, 1).value = 'EVRAK TİPİ DÖKÜMÜ';
-    ws.getCell(row, 1).font = { bold: true, size: 11, color: { argb: 'FF1E3A8A' } };
-    row += 1;
-    ['Evrak tipi', 'Adet'].forEach((h, i) => {
-      const c = ws.getCell(row, i + 1);
-      c.value = h;
-      c.font = { bold: true, size: 9, color: { argb: 'FFFFFFFF' } };
-      fillCell(c, 'FF1E3A8A');
-      borderCell(c);
-    });
-    row += 1;
-    for (const e of ozet.evrakTipleri) {
-      ws.getCell(row, 1).value = e.tip;
-      ws.getCell(row, 2).value = e.adet;
-      ws.getCell(row, 1).font = { size: 9 };
-      ws.getCell(row, 2).font = { size: 9, bold: true };
-      borderCell(ws.getCell(row, 1));
-      borderCell(ws.getCell(row, 2));
-      row += 1;
-    }
-  }
-
   return row;
 }

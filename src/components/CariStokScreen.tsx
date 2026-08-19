@@ -978,6 +978,8 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
       miktar: log.hizmetMiktar,
       birim: log.hizmetEtiket,
       plaka: log.plaka,
+      kiloKg: log.kiloKg,
+      tonaj: log.tonaj,
     }));
 
   const logsForVisibleReport = () =>

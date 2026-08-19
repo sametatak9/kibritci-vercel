@@ -5,6 +5,7 @@ import {
 } from './kibritciReportTemplate';
 import { KIBRITCI_COMPANY, loadKibritciLogoDataUrl, loadKibritciReportAssets, type KibritciReportAssets } from './kibritciBrand';
 import { createExcelWorkbook } from './exceljsLoader';
+import { resolveMicirKiloKg } from './micirUtils';
 import { computeMalzemeOzet, malzemeOzetHtml, writeMalzemeOzetSheetContent, type MalzemeOzetKalem } from './malzemeTonajOzet';
 
 export type ReportExportFormat = 'html' | 'csv' | 'txt' | 'xlsx';
@@ -27,26 +28,28 @@ export interface HistoryLogRow {
   miktar?: number;
   birim?: string;
   plaka?: string;
+  kiloKg?: number;
+  tonaj?: number;
 }
 
 const fmtTutar = (n?: number): string =>
   n != null && !Number.isNaN(Number(n)) ? `₺${Number(n).toLocaleString('tr-TR')}` : '';
 
-function historyLogTon(log: HistoryLogRow): number {
-  const birim = String(log.birim || '').toLocaleLowerCase('tr-TR');
-  if (birim === 'ton' || birim === 'tonaj') return Number(log.miktar) || 0;
-  return 0;
-}
-
 function historyLogsToOzetKalemler(logs: HistoryLogRow[]): MalzemeOzetKalem[] {
-  return logs.map((log) => ({
-    tip: log.malzemeTipi ?? 'DIGER',
-    ton: historyLogTon(log),
-    kg: historyLogTon(log) * 1000,
-    plaka: log.plaka,
-    tarih: log.date,
-    evrakTipi: log.type,
-  }));
+  return logs.map((log) => {
+    const birim = String(log.birim || '').toLocaleLowerCase('tr-TR');
+    const kg = resolveMicirKiloKg({
+      kiloKg: log.kiloKg,
+      tonaj: log.tonaj ?? (birim === 'ton' || birim === 'tonaj' ? Number(log.miktar) || 0 : 0),
+    });
+    return {
+      tip: log.malzemeTipi ?? 'DIGER',
+      ton: 0,
+      kg,
+      tarih: log.date,
+      evrakTipi: log.type,
+    };
+  });
 }
 
 export function escapeCsvCell(value: string): string {

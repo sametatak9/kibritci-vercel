@@ -16,6 +16,7 @@ import { firmaEslesir } from './taseronUtils';
 import {
   malzemeTipiLabel,
   micirMalzemeTipiSortKey,
+  resolveMicirKiloKg,
   resolveMicirMalzemeTipiFromIrsaliye,
 } from './micirUtils';
 
@@ -185,20 +186,12 @@ export async function exportIrsaliyeTumZamanlarExcel(opts: {
   const faturalar = opts.faturalar || [];
 
   const ozetKalemler: MalzemeOzetKalem[] = irs.map((ir) => {
-    const h = irsaliyeHizmetMiktari(ir);
     const tip = resolveMicirMalzemeTipiFromIrsaliye(ir);
-    const linked = findFaturalarForIrsaliye(ir, faturalar);
-    const faturali = Boolean(linked.find((ft) => isGercekFaturaGirisi(ft)) || ir.faturaNo);
-    const onay = String(ir.onayDurumu || '').toLocaleUpperCase('tr-TR');
-    const ton = h.etiket === 'ton' || h.birim === 'TON' ? Number(h.miktar) || 0 : 0;
-    const kg = Number(ir.kiloKg) || (ton ? ton * 1000 : 0);
+    const kg = resolveMicirKiloKg({ kiloKg: ir.kiloKg, tonaj: ir.tonaj });
     return {
       tip: tip ?? 'DIGER',
-      ton,
+      ton: 0,
       kg,
-      faturali,
-      onayli: onay.includes('ONAYLANDI'),
-      plaka: ir.plaka,
       tarih: ir.tarih,
     };
   });
