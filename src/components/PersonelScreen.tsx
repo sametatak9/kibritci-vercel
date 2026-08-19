@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Users, UserPlus, Trash2, CreditCard as Edit3, Camera, Search, ShieldCheck, Mail, Phone, MapPin, Tent, DollarSign, UserX, FileText, CloudUpload as UploadCloud, CircleCheck as CheckCircle2, CircleAlert as AlertCircle, Loader as Loader2, Building2, History, Download, RefreshCw, ListPlus, ArrowLeft, ClipboardList } from 'lucide-react';
+import { Users, UserPlus, Trash2, CreditCard as Edit3, Camera, Search, ShieldCheck, Mail, Phone, MapPin, Tent, DollarSign, UserX, FileText, CloudUpload as UploadCloud, CircleCheck as CheckCircle2, CircleAlert as AlertCircle, Loader as Loader2, Building2, History, Download, RefreshCw, ListPlus, ArrowLeft, ClipboardList, Tags } from 'lucide-react';
 import { CariKart, CariKartIslem, KampKaydi, KampOdasi, Personel, SahaFaaliyeti, AylikYoklamaMap } from '../types/erp';
 import { fetchApiJson } from '../lib/apiClient';
 import { compressImage } from '../lib/imageCompress';
@@ -60,10 +60,11 @@ import {
   type PersonelGorevGrup,
 } from '../lib/personelGorevGrupUtils';
 import { SmartCatalogField } from './SmartCatalogField';
+import { PersonelNitelikTopluPanel } from './PersonelNitelikTopluPanel';
 
 const MAX_PERSONEL_INLINE_MEDIA = 120_000;
 
-type PersonelScreenView = 'liste' | 'kayit';
+type PersonelScreenView = 'liste' | 'kayit' | 'nitelik';
 type KadroMode = 'ana_firma' | 'taseron';
 
 /** Büyük foto/PDF’leri merge yazımında tekrar gönderme — timeout + rollback engeli */
@@ -1673,6 +1674,18 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
               <ClipboardList size={14} />
               Personel Kayıt
             </button>
+            <button
+              type="button"
+              onClick={() => setScreenView('nitelik')}
+              className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold transition cursor-pointer ${
+                screenView === 'nitelik'
+                  ? 'bg-orange-500 text-white shadow-sm'
+                  : 'text-slate-600 hover:bg-orange-100'
+              }`}
+            >
+              <Tags size={14} />
+              Nitelik Toplu
+            </button>
           </div>
 
           {screenView === 'liste' ? (
@@ -1734,7 +1747,9 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
       </div>
 
       <div className="flex-1 overflow-y-auto p-4 sm:p-6">
-      {screenView === 'kayit' ? (
+      {screenView === 'nitelik' ? (
+        <PersonelNitelikTopluPanel personeller={personeller} setPersoneller={setPersoneller} />
+      ) : screenView === 'kayit' ? (
       <div className="max-w-4xl mx-auto w-full bg-white border border-orange-100 rounded-2xl flex flex-col overflow-hidden shadow-sm">
 
         {/* Header card indicator */}
