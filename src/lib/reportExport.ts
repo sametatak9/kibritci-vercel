@@ -5,6 +5,7 @@ import {
 } from './kibritciReportTemplate';
 import { KIBRITCI_COMPANY, loadKibritciLogoDataUrl, loadKibritciReportAssets, type KibritciReportAssets } from './kibritciBrand';
 import { createExcelWorkbook } from './exceljsLoader';
+import { computeMalzemeOzet, malzemeOzetHtml, writeMalzemeOzetSheetContent, type MalzemeOzetKalem } from './malzemeTonajOzet';
 
 export type ReportExportFormat = 'html' | 'csv' | 'txt' | 'xlsx';
 
@@ -22,10 +23,31 @@ export interface HistoryLogRow {
   title: string;
   desc: string;
   kalemler?: HistoryLogKalemRow[];
+  malzemeTipi?: string | null;
+  miktar?: number;
+  birim?: string;
+  plaka?: string;
 }
 
 const fmtTutar = (n?: number): string =>
   n != null && !Number.isNaN(Number(n)) ? `₺${Number(n).toLocaleString('tr-TR')}` : '';
+
+function historyLogTon(log: HistoryLogRow): number {
+  const birim = String(log.birim || '').toLocaleLowerCase('tr-TR');
+  if (birim === 'ton' || birim === 'tonaj') return Number(log.miktar) || 0;
+  return 0;
+}
+
+function historyLogsToOzetKalemler(logs: HistoryLogRow[]): MalzemeOzetKalem[] {
+  return logs.map((log) => ({
+    tip: log.malzemeTipi ?? 'DIGER',
+    ton: historyLogTon(log),
+    kg: historyLogTon(log) * 1000,
+    plaka: log.plaka,
+    tarih: log.date,
+    evrakTipi: log.type,
+  }));
+}
 
 export function escapeCsvCell(value: string): string {
   const v = String(value ?? '').replace(/"/g, '""');
@@ -83,7 +105,8 @@ export function buildHistoryTableHtml(options: {
       return `<tr><td style="padding:8px;vertical-align:top">${log.date}</td><td style="padding:8px;vertical-align:top">${log.type}</td><td style="padding:8px"><strong>${log.title}</strong><br/><span style="color:#64748b;font-size:11px">${log.desc}</span>${kalemHtml}</td></tr>`;
     })
     .join('');
-  const bodyHtml = `<table style="width:100%;border-collapse:collapse;font-size:12px">
+  const ozetHtml = malzemeOzetHtml(computeMalzemeOzet(historyLogsToOzetKalemler(options.logs)));
+  const bodyHtml = `${ozetHtml}<table style="width:100%;border-collapse:collapse;font-size:12px">
     <thead><tr style="background:#f1f5f9"><th style="padding:8px;text-align:left">Tarih</th><th style="padding:8px;text-align:left">Tip</th><th style="padding:8px;text-align:left">Detay</th></tr></thead>
     <tbody>${rows}</tbody></table>`;
   return buildKibritciReportHtml({
@@ -185,6 +208,32 @@ async function exportHistoryExcelWorkbook(options: {
   const wb = await createExcelWorkbook();
   wb.creator = KIBRITCI_COMPANY.shortName;
   wb.created = new Date();
+
+  const malzemeOzet = computeMalzemeOzet(historyLogsToOzetKalemler(options.logs));
+  const ozetWs = wb.addWorksheet('ÖZET', {
+    pageSetup: { orientation: 'landscape', paperSize: 9, fitToPage: true, fitToWidth: 1 },
+  });
+  ozetWs.columns = Array.from({ length: 9 }, () => ({ width: 16 }));
+  ozetWs.getCell(1, 1).value = options.title;
+  ozetWs.getCell(1, 1).font = { bold: true, size: 14, color: { argb: 'FF1E3A8A' } };
+  ozetWs.mergeCells(1, 1, 1, 9);
+  ozetWs.getCell(2, 1).value = `${options.logs.length} kayıt  ·  ${new Date().toLocaleString('tr-TR')}`;
+  ozetWs.getCell(2, 1).font = { size: 9, color: { argb: 'FF64748B' } };
+  ozetWs.mergeCells(2, 1, 2, 9);
+  let ozetRow = 4;
+  for (const line of options.meta) {
+    ozetWs.mergeCells(ozetRow, 1, ozetRow, 9);
+    ozetWs.getCell(ozetRow, 1).value = line;
+    ozetWs.getCell(ozetRow, 1).font = { size: 9, color: { argb: 'FF334155' } };
+    ozetRow += 1;
+  }
+  ozetRow += 1;
+  const irsaliyeAdet = options.logs.filter((l) => String(l.type || '').toLocaleUpperCase('tr-TR').includes('İRSALİYE')).length;
+  writeMalzemeOzetSheetContent(ozetWs, malzemeOzet, ozetRow, {
+    kayitAdet: options.logs.length,
+    irsaliyeAdet,
+  });
+
   const ws = wb.addWorksheet('KAYITLAR', {
     pageSetup: { orientation: 'landscape', paperSize: 9, fitToPage: true, fitToWidth: 1 },
   });

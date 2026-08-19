@@ -974,6 +974,10 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
       title: log.title,
       desc: log.desc,
       kalemler: log.kalemler,
+      malzemeTipi: log.malzemeTipi,
+      miktar: log.hizmetMiktar,
+      birim: log.hizmetEtiket,
+      plaka: log.plaka,
     }));
 
   const logsForVisibleReport = () =>
@@ -1072,6 +1076,7 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
           miktar: log.hizmetMiktar,
           birim: log.hizmetEtiket,
           faturaNo: log.bagliFaturaNo,
+          malzemeTipi: log.malzemeTipi,
         })),
       });
       alert(
@@ -1142,56 +1147,48 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
 
   const selectedIrsaliyePreview = useMemo(() => {
     if (selectedIrsaliyeIds.size === 0) return null;
-    const selected = historyList.filter(
-      (h) => h.collection === 'irsaliyeler' && selectedIrsaliyeIds.has(h.id)
+    const selected = historyList.filter((h) => selectedIrsaliyeIds.has(h.id));
+    const selectedLogIds = new Set(selected.map((h) => h.id));
+    const fromProps = irsaliyeler.filter(
+      (ir) => selectedIrsaliyeIds.has(ir.id) && !selectedLogIds.has(ir.id)
     );
-    if (!selected.length) {
-      // Firestore listesi dışında props irsaliyeler yedek
-      const fromProps = irsaliyeler.filter((ir) => selectedIrsaliyeIds.has(ir.id));
-      let ton = 0;
-      let kalemToplam = 0;
-      let kalemSayisi = 0;
-      const byTip: Partial<Record<MicirMalzemeTipi, number>> = {};
-      for (const ir of fromProps) {
-        const h = irsaliyeHizmetMiktari(ir);
-        ton += h.miktar || 0;
-        for (const k of ir.kalemler || []) {
-          kalemToplam += Number(k.miktar) || 0;
-          kalemSayisi += 1;
-        }
-        const tip = resolveMicirMalzemeTipiFromIrsaliye(ir);
-        if (tip) byTip[tip] = (byTip[tip] || 0) + (h.miktar || 0);
-      }
-      return {
-        adet: fromProps.length,
-        ton,
-        kalemToplam,
-        kalemSayisi,
-        byTip,
-        etiket: ton > 0 && Object.keys(byTip).length ? 'ton' : 'hizmet',
-      };
-    }
+    if (!selected.length && !fromProps.length) return null;
+
     let ton = 0;
     let kalemToplam = 0;
     let kalemSayisi = 0;
     const byTip: Partial<Record<MicirMalzemeTipi, number>> = {};
     for (const h of selected) {
-      ton += Number(h.hizmetMiktar) || 0;
+      const miktar = Number(h.hizmetMiktar) || 0;
+      if (h.malzemeTipi || h.hizmetEtiket === 'ton') ton += miktar;
       for (const k of h.kalemler || []) {
         kalemToplam += Number(k.miktar) || 0;
         kalemSayisi += 1;
       }
       if (h.malzemeTipi) {
-        byTip[h.malzemeTipi] = (byTip[h.malzemeTipi] || 0) + (Number(h.hizmetMiktar) || 0);
+        byTip[h.malzemeTipi] = (byTip[h.malzemeTipi] || 0) + miktar;
       }
     }
+    for (const ir of fromProps) {
+      const h = irsaliyeHizmetMiktari(ir);
+      ton += h.miktar || 0;
+      for (const k of ir.kalemler || []) {
+        kalemToplam += Number(k.miktar) || 0;
+        kalemSayisi += 1;
+      }
+      const tip = resolveMicirMalzemeTipiFromIrsaliye(ir);
+      if (tip) byTip[tip] = (byTip[tip] || 0) + (h.miktar || 0);
+    }
+    const irsaliyeAdet =
+      selected.filter((h) => h.collection === 'irsaliyeler').length + fromProps.length;
     return {
-      adet: selected.length,
+      kayitAdet: selectedIrsaliyeIds.size,
+      irsaliyeAdet,
       ton,
       kalemToplam,
       kalemSayisi,
       byTip,
-      etiket: selected.find((x) => x.hizmetEtiket)?.hizmetEtiket || 'ton',
+      etiket: selected.find((x) => x.hizmetEtiket)?.hizmetEtiket || (ton > 0 ? 'ton' : 'hizmet'),
     };
   }, [selectedIrsaliyeIds, historyList, irsaliyeler]);
 
@@ -2721,12 +2718,15 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
                   >
                     <Download size={12} /> Zincir Excel
                   </button>
+                  <span className="self-center text-[9px] font-black uppercase tracking-wider text-blue-900">
+                    Tümünü raporla
+                  </span>
                   <button
                     type="button"
                     onClick={() => void handleTumZamanlarIrsaliyeExcel()}
                     disabled={tumZamanlarBusy}
                     className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-[10px] font-bold bg-blue-900 text-white cursor-pointer disabled:opacity-60"
-                    title="Tüm geçmiş kayıtlar + gelen irsaliyeler — Kibritçi antetli / logolu Excel"
+                    title="Tümünü raporla — tüm geçmiş kayıtlar + gelen irsaliyeler (Mıcır / Taş Tozu / Stabilize özeti)"
                   >
                     <Download size={12} />
                     {tumZamanlarBusy ? 'Excel hazırlanıyor…' : 'Tüm Zamanlar Excel'}
@@ -2735,7 +2735,7 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
                     type="button"
                     onClick={() => void exportLogs('xlsx')}
                     className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-[10px] font-bold bg-emerald-700 text-white cursor-pointer"
-                    title="Açık listedeki tüm kayıtlar — antetli Excel"
+                    title="Tümünü raporla — açık listedeki tüm kayıtlar, antetli Excel (malzeme özeti)"
                   >
                     <Download size={12} /> Excel
                   </button>
@@ -2751,7 +2751,7 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
                     type="button"
                     onClick={() => void exportLogs('html')}
                     className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-[10px] font-bold bg-slate-800 text-white cursor-pointer"
-                    title="Açık listedeki tüm kayıtlar — antetli HTML"
+                    title="Tümünü raporla — açık listedeki tüm kayıtlar, antetli HTML (malzeme özeti)"
                   >
                     <FileText size={12} /> HTML
                   </button>
@@ -2814,7 +2814,10 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
                         Seçim önizleme
                       </p>
                       <p className="font-semibold leading-relaxed">
-                        {selectedIrsaliyePreview.adet} irsaliye
+                        {selectedIrsaliyePreview.kayitAdet} kayıt
+                        {selectedIrsaliyePreview.irsaliyeAdet > 0
+                          ? ` · ${selectedIrsaliyePreview.irsaliyeAdet} irsaliye`
+                          : ''}
                         {selectedIrsaliyePreview.kalemSayisi > 0
                           ? ` · ${selectedIrsaliyePreview.kalemSayisi} kalem`
                           : ''}

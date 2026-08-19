@@ -7,30 +7,19 @@ import { createExcelWorkbook } from './exceljsLoader';
 import { KIBRITCI_COMPANY, loadKibritciLogoDataUrl } from './kibritciBrand';
 import { formatDateLabelTr, normalizeDateKey } from './dateKeyUtils';
 import { findFaturalarForIrsaliye, irsaliyeHizmetMiktari, isGercekFaturaGirisi, isTaslakMaliBagFatura } from './evrakDonusum';
+import {
+  computeMalzemeOzet,
+  writeMalzemeOzetSheetContent,
+  type MalzemeOzetKalem,
+} from './malzemeTonajOzet';
 import { firmaEslesir } from './taseronUtils';
 import {
   malzemeTipiLabel,
   micirMalzemeTipiSortKey,
   resolveMicirMalzemeTipiFromIrsaliye,
-  type MicirMalzemeTipi,
 } from './micirUtils';
 
 const COLS = 16;
-const AY = [
-  '',
-  'OCAK',
-  'ŞUBAT',
-  'MART',
-  'NİSAN',
-  'MAYIS',
-  'HAZİRAN',
-  'TEMMUZ',
-  'AĞUSTOS',
-  'EYLÜL',
-  'EKİM',
-  'KASIM',
-  'ARALIK',
-];
 
 function setFill(cell: { fill?: unknown }, argb: string) {
   cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb } };
@@ -55,12 +44,6 @@ function downloadBuffer(buffer: ArrayBuffer, fileName: string) {
   a.download = fileName;
   a.click();
   URL.revokeObjectURL(url);
-}
-
-function monthTitle(ym: string): string {
-  const [y, m] = ym.split('-');
-  const ay = AY[Number(m)] || m;
-  return y && m ? `${ay} ${y}` : 'Tarihsiz';
 }
 
 function kaynakLabel(ir: Irsaliye): string {
@@ -185,6 +168,7 @@ export type TumZamanlarHistoryRow = {
   miktar?: number;
   birim?: string;
   faturaNo?: string;
+  malzemeTipi?: string | null;
 };
 
 export async function exportIrsaliyeTumZamanlarExcel(opts: {
@@ -200,21 +184,36 @@ export async function exportIrsaliyeTumZamanlarExcel(opts: {
   }
   const faturalar = opts.faturalar || [];
 
-  let toplamTon = 0;
-  const tipMap: Partial<Record<MicirMalzemeTipi | 'DIGER', number>> = {};
-  const ayMap = new Map<string, { adet: number; ton: number }>();
-  for (const ir of irs) {
+  const ozetKalemler: MalzemeOzetKalem[] = irs.map((ir) => {
     const h = irsaliyeHizmetMiktari(ir);
-    const miktar = h.miktar || 0;
-    if (h.etiket === 'ton' || h.birim === 'TON') toplamTon += miktar;
-    const tip = resolveMicirMalzemeTipiFromIrsaliye(ir) || 'DIGER';
-    tipMap[tip] = (tipMap[tip] || 0) + (h.etiket === 'ton' || h.birim === 'TON' ? miktar : 0);
-    const ym = (normalizeDateKey(ir.tarih) || String(ir.tarih || '')).slice(0, 7) || '0000-00';
-    const cur = ayMap.get(ym) || { adet: 0, ton: 0 };
-    cur.adet += 1;
-    if (h.etiket === 'ton' || h.birim === 'TON') cur.ton += miktar;
-    ayMap.set(ym, cur);
+    const tip = resolveMicirMalzemeTipiFromIrsaliye(ir);
+    const linked = findFaturalarForIrsaliye(ir, faturalar);
+    const faturali = Boolean(linked.find((ft) => isGercekFaturaGirisi(ft)) || ir.faturaNo);
+    const onay = String(ir.onayDurumu || '').toLocaleUpperCase('tr-TR');
+    const ton = h.etiket === 'ton' || h.birim === 'TON' ? Number(h.miktar) || 0 : 0;
+    const kg = Number(ir.kiloKg) || (ton ? ton * 1000 : 0);
+    return {
+      tip: tip ?? 'DIGER',
+      ton,
+      kg,
+      faturali,
+      onayli: onay.includes('ONAYLANDI'),
+      plaka: ir.plaka,
+      tarih: ir.tarih,
+    };
+  });
+  const malzemeOzet = computeMalzemeOzet(ozetKalemler);
+  if (historyLogs.length) {
+    const evrak = computeMalzemeOzet(
+      historyLogs.map((log) => ({
+        tip: log.malzemeTipi ?? 'DIGER',
+        ton: 0,
+        evrakTipi: log.type,
+      }))
+    );
+    malzemeOzet.evrakTipleri = evrak.evrakTipleri;
   }
+  const toplamTon = malzemeOzet.toplamTon;
 
   const wb = await createExcelWorkbook();
   wb.creator = KIBRITCI_COMPANY.shortName;
@@ -238,44 +237,10 @@ export async function exportIrsaliyeTumZamanlarExcel(opts: {
   ozet.getCell(row, 1).font = { bold: true, size: 11, color: { argb: 'FF1E3A8A' } };
   row += 1;
 
-  const summary: Array<[string, string | number]> = [
-    ['Toplam geçmiş kayıt', historyLogs.length || irs.length],
-    ['İrsaliye adedi', irs.length],
-    ['Toplam ağırlık (ton)', Number(toplamTon.toFixed(3))],
-    ['Mıcır (ton)', Number((tipMap.MICIR || 0).toFixed(3))],
-    ['Taş tozu (ton)', Number((tipMap.TAS_TOZU || 0).toFixed(3))],
-    ['Stabilize (ton)', Number((tipMap.STABILIZE || 0).toFixed(3))],
-    ['Diğer (ton)', Number((tipMap.DIGER || 0).toFixed(3))],
-  ];
-  for (const [label, val] of summary) {
-    ozet.getCell(row, 1).value = label;
-    ozet.getCell(row, 1).font = { bold: true, size: 10 };
-    ozet.mergeCells(row, 2, row, 4);
-    ozet.getCell(row, 2).value = val;
-    ozet.getCell(row, 2).font = { size: 10, bold: label.startsWith('Toplam') };
-    if (label.startsWith('Toplam')) setFill(ozet.getCell(row, 2), 'FFDBEAFE');
-    row += 1;
-  }
-  row += 1;
-
-  ozet.mergeCells(row, 1, row, 4);
-  ozet.getCell(row, 1).value = 'AYLIK DÖKÜM';
-  ozet.getCell(row, 1).font = { bold: true, size: 11, color: { argb: 'FF1E3A8A' } };
-  row += 1;
-  writeHeaderRow(ozet, row, ['Ay', 'Adet', 'Ton']);
-  row += 1;
-  [...ayMap.entries()]
-    .sort((a, b) => a[0].localeCompare(b[0]))
-    .forEach(([ym, v]) => {
-      const vals = [monthTitle(ym), v.adet, Number(v.ton.toFixed(3))];
-      vals.forEach((val, i) => {
-        const c = ozet.getCell(row, i + 1);
-        c.value = val;
-        c.font = { size: 9 };
-        setBorder(c);
-      });
-      row += 1;
-    });
+  row = writeMalzemeOzetSheetContent(ozet, malzemeOzet, row, {
+    kayitAdet: historyLogs.length || irs.length,
+    irsaliyeAdet: irs.length,
+  });
   writeFooter(ozet, row + 1);
 
   const detay = wb.addWorksheet('İRSALİYELER', {
