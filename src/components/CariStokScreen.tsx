@@ -58,6 +58,7 @@ import {
   type TaslakBirlesimPaketi,
 } from '../lib/taslakBirlesimRapor';
 import { openSeciliIrsaliyeFotoRaporu } from '../lib/irsaliyeTopluFotoRapor';
+import { exportIrsaliyeTumZamanlarExcel } from '../lib/irsaliyeTumZamanlarExcel';
 import {
   irsaliyeNoChainSortKey,
   isEntoMadenFirma,
@@ -200,6 +201,7 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
   const [historyFilter, setHistoryFilter] = useState('ALL');
   const [selectedIrsaliyeIds, setSelectedIrsaliyeIds] = useState<Set<string>>(new Set());
   const [fotoRaporBusy, setFotoRaporBusy] = useState(false);
+  const [tumZamanlarBusy, setTumZamanlarBusy] = useState(false);
   const [detayPayload, setDetayPayload] = useState<EvrakDetayPayload | null>(null);
   const [genericDetail, setGenericDetail] = useState<GenericDetail | null>(null);
   const [detailLoadingId, setDetailLoadingId] = useState<string | null>(null);
@@ -1012,6 +1014,29 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
       alert('Fotoğraflı rapor açılamadı: ' + (err?.message || err));
     } finally {
       setFotoRaporBusy(false);
+    }
+  };
+
+  const handleTumZamanlarIrsaliyeExcel = async () => {
+    if (!selectedCari) {
+      alert('Önce cari kartı seçin.');
+      return;
+    }
+    setTumZamanlarBusy(true);
+    try {
+      const result = await exportIrsaliyeTumZamanlarExcel({
+        cari: selectedCari,
+        irsaliyeler,
+        faturalar,
+      });
+      alert(
+        `Tüm zamanlar Excel indirildi.\n${result.adet} irsaliye · ${result.toplamTon.toLocaleString('tr-TR')} ton\n${result.fileName}`
+      );
+    } catch (err: any) {
+      console.error(err);
+      alert('Tüm zamanlar raporu üretilemedi: ' + (err?.message || err));
+    } finally {
+      setTumZamanlarBusy(false);
     }
   };
 
@@ -2650,6 +2675,16 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
                     title="Kibritçi antetli Excel — toplam ağırlık + SA + irsaliyeler"
                   >
                     <Download size={12} /> Zincir Excel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleTumZamanlarIrsaliyeExcel()}
+                    disabled={tumZamanlarBusy}
+                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-[10px] font-bold bg-blue-900 text-white cursor-pointer disabled:opacity-60"
+                    title="Bu carinin tüm gelen irsaliyeleri — Kibritçi antetli / logolu Excel (özet + döküm + kalemler)"
+                  >
+                    <Download size={12} />
+                    {tumZamanlarBusy ? 'Excel hazırlanıyor…' : 'Tüm Zamanlar Excel'}
                   </button>
                   <button
                     type="button"
