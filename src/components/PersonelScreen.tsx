@@ -592,8 +592,9 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
   const normalizePersonelGorev = (value: string | undefined | null) => {
     const raw = String(value || '').trim();
     const key = normalizeRoleKey(raw);
+    if (!raw) return '';
     if (key === 'ISCI' || key === 'DUZISCI') return 'DÜZ İŞÇİ';
-    return raw || 'DÜZ İŞÇİ';
+    return raw;
   };
 
   // NOT: Tüm kadroyu normalize edip setPersoneller ile senkronlamak
@@ -2206,7 +2207,9 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
                   hint={
                     isAkvizyonFirmaAdi(formData.firmaAdi)
                       ? 'Akvizyon personeli için görev sabittir: GÜVENLİK'
-                      : `${existingGorevOptions.length} kayıtlı görev — listeden seçin veya benzer yazım uyarısını dikkate alın`
+                      : formData.gorev?.trim()
+                        ? `${existingGorevOptions.length} kayıtlı görev — listeden seçin veya benzer yazım uyarısını dikkate alın`
+                        : 'Boş = arafta. Formen / kampçı / tesisatçı / puantaja çıkmaz. Siz doldurunca yoklamaya girer.'
                   }
                 />
                 <SmartCatalogField

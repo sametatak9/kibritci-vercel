@@ -8,7 +8,8 @@ import {
   buildSeramikPersonelListForMonth,
   getYoklamaDay, 
   isEligibleForDailyYoklama, 
-  isTaseronPersonel, 
+  isTaseronPersonel,
+  isGorevsizPersonel,
   setYoklamaDay, 
   isKampciYoklamaKapsami,
   isTesisatciGorev,
@@ -95,7 +96,7 @@ export const KampGunlukYoklamaTab: React.FC<KampGunlukYoklamaTabProps> = ({
         if (!isSeramikEkibiPersonel(p)) return false;
         return isEligibleForDailyYoklama(p, year, month, day);
       }
-      if (isTaseronPersonel(p)) return false;
+      if (isTaseronPersonel(p) || isGorevsizPersonel(p)) return false;
       if (personelKapsami === 'tesisatci') {
         if (!isTesisatciGorev(p.gorev)) return false;
       } else if (personelKapsami === 'mermerci') {

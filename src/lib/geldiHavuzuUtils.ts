@@ -5,6 +5,7 @@ import {
   findPersonelByName,
   getYoklamaDay,
   isIdariPersonel,
+  isGorevsizPersonel,
   isKampciGorev,
   isTaseronPersonel,
   normalizeTurkishName,
@@ -70,7 +71,7 @@ export function buildGeldiHavuzu(
   const { y, m, d } = parts;
   return personeller
     .filter((p) => {
-      if (isTaseronPersonel(p) || isIdariPersonel(p)) return false;
+      if (isTaseronPersonel(p) || isIdariPersonel(p) || isGorevsizPersonel(p)) return false;
       const aktif = p.durum === true || String(p.durum).toLowerCase() === 'true';
       if (!aktif) return false;
       if (String(p.istenCikisTarihi || '').trim()) return false;

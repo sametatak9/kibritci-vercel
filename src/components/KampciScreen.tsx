@@ -33,6 +33,7 @@ import {
   isSoforGorev,
   isOperatorGorev,
   isIdariPersonel,
+  isGorevsizPersonel,
   getYoklamaDay,
   setYoklamaDay,
 } from '../lib/yoklamaUtils';
@@ -114,7 +115,7 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
 
   const filterKampciPersonel = React.useCallback(
     (p: Personel) => {
-      if (isTaseronPersonel(p) || isIdariPersonel(p)) return false;
+      if (isTaseronPersonel(p) || isIdariPersonel(p) || isGorevsizPersonel(p)) return false;
       // Şöför / operatör kendi yoklamalarında; kampçı listesinde görünmez
       if (isSoforGorev(p.gorev) || isOperatorGorev(p.gorev)) return false;
       // Kampçı + Şenör
@@ -1713,7 +1714,7 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
     const dk = todayDateKey();
     const [y, m, d] = dk.split('-').map(Number);
     const base = personeller.filter((p) => {
-      if (isTaseronPersonel(p) || isIdariPersonel(p)) return false;
+      if (isTaseronPersonel(p) || isIdariPersonel(p) || isGorevsizPersonel(p)) return false;
       if (isSoforGorev(p.gorev) || isOperatorGorev(p.gorev)) return false;
       if (!isKampciYoklamaKapsami(p.gorev)) return false;
       const day = getYoklamaDay(yoklamalar[p.id], y, m, d);

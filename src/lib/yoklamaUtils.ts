@@ -524,6 +524,11 @@ export function isIdariPersonel(p?: Personel): boolean {
   return dep === 'IDARI' || dep.includes('IDARI PERSONEL') || dep === 'OFIS / IDARI';
 }
 
+/** Görev/ünvan boş — SGK entegrasyonu arafta kaydı; hiçbir yoklama modülüne girmez */
+export function isGorevsizPersonel(p?: Personel): boolean {
+  return !String(p?.gorev || '').trim();
+}
+
 /**
  * Faaliyeti Olan Personeller kapsamı:
  * Ana firma saha işçileri + Götürü/seramik ekibi (taşeron SERAMİK EKİBİ dahil).
@@ -532,6 +537,7 @@ export function isIdariPersonel(p?: Personel): boolean {
 export function isFaaliyetPersonelKapsaminda(p?: Personel): boolean {
   if (!p) return false;
   if (isIdariPersonel(p)) return false;
+  if (isGorevsizPersonel(p)) return false;
   if (isFormenGorev(p.gorev)) return false;
   // Götürü / seramik ekibi taşeron olsa da saha takibine dahil
   if (isSeramikEkibiPersonel(p)) return true;
@@ -597,7 +603,7 @@ export function buildPersonelListForMonth(
   personeller.forEach(p => {
     // Taşeron + idari kadro yoklama/puantaj listesine girmez.
     // Götürü / seramik ekibi ayrı koleksiyonda (goturuYoklamalari) tutulur.
-    if (isTaseronPersonel(p) || isIdariPersonel(p) || isSeramikEkibiPersonel(p) || isPendingKampPersonel(p)) return;
+    if (isTaseronPersonel(p) || isIdariPersonel(p) || isGorevsizPersonel(p) || isSeramikEkibiPersonel(p) || isPendingKampPersonel(p)) return;
     if (isPersonelVisibleInMonth(p, year, month, asYoklamaGunMap(yoklamalar[p.id]))) ids.add(p.id);
   });
   Object.entries(yoklamalar).forEach(([id, map]) => {
@@ -605,7 +611,7 @@ export function buildPersonelListForMonth(
     // Bu, "kayıtlı olmayan personel yoklamada görünüyor" ve mükerrer satır riskini azaltır.
     const existing = byId.get(id);
     if (!existing) return;
-    if (isTaseronPersonel(existing) || isIdariPersonel(existing) || isSeramikEkibiPersonel(existing) || isPendingKampPersonel(existing)) return;
+    if (isTaseronPersonel(existing) || isIdariPersonel(existing) || isGorevsizPersonel(existing) || isSeramikEkibiPersonel(existing) || isPendingKampPersonel(existing)) return;
     const personMap = asYoklamaGunMap(map);
     if (!personHasYoklamaInMonth(personMap, year, month)) return;
     if (!isPersonelVisibleInMonth(existing, year, month, personMap)) return;

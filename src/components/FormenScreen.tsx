@@ -10,7 +10,7 @@ import { Personel, AylikYoklamaMap, YoklamaDurum, SahaFaaliyeti as SahaFaaliyeti
 import { db, saveDocument } from '../lib/firebase';
 import { assertErpWriteAuth, formatFirestoreWriteError } from '../lib/authWriteGuard';
 import { compressImage } from '../lib/imageCompress';
-import { buildPersonelListForMonth, getYoklamaDay, isEligibleForDailyYoklama, isTaseronPersonel, isIdariPersonel, setYoklamaDay, isKampciTesisatciMermerci, isSoforGorev, isOperatorGorev, isSeramikEkibiPersonel } from '../lib/yoklamaUtils';
+import { buildPersonelListForMonth, getYoklamaDay, isEligibleForDailyYoklama, isTaseronPersonel, isIdariPersonel, isGorevsizPersonel, setYoklamaDay, isKampciTesisatciMermerci, isSoforGorev, isOperatorGorev, isSeramikEkibiPersonel } from '../lib/yoklamaUtils';
 import { buildFormenGunlukOzet } from '../lib/gunlukAkisUtils';
 import { buildWhatsAppUrl, isLegacySahaRecord } from '../lib/mobilOnayUtils';
 import {
@@ -183,7 +183,7 @@ export const FormenScreen: React.FC<FormenScreenProps> = ({
   });
 
   const filterFormenPuantajPersonel = React.useCallback((p: Personel) => {
-    if (isTaseronPersonel(p) || isIdariPersonel(p)) return false;
+    if (isTaseronPersonel(p) || isIdariPersonel(p) || isGorevsizPersonel(p)) return false;
     if (isSoforGorev(p.gorev) || isOperatorGorev(p.gorev)) return false;
     if (isKampciTesisatciMermerci(p.gorev)) return false;
     if (isSeramikEkibiPersonel(p)) return false;
@@ -271,7 +271,7 @@ export const FormenScreen: React.FC<FormenScreenProps> = ({
   const activeStaff = useMemo(
     () =>
       monthPersonelList.filter((p) => {
-        if (isTaseronPersonel(p) || isIdariPersonel(p)) return false;
+        if (isTaseronPersonel(p) || isIdariPersonel(p) || isGorevsizPersonel(p)) return false;
         if (isSoforGorev(p.gorev) || isOperatorGorev(p.gorev)) return false;
         if (isKampciTesisatciMermerci(p.gorev)) return false;
         if (isSeramikEkibiPersonel(p)) return false;
@@ -2958,7 +2958,7 @@ _Lütfen bu personelin sigorta giriş işlemlerini başlatınız._`}
                     <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-2">
                       <div className="flex items-center space-x-2 text-slate-950">
                         <Users size={14} className="text-amber-500" />
-                        <span className="font-bold text-[10px] uppercase tracking-wider">ŞANTİYE PERSONEL LİSTESİ ({personeller.filter(p => (p.durum === true || String(p.durum).toLowerCase() === 'true') && !isTaseronPersonel(p) && !isIdariPersonel(p)).length})</span>
+                        <span className="font-bold text-[10px] uppercase tracking-wider">ŞANTİYE PERSONEL LİSTESİ ({personeller.filter(p => (p.durum === true || String(p.durum).toLowerCase() === 'true') && !isTaseronPersonel(p) && !isIdariPersonel(p) && !isGorevsizPersonel(p)).length})</span>
                       </div>
                       
                       {/* Search Personnel */}
@@ -2976,7 +2976,7 @@ _Lütfen bu personelin sigorta giriş işlemlerini başlatınız._`}
 
                     <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
                       {personeller
-                        .filter(p => (p.durum === true || String(p.durum).toLowerCase() === 'true') && !isTaseronPersonel(p) && !isIdariPersonel(p))
+                        .filter(p => (p.durum === true || String(p.durum).toLowerCase() === 'true') && !isTaseronPersonel(p) && !isIdariPersonel(p) && !isGorevsizPersonel(p))
                         .filter(p => {
                           const q = personelSearchKeyword.toLowerCase().trim();
                           if (!q) return true;

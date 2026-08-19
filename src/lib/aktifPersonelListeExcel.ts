@@ -23,6 +23,7 @@ import {
   getYoklamaDay,
   isDayActiveForPersonel,
   isIdariPersonel,
+  isGorevsizPersonel,
   isPersonelActiveInDateRange,
   isSeramikEkibiPersonel,
   isTaseronPersonel,
@@ -105,7 +106,7 @@ export function collectAktifAnaFirmaPersonelNow(personeller: Personel[]): Person
 
 /** Aralık yoklama raporu: Kibritçi saha (idari / taşeron / seramik ekibi yok). */
 export function isAralikYoklamaSahaPersonel(p: Personel): boolean {
-  return !isTaseronPersonel(p) && !isIdariPersonel(p) && !isSeramikEkibiPersonel(p);
+  return !isTaseronPersonel(p) && !isIdariPersonel(p) && !isGorevsizPersonel(p) && !isSeramikEkibiPersonel(p);
 }
 
 export function collectAralikYoklamaSahaPersonel(

@@ -6,7 +6,7 @@ import { buildDayPersonelRaporu, resolveFaaliyetEkip } from './faaliyetPersonelU
 import { ilerlemeDurumuLabel, normalizeFaaliyetEtiketi } from './faaliyetEtiketUtils';
 import { getFaaliyetTumFotolar } from './sahaFaaliyetUtils';
 import { saveDocument } from './firebase';
-import { getYoklamaDay, isIdariPersonel, isTaseronPersonel } from './yoklamaUtils';
+import { getYoklamaDay, isIdariPersonel, isGorevsizPersonel, isTaseronPersonel } from './yoklamaUtils';
 import { normalizeGorev } from './gorevUtils';
 
 function escapeHtml(value: string): string {
@@ -109,7 +109,7 @@ function buildYoklamaSectionHtml(options: {
   const geldiPersoneller: Personel[] = [];
 
   for (const p of options.personeller || []) {
-    if (isTaseronPersonel(p) || isIdariPersonel(p)) continue;
+    if (isTaseronPersonel(p) || isIdariPersonel(p) || isGorevsizPersonel(p)) continue;
     const aktif = p.durum === true || String(p.durum).toLowerCase() === 'true';
     if (!aktif) continue;
     if (String(p.istenCikisTarihi || '').trim()) continue;

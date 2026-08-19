@@ -49,7 +49,7 @@ import { exportHistoryReport } from '../lib/reportExport';
 import { collection, onSnapshot, getDocs, doc, setDoc, updateDoc, arrayUnion } from 'firebase/firestore';
 import { PARSEL_BLOK_MAP, defaultBlokForParsel } from '../data/parselBlokMap';
 import { normalizeDateKey, todayDateKey } from '../lib/dateKeyUtils';
-import { getYoklamaDay, isTaseronPersonel, isIdariPersonel } from '../lib/yoklamaUtils';
+import { getYoklamaDay, isTaseronPersonel, isIdariPersonel, isGorevsizPersonel } from '../lib/yoklamaUtils';
 import {
   applySahaMesaiToYoklama,
   formatMesaiFaaliyetLabel,
@@ -961,7 +961,7 @@ export const IdariScreen: React.FC<IdariScreenProps> = ({
     const { y, m, d } = sahaKayitDateParts;
     if (!y || !m || !d) return [] as Personel[];
     return personeller.filter((p) => {
-      if (isTaseronPersonel(p) || isIdariPersonel(p)) return false;
+      if (isTaseronPersonel(p) || isIdariPersonel(p) || isGorevsizPersonel(p)) return false;
       const dayData = getYoklamaDay(yoklamalar[p.id], y, m, d);
       return dayData?.durum === 'Geldi';
     });
@@ -5171,7 +5171,7 @@ export const IdariScreen: React.FC<IdariScreenProps> = ({
                 const d = parseInt(parts[2], 10);
 
                 const activePersonel = personeller.filter(
-                  (p) => (p.durum === true || String(p.durum) === 'true') && !isTaseronPersonel(p) && !isIdariPersonel(p)
+                  (p) => (p.durum === true || String(p.durum) === 'true') && !isTaseronPersonel(p) && !isIdariPersonel(p) && !isGorevsizPersonel(p)
                 );
                 let countGeldi = 0;
                 let countYok = 0;
@@ -5296,7 +5296,7 @@ export const IdariScreen: React.FC<IdariScreenProps> = ({
                   const d = parseInt(parts[2], 10);
 
                   const activePersonel = personeller.filter(
-                    (p) => (p.durum === true || String(p.durum) === 'true') && !isTaseronPersonel(p) && !isIdariPersonel(p)
+                    (p) => (p.durum === true || String(p.durum) === 'true') && !isTaseronPersonel(p) && !isIdariPersonel(p) && !isGorevsizPersonel(p)
                   );
                   const sahadakiAktifKadro = activePersonel.filter(p => {
                     const dayData = getYoklamaDay(yoklamalar[p.id], y, m, d);

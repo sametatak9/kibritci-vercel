@@ -438,12 +438,14 @@ export const AKVIZYON_GOREV = 'GÜVENLİK';
 /** Akvizyon güvenlik firması — görev her zaman GÜVENLİK olmalı */
 export function resolveAkvizyonGorev(firmaAdi?: string | null, currentGorev?: string | null): string {
   if (isAkvizyonFirmaAdi(firmaAdi)) return AKVIZYON_GOREV;
-  return String(currentGorev || '').trim() || 'DÜZ İŞÇİ';
+  return String(currentGorev || '').trim();
 }
 
 /** Kadro görevi (nitelik hariç) — puantaj / USTA grubu bununla hesaplanır */
 export function kadroPersonelGorev(p?: Personel): string {
   if (!p) return '—';
+  const raw = String(p.gorev || '').trim();
+  if (!raw) return '';
   return normalizeGorev(resolveAkvizyonGorev(p.firmaAdi, p.gorev));
 }
 
@@ -455,6 +457,8 @@ export function displayPersonelGorev(p?: Personel): string {
   if (!p) return '—';
   const gorev = kadroPersonelGorev(p);
   const nitelik = displayPersonelNitelik(p);
+  if (!gorev && nitelik) return `— · ${nitelik}`;
+  if (!gorev) return '—';
   if (!nitelik) return gorev || '—';
   const n = nitelik.toLocaleUpperCase('tr-TR');
   if (!n || n === gorev.toLocaleUpperCase('tr-TR')) return gorev || '—';

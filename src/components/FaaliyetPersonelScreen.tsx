@@ -503,7 +503,7 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
       const { submitFaaliyetGunSonuRapor, openFaaliyetGunSonuReport } = await import(
         '../lib/faaliyetGunSonuRapor'
       );
-      const { getYoklamaDay, isIdariPersonel, isTaseronPersonel } = await import(
+      const { getYoklamaDay, isIdariPersonel, isGorevsizPersonel, isTaseronPersonel } = await import(
         '../lib/yoklamaUtils'
       );
       const parts = selectedDate.split('-').map(Number);
@@ -512,7 +512,7 @@ export const FaaliyetPersonelScreen: React.FC<FaaliyetPersonelScreenProps> = ({
       let izinli = 0;
       let raporlu = 0;
       for (const p of personeller) {
-        if (isTaseronPersonel(p) || isIdariPersonel(p)) continue;
+        if (isTaseronPersonel(p) || isIdariPersonel(p) || isGorevsizPersonel(p)) continue;
         const aktif = p.durum === true || String(p.durum).toLowerCase() === 'true';
         if (!aktif || String(p.istenCikisTarihi || '').trim()) continue;
         const day = getYoklamaDay(yoklamalar[p.id], parts[0], parts[1], parts[2]);

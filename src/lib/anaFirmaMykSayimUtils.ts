@@ -6,6 +6,7 @@ import {
   canonicalizeAnaFirmaAdi,
   isFormenGorev,
   isIdariPersonel,
+  isGorevsizPersonel,
   isTaseronPersonel,
 } from './yoklamaUtils';
 
@@ -29,6 +30,7 @@ export function isPersonelAktifKayit(p: Personel): boolean {
 export function isAnaFirmaMykSayimPersoneli(p: Personel): boolean {
   if (isTaseronPersonel(p)) return false;
   if (isIdariPersonel(p)) return false;
+  if (isGorevsizPersonel(p)) return false;
   if (!isPersonelAktifKayit(p)) return false;
   return isAnaFirmaMykSayimGorevi(p.gorev);
 }

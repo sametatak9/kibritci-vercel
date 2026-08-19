@@ -7,6 +7,7 @@ import { normalizeDateKey } from './dateKeyUtils';
 import {
   getYoklamaDay,
   isIdariPersonel,
+  isGorevsizPersonel,
   isKampciYoklamaKapsami,
   isMermerciGorev,
   isOperatorGorev,
@@ -98,6 +99,7 @@ export function resolveGeldiRolPersonelIds(
   for (const p of personeller || []) {
     if (!isAktifPersonel(p)) continue;
     if (isIdariPersonel(p)) continue;
+    if (isGorevsizPersonel(p)) continue;
     if (rol === 'SERAMIK') {
       if (!isSeramikEkibiPersonel(p)) continue;
     } else {
