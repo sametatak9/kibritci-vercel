@@ -3,9 +3,10 @@ import {
   downloadKibritciReportHtml,
   openKibritciReportPrint,
 } from './kibritciReportTemplate';
-import { loadKibritciReportAssets, type KibritciReportAssets } from './kibritciBrand';
+import { KIBRITCI_COMPANY, loadKibritciLogoDataUrl, loadKibritciReportAssets, type KibritciReportAssets } from './kibritciBrand';
+import { createExcelWorkbook } from './exceljsLoader';
 
-export type ReportExportFormat = 'html' | 'csv' | 'txt';
+export type ReportExportFormat = 'html' | 'csv' | 'txt' | 'xlsx';
 
 export interface HistoryLogKalemRow {
   urunAdi: string;
@@ -132,6 +133,11 @@ export async function exportHistoryReport(options: {
     return;
   }
 
+  if (options.format === 'xlsx') {
+    await exportHistoryExcelWorkbook(options);
+    return;
+  }
+
   if (options.format === 'html') {
     // Görselleri base64 gömerek indirilen HTML'de de antet/logo/filigranın görünmesini sağla
     const assets = await loadKibritciReportAssets();
@@ -168,6 +174,132 @@ export async function exportHistoryReport(options: {
     ],
     `${options.fileBase}.txt`
   );
+}
+
+async function exportHistoryExcelWorkbook(options: {
+  title: string;
+  fileBase: string;
+  meta: string[];
+  logs: HistoryLogRow[];
+}): Promise<void> {
+  const wb = await createExcelWorkbook();
+  wb.creator = KIBRITCI_COMPANY.shortName;
+  wb.created = new Date();
+  const ws = wb.addWorksheet('KAYITLAR', {
+    pageSetup: { orientation: 'landscape', paperSize: 9, fitToPage: true, fitToWidth: 1 },
+  });
+  ws.columns = [
+    { width: 5 },
+    { width: 14 },
+    { width: 18 },
+    { width: 36 },
+    { width: 48 },
+    { width: 28 },
+    { width: 12 },
+    { width: 10 },
+    { width: 14 },
+    { width: 14 },
+  ];
+
+  ws.getRow(1).height = 58;
+  ws.mergeCells(1, 1, 2, 3);
+  const logoDataUrl = await loadKibritciLogoDataUrl();
+  const logoBase64 = logoDataUrl?.replace(/^data:image\/png;base64,/i, '') || null;
+  if (logoBase64) {
+    const logoId = wb.addImage({ base64: logoBase64, extension: 'png' });
+    ws.addImage(logoId, { tl: { col: 0.1, row: 0.1 }, ext: { width: 168, height: 64 } });
+  } else {
+    ws.getCell(1, 1).value = KIBRITCI_COMPANY.shortName;
+    ws.getCell(1, 1).font = { bold: true, size: 14, color: { argb: 'FF1E3A8A' } };
+  }
+  ws.mergeCells(1, 4, 1, 10);
+  ws.getCell(1, 4).value = options.title;
+  ws.getCell(1, 4).font = { bold: true, size: 14, color: { argb: 'FF0F172A' } };
+  ws.getCell(1, 4).alignment = { horizontal: 'right', vertical: 'middle' };
+  ws.mergeCells(2, 4, 2, 10);
+  ws.getCell(2, 4).value = `${options.logs.length} kayıt  ·  ${new Date().toLocaleString('tr-TR')}`;
+  ws.getCell(2, 4).font = { size: 9, color: { argb: 'FF64748B' } };
+  ws.getCell(2, 4).alignment = { horizontal: 'right', vertical: 'middle' };
+  ws.mergeCells(3, 1, 3, 10);
+  ws.getCell(3, 1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E3A8A' } };
+  ws.getRow(3).height = 4;
+  ws.mergeCells(4, 1, 4, 10);
+  ws.getCell(4, 1).value = KIBRITCI_COMPANY.legalName;
+  ws.getCell(4, 1).font = { bold: true, size: 8, color: { argb: 'FF334155' } };
+  ws.mergeCells(5, 1, 5, 10);
+  ws.getCell(5, 1).value = `${KIBRITCI_COMPANY.address}  ·  ${KIBRITCI_COMPANY.phone}  ·  ${KIBRITCI_COMPANY.email}`;
+  ws.getCell(5, 1).font = { size: 7, color: { argb: 'FF64748B' } };
+  let row = 7;
+  for (const line of options.meta) {
+    ws.mergeCells(row, 1, row, 10);
+    ws.getCell(row, 1).value = line;
+    ws.getCell(row, 1).font = { size: 9, color: { argb: 'FF334155' } };
+    row += 1;
+  }
+  row += 1;
+  const headers = [
+    '#',
+    'Tarih',
+    'Tip',
+    'Belge / Başlık',
+    'Açıklama',
+    'Ürün / Kalem',
+    'Miktar',
+    'Birim',
+    'Birim Fiyat',
+    'Toplam',
+  ];
+  headers.forEach((h, i) => {
+    const c = ws.getCell(row, i + 1);
+    c.value = h;
+    c.font = { bold: true, size: 9, color: { argb: 'FFFFFFFF' } };
+    c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E3A8A' } };
+  });
+  const headerRow = row;
+  row += 1;
+  let n = 0;
+  for (const log of options.logs) {
+    const kalemler = log.kalemler?.length ? log.kalemler : [{ urunAdi: '' }];
+    for (const k of kalemler) {
+      n += 1;
+      const vals = [
+        n,
+        log.date,
+        log.type,
+        log.title,
+        log.desc,
+        k.urunAdi || '',
+        k.miktar != null ? String(k.miktar) : '',
+        k.birim || '',
+        k.birimFiyat != null ? String(k.birimFiyat) : '',
+        k.toplam != null ? String(k.toplam) : '',
+      ];
+      vals.forEach((v, i) => {
+        const c = ws.getCell(row, i + 1);
+        c.value = v;
+        c.font = { size: 8 };
+        if (n % 2 === 0) {
+          c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } };
+        }
+      });
+      row += 1;
+    }
+  }
+  ws.autoFilter = {
+    from: { row: headerRow, column: 1 },
+    to: { row: Math.max(headerRow, row - 1), column: headers.length },
+  };
+  ws.views = [{ state: 'frozen', ySplit: headerRow }];
+  const buffer = await wb.xlsx.writeBuffer();
+  const blob = new Blob([buffer as ArrayBuffer], {
+    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${options.fileBase}.xlsx`;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 function escapeHtml(value: string): string {

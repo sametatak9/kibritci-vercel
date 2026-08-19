@@ -7,7 +7,7 @@ import { collection, deleteField, doc, getDoc, getDocs, updateDoc, writeBatch } 
 import { CariKart, Fatura, Irsaliye, Personel, SatinAlmaTalebi, StokKart, StokKartIslem, CariKartIslem } from '../types/erp';
 import { db, removeDocument } from '../lib/firebase';
 import { warnIfDuplicateCari, warnIfDuplicateStok } from '../lib/duplicateNameUtils';
-import { exportHistoryReport } from '../lib/reportExport';
+import { exportHistoryReport, type ReportExportFormat } from '../lib/reportExport';
 import { firmaEslesir, personelForCariKart } from '../lib/taseronUtils';
 import { findDuplicateCariler, mergeDuplicateCarilerFor } from '../lib/cariKartDedupUtils';
 import { displayPersonelGorev, isPersonelActiveOnDate } from '../lib/guvenlikHelpers';
@@ -967,18 +967,48 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
     }
   };
 
+  const historyRowsForExport = (logs: HistoryLog[]) =>
+    logs.map((log) => ({
+      date: formatDateLabelTr(log.date) || log.date,
+      type: log.type,
+      title: log.title,
+      desc: log.desc,
+      kalemler: log.kalemler,
+    }));
+
+  const logsForVisibleReport = () =>
+    filteredHistory.length ? filteredHistory : historyList;
+
   const handleTaslakPaketRapor = async (mode: 'html' | 'excel') => {
     let paketler = paketlerForSelectedIrsaliyeler(tumBirlesimPaketleri, selectedIrsaliyeIds);
     if (!paketler.length && historyFilter === 'TASLAK BAĞ') paketler = taslakPaketler;
     if (!paketler.length && tumBirlesimPaketleri.length) {
-      const ok = window.confirm(
-        `Seçim yok. Tüm ${tumBirlesimPaketleri.length} birleşim paketi rapora alınsın mı?`
-      );
-      if (!ok) return;
       paketler = tumBirlesimPaketleri;
     }
     if (!paketler.length) {
-      alert('Rapor için birleşim paketi bulunamadı.');
+      const logs = logsForVisibleReport();
+      if (!logs.length) {
+        alert('Rapor için kayıt bulunamadı.');
+        return;
+      }
+      try {
+        await exportHistoryReport({
+          title: selectedCari
+            ? `Cari Geçmiş Raporu — ${selectedCari.unvan}`
+            : 'Kart Geçmiş Hareket Raporu',
+          fileBase: `Kibritci_Cari_Gecmis_${selectedCari?.id || 'kart'}`,
+          meta: [
+            `Kart: ${selectedCari?.unvan || ''}`,
+            `Kayıt: ${logs.length}`,
+            `Rapor Tarihi: ${new Date().toLocaleString('tr-TR')}`,
+          ],
+          logs: historyRowsForExport(logs),
+          format: mode === 'excel' ? 'xlsx' : 'html',
+        });
+      } catch (err: any) {
+        console.error(err);
+        alert('Rapor üretilemedi: ' + (err?.message || err));
+      }
       return;
     }
     try {
@@ -997,9 +1027,12 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
   };
 
   const handleSeciliIrsaliyeFotoRapor = async () => {
-    const ids = [...selectedIrsaliyeIds];
+    const fromSel = irsaliyeler.filter((ir) => selectedIrsaliyeIds.has(ir.id)).map((ir) => ir.id);
+    const ids = fromSel.length
+      ? fromSel
+      : filteredHistory.filter((h) => h.collection === 'irsaliyeler').map((h) => h.id);
     if (!ids.length) {
-      alert('Fotoğraflı rapor için listeden irsaliye işaretleyin.');
+      alert('Fotoğraflı rapor için irsaliye kaydı yok.');
       return;
     }
     setFotoRaporBusy(true);
@@ -1024,13 +1057,25 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
     }
     setTumZamanlarBusy(true);
     try {
+      const logs = historyList.length ? historyList : logsForVisibleReport();
       const result = await exportIrsaliyeTumZamanlarExcel({
         cari: selectedCari,
         irsaliyeler,
         faturalar,
+        historyLogs: logs.map((log) => ({
+          date: formatDateLabelTr(log.date) || log.date,
+          type: log.type,
+          title: log.title,
+          desc: log.desc,
+          irsaliyeNo: log.irsaliyeNo,
+          plaka: log.plaka,
+          miktar: log.hizmetMiktar,
+          birim: log.hizmetEtiket,
+          faturaNo: log.bagliFaturaNo,
+        })),
       });
       alert(
-        `Tüm zamanlar Excel indirildi.\n${result.adet} irsaliye · ${result.toplamTon.toLocaleString('tr-TR')} ton\n${result.fileName}`
+        `Tüm zamanlar Excel indirildi.\n${result.kayit} kayıt · ${result.adet} irsaliye · ${result.toplamTon.toLocaleString('tr-TR')} ton\n${result.fileName}`
       );
     } catch (err: any) {
       console.error(err);
@@ -1165,27 +1210,36 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
     });
   };
 
-  const visibleIrsaliyeIds = useMemo(() => {
+  const visibleRowIds = useMemo(() => {
     if (historyFilter === 'TASLAK BAĞ') {
-      return [...new Set(taslakPaketler.flatMap((p) => p.irsaliyeler.map((ir) => ir.id)))];
+      const paketIds = taslakPaketler.flatMap((p) => p.irsaliyeler.map((ir) => ir.id));
+      const logIds = filteredHistory.map((h) => h.id);
+      return [...new Set([...logIds, ...paketIds])];
     }
-    return filteredHistory.filter((h) => h.collection === 'irsaliyeler').map((h) => h.id);
+    return [...new Set(filteredHistory.map((h) => h.id))];
   }, [historyFilter, taslakPaketler, filteredHistory]);
 
-  const allVisibleIrsaliyeSelected =
-    visibleIrsaliyeIds.length > 0 && visibleIrsaliyeIds.every((id) => selectedIrsaliyeIds.has(id));
+  const allVisibleRowsSelected =
+    visibleRowIds.length > 0 && visibleRowIds.every((id) => selectedIrsaliyeIds.has(id));
+
+  const selectedActualIrsaliyeCount = useMemo(
+    () =>
+      historyList.filter((h) => h.collection === 'irsaliyeler' && selectedIrsaliyeIds.has(h.id))
+        .length,
+    [historyList, selectedIrsaliyeIds]
+  );
 
   const toggleSelectAllVisibleIrsaliyeler = () => {
-    if (!visibleIrsaliyeIds.length) {
-      alert('Bu listede seçilecek irsaliye yok. İRSALİYE sekmesine geçin veya birleşim paketine bakın.');
+    if (!visibleRowIds.length) {
+      alert('Bu listede seçilecek kayıt yok.');
       return;
     }
-    if (allVisibleIrsaliyeSelected) setSelectedIrsaliyeIds(new Set());
-    else setSelectedIrsaliyeIds(new Set(visibleIrsaliyeIds));
+    if (allVisibleRowsSelected) setSelectedIrsaliyeIds(new Set());
+    else setSelectedIrsaliyeIds(new Set(visibleRowIds));
   };
 
   const toggleSelectMonthIrsaliyeler = (items: HistoryLog[]) => {
-    const ids = items.filter((h) => h.collection === 'irsaliyeler').map((h) => h.id);
+    const ids = items.map((h) => h.id);
     if (!ids.length) return;
     setSelectedIrsaliyeIds((prev) => {
       const next = new Set(prev);
@@ -1431,24 +1485,20 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
     }
   };
 
-  const handleOpenZincirRaporuFromCari = () => {
+  const resolveZincirFocusIds = (): string[] => {
     const selected = irsaliyeler.filter((ir) => selectedIrsaliyeIds.has(ir.id));
-    const birlestirilenLogs = historyList.filter(
-      (h) => h.collection === 'irsaliyeler' && (h.birlestirilmis || Boolean(h.bagliFaturaNo))
-    );
-    let focusIds: string[] = [];
-    if (selected.length) {
-      focusIds = selected.map((ir) => ir.id);
-    } else if (historyFilter === 'BİRLEŞTİRİLEN' && birlestirilenLogs.length) {
-      focusIds = birlestirilenLogs.map((h) => h.id);
-    } else if (birlestirilenLogs.length) {
-      const ok = window.confirm(
-        `Seçim yok.\n\n${birlestirilenLogs.length} birleştirilmiş irsaliye için zincir raporu açılsın mı?\n(Tüm 205 irsaliye yerine yalnızca birleştirilenler.)`
-      );
-      if (!ok) return;
-      focusIds = birlestirilenLogs.map((h) => h.id);
-    } else {
-      alert('Zincir raporu için önce irsaliye seçin veya faturaya birleştirin.');
+    if (selected.length) return selected.map((ir) => ir.id);
+    const visibleIrs = filteredHistory
+      .filter((h) => h.collection === 'irsaliyeler')
+      .map((h) => h.id);
+    if (visibleIrs.length) return visibleIrs;
+    return historyList.filter((h) => h.collection === 'irsaliyeler').map((h) => h.id);
+  };
+
+  const handleOpenZincirRaporuFromCari = () => {
+    const focusIds = resolveZincirFocusIds();
+    if (!focusIds.length) {
+      alert('Zincir raporu için irsaliye kaydı yok.');
       return;
     }
     const focusSet = new Set(focusIds);
@@ -1851,28 +1901,36 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
     }
   };
 
-  const exportLogs = async (format: 'csv' | 'html') => {
+  const exportLogs = async (format: ReportExportFormat) => {
     const card = csTab === 'cari' ? selectedCari : selectedStok;
-    if (!card) return;
+    if (!card) {
+      alert('Önce kart seçin.');
+      return;
+    }
+    const logs = logsForVisibleReport();
+    if (!logs.length) {
+      alert('Raporlanacak kayıt yok.');
+      return;
+    }
     const name = csTab === 'cari' ? (card as CariKart).unvan : (card as StokKart).stokAdi;
-    await exportHistoryReport({
-      title: 'Kart Geçmiş Hareket Raporu',
-      fileBase: `Kibritci_${csTab === 'cari' ? 'Cari' : 'Stok'}_Gecmis_${card.id}`,
-      meta: [
-        `Kart Tipi: ${csTab === 'cari' ? 'Cari Firma' : 'Stok Malzeme'}`,
-        `Kart Adı: ${name}`,
-        `Kart ID: ${card.id}`,
-        `Rapor Tarihi: ${new Date().toLocaleString('tr-TR')}`,
-      ],
-      logs: historyList.map((log) => ({
-        date: log.date,
-        type: log.type,
-        title: log.title,
-        desc: log.desc,
-        kalemler: log.kalemler,
-      })),
-      format,
-    });
+    try {
+      await exportHistoryReport({
+        title: 'Kart Geçmiş Hareket Raporu',
+        fileBase: `Kibritci_${csTab === 'cari' ? 'Cari' : 'Stok'}_Gecmis_${card.id}`,
+        meta: [
+          `Kart Tipi: ${csTab === 'cari' ? 'Cari Firma' : 'Stok Malzeme'}`,
+          `Kart Adı: ${name}`,
+          `Kart ID: ${card.id}`,
+          `Kayıt: ${logs.length}`,
+          `Rapor Tarihi: ${new Date().toLocaleString('tr-TR')}`,
+        ],
+        logs: historyRowsForExport(logs),
+        format,
+      });
+    } catch (err: any) {
+      console.error(err);
+      alert('Rapor üretilemedi: ' + (err?.message || err));
+    }
   };
 
   const accent = csTab === 'cari' ? 'amber' : 'teal';
@@ -2506,6 +2564,8 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
                         {historyList.filter((h) => h.collection === 'irsaliyeler').length} irsaliye
                         {' · '}
                         {historyList.length} toplam kayıt
+                        {' · '}
+                        raporlar açık sekmedeki tüm kayıtları alır
                       </>
                     ) : (
                       <>
@@ -2540,16 +2600,16 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
                       type="button"
                       onClick={toggleSelectAllVisibleIrsaliyeler}
                       className={`inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-[10px] font-bold cursor-pointer border ${
-                        allVisibleIrsaliyeSelected
+                        allVisibleRowsSelected
                           ? 'bg-indigo-700 text-white border-indigo-700'
                           : 'bg-white text-indigo-800 border-indigo-200'
                       }`}
-                      title="Bu listedeki tüm irsaliyeleri toplu işaretle"
+                      title="Açık listedeki tüm kayıtları işaretle (Tümü = irsaliye + fatura + işlem satırları)"
                     >
                       <CheckSquare size={12} />
-                      {allVisibleIrsaliyeSelected
-                        ? `Tüm seçim kalksın (${visibleIrsaliyeIds.length})`
-                        : `Tümünü seç (${visibleIrsaliyeIds.length})`}
+                      {allVisibleRowsSelected
+                        ? `Tüm seçim kalksın (${visibleRowIds.length})`
+                        : `Tümünü seç (${visibleRowIds.length})`}
                     </button>
                   )}
                   {selectedIrsaliyeIds.size > 0 && (
@@ -2560,7 +2620,7 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
                         className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-[10px] font-bold bg-violet-700 text-white cursor-pointer"
                         title="Seçili irsaliyeleri birleştirip taslak faturaya dönüştür"
                       >
-                        <Receipt size={12} /> Seçilenleri Faturaya Dönüştür ({selectedIrsaliyeIds.size})
+                        <Receipt size={12} /> Seçilenleri Faturaya Dönüştür ({selectedActualIrsaliyeCount})
                       </button>
                       <button
                         type="button"
@@ -2595,8 +2655,8 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
                       <Camera size={12} />
                       {fotoRaporBusy
                         ? 'Fotoğraflı rapor hazırlanıyor…'
-                        : selectedIrsaliyeIds.size > 0
-                          ? `Seçilenleri Fotoğraflı Raporla (${selectedIrsaliyeIds.size})`
+                        : selectedActualIrsaliyeCount > 0
+                          ? `Seçilenleri Fotoğraflı Raporla (${selectedActualIrsaliyeCount})`
                           : 'Seçilenleri Fotoğraflı Raporla'}
                     </button>
                   )}
@@ -2604,7 +2664,7 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
                     type="button"
                     onClick={() => void handleTaslakPaketRapor('html')}
                     className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-[10px] font-bold bg-violet-800 text-white cursor-pointer"
-                    title="Seçili/tüm taslak birleşim paketleri — antetli HTML"
+                    title="Açık listedeki tüm kayıtlar — antetli HTML (seçim gerekmez)"
                   >
                     <FileText size={12} /> Taslak HTML
                   </button>
@@ -2612,7 +2672,7 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
                     type="button"
                     onClick={() => void handleTaslakPaketRapor('excel')}
                     className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-[10px] font-bold bg-emerald-800 text-white cursor-pointer"
-                    title="Seçili/tüm taslak birleşim paketleri — antetli Excel (SA bağı dahil)"
+                    title="Açık listedeki tüm kayıtlar — antetli Excel (seçim gerekmez)"
                   >
                     <Download size={12} /> Taslak Excel
                   </button>
@@ -2620,7 +2680,7 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
                     type="button"
                     onClick={handleOpenZincirRaporuFromCari}
                     className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-[10px] font-bold bg-amber-600 text-white cursor-pointer"
-                    title="SA → İrsaliye → Fatura zincir raporu (HTML + antetli Excel)"
+                    title="Listedeki irsaliyelerin SA → irsaliye → fatura zinciri (seçim yoksa tümü)"
                   >
                     <ClipboardList size={12} /> Zincir Raporu
                   </button>
@@ -2629,24 +2689,9 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
                     onClick={() => {
                       void (async () => {
                         try {
-                          const selected = irsaliyeler.filter((ir) => selectedIrsaliyeIds.has(ir.id));
-                          const birlestirilenLogs = historyList.filter(
-                            (h) =>
-                              h.collection === 'irsaliyeler' &&
-                              (h.birlestirilmis || Boolean(h.bagliFaturaNo))
-                          );
-                          let focusIds: string[] = [];
-                          if (selected.length) focusIds = selected.map((ir) => ir.id);
-                          else if (historyFilter === 'BİRLEŞTİRİLEN' && birlestirilenLogs.length) {
-                            focusIds = birlestirilenLogs.map((h) => h.id);
-                          } else if (birlestirilenLogs.length) {
-                            const ok = window.confirm(
-                              `${birlestirilenLogs.length} birleştirilmiş irsaliye için Excel üretilsin mi?`
-                            );
-                            if (!ok) return;
-                            focusIds = birlestirilenLogs.map((h) => h.id);
-                          } else {
-                            alert('Excel için önce irsaliye seçin veya birleştirin.');
+                          const focusIds = resolveZincirFocusIds();
+                          if (!focusIds.length) {
+                            alert('Excel için irsaliye kaydı yok. Tüm Zamanlar Excel veya HTML kullanın.');
                             return;
                           }
                           const focusSet = new Set(focusIds);
@@ -2681,22 +2726,32 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
                     onClick={() => void handleTumZamanlarIrsaliyeExcel()}
                     disabled={tumZamanlarBusy}
                     className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-[10px] font-bold bg-blue-900 text-white cursor-pointer disabled:opacity-60"
-                    title="Bu carinin tüm gelen irsaliyeleri — Kibritçi antetli / logolu Excel (özet + döküm + kalemler)"
+                    title="Tüm geçmiş kayıtlar + gelen irsaliyeler — Kibritçi antetli / logolu Excel"
                   >
                     <Download size={12} />
                     {tumZamanlarBusy ? 'Excel hazırlanıyor…' : 'Tüm Zamanlar Excel'}
                   </button>
                   <button
                     type="button"
-                    onClick={() => exportLogs('csv')}
+                    onClick={() => void exportLogs('xlsx')}
+                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-[10px] font-bold bg-emerald-700 text-white cursor-pointer"
+                    title="Açık listedeki tüm kayıtlar — antetli Excel"
+                  >
+                    <Download size={12} /> Excel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void exportLogs('csv')}
                     className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-[10px] font-bold bg-emerald-600 text-white cursor-pointer"
+                    title="Açık listedeki tüm kayıtlar — CSV"
                   >
                     <Download size={12} /> CSV
                   </button>
                   <button
                     type="button"
-                    onClick={() => exportLogs('html')}
+                    onClick={() => void exportLogs('html')}
                     className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-[10px] font-bold bg-slate-800 text-white cursor-pointer"
+                    title="Açık listedeki tüm kayıtlar — antetli HTML"
                   >
                     <FileText size={12} /> HTML
                   </button>
@@ -2948,15 +3003,13 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
                             ? ` · Stabilize ${group.tipCounts.STABILIZE}`
                             : ''}
                           </span>
-                          {group.items.some((x) => x.collection === 'irsaliyeler') && (
+                          {group.items.length > 0 && (
                             <button
                               type="button"
                               onClick={() => toggleSelectMonthIrsaliyeler(group.items)}
                               className="text-[9px] font-black px-2 py-0.5 rounded bg-indigo-600 text-white cursor-pointer"
                             >
-                              {group.items
-                                .filter((x) => x.collection === 'irsaliyeler')
-                                .every((x) => selectedIrsaliyeIds.has(x.id))
+                              {group.items.every((x) => selectedIrsaliyeIds.has(x.id))
                                 ? 'Ay seçimini kaldır'
                                 : 'Bu ayın tümünü seç'}
                             </button>
@@ -3047,17 +3100,15 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
                           : 'border-slate-100 bg-slate-50/80 hover:border-slate-300'
                       }`}
                     >
-                      {log.collection === 'irsaliyeler' && (
-                        <label className="shrink-0 self-center flex items-center cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={selectedIrsaliyeIds.has(log.id)}
-                            onChange={() => toggleIrsaliyeSelection(log.id)}
-                            className="w-4 h-4 rounded border-slate-300 text-violet-700 cursor-pointer"
-                            title="Faturaya dönüştürmek / eşleştirmek için seç"
-                          />
-                        </label>
-                      )}
+                      <label className="shrink-0 self-center flex items-center cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={selectedIrsaliyeIds.has(log.id)}
+                          onChange={() => toggleIrsaliyeSelection(log.id)}
+                          className="w-4 h-4 rounded border-slate-300 text-violet-700 cursor-pointer"
+                          title="Rapor / birleşim için seç"
+                        />
+                      </label>
                       <div className="shrink-0 w-9 h-9 rounded-xl bg-white border border-slate-200 flex items-center justify-center text-slate-600">
                         {TYPE_ICON[log.birlestirilmis ? 'BİRLEŞTİRİLEN' : log.type] || (
                           <ClipboardList size={14} />

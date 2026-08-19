@@ -175,14 +175,28 @@ function writeHeaderRow(ws: Worksheet, row: number, headers: string[]) {
   });
 }
 
+export type TumZamanlarHistoryRow = {
+  date: string;
+  type: string;
+  title: string;
+  desc: string;
+  irsaliyeNo?: string;
+  plaka?: string;
+  miktar?: number;
+  birim?: string;
+  faturaNo?: string;
+};
+
 export async function exportIrsaliyeTumZamanlarExcel(opts: {
   cari: CariKart;
   irsaliyeler: Irsaliye[];
   faturalar?: Fatura[];
-}): Promise<{ adet: number; toplamTon: number; fileName: string }> {
+  historyLogs?: TumZamanlarHistoryRow[];
+}): Promise<{ adet: number; toplamTon: number; kayit: number; fileName: string }> {
   const irs = sortIrs(irsaliyelerForCariKart(opts.irsaliyeler, opts.cari));
-  if (!irs.length) {
-    throw new Error('Bu cari için gelen irsaliye bulunamadı.');
+  const historyLogs = opts.historyLogs || [];
+  if (!irs.length && !historyLogs.length) {
+    throw new Error('Bu cari için raporlanacak kayıt bulunamadı.');
   }
   const faturalar = opts.faturalar || [];
 
@@ -225,6 +239,7 @@ export async function exportIrsaliyeTumZamanlarExcel(opts: {
   row += 1;
 
   const summary: Array<[string, string | number]> = [
+    ['Toplam geçmiş kayıt', historyLogs.length || irs.length],
     ['İrsaliye adedi', irs.length],
     ['Toplam ağırlık (ton)', Number(toplamTon.toFixed(3))],
     ['Mıcır (ton)', Number((tipMap.MICIR || 0).toFixed(3))],
@@ -403,11 +418,75 @@ export async function exportIrsaliyeTumZamanlarExcel(opts: {
   }
   writeFooter(kalemWs, kr + 1);
 
+  if (historyLogs.length) {
+    const kayitWs = wb.addWorksheet('TÜM KAYITLAR', {
+      pageSetup: { orientation: 'landscape', paperSize: 9, fitToPage: true, fitToWidth: 1 },
+    });
+    kayitWs.columns = [
+      { width: 5 },
+      { width: 14 },
+      { width: 18 },
+      { width: 36 },
+      { width: 48 },
+      { width: 16 },
+      { width: 14 },
+      { width: 12 },
+      { width: 10 },
+      { width: 18 },
+    ];
+    let hr = await applyAntet(wb, kayitWs, {
+      docCode: 'IRS-TUMZMN-KAY',
+      title: 'Tüm geçmiş kayıtlar',
+      subtitle: `${opts.cari.unvan} · ${historyLogs.length} kayıt`,
+    });
+    writeHeaderRow(kayitWs, hr, [
+      '#',
+      'Tarih',
+      'Tip',
+      'Belge / Başlık',
+      'Açıklama',
+      'İrsaliye No',
+      'Plaka',
+      'Miktar',
+      'Birim',
+      'Fatura',
+    ]);
+    hr += 1;
+    historyLogs.forEach((log, idx) => {
+      const vals: Array<string | number> = [
+        idx + 1,
+        log.date,
+        log.type,
+        log.title,
+        log.desc,
+        log.irsaliyeNo || '',
+        log.plaka || '',
+        log.miktar || '',
+        log.birim || '',
+        log.faturaNo || '',
+      ];
+      vals.forEach((v, i) => {
+        const c = kayitWs.getCell(hr, i + 1);
+        c.value = v;
+        c.font = { size: 8 };
+        setBorder(c);
+        if (idx % 2 === 1) setFill(c, 'FFF8FAFC');
+      });
+      hr += 1;
+    });
+    writeFooter(kayitWs, hr + 1);
+    kayitWs.autoFilter = {
+      from: { row: 7, column: 1 },
+      to: { row: Math.max(7, hr - 1), column: 10 },
+    };
+    kayitWs.views = [{ state: 'frozen', ySplit: 7 }];
+  }
+
   const safeKod = String(opts.cari.kod || opts.cari.unvan || 'cari')
     .replace(/[^\wğüşıöçĞÜŞİÖÇ-]+/gi, '_')
     .slice(0, 40);
   const fileName = `Kibritci_Tum_Zamanlar_Irsaliye_${safeKod}_${normalizeDateKey(new Date().toISOString()) || 'rapor'}.xlsx`;
   const buffer = await wb.xlsx.writeBuffer();
   downloadBuffer(buffer as ArrayBuffer, fileName);
-  return { adet: irs.length, toplamTon, fileName };
+  return { adet: irs.length, toplamTon, kayit: historyLogs.length, fileName };
 }
