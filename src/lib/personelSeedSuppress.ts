@@ -1,5 +1,9 @@
-/** Kaldırılan placeholder idari kayıtları — bir daha seed ile gelmesin */
-export const REMOVED_IDARI_PLACEHOLDER_TCS = new Set(['23479948444', '14372424838']);
+/**
+ * Eski sahte idari TC’ler. Ağustos 2026 SGK listesi 23479948444 / 14372424838
+ * numaralarının Mehmet Buğra Ardıç ve Büşra Özbilek’in gerçek TC’si olduğunu
+ * doğruladı; bu yüzden set boş. Kart ID’si PENDING kalır, TC yazılır.
+ */
+export const REMOVED_IDARI_PLACEHOLDER_TCS = new Set<string>();
 
 const STORAGE_KEY = 'kibritci_suppressed_personel_tcs_v1';
 

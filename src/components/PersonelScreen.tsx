@@ -42,7 +42,6 @@ import {
   planManualPersonelMerge,
   planPersonelDuplicateMerge,
 } from '../lib/personelDuplicateMerge';
-import { REMOVED_IDARI_PLACEHOLDER_TCS } from '../lib/personelSeedSuppress';
 import {
   buildPersonelKaliteIndex,
   formatPersonelKaliteOzet,
@@ -957,10 +956,6 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
     }
 
     const normalizedTc = String(formData.tcNo || '').trim();
-    if (REMOVED_IDARI_PLACEHOLDER_TCS.has(normalizedTc)) {
-      alert('Bu TC eski placeholder kayıttır (İDARİ KAYIT-18/22). Gerçek TC girin; sahte 11 hane yazmayın.');
-      return;
-    }
     if (normalizedTc && !validateTC(normalizedTc)) {
       alert('TC Kimlik No tam 11 haneli ve sadece rakamlardan oluşmalıdır!');
       return;

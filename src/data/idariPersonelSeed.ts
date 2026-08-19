@@ -47,12 +47,12 @@ const ROWS: IdariRow[] = [
   { ad: 'EMRE YUNUS', soyad: 'BOZYİĞİT', tcNo: '18158908178', iseGirisTarihi: trDate('27.10.2025'), gorev: 'İnşaat Mühendisi' },
   // YEDİTEPE taşeron → Kibritçi idari transfer
   { ad: 'OLCAY', soyad: 'DÜZENLİ', tcNo: '46366841604', iseGirisTarihi: trDate('12.08.2026'), gorev: 'Peyzaj Mimarı' },
-  // TC sonra girilecek — 11 haneli placeholder YAZILMAZ (Büşra/Buğra Excel TC’leri eski İDARİ KAYIT-22/18).
-  // Birhan Velioğlu açılmıyor. IBAN Excel listesinden (ödeme); yoklama personel.id ile bağlı.
+  // Kart ID PENDING kalır (izin/ödeme bağları). TC = Ağustos 2026 SGK şube 34.
+  // Birhan Velioğlu bu seed’de yok; arafta prs_sgk_13013461560 olarak açıldı.
   {
     ad: 'BÜŞRA',
     soyad: 'ÖZBİLEK',
-    tcNo: '',
+    tcNo: '14372424838',
     ibanNo: 'TR910006200152200006629862',
     iseGirisTarihi: '2026-08-17',
     gorev: 'Mimar',
@@ -62,7 +62,7 @@ const ROWS: IdariRow[] = [
   {
     ad: 'GÜRSOY',
     soyad: 'MAZLUM',
-    tcNo: '',
+    tcNo: '57733469734',
     ibanNo: 'TR860006200046700006628825',
     iseGirisTarihi: '2026-08-17',
     gorev: 'Genel Koordinatör',
@@ -71,7 +71,7 @@ const ROWS: IdariRow[] = [
   {
     ad: 'HATİCE BEGÜM',
     soyad: 'ASNA',
-    tcNo: '',
+    tcNo: '20201223428',
     ibanNo: 'TR660001009010797675805001',
     iseGirisTarihi: '2026-08-17',
     gorev: 'Stajyer Mimar',
@@ -81,7 +81,7 @@ const ROWS: IdariRow[] = [
   {
     ad: 'KÜBRA',
     soyad: 'OK',
-    tcNo: '',
+    tcNo: '10024486780',
     ibanNo: 'TR140006200073900006618867',
     iseGirisTarihi: '2026-08-17',
     gorev: 'İnşaat Mühendisi',
@@ -91,7 +91,7 @@ const ROWS: IdariRow[] = [
   {
     ad: 'MEHMET BUĞRA',
     soyad: 'ARDIÇ',
-    tcNo: '',
+    tcNo: '23479948444',
     ibanNo: 'TR540006200041700006838395',
     iseGirisTarihi: '2026-08-17',
     gorev: 'Mimar',
@@ -100,7 +100,7 @@ const ROWS: IdariRow[] = [
   {
     ad: 'MEHMET MURAT',
     soyad: 'ASLAN',
-    tcNo: '',
+    tcNo: '23944656638',
     ibanNo: 'TR350006200017400006621896',
     iseGirisTarihi: '2026-08-17',
     gorev: 'Proje Müdürü',
@@ -109,7 +109,7 @@ const ROWS: IdariRow[] = [
   {
     ad: 'YAHYA EREN',
     soyad: 'TURGAY',
-    tcNo: '',
+    tcNo: '20357386510',
     ibanNo: 'TR280006200078800006812661',
     iseGirisTarihi: '2026-08-17',
     gorev: 'Peyzaj Mimarı',
@@ -127,7 +127,7 @@ function toPersonel(row: IdariRow, index: number): Personel {
   const pending = Boolean(row.tcBekleniyor) || !tc;
   return {
     id: pending ? idariPendingId(row) : `PRS-IDARI-${tc || index}`,
-    tcNo: pending ? '' : tc,
+    tcNo: tc,
     ad: row.ad,
     soyad: row.soyad,
     babaAdi: '',
