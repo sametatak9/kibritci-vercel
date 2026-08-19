@@ -1748,7 +1748,11 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
 
       <div className="flex-1 overflow-y-auto p-4 sm:p-6">
       {screenView === 'nitelik' ? (
-        <PersonelNitelikTopluPanel personeller={personeller} setPersoneller={setPersoneller} />
+        <PersonelNitelikTopluPanel
+          personeller={personeller}
+          setPersoneller={setPersoneller}
+          cariKartlar={cariKartlar}
+        />
       ) : screenView === 'kayit' ? (
       <div className="max-w-4xl mx-auto w-full bg-white border border-orange-100 rounded-2xl flex flex-col overflow-hidden shadow-sm">
 
