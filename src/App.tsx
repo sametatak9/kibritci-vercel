@@ -140,7 +140,9 @@ import { syncAuthClaimsFromServer } from './lib/authClaimsClient';
 import { assertErpWriteAuth, formatFirestoreWriteError } from './lib/authWriteGuard';
 import {
   countYoklamaFilledDays,
+  resolveYoklamaSnapshotMap,
 } from './lib/yoklamaGuard';
+import { todayDateKey } from './lib/dateKeyUtils';
 import {
   enqueueSahaFaaliyetSave,
   fetchSahaFaaliyetById,
@@ -1583,24 +1585,21 @@ function App() {
         if (rawJson && rawJson === yoklamaJsonSeenRef.current) return;
 
         const data = parseYoklamaSnapshotData(raw) as AylikYoklamaMap;
-        const nextFilled = countYoklamaFilledDays(data);
         const fromCache = Boolean(snap.metadata?.fromCache);
 
         setYoklamalar((prev) => {
-          const prevFilled = countYoklamaFilledDays(prev);
-          // Masaüstü IndexedDB bazen eski/zayıf paket döndürür — dolu haritayı ezme
-          if (
-            fromCache &&
-            prevFilled >= 80 &&
-            nextFilled < Math.max(30, prevFilled * 0.25)
-          ) {
-            console.warn('[yoklama] Cache snapshot küçülmesi yok sayıldı', {
-              prevFilled,
-              nextFilled,
+          const resolved = resolveYoklamaSnapshotMap(prev, data, {
+            fromCache,
+            todayKey: todayDateKey(),
+          });
+          if (resolved === prev && prev !== data) {
+            console.warn('[yoklama] Zayıf/eski snapshot yok sayıldı (sabah kaydı korundu)', {
+              prevFilled: countYoklamaFilledDays(prev),
+              nextFilled: countYoklamaFilledDays(data),
+              fromCache,
             });
-            return prev;
           }
-          return data;
+          return resolved;
         });
         // Ref'i yalnızca kabul edilen (veya ilk) paket için güncelle — zayıf cache ezmesin
         if (

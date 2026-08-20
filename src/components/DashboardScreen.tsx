@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState, startTransition } from 'react';
-import {
+import { 
   Users, Wallet, ShoppingCart, Truck, ClipboardList, CalendarCheck2, Tent,
   MapPin, Sparkles, Bell, HardHat, Building2, ShieldCheck, Camera,
   ChevronRight, FileText, UserCircle, LayoutGrid,
@@ -82,8 +82,8 @@ const ACTION_ZONES: Array<{ title: string; items: ActionItem[] }> = [
   },
 ];
 
-export const DashboardScreen: React.FC<DashboardScreenProps> = ({
-  personeller,
+export const DashboardScreen: React.FC<DashboardScreenProps> = ({ 
+  personeller, 
   kasaHareketleri,
   yoklamalar,
   satinAlmaTalepleri,
@@ -138,8 +138,8 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
     const y = now.getFullYear();
     const m = now.getMonth() + 1;
     const daysInMonth = new Date(y, m, 0).getDate();
-    let totalCheckedDays = 0;
-    let totalPresentDays = 0;
+  let totalCheckedDays = 0;
+  let totalPresentDays = 0;
     for (const pId of Object.keys(yoklamalar || {})) {
       const personMap = yoklamalar[pId] || {};
       for (let d = 1; d <= daysInMonth; d += 1) {
@@ -267,18 +267,18 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
               <div className="flex items-center gap-4 min-w-0 flex-1">
                 <div className="rounded-xl bg-gradient-to-br from-orange-50 to-amber-50 p-3 border border-orange-100/60 shrink-0">
                   <KibritciLogo size="lg" className="h-11 sm:h-12" />
-                </div>
+        </div>
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2 mb-1">
                     <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest text-orange-700 bg-orange-50 border border-orange-200/60 px-2 py-0.5 rounded-full">
                       <Sparkles size={10} /> {getGreeting()}, {userLabel}
-                    </span>
+                  </span>
                     {unreadNotifs > 0 && (
                       <span className="inline-flex items-center gap-1 text-[10px] font-bold text-rose-600 bg-rose-50 border border-rose-100 px-2 py-0.5 rounded-full">
                         <Bell size={10} /> {unreadNotifs}
-                      </span>
+                  </span>
                     )}
-                  </div>
+                </div>
                   <h1 className="font-display text-xl sm:text-2xl font-bold text-slate-900 tracking-tight">
                     Şantiye Yönetim Merkezi
                   </h1>
@@ -309,7 +309,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
                       {s.badge != null && s.badge > 0 && (
                         <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 rounded-full bg-amber-500 text-white text-[9px] font-black flex items-center justify-center">
                           {s.badge > 99 ? '99+' : s.badge}
-                        </span>
+                </span>
                       )}
                     </button>
                   );
@@ -350,7 +350,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
               </button>
             );
           })}
-        </div>
+              </div>
 
         <DashboardGunlukYoklamaGorev
           personeller={personeller}
@@ -403,9 +403,9 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
                           </button>
                         );
                       })}
-                    </div>
-                  </div>
-                ))}
+                      </div>
+                      </div>
+                    ))}
               </div>
             </section>
 
@@ -418,7 +418,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
               onNavigate={onNavigate}
             />
           </div>
-
+          
           <div className="xl:col-span-5">
             <DashboardSonIslemlerFeed
               kasaHareketleri={kasaHareketleri}
@@ -439,14 +439,14 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
                   { tab: 'cari_stok', label: 'Cari / Stok' },
                   { tab: 'personel_izin', label: 'İzin Formu' },
                 ].map((link) => (
-                  <button
+            <button 
                     key={link.tab}
                     type="button"
                     onClick={() => onNavigate(link.tab)}
                     className="text-[11px] font-bold px-3 py-2.5 rounded-xl border border-slate-100 bg-slate-50 hover:bg-orange-50 hover:border-orange-200 text-slate-700 transition cursor-pointer"
                   >
                     {link.label}
-                  </button>
+            </button>
                 ))}
               </div>
             </section>

@@ -1223,7 +1223,7 @@ function addHaftalikKasaIcmalSheet(
     const dateCell = r.getCell(1);
     dateCell.value = new Date(`${String(kh.tarih).slice(0, 10)}T12:00:00`);
     dateCell.numFmt = 'dd.mm.yyyy';
-    dateCell.alignment = { horizontal: 'center', vertical: 'middle' };
+  dateCell.alignment = { horizontal: 'center', vertical: 'middle' };
     r.getCell(2).value = ay;
     r.getCell(3).value = Number(yil) || yil;
     r.getCell(4).value = buildDefterAciklama(kh, personeller);

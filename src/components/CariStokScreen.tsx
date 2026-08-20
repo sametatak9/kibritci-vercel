@@ -985,6 +985,15 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
   const logsForVisibleReport = () =>
     filteredHistory.length ? filteredHistory : historyList;
 
+  /** İşaret varsa yalnız seçilenler; yoksa açık sekmenin tümü. */
+  const logsForSelectedOrVisible = () => {
+    if (selectedIrsaliyeIds.size > 0) {
+      const selected = historyList.filter((h) => selectedIrsaliyeIds.has(h.id));
+      if (selected.length) return selected;
+    }
+    return logsForVisibleReport();
+  };
+
   const handleTaslakPaketRapor = async (mode: 'html' | 'excel') => {
     let paketler = paketlerForSelectedIrsaliyeler(tumBirlesimPaketleri, selectedIrsaliyeIds);
     if (!paketler.length && historyFilter === 'TASLAK BAĞ') paketler = taslakPaketler;
@@ -1079,10 +1088,12 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
           birim: log.hizmetEtiket,
           faturaNo: log.bagliFaturaNo,
           malzemeTipi: log.malzemeTipi,
+          kiloKg: log.kiloKg,
+          tonaj: log.tonaj,
         })),
       });
       alert(
-        `Tüm zamanlar Excel indirildi.\n${result.kayit} kayıt · ${result.adet} irsaliye · ${result.toplamTon.toLocaleString('tr-TR')} ton\n${result.fileName}`
+        `Tüm zamanlar Excel indirildi.\n${result.kayit} kayıt · ${result.adet} irsaliye · ${result.toplamKg.toLocaleString('tr-TR')} kg (${result.toplamTon.toLocaleString('tr-TR')} ton)\n${result.fileName}`
       );
     } catch (err: any) {
       console.error(err);
@@ -1906,7 +1917,7 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
       alert('Önce kart seçin.');
       return;
     }
-    const logs = logsForVisibleReport();
+    const logs = logsForSelectedOrVisible();
     if (!logs.length) {
       alert('Raporlanacak kayıt yok.');
       return;
@@ -1920,7 +1931,9 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
           `Kart Tipi: ${csTab === 'cari' ? 'Cari Firma' : 'Stok Malzeme'}`,
           `Kart Adı: ${name}`,
           `Kart ID: ${card.id}`,
-          `Kayıt: ${logs.length}`,
+          `Kayıt: ${logs.length}${
+            selectedIrsaliyeIds.size > 0 ? ` (işaretli ${selectedIrsaliyeIds.size})` : ' (açık sekme)'
+          }`,
           `Rapor Tarihi: ${new Date().toLocaleString('tr-TR')}`,
         ],
         logs: historyRowsForExport(logs),
@@ -2564,7 +2577,7 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
                         {' · '}
                         {historyList.length} toplam kayıt
                         {' · '}
-                        raporlar açık sekmedeki tüm kayıtları alır
+                        rapor: işaretli varsa onları, yoksa açık sekmenin tümünü alır
                       </>
                     ) : (
                       <>
@@ -2720,24 +2733,21 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
                   >
                     <Download size={12} /> Zincir Excel
                   </button>
-                  <span className="self-center text-[9px] font-black uppercase tracking-wider text-blue-900">
-                    Tümünü raporla
-                  </span>
                   <button
                     type="button"
                     onClick={() => void handleTumZamanlarIrsaliyeExcel()}
-                    disabled={tumZamanlarBusy}
-                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-[10px] font-bold bg-blue-900 text-white cursor-pointer disabled:opacity-60"
-                    title="Tümünü raporla — tüm geçmiş kayıtlar + gelen irsaliyeler (Mıcır / Taş Tozu / Stabilize özeti)"
+                    disabled={tumZamanlarBusy || !selectedCari}
+                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider bg-blue-900 text-white cursor-pointer disabled:opacity-60"
+                    title="Bu carinin tüm irsaliyelerini antetli Excel’e basar (Mıcır / Taş Tozu / Stabilize kilo özeti). Seçim gerekmez."
                   >
                     <Download size={12} />
-                    {tumZamanlarBusy ? 'Excel hazırlanıyor…' : 'Tüm Zamanlar Excel'}
+                    {tumZamanlarBusy ? 'Excel hazırlanıyor…' : 'Tümünü raporla'}
                   </button>
                   <button
                     type="button"
                     onClick={() => void exportLogs('xlsx')}
                     className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-[10px] font-bold bg-emerald-700 text-white cursor-pointer"
-                    title="Tümünü raporla — açık listedeki tüm kayıtlar, antetli Excel (malzeme özeti)"
+                    title="Tümünü raporla — işaretli kayıtlar (yoksa açık listedekilerin tümü), antetli Excel + kilo özeti"
                   >
                     <Download size={12} /> Excel
                   </button>
@@ -2745,7 +2755,7 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
                     type="button"
                     onClick={() => void exportLogs('csv')}
                     className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-[10px] font-bold bg-emerald-600 text-white cursor-pointer"
-                    title="Açık listedeki tüm kayıtlar — CSV"
+                    title="İşaretli kayıtlar (yoksa açık listedekilerin tümü) — CSV"
                   >
                     <Download size={12} /> CSV
                   </button>
@@ -2753,7 +2763,7 @@ export const CariStokScreen: React.FC<CariStokScreenProps> = ({
                     type="button"
                     onClick={() => void exportLogs('html')}
                     className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-[10px] font-bold bg-slate-800 text-white cursor-pointer"
-                    title="Tümünü raporla — açık listedeki tüm kayıtlar, antetli HTML (malzeme özeti)"
+                    title="Tümünü raporla — işaretli kayıtlar (yoksa açık listedekilerin tümü), antetli HTML + kilo özeti"
                   >
                     <FileText size={12} /> HTML
                   </button>

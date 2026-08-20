@@ -157,7 +157,7 @@ export function getYoklamaDay(
   const map = asYoklamaGunMap(personMap);
   if (!map) return undefined;
   const dateKey = yoklamaDateKey(year, month, day);
-  return map[dateKey];
+  return map[dateKey] || map[String(day)];
 }
 
 export function setYoklamaDay(

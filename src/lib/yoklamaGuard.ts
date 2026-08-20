@@ -36,6 +36,19 @@ export function countYoklamaFilledDays(map: AylikYoklamaMap): number {
   return total;
 }
 
+/** Belirli bir YYYY-MM-DD günündeki dolu kayıt sayısı (sabah yoklaması koruması) */
+export function countYoklamaFilledOnDate(map: AylikYoklamaMap, dateKey: string): number {
+  if (!dateKey || !/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) return 0;
+  let total = 0;
+  for (const personMap of Object.values(map || {})) {
+    if (!personMap || typeof personMap !== 'object') continue;
+    const data = (personMap as Record<string, { durum?: string }>)[dateKey];
+    const durum = data?.durum;
+    if (durum && durum !== 'Girilmedi') total++;
+  }
+  return total;
+}
+
 export function countYoklamaPersons(map: AylikYoklamaMap): number {
   return Object.keys(map || {}).length;
 }
@@ -127,4 +140,37 @@ export function mergeYoklamaMaps(
     result[personId] = mergedDays;
   }
   return result;
+}
+
+/**
+ * Canlı dinleyici / zayıf önbellek: daha dolu belleği ve bugünün sabah kaydını ezme.
+ * Gelen paket daha zenginse onu alır; bugün eksikse gelen haritanın üstüne yerel günü korur.
+ */
+export function resolveYoklamaSnapshotMap(
+  prev: AylikYoklamaMap,
+  incoming: AylikYoklamaMap,
+  opts?: { fromCache?: boolean; todayKey?: string }
+): AylikYoklamaMap {
+  const prevFilled = countYoklamaFilledDays(prev);
+  const nextFilled = countYoklamaFilledDays(incoming);
+  const todayKey = opts?.todayKey;
+  const prevToday = todayKey ? countYoklamaFilledOnDate(prev, todayKey) : 0;
+  const nextToday = todayKey ? countYoklamaFilledOnDate(incoming, todayKey) : 0;
+
+  if (opts?.fromCache && prevFilled >= 30 && nextFilled < prevFilled) {
+    return prev;
+  }
+  if (opts?.fromCache && prevToday > nextToday) {
+    return mergeYoklamaMaps(incoming, prev) as AylikYoklamaMap;
+  }
+
+  if (prevFilled >= 80 && nextFilled < Math.max(30, prevFilled * 0.25)) {
+    return prev;
+  }
+
+  if (prevToday > nextToday && nextFilled <= prevFilled + 15) {
+    return mergeYoklamaMaps(incoming, prev) as AylikYoklamaMap;
+  }
+
+  return incoming;
 }

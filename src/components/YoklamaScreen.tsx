@@ -31,7 +31,7 @@ import {
   YoklamaArchiveEntry,
 } from '../lib/yoklamaPersistence';
 import type { YoklamaSaveSource } from '../lib/yoklamaPersistence';
-import { countYoklamaFilledDays, countYoklamaPersons } from '../lib/yoklamaGuard';
+import { countYoklamaFilledDays, countYoklamaPersons, mergeYoklamaMaps } from '../lib/yoklamaGuard';
 import {
   buildGunlukYoklamaOzet,
   buildGunlukYoklamaRaporHtml,
@@ -276,17 +276,15 @@ export const YoklamaScreen: React.FC<YoklamaScreenProps> = ({
       setRedoStack([]);
       return;
     }
-    // Takılı boş/zayıf taslak, dolu sunucu haritasını gizlemesin (masaüstü sık)
+    // Zayıf taslak dolu sunucu haritasını gizlemesin — sabah işaretlerini atma, birleştir
     const remoteFilled = countYoklamaFilledDays(yoklamalar);
     const localFilled = countYoklamaFilledDays(draftYoklamalar);
     if (remoteFilled > localFilled + 20) {
-      setDraftYoklamalar(yoklamalar);
-      setHasPendingChanges(false);
-      setUndoStack([]);
-      setRedoStack([]);
+      const merged = mergeYoklamaMaps(yoklamalar, draftYoklamalar) as AylikYoklamaMap;
+      setDraftYoklamalar(merged);
       if (addNotification) {
         addNotification(
-          `Yoklama taslağı sunucu ile senkronlandı (${remoteFilled} dolu gün). Kaydedilmemiş zayıf taslak atıldı.`
+          `Yoklama taslağı dolu sunucu haritası ile birleştirildi (${countYoklamaFilledDays(merged)} dolu gün). Kaydetmeyi unutmayın.`
         );
       }
     }

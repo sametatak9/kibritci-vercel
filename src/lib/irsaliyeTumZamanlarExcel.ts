@@ -170,6 +170,8 @@ export type TumZamanlarHistoryRow = {
   birim?: string;
   faturaNo?: string;
   malzemeTipi?: string | null;
+  kiloKg?: number;
+  tonaj?: number;
 };
 
 export async function exportIrsaliyeTumZamanlarExcel(opts: {
@@ -177,7 +179,7 @@ export async function exportIrsaliyeTumZamanlarExcel(opts: {
   irsaliyeler: Irsaliye[];
   faturalar?: Fatura[];
   historyLogs?: TumZamanlarHistoryRow[];
-}): Promise<{ adet: number; toplamTon: number; kayit: number; fileName: string }> {
+}): Promise<{ adet: number; toplamTon: number; toplamKg: number; kayit: number; fileName: string }> {
   const irs = sortIrs(irsaliyelerForCariKart(opts.irsaliyeler, opts.cari));
   const historyLogs = opts.historyLogs || [];
   if (!irs.length && !historyLogs.length) {
@@ -187,10 +189,17 @@ export async function exportIrsaliyeTumZamanlarExcel(opts: {
 
   const ozetKalemler: MalzemeOzetKalem[] = irs.map((ir) => {
     const tip = resolveMicirMalzemeTipiFromIrsaliye(ir);
-    const kg = resolveMicirKiloKg({ kiloKg: ir.kiloKg, tonaj: ir.tonaj });
+    const h = irsaliyeHizmetMiktari(ir);
+    const etiket = String(h.etiket || h.birim || '').toLocaleLowerCase('tr-TR');
+    const tonajFromHizmet =
+      (etiket === 'ton' || etiket === 'tonaj') && h.miktar > 0 ? h.miktar : 0;
+    const kg = resolveMicirKiloKg({
+      kiloKg: ir.kiloKg,
+      tonaj: ir.tonaj || tonajFromHizmet,
+    });
     return {
       tip: tip ?? 'DIGER',
-      ton: 0,
+      ton: kg > 0 ? kg / 1000 : 0,
       kg,
       tarih: ir.tarih,
     };
@@ -207,6 +216,7 @@ export async function exportIrsaliyeTumZamanlarExcel(opts: {
     malzemeOzet.evrakTipleri = evrak.evrakTipleri;
   }
   const toplamTon = malzemeOzet.toplamTon;
+  const toplamKg = malzemeOzet.toplamKg;
 
   const wb = await createExcelWorkbook();
   wb.creator = KIBRITCI_COMPANY.shortName;
@@ -446,5 +456,5 @@ export async function exportIrsaliyeTumZamanlarExcel(opts: {
   const fileName = `Kibritci_Tum_Zamanlar_Irsaliye_${safeKod}_${normalizeDateKey(new Date().toISOString()) || 'rapor'}.xlsx`;
   const buffer = await wb.xlsx.writeBuffer();
   downloadBuffer(buffer as ArrayBuffer, fileName);
-  return { adet: irs.length, toplamTon, kayit: historyLogs.length, fileName };
+  return { adet: irs.length, toplamTon, toplamKg, kayit: historyLogs.length, fileName };
 }

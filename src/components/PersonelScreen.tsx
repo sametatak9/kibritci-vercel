@@ -10,12 +10,12 @@ import { normalizeTurkishName } from '../lib/yoklamaUtils';
 import {
   AKVIZYON_GOREV,
   displayPersonelGorev,
+  displayPersonelNitelik,
   isAkvizyonFirmaAdi,
   personelMatchesTextSearch,
   personelNameKey,
   resolveAkvizyonGorev,
 } from '../lib/guvenlikHelpers';
-import { CANONICAL_ANA_FIRMA_ADI, isIdariPersonel, isKibritciCompany, isPendingKampPersonel, isTaseronPersonel } from '../lib/yoklamaUtils';
 import {
   personelHasTakipEtiketi,
   withPersonelTakipEtiketi,
@@ -36,6 +36,18 @@ import {
   exportSeciliPersonelExcel,
   openPersonelListeRaporu,
 } from '../lib/taseronPersonelExcelExport';
+import {
+  collectAktifAnaFirmaGorevGroups,
+  exportAnaFirmaGorevPersonelExcel,
+  printAnaFirmaGorevPersonelReport,
+} from '../lib/anaFirmaGorevPersonelRapor';
+import {
+  CANONICAL_ANA_FIRMA_ADI,
+  isIdariPersonel,
+  isKibritciCompany,
+  isPendingKampPersonel,
+  isTaseronPersonel,
+} from '../lib/yoklamaUtils';
 import { findPersonelByTcInList, loadPersonellerForDedup, upsertPersonelAvoidDuplicate } from '../lib/personelMatchUtils';
 import {
   applyPersonelDuplicateMerge,
@@ -192,6 +204,8 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
   const [mergeKeepId, setMergeKeepId] = useState('');
   const [mergeDropId, setMergeDropId] = useState('');
   const [exportingListe, setExportingListe] = useState<'excel' | 'html' | null>(null);
+  const [gorevListeOpen, setGorevListeOpen] = useState(false);
+  const [gorevListeExporting, setGorevListeExporting] = useState(false);
   const [screenView, setScreenView] = useState<PersonelScreenView>('liste');
 
   // SGK PDF parsing states
@@ -1546,6 +1560,45 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
     return 'bg-rose-50 text-rose-800 border-rose-200';
   };
 
+  const aktifAnaFirmaGorevGroups = useMemo(
+    () => collectAktifAnaFirmaGorevGroups(personeller),
+    [personeller]
+  );
+
+  const aktifAnaFirmaGorevToplam = useMemo(
+    () => aktifAnaFirmaGorevGroups.reduce((s, g) => s + g.personeller.length, 0),
+    [aktifAnaFirmaGorevGroups]
+  );
+
+  const handleOpenGorevListe = () => {
+    if (aktifAnaFirmaGorevToplam === 0) {
+      alert('Aktif ana firma personeli bulunamadı.');
+      return;
+    }
+    setGorevListeOpen(true);
+  };
+
+  const handlePrintGorevListe = () => {
+    try {
+      const count = printAnaFirmaGorevPersonelReport(personeller, { onlyActive: true });
+      alert(`${count} kişi için antetli görev raporu açıldı (yazdır / PDF kaydet).`);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Rapor oluşturulamadı.');
+    }
+  };
+
+  const handleExportGorevListeExcel = async () => {
+    setGorevListeExporting(true);
+    try {
+      const count = await exportAnaFirmaGorevPersonelExcel(personeller);
+      alert(`${count} aktif ana firma personeli göreve göre Excel olarak indirildi.`);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Excel oluşturulamadı.');
+    } finally {
+      setGorevListeExporting(false);
+    }
+  };
+
   const buildListeRaporSubtitle = () => {
     const parts: string[] = [
       kadroMode === 'ana_firma' ? 'Ana Firma' : 'Taşeron',
@@ -2511,6 +2564,18 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
                   </span>
                 )}
 
+                {kadroMode === 'ana_firma' && (
+                  <button
+                    type="button"
+                    onClick={handleOpenGorevListe}
+                    className="inline-flex items-center gap-1.5 text-[10px] font-bold px-3 py-2 rounded-xl border cursor-pointer bg-[#1e3a5f] text-white border-[#152a47] hover:bg-[#152a47]"
+                    title="Aktif ana firma kadrosu — göreve göre gruplu liste + antetli rapor"
+                  >
+                    <ClipboardList size={14} />
+                    Göreve Göre Kadro ({aktifAnaFirmaGorevToplam})
+                  </button>
+                )}
+
                 <button
                   type="button"
                   onClick={() => setShowOnlyActive((prev) => !prev)}
@@ -3346,6 +3411,99 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
                 </div>
               </>
             )}
+          </div>
+        </div>
+      )}
+
+      {gorevListeOpen && (
+        <div className="fixed inset-0 z-[80] flex items-end sm:items-center justify-center bg-slate-900/50 p-2 sm:p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[92vh] flex flex-col border border-slate-200">
+            <div className="shrink-0 px-4 sm:px-6 py-4 border-b border-slate-100 flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-black text-[#1e3a5f] uppercase tracking-wide">
+                  {CANONICAL_ANA_FIRMA_ADI} — Aktif Kadro (Göreve Göre)
+                </h3>
+                <p className="text-[11px] text-slate-500 mt-1">
+                  {aktifAnaFirmaGorevToplam} kişi · {aktifAnaFirmaGorevGroups.length} görev grubu · taşeron hariç
+                </p>
+                <p className="text-[10px] text-slate-400 mt-0.5">
+                  <strong>Görev</strong> = program yoklama ünvanı · <strong>Nitelik</strong> = SGK meslek (kart)
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => void handleExportGorevListeExcel()}
+                  disabled={gorevListeExporting}
+                  className="inline-flex items-center gap-1.5 text-[10px] font-bold px-3 py-2 rounded-xl border cursor-pointer bg-teal-50 text-teal-800 border-teal-200 hover:bg-teal-100 disabled:opacity-50"
+                >
+                  {gorevListeExporting ? (
+                    <Loader2 size={14} className="animate-spin" />
+                  ) : (
+                    <Download size={14} />
+                  )}
+                  Antetli Excel
+                </button>
+                <button
+                  type="button"
+                  onClick={handlePrintGorevListe}
+                  className="inline-flex items-center gap-1.5 text-[10px] font-bold px-3 py-2 rounded-xl border cursor-pointer bg-[#1e3a5f] text-white border-[#152a47] hover:bg-[#152a47]"
+                >
+                  <FileText size={14} />
+                  Antetli Yazdır / PDF
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setGorevListeOpen(false)}
+                  className="text-[10px] font-bold px-3 py-2 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 cursor-pointer"
+                >
+                  Kapat
+                </button>
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-4 space-y-4">
+              {aktifAnaFirmaGorevGroups.map((grup) => (
+                <section key={grup.gorev} className="rounded-xl border border-slate-200 overflow-hidden">
+                  <div className="bg-[#1e3a5f] text-white px-3 py-2 flex items-center justify-between">
+                    <span className="text-xs font-black uppercase tracking-wide">{grup.gorev}</span>
+                    <span className="text-[10px] font-bold bg-white/15 px-2 py-0.5 rounded-full">
+                      {grup.personeller.length} kişi
+                    </span>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-[11px]">
+                      <thead>
+                        <tr className="bg-slate-50 text-slate-600 uppercase text-[9px]">
+                          <th className="px-2 py-1.5 text-center w-8">#</th>
+                          <th className="px-2 py-1.5 text-left">Ad Soyad</th>
+                          <th className="px-2 py-1.5 text-left">T.C.</th>
+                          <th className="px-2 py-1.5 text-left">Görev</th>
+                          <th className="px-2 py-1.5 text-left">Nitelik (SGK)</th>
+                          <th className="px-2 py-1.5 text-left">İşe Giriş</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {grup.personeller.map((p, idx) => (
+                          <tr key={p.id} className="border-t border-slate-100 even:bg-slate-50/60">
+                            <td className="px-2 py-1.5 text-center text-slate-500">{idx + 1}</td>
+                            <td className="px-2 py-1.5 font-semibold text-slate-900">
+                              {p.ad} {p.soyad}
+                            </td>
+                            <td className="px-2 py-1.5 font-mono text-[10px]">{p.tcNo || '—'}</td>
+                            <td className="px-2 py-1.5 font-bold text-[#1e3a5f]">{grup.gorev}</td>
+                            <td className="px-2 py-1.5 text-slate-600">
+                              {displayPersonelNitelik(p) || '—'}
+                            </td>
+                            <td className="px-2 py-1.5">{p.iseGirisTarihi || '—'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </section>
+              ))}
+            </div>
           </div>
         </div>
       )}

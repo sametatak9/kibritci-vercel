@@ -38,13 +38,15 @@ const fmtTutar = (n?: number): string =>
 function historyLogsToOzetKalemler(logs: HistoryLogRow[]): MalzemeOzetKalem[] {
   return logs.map((log) => {
     const birim = String(log.birim || '').toLocaleLowerCase('tr-TR');
+    const miktar = Number(log.miktar) || 0;
+    const tonajFromMiktar = birim === 'ton' || birim === 'tonaj' ? miktar : 0;
     const kg = resolveMicirKiloKg({
       kiloKg: log.kiloKg,
-      tonaj: log.tonaj ?? (birim === 'ton' || birim === 'tonaj' ? Number(log.miktar) || 0 : 0),
+      tonaj: log.tonaj ?? tonajFromMiktar,
     });
     return {
       tip: log.malzemeTipi ?? 'DIGER',
-      ton: 0,
+      ton: kg > 0 ? kg / 1000 : 0,
       kg,
       tarih: log.date,
       evrakTipi: log.type,

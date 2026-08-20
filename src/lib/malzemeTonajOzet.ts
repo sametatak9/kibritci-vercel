@@ -138,8 +138,9 @@ export function computeMalzemeOzet(items: MalzemeOzetKalem[]): MalzemeOzet {
 
   for (const it of items) {
     const tip = tipOf(it.tip);
-    const ton = Number(it.ton) || 0;
-    const kg = Number(it.kg) > 0 ? Number(it.kg) : ton > 0 ? ton * 1000 : 0;
+    const rawTon = Number(it.ton) || 0;
+    const kg = Number(it.kg) > 0 ? Number(it.kg) : rawTon > 0 ? rawTon * 1000 : 0;
+    const ton = rawTon > 0 ? rawTon : kg > 0 ? kg / 1000 : 0;
     const bucket = tipMap[tip];
     bucket.adet += 1;
     bucket.ton += ton;

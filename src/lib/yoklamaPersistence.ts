@@ -37,6 +37,7 @@ const ARCHIVE_PRUNE_MIN_INTERVAL_MS = 10 * 60 * 1000;
 let lastArchivePruneAt = 0;
 let archivePruneInFlight: Promise<void> | null = null;
 let monthShardMigrateInFlight: Promise<void> | null = null;
+let monthShardQueued: AylikYoklamaMap | null = null;
 
 export type YoklamaSaveSource =
   | 'yoklama_screen'
@@ -78,9 +79,10 @@ export function parseYoklamaDataJson(raw: Record<string, unknown> | undefined): 
   if (!raw) return {};
   if (typeof raw.dataJson === 'string') {
     try {
-      return JSON.parse(raw.dataJson) as AylikYoklamaMap;
+      const parsed = JSON.parse(raw.dataJson) as AylikYoklamaMap;
+      if (parsed && typeof parsed === 'object') return parsed;
     } catch {
-      return {};
+      /* eski `data` alanına düş */
     }
   }
   return (raw.data as AylikYoklamaMap) || {};
@@ -215,6 +217,18 @@ async function fetchMonthShard(yearMonth: string): Promise<AylikYoklamaMap> {
   }
 }
 
+/** Yazmadan önce güncel ay: cache değil sunucu (başka rolün sabah kaydı kaybolmasın) */
+async function fetchMonthShardPreferServer(yearMonth: string): Promise<AylikYoklamaMap> {
+  const docRef = doc(db, 'yoklamalar', yoklamaMonthDocId(yearMonth));
+  try {
+    const snap = await withTimeout(getDocFromServer(docRef), YOKLAMA_MONTH_READ_TIMEOUT_MS);
+    if (!snap.exists()) return {};
+    return parseYoklamaDataJson(snap.data() as Record<string, unknown>);
+  } catch {
+    return fetchMonthShard(yearMonth);
+  }
+}
+
 /** Küçük ay belgelerini paralel oku — PC timeout'ta ana belgeye gerek kalmaz */
 export async function fetchYoklamaMonthShards(
   yearMonths: string[]
@@ -251,7 +265,10 @@ async function writeMonthShard(yearMonth: string, slice: AylikYoklamaMap): Promi
 
 /** Büyük haritayı ay belgelerine böler (arka plan; hata yutma) */
 export function scheduleYoklamaMonthShardSync(map: AylikYoklamaMap): void {
-  if (monthShardMigrateInFlight) return;
+  if (monthShardMigrateInFlight) {
+    monthShardQueued = map;
+    return;
+  }
   const months = listYoklamaYearMonths(map);
   if (months.length === 0) return;
   monthShardMigrateInFlight = (async () => {
@@ -273,6 +290,11 @@ export function scheduleYoklamaMonthShardSync(map: AylikYoklamaMap): void {
     .catch((err) => console.warn('[yoklama] ay shard senkronu atlandı:', err))
     .finally(() => {
       monthShardMigrateInFlight = null;
+      if (monthShardQueued) {
+        const queued = monthShardQueued;
+        monthShardQueued = null;
+        scheduleYoklamaMonthShardSync(queued);
+      }
     });
 }
 
@@ -544,33 +566,83 @@ export function enqueueYoklamaSave(
   return task;
 }
 
-/** Yazmadan önce uzak harita: cache öncelikli (PC timeout'u azaltır) */
-async function loadRemoteForWrite(): Promise<AylikYoklamaMap> {
+/** Yazmadan önce uzak harita: cache + güncel ay sunucu shard. Mega-belge ancak tam ise ezilir. */
+async function loadRemoteForWrite(): Promise<{ map: AylikYoklamaMap; allowMegaWrite: boolean }> {
+  let map: AylikYoklamaMap = {};
+  let allowMegaWrite = false;
+
   try {
     const cached = await fetchYoklamaMapWithRetry(isProductionLive() ? 3 : 2);
-    if (hasSubstantialYoklamaData(cached) || countYoklamaFilledDays(cached) >= 30) {
-      // Arka planda sunucu ile doğrula; yazmayı bloklama
-      void fetchYoklamaMapFromServer()
-        .then((s) => {
-          if (countYoklamaFilledDays(s.map) > countYoklamaFilledDays(cached) + 20) {
-            scheduleYoklamaMonthShardSync(s.map);
-          }
-        })
-        .catch(() => undefined);
-      return cached;
+    const cachedFilled = countYoklamaFilledDays(cached);
+    if (cachedFilled > 0) {
+      map = cached;
+      if (hasSubstantialYoklamaData(cached) || cachedFilled >= 30) {
+        allowMegaWrite = true;
+      }
     }
   } catch {
     /* cache boş / timeout */
   }
 
   try {
-    const shards = await fetchYoklamaMonthShards(surroundingYearMonths(new Date(), 3));
-    if (countYoklamaFilledDays(shards) >= 10) return shards;
+    const parts = await Promise.all(
+      surroundingYearMonths(new Date(), 1).map((ym) => fetchMonthShardPreferServer(ym))
+    );
+    for (const part of parts) {
+      if (Object.keys(part).length === 0) continue;
+      map = mergeYoklamaMaps(map, part) as AylikYoklamaMap;
+    }
   } catch {
     /* ignore */
   }
 
-  return (await fetchYoklamaMapFromServerWithRetry(2)).map;
+  if (!allowMegaWrite) {
+    try {
+      const server = await fetchYoklamaMapFromServerWithRetry(2);
+      const serverFilled = countYoklamaFilledDays(server.map);
+      if (serverFilled > 0) {
+        map =
+          Object.keys(map).length > 0
+            ? (mergeYoklamaMaps(server.map, map) as AylikYoklamaMap)
+            : server.map;
+        if (hasSubstantialYoklamaData(server.map) || serverFilled >= 30) {
+          allowMegaWrite = true;
+        }
+      }
+    } catch {
+      /* mega okunamadı — yalnızca shard ile devam */
+    }
+  } else {
+    void fetchYoklamaMapFromServer()
+      .then((s) => {
+        if (countYoklamaFilledDays(s.map) > countYoklamaFilledDays(map) + 20) {
+          scheduleYoklamaMonthShardSync(s.map);
+        }
+      })
+      .catch(() => undefined);
+  }
+
+  if (Object.keys(map).length === 0) {
+    map = (await fetchYoklamaMapFromServerWithRetry(2)).map;
+    allowMegaWrite = hasSubstantialYoklamaData(map) || countYoklamaFilledDays(map) >= 30;
+  }
+
+  return { map, allowMegaWrite };
+}
+
+async function writeTouchedMonthShards(
+  fullMap: AylikYoklamaMap,
+  localMap: AylikYoklamaMap
+): Promise<void> {
+  const months = listYoklamaYearMonths(localMap);
+  const targets = months.length > 0 ? months : surroundingYearMonths(new Date(), 0);
+  for (const ym of targets) {
+    try {
+      await writeMonthShard(ym, sliceYoklamaMapToYearMonth(fullMap, ym));
+    } catch (err) {
+      console.warn('[yoklama] dokunulan ay shard yazılamadı', ym, err);
+    }
+  }
 }
 
 export async function persistYoklamaDocument(
@@ -579,9 +651,12 @@ export async function persistYoklamaDocument(
   options?: { dropPersonelIds?: string[] }
 ): Promise<YoklamaSaveResult> {
   let remote: AylikYoklamaMap;
+  let allowMegaWrite = false;
 
   try {
-    remote = await loadRemoteForWrite();
+    const loaded = await loadRemoteForWrite();
+    remote = loaded.map;
+    allowMegaWrite = loaded.allowMegaWrite;
   } catch (err) {
     if (isProductionLive() || hasSubstantialYoklamaData(localMap)) {
       return {
@@ -613,10 +688,14 @@ export async function persistYoklamaDocument(
   }
 
   try {
-    await writeYoklamaMap(payload);
-    // Ay shard'ları — sonraki PC yüklemeleri mega-belgeye muhtaç kalmasın
+    // Kısmi uzak harita ile mega-belgeyi ezme (geçmiş aylar kaybolmasın)
+    if (allowMegaWrite || !remoteNonEmpty) {
+      await writeYoklamaMap(payload);
+    } else {
+      console.warn('[yoklama] mega-belge yazımı atlandı (uzak harita kısmi); ay yedeği yazılıyor');
+    }
+    await writeTouchedMonthShards(payload, localMap);
     scheduleYoklamaMonthShardSync(payload);
-    // Arşiv kritik yolda bekletmesin (timeout zincirini kısaltır)
     if (remoteNonEmpty) {
       void archiveYoklamaSnapshot(remote, kaynak, 'Kayıt sonrası otomatik yedek').catch((e) =>
         console.warn('Yoklama arşivi atlandı:', e)

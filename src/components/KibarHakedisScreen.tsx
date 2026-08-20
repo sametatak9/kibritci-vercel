@@ -474,16 +474,16 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
     const rows: StaffHakedisRow[] = tagged.map((p) => {
       const personMap = yoklamaSource[p.id] as Record<string, { durum?: string; mesaiSaati?: number }> | undefined;
       const { geldiGun, mesaiSaat } = sumStrictMonthAttendance(p, personMap, year, month);
-      const gunKazanci = calcGunKazanci(p, geldiGun, year, month);
-      const mesaiKazanci = calcMesaiKazanci(p, mesaiSaat, year, month);
+        const gunKazanci = calcGunKazanci(p, geldiGun, year, month);
+        const mesaiKazanci = calcMesaiKazanci(p, mesaiSaat, year, month);
       return {
-        personel: p,
-        geldiGun,
-        mesaiSaat,
-        gunKazanci,
-        mesaiKazanci,
-        toplamKazanc: gunKazanci + mesaiKazanci,
-        zerYapiHakedis: geldiGun * ZER_YAPI_GUNLUK,
+          personel: p,
+          geldiGun,
+          mesaiSaat,
+          gunKazanci,
+          mesaiKazanci,
+          toplamKazanc: gunKazanci + mesaiKazanci,
+          zerYapiHakedis: geldiGun * ZER_YAPI_GUNLUK,
       };
     });
 
@@ -2111,19 +2111,19 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
                   <div className="flex justify-between"><span>Gün</span><span className="font-mono">{formatMoney(totalGunKazanci, 0)}</span></div>
                   <div className="flex justify-between"><span>Mesai</span><span className="font-mono">{formatMoney(totalMesaiKazanci, 0)}</span></div>
                   <div className="flex justify-between font-black border-t pt-1"><span>Toplam</span><span className="font-mono">{formatMoney(totalMaasKazanci, 0)}</span></div>
-                </div>
+              </div>
                 <div className="bg-white border border-rose-200 rounded-lg p-2 space-y-1">
                   <span className="font-black uppercase text-rose-700 block">+{formatMoney(TABAN_FARK_TL, 0)}</span>
                   <div className="flex justify-between"><span>Gün</span><span className="font-mono">{formatMoney(analysisSummary.senaryoGunToplam, 0)}</span></div>
                   <div className="flex justify-between"><span>Mesai</span><span className="font-mono">{formatMoney(analysisSummary.senaryoMesaiToplam, 0)}</span></div>
                   <div className="flex justify-between font-black border-t pt-1"><span>Toplam</span><span className="font-mono">{formatMoney(analysisSummary.senaryoToplamMasraf, 0)}</span></div>
-                </div>
+              </div>
                 <div className="bg-emerald-100 border border-emerald-400 rounded-lg p-2 space-y-1">
                   <span className="font-black uppercase text-emerald-900 block">Fazla ödeme</span>
                   <div className="flex justify-between"><span>Gün</span><span className="font-mono">{formatMoney(analysisSummary.gunTasarrufu, 0)}</span></div>
                   <div className="flex justify-between"><span>Mesai ✓</span><span className="font-mono">{formatMoney(analysisSummary.mesaiTasarrufu, 0)}</span></div>
                   <div className="flex justify-between font-black border-t pt-1 text-emerald-950"><span>Toplam</span><span className="font-mono">{formatMoney(analysisSummary.fazlaMaasOdemesi, 0)}</span></div>
-                </div>
+              </div>
               </div>
               <div className="bg-white border border-emerald-300 rounded-lg p-2 text-[8px] space-y-1">
                 <div className="flex justify-between font-bold">
@@ -2158,13 +2158,13 @@ export const KibarHakedisScreen: React.FC<KibarHakedisScreenProps> = ({
             </div>
 
             {analysisSummary.enCokEtkilenen.length > 0 && (
-              <div className="bg-amber-50 border border-amber-200 p-4 rounded-xl space-y-2">
+            <div className="bg-amber-50 border border-amber-200 p-4 rounded-xl space-y-2">
                 <span className="text-[9px] text-amber-800 font-black block uppercase tracking-wide">En yüksek kâr katkısı (ilk 5)</span>
                 {analysisSummary.enCokEtkilenen.map((p) => (
                   <div key={p.adSoyad} className="flex justify-between text-[8px] text-amber-800 gap-2">
                     <span className="truncate">{p.adSoyad}</span>
                     <span className="font-mono shrink-0">{formatMoney(p.masrafFarki, 0)}</span>
-                  </div>
+              </div>
                 ))}
               </div>
             )}
