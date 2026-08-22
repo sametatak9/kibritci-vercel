@@ -288,6 +288,7 @@ export const TemizlikKirimScreen: React.FC<Props> = ({ currentUser }) => {
   const [koridorKartlar, setKoridorKartlar] = useState<TemizlikKoridorKart[]>([]);
   const [blokKartlar, setBlokKartlar] = useState<TemizlikBlokKart[]>([]);
   const [yeniBlokAd, setYeniBlokAd] = useState('');
+  const [blokAdDuzenle, setBlokAdDuzenle] = useState('');
   const [yeniKoridorBaslik, setYeniKoridorBaslik] = useState('');
   const [editingKoridorKod, setEditingKoridorKod] = useState<string | null>(null);
   const [editKoridorBaslik, setEditKoridorBaslik] = useState('');
@@ -394,6 +395,10 @@ export const TemizlikKirimScreen: React.FC<Props> = ({ currentUser }) => {
   useEffect(() => {
     if (!bloklar.includes(selectedBlok)) setSelectedBlok(bloklar[0] || 'A1');
   }, [parsel, bloklar, selectedBlok]);
+
+  useEffect(() => {
+    setBlokAdDuzenle(selectedBlok);
+  }, [selectedBlok]);
 
   useEffect(() => {
     if (!layoutSnapReady) return;
@@ -673,6 +678,90 @@ export const TemizlikKirimScreen: React.FC<Props> = ({ currentUser }) => {
       showMsg(`${ad} blok kartı kaydedildi.`);
     } catch (e: unknown) {
       showMsg(formatFirestoreWriteError(e, 'Blok açılamadı.'), 'err');
+    }
+  };
+
+  const handleBlokAdGuncelle = async () => {
+    if (!selectedBlok) {
+      showMsg('Önce tablodan veya çipten bloğu seçin.', 'err');
+      return;
+    }
+    const ad = blokAdDuzenle.trim().toLocaleUpperCase('tr-TR');
+    if (!ad) {
+      showMsg('Yeni blok adı yazın.', 'err');
+      return;
+    }
+    if (ad === selectedBlok.toLocaleUpperCase('tr-TR')) {
+      showMsg('Blok adı aynı.');
+      return;
+    }
+    if (bloklar.some((b) => b.toLocaleUpperCase('tr-TR') === ad)) {
+      showMsg(`${ad} zaten var — birleştirme yok, başka ad seçin.`, 'err');
+      return;
+    }
+    if (!(await guardWrite())) return;
+    setBusy(true);
+    setBusyLabel('Blok adı güncelleniyor…');
+    try {
+      const oldKart = blokKartlar.find(
+        (k) => k.parsel === parsel && k.blok.toLocaleUpperCase('tr-TR') === selectedBlok.toLocaleUpperCase('tr-TR')
+      );
+      await saveDocument(
+        'temizlikBlokKartlari',
+        cleanUndefined({
+          id: blokKartId(parsel, ad),
+          parsel,
+          blok: ad,
+          kayitTarihi: oldKart?.kayitTarihi || new Date().toISOString(),
+        })
+      );
+      if (oldKart && oldKart.id !== blokKartId(parsel, ad)) {
+        await removeDocument('temizlikBlokKartlari', oldKart.id);
+      }
+      for (const d of daireler.filter((x) => x.parsel === parsel && x.blok === selectedBlok)) {
+        await saveDocument(
+          'temizlikDaireleri',
+          cleanUndefined({ ...d, blok: ad, guncellemeTarihi: new Date().toISOString() })
+        );
+      }
+      for (const t of tespitler.filter((x) => x.parsel === parsel && x.blok === selectedBlok)) {
+        await saveDocument('temizlikTespitleri', cleanUndefined({ ...t, blok: ad }));
+      }
+      for (const u of uygulamalar.filter((x) => x.parsel === parsel && x.blok === selectedBlok)) {
+        await saveDocument('temizlikUygulamalari', cleanUndefined({ ...u, blok: ad }));
+      }
+      for (const b of bacalar.filter(
+        (x) =>
+          x.parsel === parsel &&
+          (x.blok === selectedBlok || x.blok2 === selectedBlok)
+      )) {
+        await saveDocument(
+          'temizlikBacalar',
+          cleanUndefined({
+            ...b,
+            blok: b.blok === selectedBlok ? ad : b.blok,
+            blok2: b.blok2 === selectedBlok ? ad : b.blok2,
+            guncellemeTarihi: new Date().toISOString(),
+          })
+        );
+      }
+      for (const k of koridorKartlar.filter((x) => x.parsel === parsel && (x.bloklar || []).includes(selectedBlok))) {
+        await saveDocument(
+          'temizlikKoridorKartlari',
+          cleanUndefined({
+            ...k,
+            bloklar: (k.bloklar || []).map((b) => (b === selectedBlok ? ad : b)),
+          })
+        );
+      }
+      setSelectedBlok(ad);
+      setBlokAdDuzenle(ad);
+      showMsg(`Blok adı ${ad} olarak güncellendi.`);
+    } catch (e: unknown) {
+      showMsg(formatFirestoreWriteError(e, 'Blok adı değiştirilemedi.'), 'err');
+    } finally {
+      setBusy(false);
+      setBusyLabel('');
     }
   };
 
@@ -1148,6 +1237,10 @@ export const TemizlikKirimScreen: React.FC<Props> = ({ currentUser }) => {
         >
           <Printer size={13} /> Parsel raporu
         </button>
+        <p className="text-[10px] text-slate-500 max-w-md leading-snug">
+          Bu tuş iş yükü / yevmiye özetidir. Antetli tespit tutanağı (imza) için menüde
+          <span className="font-black text-slate-800"> Parsel Temizlik Tespit</span> sekmesi kullanılır.
+        </p>
       </div>
 
       {mainTab === 'daire' && (() => {
@@ -1326,6 +1419,22 @@ export const TemizlikKirimScreen: React.FC<Props> = ({ currentUser }) => {
                 className="bg-slate-900 text-white rounded-xl px-3 text-[10px] font-black cursor-pointer disabled:opacity-50"
               >
                 Blok kartı aç
+              </button>
+            </div>
+            <div className="flex gap-2">
+              <input
+                value={blokAdDuzenle}
+                onChange={(e) => setBlokAdDuzenle(e.target.value)}
+                placeholder="Seçili bloğun adı"
+                className="flex-1 bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold"
+              />
+              <button
+                type="button"
+                disabled={busy || !selectedBlok}
+                onClick={() => void handleBlokAdGuncelle()}
+                className="inline-flex items-center gap-1 bg-white border border-slate-300 text-slate-800 rounded-xl px-3 text-[10px] font-black cursor-pointer disabled:opacity-50"
+              >
+                <Pencil size={11} /> Bloğun adını değiştir
               </button>
             </div>
 
