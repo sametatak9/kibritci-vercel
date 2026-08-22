@@ -4333,7 +4333,10 @@ function App() {
               )}
 
               {activeTab === "temizlik_kirim" && (
-                <TemizlikKirimScreen currentUser={currentUser} />
+                <TemizlikKirimScreen
+                  currentUser={currentUser}
+                  onOpenTespitTab={() => handleTabNavigation('parsel_temizlik_tespit')}
+                />
               )}
 
               {activeTab === "parsel_temizlik_tespit" && (

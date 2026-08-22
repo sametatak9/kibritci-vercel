@@ -358,7 +358,8 @@ export function buildParselTopluTutanakHtml(opts: {
   imza?: { hazirlayan?: string; parselSefi?: string; projeMuduru?: string };
 }): string {
   const tarih = formatDateLabelTr(opts.tarih || new Date().toISOString());
-  const konuBaslik = opts.konu === 'BACA' ? 'Altyapı Baca Temizliği' : 'Daire / Blok Temizliği';
+  const konuBaslik =
+    opts.konu === 'BACA' ? 'Altyapı Baca Temizliği ve Çevre Düzenleme' : 'Daire / Blok Temizliği';
   const docCode = opts.konu === 'BACA' ? 'PTT-PARSEL-BACA' : 'PTT-PARSEL-DAIRE';
   const body = `
     <h1 style="font-size:18px;font-weight:900;margin:0 0 4px;letter-spacing:.04em;text-transform:uppercase">Parsel Geneli ${escapeHtml(konuBaslik)} Tutanağı</h1>

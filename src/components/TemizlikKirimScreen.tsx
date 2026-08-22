@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Camera, Droplets, MapPin, Plus, Printer, Trash2, X, Layers, CheckCircle2, ImagePlus, Pencil,
+  Camera, ClipboardList, Droplets, FileSignature, MapPin, Plus, Printer, Trash2, X, Layers, CheckCircle2, ImagePlus, Pencil,
 } from 'lucide-react';
 import { collection, onSnapshot } from 'firebase/firestore';
 import {
@@ -264,9 +264,10 @@ const IsYukuTablo: React.FC<{
 
 interface Props {
   currentUser?: { email?: string } | null;
+  onOpenTespitTab?: () => void;
 }
 
-export const TemizlikKirimScreen: React.FC<Props> = ({ currentUser }) => {
+export const TemizlikKirimScreen: React.FC<Props> = ({ currentUser, onOpenTespitTab }) => {
   const kaydeden = currentUser?.email || 'saha';
   const [mainTab, setMainTab] = useState<'daire' | 'baca'>('daire');
   const [parsel, setParsel] = useState(TEMIZLIK_DEFAULT_PARSEL);
@@ -1237,10 +1238,29 @@ export const TemizlikKirimScreen: React.FC<Props> = ({ currentUser }) => {
         >
           <Printer size={13} /> Parsel raporu
         </button>
-        <p className="text-[10px] text-slate-500 max-w-md leading-snug">
-          Bu tuş iş yükü / yevmiye özetidir. Antetli tespit tutanağı (imza) için menüde
-          <span className="font-black text-slate-800"> Parsel Temizlik Tespit</span> sekmesi kullanılır.
-        </p>
+        <button
+          type="button"
+          onClick={() => onOpenTespitTab?.()}
+          className="inline-flex items-center gap-1.5 bg-amber-700 text-white text-[10px] font-black px-4 py-2.5 rounded-xl cursor-pointer border-2 border-amber-900"
+        >
+          <FileSignature size={14} /> Fotoğraflı tutanak al
+        </button>
+      </div>
+      <div className="rounded-2xl border-2 border-amber-700 bg-amber-50 px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p className="text-[11px] font-black uppercase text-amber-950">Antetli tutanak buradan değil</p>
+          <p className="text-[12px] font-semibold text-amber-950 mt-0.5 leading-snug">
+            Siyah tuş yalnızca sayı özetidir. 160/2 baca + çevre düzenleme tutanağı için turuncu
+            <span className="font-black"> Fotoğraflı tutanak al</span> tuşuna basın — fotoğraf kutusuna düşersiniz.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => onOpenTespitTab?.()}
+          className="inline-flex items-center gap-2 bg-amber-800 text-white text-xs font-black px-4 py-3 rounded-xl cursor-pointer"
+        >
+          <ClipboardList size={16} /> Parsel Temizlik Tespit’e git
+        </button>
       </div>
 
       {mainTab === 'daire' && (() => {

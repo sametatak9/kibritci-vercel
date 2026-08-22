@@ -665,7 +665,7 @@ export const ParselTemizlikTespitScreen: React.FC<Props> = ({ currentUser }) => 
     const kisa = parselKisaAd(parsel);
     if (tutanakNot.trim()) return tutanakNot.trim();
     if (konu === 'BACA') {
-      return `${parsel} (${kisa}) kapsamında altyapı baca (çukur) temizlik işleri parsel geneli tamamlanmıştır. Saha kontrolünde bacalar temizlenmiş olarak görülmüş; iş bitimi bu tutanak ve ekli fotoğraflarla belgelenmiştir. Bacalar tek tek kart açılmadan parsel bütününde teslim edilmiştir.`;
+      return `${parsel} (${kisa}) kapsamında altyapı baca (çukur) temizlik işleri ile çevre düzenleme işleri parsel geneli tamamlanmıştır. Saha kontrolünde baca ağızları açılmış/temizlenmiş, avlu ve blok çevreleri tesviye ve zemin hazırlığı yapılmış olarak görülmüştür. İş bitimi bu tutanak ve ekli fotoğraflarla belgelenmiştir. Bacalar tek tek kart açılmadan parsel bütününde teslim edilmiştir.`;
     }
     return `${parsel} (${kisa}) kapsamında daire / blok temizlik işleri parsel geneli tamamlanmıştır. Saha kontrol fotoğrafları ekte olup iş bitimi bu tutanakla belgelenmiştir.`;
   };
@@ -825,8 +825,8 @@ export const ParselTemizlikTespitScreen: React.FC<Props> = ({ currentUser }) => 
       </div>
 
       <div className="rounded-2xl border-2 border-slate-900 bg-white p-4 space-y-3">
-        <p className="text-[11px] font-black uppercase tracking-wide text-slate-900">
-          Parsel geneli tutanak — fotoğraf at, rapor bas
+        <p className="text-sm font-black uppercase tracking-wide text-slate-900">
+          Tutanak burada — fotoğrafı buraya atın, alttaki turuncu tuşa basın
         </p>
         <p className="text-[11px] text-slate-600 leading-snug">
           Tek tek daire/baca açmadan: {parselKisaAd(parsel)} için 6–16 fotoğraf ekleyin. Üstteki imza isimlerini doldurun.
