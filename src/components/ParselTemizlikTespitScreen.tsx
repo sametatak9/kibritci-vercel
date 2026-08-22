@@ -48,6 +48,17 @@ import type {
 } from '../types/erp';
 
 const PARSEL_SECENEK = PARSEL_LIST.filter((p) => p !== 'GENEL SAHA');
+const BLOK_TEMIZLIK_160 = ['C2', 'A1A', 'C3', 'A1B', 'B3', 'C4'];
+
+type BlokFotoSatir = { blok: string; fotolar: string[]; not: string };
+
+function seedBlokSatirlari(): BlokFotoSatir[] {
+  return BLOK_TEMIZLIK_160.map((blok) => ({
+    blok,
+    fotolar: [],
+    not: `${blok} bloğu temizliği tamamlandı.`,
+  }));
+}
 
 type Props = { currentUser?: { email?: string; ad?: string; soyad?: string; displayName?: string } | null };
 type Mod = 'daire' | 'baca';
@@ -143,6 +154,13 @@ export const ParselTemizlikTespitScreen: React.FC<Props> = ({ currentUser }) => 
   const [projeMuduru, setProjeMuduru] = useState('');
   const [tutanakNot, setTutanakNot] = useState('');
   const [topluFotolar, setTopluFotolar] = useState<string[]>([]);
+  const [blokFotoSatirlari, setBlokFotoSatirlari] = useState<BlokFotoSatir[]>(seedBlokSatirlari);
+
+  useEffect(() => {
+    if (parsel === 'Parsel Bölge 160/2') {
+      setBlokFotoSatirlari((prev) => (prev.length ? prev : seedBlokSatirlari()));
+    }
+  }, [parsel]);
 
   useEffect(() => {
     setBlokAdDuzenle(aktifBlok);
@@ -189,6 +207,16 @@ export const ParselTemizlikTespitScreen: React.FC<Props> = ({ currentUser }) => 
     void readFileList(copied, 16, topluFotolar).then((next) => {
       setTopluFotolar(next);
       show(`${next.length} fotoğraf eklendi. Şimdi turuncu tutanak tuşuna basın.`);
+    });
+  };
+
+  const ingestBlokFoto = (idx: number, files: FileList | File[] | null) => {
+    const copied = files ? Array.from(files as ArrayLike<File>) : [];
+    if (!copied.length) return show('Bu blok için dosya seçilmedi.', 'err');
+    const mevcut = blokFotoSatirlari[idx]?.fotolar || [];
+    void readFileList(copied, 12, mevcut).then((next) => {
+      setBlokFotoSatirlari((prev) => prev.map((row, i) => (i === idx ? { ...row, fotolar: next } : row)));
+      show(`${blokFotoSatirlari[idx]?.blok} — ${next.length} fotoğraf.`);
     });
   };
 
@@ -738,6 +766,54 @@ export const ParselTemizlikTespitScreen: React.FC<Props> = ({ currentUser }) => 
     }
   };
 
+  const handleBlokTemizlikTutanak = async () => {
+    const dolu = blokFotoSatirlari.filter((r) => r.fotolar.length > 0);
+    if (dolu.length === 0) {
+      return show('Her bloğun altına o bloğun fotoğrafını yükleyin (C2, A1A, C3, A1B, B3, C4).', 'err');
+    }
+    const eksik = blokFotoSatirlari.filter((r) => r.fotolar.length === 0).map((r) => r.blok);
+    if (eksik.length && !window.confirm(`${eksik.join(', ')} bloğunda fotoğraf yok. Yine de tutanak basılsın mı?`)) return;
+    const raporPencere = window.open('', '_blank');
+    if (raporPencere) {
+      raporPencere.document.write('<p style="font-family:sans-serif;padding:24px">Tutanak hazırlanıyor…</p>');
+    }
+    setBusy(true);
+    try {
+      const blokFotolar = blokFotoSatirlari.map((r) => ({
+        blok: r.blok,
+        fotoUrls: r.fotolar,
+        not: r.not.trim() || `${r.blok} bloğu temizliği tamamlandı.`,
+      }));
+      const hepsi = blokFotoSatirlari.flatMap((r) => r.fotolar);
+      const html = buildParselTopluTutanakHtml({
+        parsel,
+        konu: 'DAIRE',
+        tarih,
+        metin: tutanakNot.trim() || `${parselKisaAd(parsel)} parselinde ${BLOK_TEMIZLIK_160.join(', ')} bloklarının temizlik işi tamamlanmıştır.`,
+        fotoUrls: hepsi,
+        imza: imza(),
+        blokFotolar,
+      });
+      openTemizlikRapor(html, `${parsel} 6 blok temizlik tutanağı`, raporPencere);
+      show('6 blok tutanağı açıldı — yazdırın / PDF kaydedin.');
+      if (await guard()) {
+        await arsivleVeYazdir(
+          html,
+          `${parsel} 6 blok temizlik tutanağı`,
+          'PARSEL_DAIRE_TOPLU',
+          BLOK_TEMIZLIK_160,
+          `${parselKisaAd(parsel)} · ${BLOK_TEMIZLIK_160.join(', ')} · ${hepsi.length} foto`,
+          undefined,
+          false
+        );
+      }
+    } catch (e: unknown) {
+      show(formatFirestoreWriteError(e, 'Blok tutanağı açılamadı.'), 'err');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const arsiv = tutanaklar
     .filter((t) => t.parsel === parsel)
     .sort((a, b) => String(b.kayitTarihi).localeCompare(String(a.kayitTarihi)))
@@ -929,6 +1005,73 @@ export const ParselTemizlikTespitScreen: React.FC<Props> = ({ currentUser }) => 
           </button>
         </div>
       </div>
+
+      {parsel === 'Parsel Bölge 160/2' ? (
+      <div className="rounded-2xl border-2 border-teal-800 bg-teal-50 p-4 space-y-3">
+        <p className="text-sm font-black uppercase text-teal-950">
+          160/2 — 6 blok temizlik tutanağı (C2 · A1A · C3 · A1B · B3 · C4)
+        </p>
+        <p className="text-[11px] text-teal-900 leading-snug">
+          Fotoğrafları sohbete atmayın. Her bloğun kendi satırından “Dosya seç” ile o bloğun fotoğrafını yükleyin.
+          Yeşil tutanak tuşu resmi evrakı açar.
+        </p>
+        {blokFotoSatirlari.map((row, idx) => (
+          <div key={row.blok} className="bg-white border border-teal-200 rounded-xl p-3 space-y-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs font-black text-slate-900 w-14">Blok {row.blok}</span>
+              <input
+                value={row.not}
+                onChange={(e) =>
+                  setBlokFotoSatirlari((prev) => prev.map((r, i) => (i === idx ? { ...r, not: e.target.value } : r)))
+                }
+                className="flex-1 min-w-[180px] border border-slate-200 rounded-lg px-2 py-1 text-[11px] font-semibold"
+              />
+              <label className="text-[10px] font-black text-teal-900 cursor-pointer bg-teal-100 rounded-lg px-2 py-1">
+                Dosya seç
+                <input
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  className="hidden"
+                  onChange={(e) => {
+                    ingestBlokFoto(idx, e.target.files);
+                    e.target.value = '';
+                  }}
+                />
+              </label>
+              <span className="text-[10px] font-bold text-slate-500">{row.fotolar.length} foto</span>
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {row.fotolar.map((u, i) => (
+                <button
+                  key={`${row.blok}_${i}`}
+                  type="button"
+                  title="Çıkar"
+                  onClick={() =>
+                    setBlokFotoSatirlari((prev) =>
+                      prev.map((r, ri) =>
+                        ri === idx ? { ...r, fotolar: r.fotolar.filter((_, j) => j !== i) } : r
+                      )
+                    )
+                  }
+                  className="cursor-pointer"
+                >
+                  <img src={u} alt="" className="w-14 h-14 object-cover rounded-lg border" />
+                </button>
+              ))}
+            </div>
+          </div>
+        ))}
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => void handleBlokTemizlikTutanak()}
+          className="inline-flex items-center gap-1.5 bg-teal-800 text-white text-[11px] font-black px-4 py-3 rounded-xl cursor-pointer disabled:opacity-50"
+        >
+          <FileSignature size={14} /> 6 bloğun resmi temizlik tutanağını bas
+        </button>
+      </div>
+      ) : null}
 
       {mod === 'daire' ? (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">

@@ -392,20 +392,30 @@ export function buildParselTopluTutanakHtml(opts: {
   metin: string;
   fotoUrls: string[];
   imza?: { hazirlayan?: string; parselSefi?: string; projeMuduru?: string };
+  blokFotolar?: { blok: string; fotoUrls: string[]; not?: string }[];
 }): string {
   const tarih = formatDateLabelTr(opts.tarih || new Date().toISOString());
   const kisa = parselKisaAd(opts.parsel);
   const baca = opts.konu === 'BACA';
+  const bloklar = (opts.blokFotolar || []).filter((b) => String(b.blok || '').trim());
+  const blokModu = !baca && bloklar.length > 0;
+  const blokAdlari = bloklar.map((b) => b.blok.trim().toLocaleUpperCase('tr-TR'));
   const belgeAdi = baca
     ? 'ALTYAPI BACA TEMİZLİĞİ VE ÇEVRE DÜZENLEME İŞ BİTİRME TUTANAĞI'
-    : 'DAİRE / BLOK TEMİZLİĞİ İŞ BİTİRME TUTANAĞI';
-  const docCode = baca ? 'PTT-PARSEL-BACA' : 'PTT-PARSEL-DAIRE';
+    : blokModu
+      ? 'BLOK TEMİZLİĞİ İŞ BİTİRME TUTANAĞI'
+      : 'DAİRE / BLOK TEMİZLİĞİ İŞ BİTİRME TUTANAĞI';
+  const docCode = baca ? 'PTT-PARSEL-BACA' : blokModu ? 'PTT-BLOK-TEMIZLIK' : 'PTT-PARSEL-DAIRE';
   const konuSatir = baca
     ? `${opts.parsel} (${kisa}) sınırları içindeki tüm altyapı bacalarının (pit / çukur ağızları) temizliği ile çevre düzenleme işinin tamamlandığının tespiti`
-    : `${opts.parsel} (${kisa}) sınırları içindeki daire / blok temizlik işinin tamamlandığının tespiti`;
+    : blokModu
+      ? `${opts.parsel} (${kisa}) kapsamında ${blokAdlari.join(', ')} bloklarının temizlik işinin tamamlandığının tespiti`
+      : `${opts.parsel} (${kisa}) sınırları içindeki daire / blok temizlik işinin tamamlandığının tespiti`;
   const sonuc = baca
     ? `Yapılan saha kontrolü sonucunda ${kisa} parselinde yer alan altyapı bacalarının tamamının temizlendiği; pit çukur ağızlarının açıldığı / temizlendiği ve çevre düzenleme (zemin tesviyesi, stabilize-çakıl serimi ve saha düzeni) işinin parsel geneli tamamlandığı tespit edilmiştir. Eksik baca bırakılmamıştır.`
-    : `Yapılan saha kontrolü sonucunda ${kisa} parselinde daire / blok temizlik işinin parsel geneli tamamlandığı tespit edilmiştir.`;
+    : blokModu
+      ? `Yapılan saha kontrolü sonucunda ${kisa} parselinde ${blokAdlari.map((b) => `Blok ${b}`).join(', ')} bloklarının temizlik işi tamamlanmıştır. Bu altı blok temizlenmiş ve teslime hazır kabul edilir.`
+      : `Yapılan saha kontrolü sonucunda ${kisa} parselinde daire / blok temizlik işinin parsel geneli tamamlandığı tespit edilmiştir.`;
   const sahaNotu = String(opts.metin || '').trim();
   const body = `
     <div style="border:2px solid #0f172a;padding:18px 20px 22px;font-family:'Times New Roman',Times,serif;color:#0f172a">
@@ -422,7 +432,7 @@ export function buildParselTopluTutanakHtml(opts: {
           <td style="border:1px solid #0f172a;padding:6px 8px;font-weight:700;background:#f1f5f9">Parsel</td>
           <td style="border:1px solid #0f172a;padding:6px 8px"><strong>${escapeHtml(opts.parsel)}</strong> &nbsp;(&nbsp;${escapeHtml(kisa)}&nbsp;)</td>
           <td style="border:1px solid #0f172a;padding:6px 8px;font-weight:700;background:#f1f5f9">Kapsam</td>
-          <td style="border:1px solid #0f172a;padding:6px 8px">Parselin tamamı</td>
+          <td style="border:1px solid #0f172a;padding:6px 8px">${blokModu ? escapeHtml(blokAdlari.map((b) => `Blok ${b}`).join(', ')) : 'Parselin tamamı'}</td>
         </tr>
         <tr>
           <td style="border:1px solid #0f172a;padding:6px 8px;font-weight:700;background:#f1f5f9">Konu</td>
@@ -433,9 +443,17 @@ export function buildParselTopluTutanakHtml(opts: {
       <p style="margin:0 0 6px;font-size:12px;font-weight:800;text-decoration:underline">MADDE 1 — Yer ve iş tanımı</p>
       <p style="margin:0 0 12px;font-size:12px;line-height:1.55;text-align:justify">
         İşbu tutanak, ${escapeHtml(opts.parsel)} üzerinde yürütülen ${
-          baca ? 'altyapı baca (yağmur / atık / pit çukuru ağızları) temizliği ve buna bağlı çevre düzenleme' : 'daire ve blok temizlik'
+          baca
+            ? 'altyapı baca (yağmur / atık / pit çukuru ağızları) temizliği ve buna bağlı çevre düzenleme'
+            : blokModu
+              ? `${blokAdlari.length} bloğa ait daire / blok temizlik`
+              : 'daire ve blok temizlik'
         } işinin saha kontrolü ile düzenlenmiştir.
-        Tespit, her baca için ayrı kart açılmaksızın parsel bütününde yapılmış; ekli fotoğraflar sahanın genel durumunu belgelemektedir.
+        ${
+          blokModu
+            ? 'Her bloğun temizliği ayrı fotoğraflarla belgelenmiştir.'
+            : 'Tespit, her baca için ayrı kart açılmaksızın parsel bütününde yapılmış; ekli fotoğraflar sahanın genel durumunu belgelemektedir.'
+        }
       </p>
 
       <p style="margin:0 0 6px;font-size:12px;font-weight:800;text-decoration:underline">MADDE 2 — Yapılan işler</p>
@@ -446,7 +464,14 @@ export function buildParselTopluTutanakHtml(opts: {
                <li>Pit / çukur çevresindeki moloz, ambalaj ve döküntülerin kaldırılması.</li>
                <li>Blok avluları ve baca hatları boyunca zemin tesviyesi, stabilize / çakıl serimi ve çevre düzeni.</li>
                <li>Temizlenen baca ağızlarının saha kontrol fotoğrafları ile belgelenmesi.</li>`
-            : `<li>Daire ve bloklarda temizlik işinin parsel geneli tamamlanması.</li>
+            : blokModu
+              ? bloklar
+                  .map(
+                    (b) =>
+                      `<li><strong>Blok ${escapeHtml(b.blok.toLocaleUpperCase('tr-TR'))}</strong> temizlik işi tamamlanmıştır.${b.not ? ` ${escapeHtml(b.not)}` : ''}</li>`
+                  )
+                  .join('')
+              : `<li>Daire ve bloklarda temizlik işinin parsel geneli tamamlanması.</li>
                <li>Saha kontrol fotoğrafları ile belgelenmesi.</li>`
         }
       </ol>
@@ -464,14 +489,27 @@ export function buildParselTopluTutanakHtml(opts: {
 
       <p style="margin:0 0 6px;font-size:12px;font-weight:800;text-decoration:underline">MADDE 4 — Ekler</p>
       <p style="margin:0 0 8px;font-size:12px;line-height:1.5">
-        EK-1: Saha kontrol fotoğrafları (${opts.fotoUrls.filter(Boolean).length} adet). Fotoğraflar ${escapeHtml(kisa)} parselinde
-        ${baca ? 'temizlenen baca ağızları ve çevre düzenleme zeminini' : 'tamamlanan temizlik işini'} göstermektedir.
+        ${
+          blokModu
+            ? 'EK-1: Blok bazında saha kontrol fotoğrafları. Her bloğun altındaki görüntüler o bloğun temizliğini belgeler.'
+            : `EK-1: Saha kontrol fotoğrafları (${opts.fotoUrls.filter(Boolean).length} adet). Fotoğraflar ${escapeHtml(kisa)} parselinde ${baca ? 'temizlenen baca ağızları ve çevre düzenleme zeminini' : 'tamamlanan temizlik işini'} göstermektedir.`
+        }
       </p>
-      ${imgGrid(opts.fotoUrls, kisa)}
+      ${
+        blokModu
+          ? bloklar
+              .map((b, i) => {
+                const ad = b.blok.toLocaleUpperCase('tr-TR');
+                return `<p style="margin:14px 0 6px;font-size:12px;font-weight:800">EK-1.${i + 1} — BLOK ${escapeHtml(ad)}${b.not ? ` — ${escapeHtml(b.not)}` : ''}</p>${imgGrid(b.fotoUrls || [], `Blok ${ad}`)}`;
+              })
+              .join('')
+          : imgGrid(opts.fotoUrls, kisa)
+      }
 
       <p style="margin:16px 0 0;font-size:12px;line-height:1.55;text-align:justify">
         MADDE 5 — İşbu tutanak gerçeğe aykırı husus taşımadığını beyan eden aşağıda imzası bulunanlarca imzalanmıştır.
         ${baca ? `<strong>${escapeHtml(kisa)} parselindeki tüm altyapı bacaları temizlenmiş kabul edilir.</strong>` : ''}
+        ${blokModu ? `<strong>${escapeHtml(kisa)} parselinde ${escapeHtml(blokAdlari.join(', '))} bloklarının temizlik işi tamamlanmış kabul edilir.</strong>` : ''}
       </p>
       ${resmiImzaCetveliHtml(opts.imza)}
     </div>
