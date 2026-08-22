@@ -42,20 +42,56 @@ function imgRow(urls: string[], max = 6): string {
     .join('')}</div>`;
 }
 
-function imgGrid(urls: string[], max = 16): string {
+function resmiImzaCetveliHtml(imza?: {
+  hazirlayan?: string;
+  parselSefi?: string;
+  projeMuduru?: string;
+}): string {
+  const cells = [
+    { unvan: 'Hazırlayan', gorev: 'Saha tespit / tutanak', ad: imza?.hazirlayan || '' },
+    { unvan: 'Kontrol eden', gorev: 'Parsel şefi / saha kontrol', ad: imza?.parselSefi || '' },
+    { unvan: 'Onaylayan', gorev: 'Proje müdürü / işveren vekili', ad: imza?.projeMuduru || '' },
+  ];
+  return `
+    <table style="width:100%;border-collapse:collapse;margin-top:28px;page-break-inside:avoid">
+      <tr>
+        ${cells
+          .map(
+            (c) => `<td style="width:33.33%;border:1px solid #0f172a;vertical-align:top;padding:0">
+              <p style="margin:0;padding:6px 8px;background:#0f172a;color:#fff;font-size:10px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;font-family:Times New Roman,Times,serif">${escapeHtml(c.unvan)}</p>
+              <p style="margin:0;padding:6px 8px 0;font-size:10px;color:#334155">${escapeHtml(c.gorev)}</p>
+              <p style="margin:0;padding:8px;font-size:13px;font-weight:700;min-height:22px">${escapeHtml(c.ad || '…')}</p>
+              <div style="height:64px;border-top:1px dashed #94a3b8;margin:0 8px"></div>
+              <p style="margin:0;padding:4px 8px 8px;font-size:9px;color:#64748b">İmza ve kaşe</p>
+            </td>`
+          )
+          .join('')}
+      </tr>
+    </table>
+    <p style="font-size:10px;line-height:1.5;color:#1e293b;margin:16px 0 0;text-align:justify">
+      İşbu tutanak üç nüsha düzenlenmiş olup hazırlayan, kontrol eden ve onaylayan tarafından imzalanmıştır.
+      Tespit fotoğrafları tutanağın ayrılmaz ekidir. İmza ve kaşe tamamlandıktan sonra bu belge, ilgili parseldeki
+      <strong>altyapı baca temizliği ve çevre düzenleme</strong> işinin tamamlandığına dair hakediş / ödeme dayanağı olarak kullanılabilir.
+    </p>`;
+}
+
+function imgGrid(urls: string[], etiket: string, max = 16): string {
   const list = (urls || []).filter(Boolean).slice(0, max);
-  if (!list.length) return '<p style="font-size:12px;color:#94a3b8">Fotoğraf eklenmedi.</p>';
-  return `<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:12px 0 8px">
-    ${list
-      .map(
-        (u, i) =>
-          `<figure style="margin:0;page-break-inside:avoid">
-            <img src="${escapeHtml(u)}" alt="Saha fotoğraf ${i + 1}" style="width:100%;height:210px;object-fit:cover;border-radius:10px;border:1px solid #cbd5e1" />
-            <figcaption style="font-size:9px;color:#64748b;margin-top:4px;font-weight:700">Fotoğraf ${i + 1}</figcaption>
-          </figure>`
-      )
-      .join('')}
-  </div>`;
+  if (!list.length) return '<p style="font-size:12px;color:#334155">Ek fotoğraf bulunmamaktadır.</p>';
+  return `<table style="width:100%;border-collapse:collapse">
+    ${Array.from({ length: Math.ceil(list.length / 2) }, (_, row) => {
+      const a = list[row * 2];
+      const b = list[row * 2 + 1];
+      const cell = (u: string | undefined, n: number) =>
+        u
+          ? `<td style="width:50%;border:1px solid #0f172a;padding:8px;vertical-align:top">
+              <img src="${escapeHtml(u)}" alt="Ek-1 Fotoğraf ${n}" style="width:100%;height:200px;object-fit:cover;display:block;border:1px solid #cbd5e1" />
+              <p style="margin:6px 0 0;font-size:10px;font-weight:700">EK-1 / Fotoğraf ${n} — ${escapeHtml(etiket)} saha kontrolü</p>
+            </td>`
+          : `<td style="width:50%;border:1px solid #0f172a"></td>`;
+      return `<tr>${cell(a, row * 2 + 1)}${cell(b, row * 2 + 2)}</tr>`;
+    }).join('')}
+  </table>`;
 }
 
 function ozetTabloHtml(
@@ -358,26 +394,98 @@ export function buildParselTopluTutanakHtml(opts: {
   imza?: { hazirlayan?: string; parselSefi?: string; projeMuduru?: string };
 }): string {
   const tarih = formatDateLabelTr(opts.tarih || new Date().toISOString());
-  const konuBaslik =
-    opts.konu === 'BACA' ? 'Altyapı Baca Temizliği ve Çevre Düzenleme' : 'Daire / Blok Temizliği';
-  const docCode = opts.konu === 'BACA' ? 'PTT-PARSEL-BACA' : 'PTT-PARSEL-DAIRE';
+  const kisa = parselKisaAd(opts.parsel);
+  const baca = opts.konu === 'BACA';
+  const belgeAdi = baca
+    ? 'ALTYAPI BACA TEMİZLİĞİ VE ÇEVRE DÜZENLEME İŞ BİTİRME TUTANAĞI'
+    : 'DAİRE / BLOK TEMİZLİĞİ İŞ BİTİRME TUTANAĞI';
+  const docCode = baca ? 'PTT-PARSEL-BACA' : 'PTT-PARSEL-DAIRE';
+  const konuSatir = baca
+    ? `${opts.parsel} (${kisa}) sınırları içindeki tüm altyapı bacalarının (pit / çukur ağızları) temizliği ile çevre düzenleme işinin tamamlandığının tespiti`
+    : `${opts.parsel} (${kisa}) sınırları içindeki daire / blok temizlik işinin tamamlandığının tespiti`;
+  const sonuc = baca
+    ? `Yapılan saha kontrolü sonucunda ${kisa} parselinde yer alan altyapı bacalarının tamamının temizlendiği; pit çukur ağızlarının açıldığı / temizlendiği ve çevre düzenleme (zemin tesviyesi, stabilize-çakıl serimi ve saha düzeni) işinin parsel geneli tamamlandığı tespit edilmiştir. Eksik baca bırakılmamıştır.`
+    : `Yapılan saha kontrolü sonucunda ${kisa} parselinde daire / blok temizlik işinin parsel geneli tamamlandığı tespit edilmiştir.`;
+  const sahaNotu = String(opts.metin || '').trim();
   const body = `
-    <h1 style="font-size:18px;font-weight:900;margin:0 0 4px;letter-spacing:.04em;text-transform:uppercase">Parsel Geneli ${escapeHtml(konuBaslik)} Tutanağı</h1>
-    <p style="font-size:12px;color:#334155;margin:0 0 4px"><strong>${escapeHtml(opts.parsel)}</strong> · ${escapeHtml(parselKisaAd(opts.parsel))} · ${escapeHtml(tarih)}</p>
-    <p style="font-size:11px;font-weight:800;color:#0f766e;margin:0 0 12px;text-transform:uppercase">Kapsam: parselin tamamı — tek tek kart açılmadan saha kontrolü</p>
-    <div style="border:1px solid #0f766e;border-radius:12px;padding:14px 16px;background:#f0fdfa;margin:0 0 16px">
-      <p style="margin:0;font-size:13px;line-height:1.55;font-weight:600;color:#134e4a;white-space:pre-wrap">${escapeHtml(opts.metin)}</p>
+    <div style="border:2px solid #0f172a;padding:18px 20px 22px;font-family:'Times New Roman',Times,serif;color:#0f172a">
+      <p style="margin:0 0 4px;text-align:center;font-size:11px;letter-spacing:.14em;font-weight:700">T.C. — KİBRİTÇİ İNŞAAT TAAHHÜT TURİZM SAN. VE TİC. LTD. ŞTİ.</p>
+      <p style="margin:0 0 12px;text-align:center;font-size:16px;font-weight:800;letter-spacing:.04em;line-height:1.35">${escapeHtml(belgeAdi)}</p>
+      <table style="width:100%;border-collapse:collapse;font-size:12px;margin:0 0 14px">
+        <tr>
+          <td style="border:1px solid #0f172a;padding:6px 8px;width:22%;font-weight:700;background:#f1f5f9">Belge türü</td>
+          <td style="border:1px solid #0f172a;padding:6px 8px">İş bitirme / saha tespit tutanağı (hakediş eki)</td>
+          <td style="border:1px solid #0f172a;padding:6px 8px;width:18%;font-weight:700;background:#f1f5f9">Tarih</td>
+          <td style="border:1px solid #0f172a;padding:6px 8px">${escapeHtml(tarih)}</td>
+        </tr>
+        <tr>
+          <td style="border:1px solid #0f172a;padding:6px 8px;font-weight:700;background:#f1f5f9">Parsel</td>
+          <td style="border:1px solid #0f172a;padding:6px 8px"><strong>${escapeHtml(opts.parsel)}</strong> &nbsp;(&nbsp;${escapeHtml(kisa)}&nbsp;)</td>
+          <td style="border:1px solid #0f172a;padding:6px 8px;font-weight:700;background:#f1f5f9">Kapsam</td>
+          <td style="border:1px solid #0f172a;padding:6px 8px">Parselin tamamı</td>
+        </tr>
+        <tr>
+          <td style="border:1px solid #0f172a;padding:6px 8px;font-weight:700;background:#f1f5f9">Konu</td>
+          <td colspan="3" style="border:1px solid #0f172a;padding:6px 8px">${escapeHtml(konuSatir)}</td>
+        </tr>
+      </table>
+
+      <p style="margin:0 0 6px;font-size:12px;font-weight:800;text-decoration:underline">MADDE 1 — Yer ve iş tanımı</p>
+      <p style="margin:0 0 12px;font-size:12px;line-height:1.55;text-align:justify">
+        İşbu tutanak, ${escapeHtml(opts.parsel)} üzerinde yürütülen ${
+          baca ? 'altyapı baca (yağmur / atık / pit çukuru ağızları) temizliği ve buna bağlı çevre düzenleme' : 'daire ve blok temizlik'
+        } işinin saha kontrolü ile düzenlenmiştir.
+        Tespit, her baca için ayrı kart açılmaksızın parsel bütününde yapılmış; ekli fotoğraflar sahanın genel durumunu belgelemektedir.
+      </p>
+
+      <p style="margin:0 0 6px;font-size:12px;font-weight:800;text-decoration:underline">MADDE 2 — Yapılan işler</p>
+      <ol style="margin:0 0 12px;padding-left:18px;font-size:12px;line-height:1.55">
+        ${
+          baca
+            ? `<li>Parsel genelindeki altyapı baca ağızlarının açılması, içinin ve çevresinin temizlenmesi.</li>
+               <li>Pit / çukur çevresindeki moloz, ambalaj ve döküntülerin kaldırılması.</li>
+               <li>Blok avluları ve baca hatları boyunca zemin tesviyesi, stabilize / çakıl serimi ve çevre düzeni.</li>
+               <li>Temizlenen baca ağızlarının saha kontrol fotoğrafları ile belgelenmesi.</li>`
+            : `<li>Daire ve bloklarda temizlik işinin parsel geneli tamamlanması.</li>
+               <li>Saha kontrol fotoğrafları ile belgelenmesi.</li>`
+        }
+      </ol>
+
+      <p style="margin:0 0 6px;font-size:12px;font-weight:800;text-decoration:underline">MADDE 3 — Tespit ve sonuç</p>
+      <p style="margin:0 0 10px;font-size:13px;line-height:1.55;text-align:justify;font-weight:700;border:1px solid #0f172a;padding:10px 12px;background:#fffbeb">
+        ${escapeHtml(sonuc)}
+      </p>
+      ${
+        sahaNotu
+          ? `<p style="margin:0 0 4px;font-size:11px;font-weight:800">Saha tutanak notu</p>
+             <p style="margin:0 0 12px;font-size:12px;line-height:1.5;text-align:justify;border:1px solid #cbd5e1;padding:8px 10px">${escapeHtml(sahaNotu)}</p>`
+          : ''
+      }
+
+      <p style="margin:0 0 6px;font-size:12px;font-weight:800;text-decoration:underline">MADDE 4 — Ekler</p>
+      <p style="margin:0 0 8px;font-size:12px;line-height:1.5">
+        EK-1: Saha kontrol fotoğrafları (${opts.fotoUrls.filter(Boolean).length} adet). Fotoğraflar ${escapeHtml(kisa)} parselinde
+        ${baca ? 'temizlenen baca ağızları ve çevre düzenleme zeminini' : 'tamamlanan temizlik işini'} göstermektedir.
+      </p>
+      ${imgGrid(opts.fotoUrls, kisa)}
+
+      <p style="margin:16px 0 0;font-size:12px;line-height:1.55;text-align:justify">
+        MADDE 5 — İşbu tutanak gerçeğe aykırı husus taşımadığını beyan eden aşağıda imzası bulunanlarca imzalanmıştır.
+        ${baca ? `<strong>${escapeHtml(kisa)} parselindeki tüm altyapı bacaları temizlenmiş kabul edilir.</strong>` : ''}
+      </p>
+      ${resmiImzaCetveliHtml(opts.imza)}
     </div>
-    <h2 style="font-size:13px;font-weight:800;margin:0 0 8px;text-transform:uppercase;letter-spacing:.06em">Saha kontrol fotoğrafları</h2>
-    ${imgGrid(opts.fotoUrls)}
-    ${temizlikImzaBarHtml(opts.imza)}
   `;
   return wrapCorporateReportHtml(body, {
-    title: `${opts.parsel} ${konuBaslik} tutanağı`,
+    title: `${opts.parsel} ${belgeAdi}`,
     docCode,
     orientation: 'portrait',
     letterhead: true,
     autoPrint: true,
+    extraCss: `
+      .corporate-report-body{font-family:'Times New Roman',Times,Georgia,serif}
+      @media print{img{break-inside:avoid}}
+    `,
   });
 }
 
@@ -453,12 +561,13 @@ export function buildBacaTemizlikTutanakHtml(opts: {
   });
 }
 
-export function openTemizlikRapor(html: string, title: string): void {
-  const w = window.open('', '_blank');
+export function openTemizlikRapor(html: string, title: string, existing?: Window | null): void {
+  const w = existing && !existing.closed ? existing : window.open('', '_blank');
   if (!w) {
-    alert('Pop-up engellendi. Tarayıcı izinlerini kontrol edin.');
+    alert('Pop-up engellendi. Tarayıcıda bu site için pencere açmaya izin verin, sonra tekrar basın.');
     return;
   }
+  w.document.open();
   w.document.write(html);
   w.document.close();
   w.document.title = title;

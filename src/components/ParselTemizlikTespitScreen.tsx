@@ -72,15 +72,24 @@ async function persistFotos(
   return out;
 }
 
-function readFiles(files: FileList | null, max: number, existing: string[]): Promise<string[]> {
-  const list = files ? Array.from(files).slice(0, Math.max(0, max - existing.length)) : [];
+function readFileList(files: FileList | File[] | null, max: number, existing: string[]): Promise<string[]> {
+  const raw = files ? Array.from(files as ArrayLike<File>) : [];
+  const list = raw
+    .filter((f) => f && (String(f.type || '').startsWith('image/') || /\.(jpe?g|png|gif|webp|heic|heif)$/i.test(f.name || '')))
+    .slice(0, Math.max(0, max - existing.length));
   return Promise.all(
     list.map(
       (file) =>
         new Promise<string>((resolve) => {
           const r = new FileReader();
           r.onload = () => resolve(String(r.result || ''));
-          r.onerror = () => resolve('');
+          r.onerror = () => {
+            try {
+              resolve(URL.createObjectURL(file));
+            } catch {
+              resolve('');
+            }
+          };
           r.readAsDataURL(file);
         })
     )
@@ -170,6 +179,18 @@ export const ParselTemizlikTespitScreen: React.FC<Props> = ({ currentUser }) => 
   }, []);
 
   const show = (t: string, k: 'ok' | 'err' = 'ok') => setMsg({ t, k });
+
+  const ingestToplu = (files: FileList | File[] | null) => {
+    const copied = files ? Array.from(files as ArrayLike<File>) : [];
+    if (!copied.length) {
+      show('Dosya seçilmedi. “Dosya seç” ile galeriden işaretleyin.', 'err');
+      return;
+    }
+    void readFileList(copied, 16, topluFotolar).then((next) => {
+      setTopluFotolar(next);
+      show(`${next.length} fotoğraf eklendi. Şimdi turuncu tutanak tuşuna basın.`);
+    });
+  };
 
   const guard = async () => {
     const block = await assertErpWriteAuth();
@@ -584,9 +605,10 @@ export const ParselTemizlikTespitScreen: React.FC<Props> = ({ currentUser }) => 
     tip: TemizlikTutanak['tip'],
     kapsam: string[],
     ozetSatir: string,
-    fotoUrls?: string[]
+    fotoUrls?: string[],
+    yazdir = true
   ) => {
-    openTemizlikRapor(html, title);
+    if (yazdir) openTemizlikRapor(html, title);
     if (!(await guard())) return;
     const row: TemizlikTutanak = {
       id: newTemizlikId('ptt'),
@@ -671,31 +693,44 @@ export const ParselTemizlikTespitScreen: React.FC<Props> = ({ currentUser }) => 
   };
 
   const handleParselTopluTutanak = async (konu: 'BACA' | 'DAIRE') => {
-    if (topluFotolar.length === 0) return show('En az bir saha fotoğrafı ekleyin.', 'err');
-    if (!(await guard())) return;
+    if (topluFotolar.length === 0) {
+      return show('Fotoğraf kutuda görünmüyor. “Dosya seç” ile yükleyin; önizleme çıkınca turuncu tuşa basın.', 'err');
+    }
+    const raporPencere = window.open('', '_blank');
+    if (raporPencere) {
+      raporPencere.document.write('<p style="font-family:sans-serif;padding:24px">Tutanak hazırlanıyor…</p>');
+    }
     setBusy(true);
     try {
-      const entityId = `parsel_${parsel.replace(/\W+/g, '_').toLowerCase()}`;
-      const uploaded = await uploadTemizlikKirimFotolar('baca', entityId, konu === 'BACA' ? 'parsel_baca' : 'parsel_daire', topluFotolar);
-      const fotoUrls = uploaded.length ? uploaded : topluFotolar;
       const metin = parselTopluMetin(konu);
       const html = buildParselTopluTutanakHtml({
         parsel,
         konu,
         tarih,
         metin,
-        fotoUrls,
+        fotoUrls: topluFotolar,
         imza: imza(),
       });
-      await arsivleVeYazdir(
-        html,
-        `${parsel} parsel geneli ${konu === 'BACA' ? 'baca' : 'daire'} tutanağı`,
-        konu === 'BACA' ? 'PARSEL_BACA_TOPLU' : 'PARSEL_DAIRE_TOPLU',
-        ['PARSEL_GENELI'],
-        `${parselKisaAd(parsel)} · ${fotoUrls.length} foto · parsel geneli tamam`,
-        fotoUrls
-      );
-      show('Parsel geneli tutanak açıldı — yazdırın / PDF kaydedin.');
+      openTemizlikRapor(html, `${parsel} parsel geneli ${konu === 'BACA' ? 'baca' : 'daire'} tutanağı`, raporPencere);
+      show('Tutanak yeni pencerede açıldı — yazdırın / PDF kaydedin.');
+      if (await guard()) {
+        const entityId = `parsel_${parsel.replace(/\W+/g, '_').toLowerCase()}`;
+        const uploaded = await uploadTemizlikKirimFotolar(
+          'baca',
+          entityId,
+          konu === 'BACA' ? 'parsel_baca' : 'parsel_daire',
+          topluFotolar
+        );
+        await arsivleVeYazdir(
+          html,
+          `${parsel} parsel geneli ${konu === 'BACA' ? 'baca' : 'daire'} tutanağı`,
+          konu === 'BACA' ? 'PARSEL_BACA_TOPLU' : 'PARSEL_DAIRE_TOPLU',
+          ['PARSEL_GENELI'],
+          `${parselKisaAd(parsel)} · ${topluFotolar.length} foto · parsel geneli tamam`,
+          uploaded,
+          false
+        );
+      }
     } catch (e: unknown) {
       show(formatFirestoreWriteError(e, 'Toplu tutanak açılamadı.'), 'err');
     } finally {
@@ -824,29 +859,44 @@ export const ParselTemizlikTespitScreen: React.FC<Props> = ({ currentUser }) => 
         </label>
       </div>
 
-      <div className="rounded-2xl border-2 border-slate-900 bg-white p-4 space-y-3">
+      <div
+        className="rounded-2xl border-2 border-slate-900 bg-white p-4 space-y-3"
+        onDragOver={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+        }}
+        onDrop={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          ingestToplu(e.dataTransfer.files);
+        }}
+      >
         <p className="text-sm font-black uppercase tracking-wide text-slate-900">
           Tutanak burada — fotoğrafı buraya atın, alttaki turuncu tuşa basın
         </p>
         <p className="text-[11px] text-slate-600 leading-snug">
-          Tek tek daire/baca açmadan: {parselKisaAd(parsel)} için 6–16 fotoğraf ekleyin. Üstteki imza isimlerini doldurun.
-          Not boşsa parselin temizliğinin bittiğine dair yazı otomatik yazılır. Antet ve logo tutanakta çıkar.
+          1) “Dosya seç” ile 160/2 fotoğraflarını işaretleyin (Ctrl ile hepsini). 2) Aşağıda küçük kareler görünmeli
+          ({topluFotolar.length} fotoğraf eklendi). 3) Turuncu tuşa basın — tutanak yeni pencerede açılır.
         </p>
-        <label className="flex items-center gap-2 text-[11px] font-bold text-slate-600 cursor-pointer">
+        <label className="flex flex-wrap items-center gap-2 text-[11px] font-bold text-slate-800 cursor-pointer bg-slate-100 border border-slate-300 rounded-xl px-3 py-2">
           <Camera size={14} />
-          Toplu saha fotoğrafı
+          Dosya seç (birden fazla)
           <input
             type="file"
             accept="image/*"
             multiple
-            capture="environment"
             className="text-[10px]"
             onChange={(e) => {
-              void readFiles(e.target.files, 16, topluFotolar).then(setTopluFotolar);
+              ingestToplu(e.target.files);
               e.target.value = '';
             }}
           />
         </label>
+        {topluFotolar.length === 0 ? (
+          <p className="text-[11px] font-bold text-rose-700">Henüz fotoğraf yok — kırmızı uyarı bu yüzden çıkıyor.</p>
+        ) : (
+          <p className="text-[11px] font-black text-emerald-800">{topluFotolar.length} fotoğraf hazır. Turuncu tuşa basın.</p>
+        )}
         <div className="flex flex-wrap gap-1.5">
           {topluFotolar.map((u, i) => (
             <button
@@ -867,7 +917,7 @@ export const ParselTemizlikTespitScreen: React.FC<Props> = ({ currentUser }) => 
             onClick={() => void handleParselTopluTutanak('BACA')}
             className="inline-flex items-center gap-1.5 bg-amber-800 text-white text-[10px] font-black px-3 py-2 rounded-xl cursor-pointer disabled:opacity-50"
           >
-            <FileSignature size={13} /> {parselKisaAd(parsel)} baca işi bitti tutanağı
+            <FileSignature size={13} /> {parselKisaAd(parsel)} TÜM BACALAR temizlendi — resmi tutanak
           </button>
           <button
             type="button"
@@ -1042,7 +1092,7 @@ export const ParselTemizlikTespitScreen: React.FC<Props> = ({ currentUser }) => 
                     capture="environment"
                     className="text-[10px]"
                     onChange={(e) => {
-                      void readFiles(e.target.files, 8, fotolar).then(setFotolar);
+                      void readFileList(e.target.files, 8, fotolar).then(setFotolar);
                       e.target.value = '';
                     }}
                   />
@@ -1190,7 +1240,7 @@ export const ParselTemizlikTespitScreen: React.FC<Props> = ({ currentUser }) => 
                     capture="environment"
                     className="text-[10px]"
                     onChange={(e) => {
-                      void readFiles(e.target.files, 8, fotolar).then(setFotolar);
+                      void readFileList(e.target.files, 8, fotolar).then(setFotolar);
                       e.target.value = '';
                     }}
                   />
