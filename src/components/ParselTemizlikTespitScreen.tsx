@@ -6,6 +6,7 @@ import {
   ClipboardCheck,
   FileSignature,
   Layers,
+  Pencil,
   Plus,
   Printer,
   Trash2,
@@ -119,6 +120,8 @@ export const ParselTemizlikTespitScreen: React.FC<Props> = ({ currentUser }) => 
   const [aktifBlok, setAktifBlok] = useState('');
   const [yeniBlok, setYeniBlok] = useState('');
   const [yeniDaireNo, setYeniDaireNo] = useState('');
+  const [blokAdDuzenle, setBlokAdDuzenle] = useState('');
+  const [daireNoDuzenle, setDaireNoDuzenle] = useState('');
   const [aktifDaireId, setAktifDaireId] = useState<string | null>(null);
   const [aktifBacaId, setAktifBacaId] = useState<string | null>(null);
   const [fotolar, setFotolar] = useState<string[]>([]);
@@ -129,6 +132,10 @@ export const ParselTemizlikTespitScreen: React.FC<Props> = ({ currentUser }) => 
   const [parselSefi, setParselSefi] = useState('');
   const [projeMuduru, setProjeMuduru] = useState('');
   const [tutanakNot, setTutanakNot] = useState('');
+
+  useEffect(() => {
+    setBlokAdDuzenle(aktifBlok);
+  }, [aktifBlok]);
 
   useEffect(() => {
     const unsubs = [
@@ -200,6 +207,10 @@ export const ParselTemizlikTespitScreen: React.FC<Props> = ({ currentUser }) => 
     .filter((d) => d.blok === aktifBlok)
     .sort((a, b) => a.daireNo.localeCompare(b.daireNo, 'tr', { numeric: true }));
 
+  useEffect(() => {
+    setDaireNoDuzenle(aktifDaire?.daireNo || '');
+  }, [aktifDaire?.id, aktifDaire?.daireNo]);
+
   const daireDurum = (d: TemizlikDaire) => {
     const t = latestByDate<TemizlikTespit>(tespitler.filter((x) => x.daireId === d.id));
     const u = uygulamalar.filter((x) => x.daireId === d.id);
@@ -254,6 +265,82 @@ export const ParselTemizlikTespitScreen: React.FC<Props> = ({ currentUser }) => 
       show(`${ad} blok kartı açıldı.`);
     } catch (e: unknown) {
       show(formatFirestoreWriteError(e, 'Blok açılamadı.'), 'err');
+    }
+  };
+
+  const handleBlokAdGuncelle = async () => {
+    if (!aktifBlok) return show('Önce bloğa girin.', 'err');
+    const ad = blokAdDuzenle.trim().toLocaleUpperCase('tr-TR');
+    if (!ad) return show('Yeni blok adı yazın.', 'err');
+    if (ad === aktifBlok.toLocaleUpperCase('tr-TR')) return show('Blok adı aynı.');
+    if (blokAdlari.some((b) => b.toLocaleUpperCase('tr-TR') === ad)) {
+      return show(`${ad} zaten var — birleştirme yok, başka ad seçin.`, 'err');
+    }
+    if (!(await guard())) return;
+    setBusy(true);
+    try {
+      const oldKart = blokKartlar.find(
+        (k) => k.parsel === parsel && k.blok.toLocaleUpperCase('tr-TR') === aktifBlok.toLocaleUpperCase('tr-TR')
+      );
+      await saveDocument(
+        'temizlikBlokKartlari',
+        cleanUndefined({
+          id: blokKartId(parsel, ad),
+          parsel,
+          blok: ad,
+          kayitTarihi: oldKart?.kayitTarihi || new Date().toISOString(),
+        })
+      );
+      if (oldKart && oldKart.id !== blokKartId(parsel, ad)) {
+        await removeDocument('temizlikBlokKartlari', oldKart.id);
+      }
+      const daireHits = daireler.filter((d) => d.parsel === parsel && d.blok === aktifBlok);
+      for (const d of daireHits) {
+        await saveDocument('temizlikDaireleri', cleanUndefined({ ...d, blok: ad, guncellemeTarihi: new Date().toISOString() }));
+      }
+      for (const t of tespitler.filter((x) => x.parsel === parsel && x.blok === aktifBlok)) {
+        await saveDocument('temizlikTespitleri', cleanUndefined({ ...t, blok: ad }));
+      }
+      for (const u of uygulamalar.filter((x) => x.parsel === parsel && x.blok === aktifBlok)) {
+        await saveDocument('temizlikUygulamalari', cleanUndefined({ ...u, blok: ad }));
+      }
+      setSeciliBloklar((p) => p.map((b) => (b === aktifBlok ? ad : b)));
+      setAktifBlok(ad);
+      setBlokAdDuzenle(ad);
+      show(`Blok adı ${ad} olarak güncellendi.`);
+    } catch (e: unknown) {
+      show(formatFirestoreWriteError(e, 'Blok adı değiştirilemedi.'), 'err');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleDaireNoGuncelle = async () => {
+    if (!aktifDaire) return;
+    const no = daireNoDuzenle.trim();
+    if (!no) return show('Daire no yazın.', 'err');
+    if (no === aktifDaire.daireNo) return show('Daire no aynı.');
+    if (blokDaireler.some((d) => d.id !== aktifDaire.id && d.daireNo === no)) {
+      return show('Bu daire no bu blokta zaten var.', 'err');
+    }
+    if (!(await guard())) return;
+    setBusy(true);
+    try {
+      await saveDocument(
+        'temizlikDaireleri',
+        cleanUndefined({ ...aktifDaire, daireNo: no, guncellemeTarihi: new Date().toISOString() })
+      );
+      for (const t of tespitler.filter((x) => x.daireId === aktifDaire.id)) {
+        await saveDocument('temizlikTespitleri', cleanUndefined({ ...t, daireNo: no }));
+      }
+      for (const u of uygulamalar.filter((x) => x.daireId === aktifDaire.id)) {
+        await saveDocument('temizlikUygulamalari', cleanUndefined({ ...u, daireNo: no }));
+      }
+      show(`Daire no ${no} olarak güncellendi.`);
+    } catch (e: unknown) {
+      show(formatFirestoreWriteError(e, 'Daire no değiştirilemedi.'), 'err');
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -486,12 +573,6 @@ export const ParselTemizlikTespitScreen: React.FC<Props> = ({ currentUser }) => 
       show('Tutanak arşivden silindi.');
     } catch (e: unknown) {
       show(formatFirestoreWriteError(e, 'Tutanak silinemedi.'), 'err');
-    }
-  };
-    } catch (e: unknown) {
-      show(formatFirestoreWriteError(e, 'Baca tespiti yazılamadı.'), 'err');
-    } finally {
-      setBusy(false);
     }
   };
 
@@ -737,6 +818,22 @@ export const ParselTemizlikTespitScreen: React.FC<Props> = ({ currentUser }) => 
                 <p className="text-[10px] font-black uppercase text-slate-500">Blok {aktifBlok} — daireler</p>
                 <div className="flex gap-2">
                   <input
+                    value={blokAdDuzenle}
+                    onChange={(e) => setBlokAdDuzenle(e.target.value)}
+                    placeholder="Blok adı"
+                    className="flex-1 border border-slate-200 rounded-xl px-2 py-1.5 text-xs font-bold"
+                  />
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => void handleBlokAdGuncelle()}
+                    className="inline-flex items-center gap-1 bg-white border border-slate-300 text-slate-800 rounded-xl px-3 text-[10px] font-black cursor-pointer disabled:opacity-50"
+                  >
+                    <Pencil size={11} /> Adı güncelle
+                  </button>
+                </div>
+                <div className="flex gap-2">
+                  <input
                     value={yeniDaireNo}
                     onChange={(e) => setYeniDaireNo(e.target.value)}
                     placeholder="Daire no"
@@ -779,7 +876,12 @@ export const ParselTemizlikTespitScreen: React.FC<Props> = ({ currentUser }) => 
             ) : (
               <p className="text-[11px] text-slate-400 italic">Bloğa tıklayarak daire fotoğrafı ve tespit girin.</p>
             )}
-            <div className="flex flex-wrap gap-2">
+            <div className="rounded-2xl border-2 border-teal-700 bg-teal-50 p-3 space-y-2">
+              <p className="text-[10px] font-black uppercase text-teal-900">Rapor / tutanak burada üretilir</p>
+              <p className="text-[10px] text-teal-800 leading-snug">
+                Fotoğraflar daire kartına kaydedilir. Antetli tutanak bu iki tuşla açılır — ayrı bir rapor ekranı yoktur.
+              </p>
+              <div className="flex flex-wrap gap-2">
               <button
                 type="button"
                 disabled={busy}
@@ -796,6 +898,7 @@ export const ParselTemizlikTespitScreen: React.FC<Props> = ({ currentUser }) => 
               >
                 <FileSignature size={13} /> Tespitli tüm bloklar (hakediş)
               </button>
+              </div>
             </div>
           </div>
           <div className="bg-white border border-slate-200 rounded-2xl p-4 space-y-3">
@@ -804,6 +907,22 @@ export const ParselTemizlikTespitScreen: React.FC<Props> = ({ currentUser }) => 
                 <p className="text-sm font-black">
                   {aktifDaire.blok} Daire {aktifDaire.daireNo}
                 </p>
+                <div className="flex gap-2">
+                  <input
+                    value={daireNoDuzenle}
+                    onChange={(e) => setDaireNoDuzenle(e.target.value)}
+                    placeholder="Daire no"
+                    className="flex-1 border border-slate-200 rounded-xl px-2 py-1.5 text-xs font-bold"
+                  />
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => void handleDaireNoGuncelle()}
+                    className="inline-flex items-center gap-1 bg-white border border-slate-300 rounded-xl px-3 text-[10px] font-black cursor-pointer disabled:opacity-50"
+                  >
+                    <Pencil size={11} /> No güncelle
+                  </button>
+                </div>
                 <label className="flex items-center gap-2 text-[11px] font-bold text-slate-600 cursor-pointer">
                   <Camera size={14} />
                   Fotoğraf
@@ -923,7 +1042,12 @@ export const ParselTemizlikTespitScreen: React.FC<Props> = ({ currentUser }) => 
                 Bu parselde henüz baca kartı yok. Baca yuvalarını Temizlik / Kırım → Baca çukur sekmesinden açın.
               </p>
             ) : null}
-            <div className="flex flex-wrap gap-2">
+            <div className="rounded-2xl border-2 border-amber-700 bg-amber-50 p-3 space-y-2">
+              <p className="text-[10px] font-black uppercase text-amber-900">Rapor / tutanak burada üretilir</p>
+              <p className="text-[10px] text-amber-900 leading-snug">
+                Baca fotoğrafları kaydedilir. Antetli tutanak bu tuşlarla açılır — ayrı bir rapor ekranı yoktur.
+              </p>
+              <div className="flex flex-wrap gap-2">
               <button
                 type="button"
                 disabled={busy}
@@ -940,6 +1064,7 @@ export const ParselTemizlikTespitScreen: React.FC<Props> = ({ currentUser }) => 
               >
                 <FileSignature size={13} /> Tespitli tüm bacalar
               </button>
+              </div>
             </div>
           </div>
           <div className="bg-white border border-slate-200 rounded-2xl p-4 space-y-3">
