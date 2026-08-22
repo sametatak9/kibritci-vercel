@@ -2,7 +2,6 @@ import {
   KIBRITCI_REPORT_HEADER_DATA_URL,
   KIBRITCI_REPORT_WATERMARK_DATA_URL,
 } from './reportBrandAssets';
-import { getKibritciAntetUrl } from './kibritciBrand';
 import { getReportEmailToolbarHtml } from './reportEmail';
 
 export const CORPORATE_COMPANY = {
@@ -34,8 +33,12 @@ export function getCorporateReportCss(): string {
     .corporate-report-footer-contact p{margin:0}
     .corporate-report-footer-web{text-align:right;font-weight:600;font-size:5.5px;color:#64748b;align-self:end}
     .corporate-report-footer-web p{margin:0}
-    .corporate-antet-banner{display:block;width:100%;max-width:640px;max-height:132px;object-fit:contain;object-position:left center;margin:0;-webkit-print-color-adjust:exact;print-color-adjust:exact}
-    @media print{.corporate-report--portrait{min-height:270mm}.corporate-report-footer{margin-top:auto}.corporate-report-watermark-img{opacity:1;-webkit-print-color-adjust:exact;print-color-adjust:exact}.corporate-report-logo-img{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
+    .corporate-antet-page{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;object-position:top center;z-index:0;pointer-events:none;opacity:.32;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+    .corporate-report--letterhead{background:#fff}
+    .corporate-report--letterhead .corporate-report-watermark-img{opacity:.14}
+    .corporate-report--letterhead .corporate-report-header{min-height:28mm;padding-top:4px;margin-bottom:8px}
+    .corporate-report--letterhead .corporate-report-logo-img{height:82px;max-width:260px;object-fit:contain;object-position:left center;background:rgba(255,255,255,.92);padding:4px 10px 4px 0;position:relative;z-index:3}
+    @media print{.corporate-report--portrait{min-height:270mm}.corporate-report-footer{margin-top:auto}.corporate-report-watermark-img{opacity:.14;-webkit-print-color-adjust:exact;print-color-adjust:exact}.corporate-report-logo-img{-webkit-print-color-adjust:exact;print-color-adjust:exact}.corporate-antet-page{opacity:.32!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}}
   `;
 }
 
@@ -51,7 +54,6 @@ export function wrapCorporateReportHtml(
     letterhead?: boolean;
   }
 ): string {
-  const headerLogoUrl = KIBRITCI_REPORT_HEADER_DATA_URL;
   const watermarkUrl = KIBRITCI_REPORT_WATERMARK_DATA_URL;
   const printDate = new Date().toLocaleDateString('tr-TR');
   const docCode = options?.docCode ?? '';
@@ -60,7 +62,9 @@ export function wrapCorporateReportHtml(
   const extraCss = options?.extraCss ?? '';
   const autoPrint = options?.autoPrint !== false;
   const letterhead = Boolean(options?.letterhead);
-  const antetUrl = letterhead ? getKibritciAntetUrl() : '';
+  const origin = typeof window !== 'undefined' && window.location?.origin ? window.location.origin : '';
+  const antetUrl = letterhead ? `${origin}/kibritci-antetli.png` : '';
+  const logoUrl = KIBRITCI_REPORT_HEADER_DATA_URL || `${origin}/kibritci-logo.png`;
 
   const emailToolbar = getReportEmailToolbarHtml({
     subject: title,
@@ -77,12 +81,11 @@ export function wrapCorporateReportHtml(
 </head>
 <body class="bg-white text-slate-900 font-sans p-4 sm:p-8">
   ${emailToolbar}
-  <div class="corporate-report corporate-report--${orientation}" data-orientation="${orientation}" style="position:relative;background:#fff">
+  <div class="corporate-report corporate-report--${orientation}${letterhead ? ' corporate-report--letterhead' : ''}" data-orientation="${orientation}" style="position:relative;background:#fff">
+    ${letterhead && antetUrl ? `<img src="${antetUrl}" alt="" class="corporate-antet-page" aria-hidden="true" />` : ''}
     <img src="${watermarkUrl}" alt="" class="corporate-report-watermark-img" aria-hidden="true" />
     <header class="corporate-report-header">
-      ${letterhead && antetUrl
-        ? `<img src="${antetUrl}" alt="Kibritçi İnşaat antet" class="corporate-antet-banner" />`
-        : `<img src="${headerLogoUrl}" alt="Kibritçi İnşaat" class="corporate-report-logo-img" />`}
+      <img src="${logoUrl}" alt="Kibritçi İnşaat" class="corporate-report-logo-img" />
       ${docCode ? `<div class="corporate-report-meta"><span class="corporate-report-doc-code">${docCode}</span><span class="corporate-report-date">Baskı: ${printDate}</span></div>` : ''}
     </header>
     <main class="corporate-report-body">${bodyContent}</main>
