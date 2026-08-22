@@ -99,6 +99,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         { key: "depocu_ekrani", label: "Depocu Mobil Paneli", icon: Package },
         { key: "imalat_terminali", label: "İmalat Terminali", icon: Smartphone },
         { key: "temizlik_kirim", label: "Temizlik / Kırım", icon: Droplets },
+        { key: "parsel_temizlik_tespit", label: "Parsel Temizlik Tespit", icon: ClipboardList },
       ]
     },
     {

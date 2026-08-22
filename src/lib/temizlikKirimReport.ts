@@ -210,6 +210,201 @@ export function buildBacaParselRaporHtml(opts: {
   });
 }
 
+export function temizlikImzaBarHtml(imza?: {
+  hazirlayan?: string;
+  parselSefi?: string;
+  projeMuduru?: string;
+}): string {
+  const cells = [
+    { unvan: 'Hazırlayan', ad: imza?.hazirlayan || '' },
+    { unvan: 'Parsel Şefi', ad: imza?.parselSefi || '' },
+    { unvan: 'Proje Müdürü', ad: imza?.projeMuduru || '' },
+  ];
+  return `
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:22px;margin-top:42px;page-break-inside:avoid">
+      ${cells
+        .map(
+          (c) => `
+        <div style="text-align:center">
+          <div style="height:52px"></div>
+          <div style="border-top:1px solid #0f172a;padding-top:8px">
+            <p style="margin:0;font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:#64748b;font-weight:800">${escapeHtml(c.unvan)}</p>
+            <p style="margin:6px 0 0;font-size:12px;font-weight:800;min-height:18px">${escapeHtml(c.ad || ' ')}</p>
+            <p style="margin:2px 0 0;font-size:9px;color:#94a3b8">İmza / kaşe</p>
+          </div>
+        </div>`
+        )
+        .join('')}
+    </div>
+    <p style="font-size:10px;color:#64748b;margin-top:18px;line-height:1.45">
+      Bu tutanak, seçilen kapsamda yapılan temizlik tespit ve uygulamasını hakediş esasına göre belgelemek üzere düzenlenmiştir.
+      Tespit fotoğrafları ve oda/baca kartları ek niteliğindedir.
+    </p>`;
+}
+
+export function buildDaireTemizlikTutanakHtml(opts: {
+  parsel: string;
+  bloklar: string[];
+  daireler: TemizlikDaire[];
+  tespitler: TemizlikTespit[];
+  uygulamalar: TemizlikUygulama[];
+  tarih?: string;
+  not?: string;
+  imza?: { hazirlayan?: string; parselSefi?: string; projeMuduru?: string };
+  /** Yalnız tespit veya uygulama olan daireler (hakediş) */
+  yalnizIslenen?: boolean;
+}): string {
+  const blokSet = new Set(opts.bloklar.map((b) => b.toLocaleUpperCase('tr-TR')));
+  let daireler = opts.daireler.filter((d) => d.parsel === opts.parsel);
+  if (blokSet.size) {
+    daireler = daireler.filter((d) => blokSet.has(String(d.blok || '').toLocaleUpperCase('tr-TR')));
+  }
+  if (opts.yalnizIslenen !== false) {
+    daireler = daireler.filter(
+      (d) =>
+        opts.tespitler.some((t) => t.daireId === d.id) ||
+        opts.uygulamalar.some((u) => u.daireId === d.id)
+    );
+  }
+  daireler = daireler.sort((a, b) => `${a.blok} ${a.daireNo}`.localeCompare(`${b.blok} ${b.daireNo}`, 'tr'));
+  const blocks = Array.from(new Set(daireler.map((d) => d.blok)));
+  const blokOzet = blocks.map((blok) =>
+    ozetDaireBlok(opts.parsel, blok, opts.daireler, opts.tespitler, opts.uygulamalar)
+  );
+  const tarih = formatDateLabelTr(opts.tarih || new Date().toISOString());
+  const body = `
+    <h1 style="font-size:18px;font-weight:900;margin:0 0 4px;letter-spacing:.04em;text-transform:uppercase">Parsel Temizlik Tespit Tutanağı</h1>
+    <p style="font-size:12px;color:#334155;margin:0 0 4px"><strong>${escapeHtml(opts.parsel)}</strong> · ${escapeHtml(parselKisaAd(opts.parsel))} · ${escapeHtml(tarih)}</p>
+    <p style="font-size:12px;color:#475569;margin:0 0 12px">Kapsam: ${blocks.length ? blocks.map((b) => `Blok ${escapeHtml(b)}`).join(', ') : 'Tespitli blok yok'} · ${daireler.length} daire kartı</p>
+    ${opts.not ? `<p style="font-size:12px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:8px 10px;margin:0 0 12px">${escapeHtml(opts.not)}</p>` : ''}
+    ${ozetTabloHtml(
+      ['Blok', 'Daire', 'Tespit', 'Tamamlanan', 'Plan yevmiye', 'Kalan'],
+      blokOzet.map((b) => [b.blok, b.adet, b.tespitli, b.tamamlanan, b.planYevmiye, b.kalanYevmiye])
+    )}
+    ${blocks
+      .map((blok) => {
+        const rows = daireler.filter((d) => d.blok === blok);
+        return `
+          <h2 style="font-size:14px;font-weight:800;margin:18px 0 8px;border-bottom:2px solid #0f766e;padding-bottom:4px">Blok ${escapeHtml(blok)} — ${rows.length} daire</h2>
+          ${rows
+            .map((d) => {
+              const t = latestByDate(opts.tespitler.filter((x) => x.daireId === d.id));
+              const u = opts.uygulamalar.filter((x) => x.daireId === d.id);
+              const h = sumYevmiye(u);
+              const p = Number(t?.planlananYevmiye || 0);
+              const durum = deriveKartDurum({
+                hasTespit: !!t,
+                planlananYevmiye: p,
+                harcananYevmiye: h,
+                uygulamalar: u,
+              });
+              const odalar = (t?.odalar || [])
+                .map(
+                  (o) =>
+                    `<li>${escapeHtml(o.ad)} — ${escapeHtml(o.durum)}${o.yorum ? `: ${escapeHtml(o.yorum)}` : ''}</li>`
+                )
+                .join('');
+              const fotolar = [
+                ...(t?.fotoUrls || []),
+                ...(t?.odalar || []).flatMap((o) => o.fotoUrls || []),
+                ...u.flatMap((x) => x.fotoUrls || []),
+              ];
+              return `
+                <div style="border:1px solid #e2e8f0;border-radius:12px;padding:12px;margin-bottom:10px;page-break-inside:avoid">
+                  <p style="font-weight:800;margin:0">Daire ${escapeHtml(d.daireNo)}${d.kat ? ` · Kat ${escapeHtml(d.kat)}` : ''} — ${TEMIZLIK_KART_DURUM_LABEL[durum]}</p>
+                  <p style="font-size:12px;color:#475569;margin:4px 0">İş: ${escapeHtml(t?.isTipi || '—')} · Plan ${p} yevmiye · Yapılan ${h}</p>
+                  ${t?.genelYorum ? `<p style="font-size:12px">${escapeHtml(t.genelYorum)}</p>` : ''}
+                  ${odalar ? `<ul style="font-size:12px;margin:6px 0">${odalar}</ul>` : ''}
+                  ${imgRow(fotolar)}
+                </div>`;
+            })
+            .join('')}
+        `;
+      })
+      .join('')}
+    ${temizlikImzaBarHtml(opts.imza)}
+  `;
+  return wrapCorporateReportHtml(body, {
+    title: `${opts.parsel} Parsel Temizlik Tespit Tutanağı`,
+    docCode: 'PTT-DAİRE',
+    orientation: 'portrait',
+    letterhead: true,
+    autoPrint: true,
+  });
+}
+
+export function buildBacaTemizlikTutanakHtml(opts: {
+  parsel: string;
+  bacaIds?: string[];
+  bacalar: TemizlikBaca[];
+  tespitler: TemizlikBacaTespit[];
+  uygulamalar: TemizlikBacaUygulama[];
+  tarih?: string;
+  not?: string;
+  imza?: { hazirlayan?: string; parselSefi?: string; projeMuduru?: string };
+  yalnizIslenen?: boolean;
+}): string {
+  const idSet = new Set(opts.bacaIds || []);
+  let bacalar = sortBacalar(opts.bacalar.filter((d) => d.parsel === opts.parsel));
+  if (idSet.size) bacalar = bacalar.filter((b) => idSet.has(b.id));
+  if (opts.yalnizIslenen !== false) {
+    bacalar = bacalar.filter(
+      (b) =>
+        opts.tespitler.some((t) => t.bacaId === b.id) ||
+        opts.uygulamalar.some((u) => u.bacaId === b.id)
+    );
+  }
+  const ozet = ozetBacaParsel(opts.parsel, bacalar, opts.tespitler, opts.uygulamalar);
+  const koridorlar = koridorlarForParsel(opts.parsel);
+  const koridorOzet = koridorlar.map((k) =>
+    ozetBacaKoridor(opts.parsel, k.id, bacalar, opts.tespitler, opts.uygulamalar)
+  );
+  const tarih = formatDateLabelTr(opts.tarih || new Date().toISOString());
+  const body = `
+    <h1 style="font-size:18px;font-weight:900;margin:0 0 4px;letter-spacing:.04em;text-transform:uppercase">Altyapı Baca Temizlik Tespit Tutanağı</h1>
+    <p style="font-size:12px;color:#334155;margin:0 0 4px"><strong>${escapeHtml(opts.parsel)}</strong> · ${escapeHtml(parselKisaAd(opts.parsel))} · ${escapeHtml(tarih)}</p>
+    <p style="font-size:12px;color:#475569;margin:0 0 12px">${ozet.adet} baca · ${ozet.tespitli} tespit · ${ozet.tamamlanan} tamamlanan</p>
+    ${opts.not ? `<p style="font-size:12px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:8px 10px;margin:0 0 12px">${escapeHtml(opts.not)}</p>` : ''}
+    ${ozetTabloHtml(
+      ['Koridor', 'Baca', 'Tespit', 'Tamamlanan', 'Plan', 'Kalan'],
+      koridorlar
+        .map((k, i) => ({ baslik: k.baslik, o: koridorOzet[i] }))
+        .filter((x) => x.o && x.o.adet > 0)
+        .map((x) => [x.baslik, x.o.adet, x.o.tespitli, x.o.tamamlanan, x.o.planYevmiye, x.o.kalanYevmiye])
+    )}
+    ${bacalar
+      .map((d) => {
+        const t = latestByDate(opts.tespitler.filter((x) => x.bacaId === d.id));
+        const u = opts.uygulamalar.filter((x) => x.bacaId === d.id);
+        const h = sumYevmiye(u);
+        const p = Number(t?.planlananYevmiye || 0);
+        const durum = deriveKartDurum({
+          hasTespit: !!t,
+          planlananYevmiye: p,
+          harcananYevmiye: h,
+          uygulamalar: u,
+        });
+        return `
+          <div style="border:1px solid #e2e8f0;border-radius:12px;padding:12px;margin-bottom:10px;page-break-inside:avoid">
+            <p style="font-weight:800;margin:0;font-size:15px">${escapeHtml(d.etiket)} — ${TEMIZLIK_KART_DURUM_LABEL[durum]}</p>
+            <p style="font-size:12px;margin:4px 0"><strong>Yer:</strong> ${escapeHtml(bacaYerSatiri(d))}${d.koridor ? ` · ${escapeHtml(d.koridor)}` : ''}</p>
+            <p style="font-size:12px;color:#475569;margin:4px 0">Kirlilik: ${escapeHtml(t?.kirlilikDurumu || '—')} · Plan ${p} · Yapılan ${h}</p>
+            ${t?.iscilikYorumu ? `<p style="font-size:12px"><strong>Tespit:</strong> ${escapeHtml(t.iscilikYorumu)}</p>` : ''}
+            ${imgRow([...(t?.fotoUrls || []), ...u.flatMap((x) => x.fotoUrls || [])])}
+          </div>`;
+      })
+      .join('')}
+    ${temizlikImzaBarHtml(opts.imza)}
+  `;
+  return wrapCorporateReportHtml(body, {
+    title: `${opts.parsel} Altyapı Baca Temizlik Tutanağı`,
+    docCode: 'PTT-BACA',
+    orientation: 'portrait',
+    letterhead: true,
+    autoPrint: true,
+  });
+}
+
 export function openTemizlikRapor(html: string, title: string): void {
   const w = window.open('', '_blank');
   if (!w) {

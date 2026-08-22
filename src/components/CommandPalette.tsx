@@ -42,6 +42,7 @@ const ROUTES = [
   { key: 'formen_ekrani', label: 'Formen Ekranı', icon: Users },
   { key: 'imalat_terminali', label: 'İmalat Terminali', icon: Settings },
   { key: 'temizlik_kirim', label: 'Temizlik / Kırım Tespiti', icon: ClipboardList },
+  { key: 'parsel_temizlik_tespit', label: 'Parsel Temizlik Tespit', icon: ClipboardList },
   { key: 'sohbet', label: 'Sohbet', icon: MessageSquare },
   { key: 'eposta', label: 'E-Posta', icon: MessageSquare },
   { key: 'admin', label: 'Üyelik Onay & İmza', icon: Settings },

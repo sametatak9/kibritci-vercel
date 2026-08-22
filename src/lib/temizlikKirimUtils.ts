@@ -52,10 +52,10 @@ export function sumYevmiye(rows: { harcananYevmiye?: number }[]): number {
   return rows.reduce((acc, r) => acc + (Number(r.harcananYevmiye) || 0), 0);
 }
 
-export function latestByDate<T>(rows: T[]): T | undefined {
+export function latestByDate<T extends { tarih?: string }>(rows: T[]): T | undefined {
   return [...rows].sort((a, b) => {
-    const da = String((a as { tarih?: string }).tarih || '');
-    const db = String((b as { tarih?: string }).tarih || '');
+    const da = String(a.tarih || '');
+    const db = String(b.tarih || '');
     return db.localeCompare(da);
   })[0];
 }

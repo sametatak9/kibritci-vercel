@@ -48,6 +48,7 @@ const ProfilScreen = lazy(() => import('./components/ProfilScreen').then(m => ({
 const DepocuScreen = lazy(() => import('./components/DepocuScreen').then(m => ({ default: m.DepocuScreen })));
 const ImalatTerminaliScreen = lazy(() => import('./components/ImalatTerminaliScreen').then(m => ({ default: m.ImalatTerminaliScreen })));
 const TemizlikKirimScreen = lazy(() => import('./components/TemizlikKirimScreen').then(m => ({ default: m.TemizlikKirimScreen })));
+const ParselTemizlikTespitScreen = lazy(() => import('./components/ParselTemizlikTespitScreen').then(m => ({ default: m.ParselTemizlikTespitScreen })));
 const MobileManagerScreen = lazy(() => import('./components/MobileManagerScreen').then(m => ({ default: m.MobileManagerScreen })));
 const KibarHakedisScreen = lazy(() => import('./components/KibarHakedisScreen').then(m => ({ default: m.KibarHakedisScreen })));
 
@@ -4333,6 +4334,10 @@ function App() {
 
               {activeTab === "temizlik_kirim" && (
                 <TemizlikKirimScreen currentUser={currentUser} />
+              )}
+
+              {activeTab === "parsel_temizlik_tespit" && (
+                <ParselTemizlikTespitScreen currentUser={currentUser} />
               )}
 
               {activeTab === "yetki_verme" && (

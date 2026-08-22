@@ -1368,3 +1368,28 @@ export interface TemizlikBacaUygulama {
   fotoUrls: string[];
   kaydeden?: string;
 }
+
+/** Parsel temizlik tutanağı — hakediş gibi antetli / imzalı resmi belge */
+export type TemizlikTutanakTipi = 'DAIRE_BLOK' | 'BACA_ALTYAPI';
+export type TemizlikTutanakDurum = 'TASLAK' | 'IMZA_BEKLIYOR' | 'DUZENLENDI';
+
+export interface TemizlikTutanakImza {
+  hazirlayan: string;
+  parselSefi: string;
+  projeMuduru: string;
+}
+
+export interface TemizlikTutanak {
+  id: string;
+  tip: TemizlikTutanakTipi;
+  parsel: string;
+  /** Daire: blok adları; Baca: baca id listesi (boş = parseldeki tespitli tümü) */
+  kapsam: string[];
+  tarih: string;
+  durum: TemizlikTutanakDurum;
+  imzalar: TemizlikTutanakImza;
+  not?: string;
+  ozetSatir: string;
+  kaydeden?: string;
+  kayitTarihi: string;
+}
