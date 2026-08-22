@@ -1370,7 +1370,7 @@ export interface TemizlikBacaUygulama {
 }
 
 /** Parsel temizlik tutanağı — hakediş gibi antetli / imzalı resmi belge */
-export type TemizlikTutanakTipi = 'DAIRE_BLOK' | 'BACA_ALTYAPI';
+export type TemizlikTutanakTipi = 'DAIRE_BLOK' | 'BACA_ALTYAPI' | 'PARSEL_BACA_TOPLU' | 'PARSEL_DAIRE_TOPLU';
 export type TemizlikTutanakDurum = 'TASLAK' | 'IMZA_BEKLIYOR' | 'DUZENLENDI';
 
 export interface TemizlikTutanakImza {
@@ -1392,4 +1392,5 @@ export interface TemizlikTutanak {
   ozetSatir: string;
   kaydeden?: string;
   kayitTarihi: string;
+  fotoUrls?: string[];
 }

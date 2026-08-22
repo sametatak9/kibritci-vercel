@@ -15,7 +15,7 @@ import { PARSEL_LIST } from '../data/parselBlokMap';
 import { db, cleanUndefined, removeDocument, saveDocument } from '../lib/firebase';
 import { assertErpWriteAuth, formatFirestoreWriteError } from '../lib/authWriteGuard';
 import { todayDateKey } from '../lib/dateKeyUtils';
-import { uploadTemizlikKirimFoto } from '../lib/temizlikKirimFotoStorage';
+import { uploadTemizlikKirimFoto, uploadTemizlikKirimFotolar } from '../lib/temizlikKirimFotoStorage';
 import { blokKartId } from '../lib/temizlikLayoutCards';
 import {
   TEMIZLIK_DEFAULT_PARSEL,
@@ -33,6 +33,7 @@ import {
 import {
   buildBacaTemizlikTutanakHtml,
   buildDaireTemizlikTutanakHtml,
+  buildParselTopluTutanakHtml,
   openTemizlikRapor,
 } from '../lib/temizlikKirimReport';
 import type {
@@ -132,6 +133,7 @@ export const ParselTemizlikTespitScreen: React.FC<Props> = ({ currentUser }) => 
   const [parselSefi, setParselSefi] = useState('');
   const [projeMuduru, setProjeMuduru] = useState('');
   const [tutanakNot, setTutanakNot] = useState('');
+  const [topluFotolar, setTopluFotolar] = useState<string[]>([]);
 
   useEffect(() => {
     setBlokAdDuzenle(aktifBlok);
@@ -576,7 +578,14 @@ export const ParselTemizlikTespitScreen: React.FC<Props> = ({ currentUser }) => 
     }
   };
 
-  const arsivleVeYazdir = async (html: string, title: string, tip: TemizlikTutanak['tip'], kapsam: string[], ozetSatir: string) => {
+  const arsivleVeYazdir = async (
+    html: string,
+    title: string,
+    tip: TemizlikTutanak['tip'],
+    kapsam: string[],
+    ozetSatir: string,
+    fotoUrls?: string[]
+  ) => {
     openTemizlikRapor(html, title);
     if (!(await guard())) return;
     const row: TemizlikTutanak = {
@@ -591,6 +600,7 @@ export const ParselTemizlikTespitScreen: React.FC<Props> = ({ currentUser }) => 
       ozetSatir,
       kaydeden,
       kayitTarihi: new Date().toISOString(),
+      fotoUrls: fotoUrls?.filter((u) => /^https?:\/\//i.test(u)).slice(0, 16),
     };
     try {
       await saveDocument('temizlikTutanaklari', cleanUndefined(row));
@@ -651,6 +661,48 @@ export const ParselTemizlikTespitScreen: React.FC<Props> = ({ currentUser }) => 
     show(`${ids.length} baca tutanağı hazırlandı.`);
   };
 
+  const parselTopluMetin = (konu: 'BACA' | 'DAIRE') => {
+    const kisa = parselKisaAd(parsel);
+    if (tutanakNot.trim()) return tutanakNot.trim();
+    if (konu === 'BACA') {
+      return `${parsel} (${kisa}) kapsamında altyapı baca (çukur) temizlik işleri parsel geneli tamamlanmıştır. Saha kontrolünde bacalar temizlenmiş olarak görülmüş; iş bitimi bu tutanak ve ekli fotoğraflarla belgelenmiştir. Bacalar tek tek kart açılmadan parsel bütününde teslim edilmiştir.`;
+    }
+    return `${parsel} (${kisa}) kapsamında daire / blok temizlik işleri parsel geneli tamamlanmıştır. Saha kontrol fotoğrafları ekte olup iş bitimi bu tutanakla belgelenmiştir.`;
+  };
+
+  const handleParselTopluTutanak = async (konu: 'BACA' | 'DAIRE') => {
+    if (topluFotolar.length === 0) return show('En az bir saha fotoğrafı ekleyin.', 'err');
+    if (!(await guard())) return;
+    setBusy(true);
+    try {
+      const entityId = `parsel_${parsel.replace(/\W+/g, '_').toLowerCase()}`;
+      const uploaded = await uploadTemizlikKirimFotolar('baca', entityId, konu === 'BACA' ? 'parsel_baca' : 'parsel_daire', topluFotolar);
+      const fotoUrls = uploaded.length ? uploaded : topluFotolar;
+      const metin = parselTopluMetin(konu);
+      const html = buildParselTopluTutanakHtml({
+        parsel,
+        konu,
+        tarih,
+        metin,
+        fotoUrls,
+        imza: imza(),
+      });
+      await arsivleVeYazdir(
+        html,
+        `${parsel} parsel geneli ${konu === 'BACA' ? 'baca' : 'daire'} tutanağı`,
+        konu === 'BACA' ? 'PARSEL_BACA_TOPLU' : 'PARSEL_DAIRE_TOPLU',
+        ['PARSEL_GENELI'],
+        `${parselKisaAd(parsel)} · ${fotoUrls.length} foto · parsel geneli tamam`,
+        fotoUrls
+      );
+      show('Parsel geneli tutanak açıldı — yazdırın / PDF kaydedin.');
+    } catch (e: unknown) {
+      show(formatFirestoreWriteError(e, 'Toplu tutanak açılamadı.'), 'err');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const arsiv = tutanaklar
     .filter((t) => t.parsel === parsel)
     .sort((a, b) => String(b.kayitTarihi).localeCompare(String(a.kayitTarihi)))
@@ -662,7 +714,7 @@ export const ParselTemizlikTespitScreen: React.FC<Props> = ({ currentUser }) => 
         <div>
           <h1 className="text-lg font-black text-slate-900 uppercase tracking-wide">Parsel Temizlik Tespit</h1>
           <p className="text-[11px] text-slate-500 mt-0.5">
-            Üç parsel · blokları elle açın · daire/baca fotoğrafı · antetli tutanak (Hazırlayan / Parsel Şefi / Proje Müdürü)
+            Üç parsel · toplu fotoğraf ile parsel geneli tutanak · veya daire/baca kartı · imza: Hazırlayan / Kontrol eden / Onaylayan
           </p>
         </div>
         <div className="flex gap-2">
@@ -709,6 +761,7 @@ export const ParselTemizlikTespitScreen: React.FC<Props> = ({ currentUser }) => 
                 setAktifBacaId(null);
                 setSeciliBloklar([]);
                 setSeciliBacaIds([]);
+                setTopluFotolar([]);
               }}
               className={`text-left rounded-2xl border p-3 cursor-pointer ${
                 on ? 'border-teal-600 bg-teal-50' : 'border-slate-200 bg-white'
@@ -742,7 +795,7 @@ export const ParselTemizlikTespitScreen: React.FC<Props> = ({ currentUser }) => 
           />
         </label>
         <label className="text-[10px] font-black uppercase text-slate-400">
-          Parsel şefi
+          Kontrol eden
           <input
             value={parselSefi}
             onChange={(e) => setParselSefi(e.target.value)}
@@ -751,7 +804,7 @@ export const ParselTemizlikTespitScreen: React.FC<Props> = ({ currentUser }) => 
           />
         </label>
         <label className="text-[10px] font-black uppercase text-slate-400">
-          Proje müdürü
+          Onaylayan
           <input
             value={projeMuduru}
             onChange={(e) => setProjeMuduru(e.target.value)}
@@ -765,10 +818,66 @@ export const ParselTemizlikTespitScreen: React.FC<Props> = ({ currentUser }) => 
             value={tutanakNot}
             onChange={(e) => setTutanakNot(e.target.value)}
             rows={2}
-            placeholder="Bu dönemde hangi bloklar teslim / hakedişe girdi…"
+            placeholder="Boş bırakırsanız parsel geneli iş bitim yazısı otomatik gelir…"
             className="mt-1 w-full border border-slate-200 rounded-xl px-2 py-1.5 text-xs font-semibold"
           />
         </label>
+      </div>
+
+      <div className="rounded-2xl border-2 border-slate-900 bg-white p-4 space-y-3">
+        <p className="text-[11px] font-black uppercase tracking-wide text-slate-900">
+          Parsel geneli tutanak — fotoğraf at, rapor bas
+        </p>
+        <p className="text-[11px] text-slate-600 leading-snug">
+          Tek tek daire/baca açmadan: {parselKisaAd(parsel)} için 6–16 fotoğraf ekleyin. Üstteki imza isimlerini doldurun.
+          Not boşsa parselin temizliğinin bittiğine dair yazı otomatik yazılır. Antet ve logo tutanakta çıkar.
+        </p>
+        <label className="flex items-center gap-2 text-[11px] font-bold text-slate-600 cursor-pointer">
+          <Camera size={14} />
+          Toplu saha fotoğrafı
+          <input
+            type="file"
+            accept="image/*"
+            multiple
+            capture="environment"
+            className="text-[10px]"
+            onChange={(e) => {
+              void readFiles(e.target.files, 16, topluFotolar).then(setTopluFotolar);
+              e.target.value = '';
+            }}
+          />
+        </label>
+        <div className="flex flex-wrap gap-1.5">
+          {topluFotolar.map((u, i) => (
+            <button
+              key={`${u.slice(-16)}_${i}`}
+              type="button"
+              title="Fotoğrafı çıkar"
+              onClick={() => setTopluFotolar((prev) => prev.filter((_, j) => j !== i))}
+              className="relative cursor-pointer"
+            >
+              <img src={u} alt="" className="w-16 h-16 object-cover rounded-lg border" />
+            </button>
+          ))}
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => void handleParselTopluTutanak('BACA')}
+            className="inline-flex items-center gap-1.5 bg-amber-800 text-white text-[10px] font-black px-3 py-2 rounded-xl cursor-pointer disabled:opacity-50"
+          >
+            <FileSignature size={13} /> {parselKisaAd(parsel)} baca işi bitti tutanağı
+          </button>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => void handleParselTopluTutanak('DAIRE')}
+            className="inline-flex items-center gap-1.5 bg-teal-800 text-white text-[10px] font-black px-3 py-2 rounded-xl cursor-pointer disabled:opacity-50"
+          >
+            <FileSignature size={13} /> {parselKisaAd(parsel)} daire/blok işi bitti tutanağı
+          </button>
+        </div>
       </div>
 
       {mod === 'daire' ? (
@@ -1153,7 +1262,15 @@ export const ParselTemizlikTespitScreen: React.FC<Props> = ({ currentUser }) => 
             {arsiv.map((t) => (
               <li key={t.id} className="text-[11px] font-semibold text-slate-700 flex items-center gap-2 flex-wrap">
                 <ClipboardCheck size={12} className="text-teal-700" />
-                {t.tarih} · {t.tip === 'DAIRE_BLOK' ? 'Daire/blok' : 'Baca'} · {t.ozetSatir}
+                {t.tarih} ·{' '}
+                {t.tip === 'PARSEL_BACA_TOPLU'
+                  ? 'Parsel geneli baca'
+                  : t.tip === 'PARSEL_DAIRE_TOPLU'
+                    ? 'Parsel geneli daire'
+                    : t.tip === 'DAIRE_BLOK'
+                      ? 'Daire/blok'
+                      : 'Baca'}{' '}
+                · {t.ozetSatir}
                 <span className="text-[9px] uppercase text-amber-800">{t.durum === 'IMZA_BEKLIYOR' ? 'İmza bekliyor' : t.durum}</span>
                 <button
                   type="button"

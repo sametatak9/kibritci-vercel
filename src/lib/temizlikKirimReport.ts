@@ -31,8 +31,8 @@ function escapeHtml(value: unknown): string {
     .replace(/"/g, '&quot;');
 }
 
-function imgRow(urls: string[]): string {
-  const list = (urls || []).filter(Boolean).slice(0, 6);
+function imgRow(urls: string[], max = 6): string {
+  const list = (urls || []).filter(Boolean).slice(0, max);
   if (!list.length) return '<p class="text-[11px] text-slate-400">Foto yok</p>';
   return `<div style="display:flex;gap:6px;flex-wrap:wrap">${list
     .map(
@@ -40,6 +40,22 @@ function imgRow(urls: string[]): string {
         `<img src="${escapeHtml(u)}" alt="" style="width:110px;height:80px;object-fit:cover;border-radius:8px;border:1px solid #e2e8f0" />`
     )
     .join('')}</div>`;
+}
+
+function imgGrid(urls: string[], max = 16): string {
+  const list = (urls || []).filter(Boolean).slice(0, max);
+  if (!list.length) return '<p style="font-size:12px;color:#94a3b8">Fotoğraf eklenmedi.</p>';
+  return `<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:12px 0 8px">
+    ${list
+      .map(
+        (u, i) =>
+          `<figure style="margin:0;page-break-inside:avoid">
+            <img src="${escapeHtml(u)}" alt="Saha fotoğraf ${i + 1}" style="width:100%;height:210px;object-fit:cover;border-radius:10px;border:1px solid #cbd5e1" />
+            <figcaption style="font-size:9px;color:#64748b;margin-top:4px;font-weight:700">Fotoğraf ${i + 1}</figcaption>
+          </figure>`
+      )
+      .join('')}
+  </div>`;
 }
 
 function ozetTabloHtml(
@@ -217,8 +233,8 @@ export function temizlikImzaBarHtml(imza?: {
 }): string {
   const cells = [
     { unvan: 'Hazırlayan', ad: imza?.hazirlayan || '' },
-    { unvan: 'Parsel Şefi', ad: imza?.parselSefi || '' },
-    { unvan: 'Proje Müdürü', ad: imza?.projeMuduru || '' },
+    { unvan: 'Kontrol eden', ad: imza?.parselSefi || '' },
+    { unvan: 'Onaylayan', ad: imza?.projeMuduru || '' },
   ];
   return `
     <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:22px;margin-top:42px;page-break-inside:avoid">
@@ -327,6 +343,37 @@ export function buildDaireTemizlikTutanakHtml(opts: {
   return wrapCorporateReportHtml(body, {
     title: `${opts.parsel} Parsel Temizlik Tespit Tutanağı`,
     docCode: 'PTT-DAİRE',
+    orientation: 'portrait',
+    letterhead: true,
+    autoPrint: true,
+  });
+}
+
+export function buildParselTopluTutanakHtml(opts: {
+  parsel: string;
+  konu: 'BACA' | 'DAIRE';
+  tarih?: string;
+  metin: string;
+  fotoUrls: string[];
+  imza?: { hazirlayan?: string; parselSefi?: string; projeMuduru?: string };
+}): string {
+  const tarih = formatDateLabelTr(opts.tarih || new Date().toISOString());
+  const konuBaslik = opts.konu === 'BACA' ? 'Altyapı Baca Temizliği' : 'Daire / Blok Temizliği';
+  const docCode = opts.konu === 'BACA' ? 'PTT-PARSEL-BACA' : 'PTT-PARSEL-DAIRE';
+  const body = `
+    <h1 style="font-size:18px;font-weight:900;margin:0 0 4px;letter-spacing:.04em;text-transform:uppercase">Parsel Geneli ${escapeHtml(konuBaslik)} Tutanağı</h1>
+    <p style="font-size:12px;color:#334155;margin:0 0 4px"><strong>${escapeHtml(opts.parsel)}</strong> · ${escapeHtml(parselKisaAd(opts.parsel))} · ${escapeHtml(tarih)}</p>
+    <p style="font-size:11px;font-weight:800;color:#0f766e;margin:0 0 12px;text-transform:uppercase">Kapsam: parselin tamamı — tek tek kart açılmadan saha kontrolü</p>
+    <div style="border:1px solid #0f766e;border-radius:12px;padding:14px 16px;background:#f0fdfa;margin:0 0 16px">
+      <p style="margin:0;font-size:13px;line-height:1.55;font-weight:600;color:#134e4a;white-space:pre-wrap">${escapeHtml(opts.metin)}</p>
+    </div>
+    <h2 style="font-size:13px;font-weight:800;margin:0 0 8px;text-transform:uppercase;letter-spacing:.06em">Saha kontrol fotoğrafları</h2>
+    ${imgGrid(opts.fotoUrls)}
+    ${temizlikImzaBarHtml(opts.imza)}
+  `;
+  return wrapCorporateReportHtml(body, {
+    title: `${opts.parsel} ${konuBaslik} tutanağı`,
+    docCode,
     orientation: 'portrait',
     letterhead: true,
     autoPrint: true,
