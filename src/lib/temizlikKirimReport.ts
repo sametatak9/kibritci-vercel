@@ -385,9 +385,11 @@ export function buildDaireTemizlikTutanakHtml(opts: {
   });
 }
 
+export type ParselTopluKonu = 'BACA' | 'DAIRE' | 'ASANSOR' | 'CEVRE';
+
 export function buildParselTopluTutanakHtml(opts: {
   parsel: string;
-  konu: 'BACA' | 'DAIRE';
+  konu: ParselTopluKonu;
   tarih?: string;
   metin: string;
   fotoUrls: string[];
@@ -414,7 +416,7 @@ export function buildParselTopluTutanakHtml(opts: {
   const sonuc = baca
     ? `Yapılan saha kontrolü sonucunda ${kisa} parselinde yer alan altyapı bacalarının tamamının temizlendiği; pit çukur ağızlarının açıldığı / temizlendiği ve çevre düzenleme (zemin tesviyesi, stabilize-çakıl serimi ve saha düzeni) işinin parsel geneli tamamlandığı tespit edilmiştir. Eksik baca bırakılmamıştır.`
     : blokModu
-      ? `Yapılan saha kontrolü sonucunda ${kisa} parselinde ${blokAdlari.map((b) => `Blok ${b}`).join(', ')} bloklarının temizlik işi tamamlanmıştır. Bu altı blok temizlenmiş ve teslime hazır kabul edilir.`
+      ? `Yapılan saha kontrolü sonucunda ${kisa} parselinde ${blokAdlari.map((b) => `Blok ${b}`).join(', ')} bloklarının kaba-ince temizlik işi tamamlanmıştır. Bu ${blokAdlari.length} blok temizlenmiş ve teslime hazır kabul edilir.`
       : `Yapılan saha kontrolü sonucunda ${kisa} parselinde daire / blok temizlik işinin parsel geneli tamamlandığı tespit edilmiştir.`;
   const sahaNotu = String(opts.metin || '').trim();
   const body = `
@@ -517,6 +519,142 @@ export function buildParselTopluTutanakHtml(opts: {
   return wrapCorporateReportHtml(body, {
     title: `${opts.parsel} ${belgeAdi}`,
     docCode,
+    orientation: 'portrait',
+    letterhead: true,
+    autoPrint: true,
+    extraCss: `
+      .corporate-report-body{font-family:'Times New Roman',Times,Georgia,serif}
+      @media print{img{break-inside:avoid}}
+    `,
+  });
+}
+
+export function buildParselTeslimTutanakHtml(opts: {
+  parsel: string;
+  tarih?: string;
+  genelNot?: string;
+  imza?: { hazirlayan?: string; parselSefi?: string; projeMuduru?: string };
+  bloklar: { blok: string; fotoUrls: string[]; not?: string }[];
+  baca: { fotoUrls: string[]; not?: string };
+  asansor: { fotoUrls: string[]; not?: string };
+  cevre: { fotoUrls: string[]; not?: string };
+}): string {
+  const tarih = formatDateLabelTr(opts.tarih || new Date().toISOString());
+  const kisa = parselKisaAd(opts.parsel);
+  const bloklar = (opts.bloklar || []).filter((b) => String(b.blok || '').trim());
+  const blokAdlari = bloklar.map((b) => b.blok.trim().toLocaleUpperCase('tr-TR'));
+  const belgeAdi = 'PARSEL İŞ BİTİRME VE TESLİM TUTANAĞI';
+  const kalemSatir = (no: string, baslik: string, icerik: string) =>
+    `<p style="margin:14px 0 6px;font-size:12px;font-weight:800;text-decoration:underline">${escapeHtml(no)} — ${escapeHtml(baslik)}</p>
+     <p style="margin:0 0 10px;font-size:12px;line-height:1.55;text-align:justify">${icerik}</p>`;
+  const body = `
+    <div style="border:2px solid #0f172a;padding:18px 20px 22px;font-family:'Times New Roman',Times,serif;color:#0f172a">
+      <p style="margin:0 0 4px;text-align:center;font-size:11px;letter-spacing:.14em;font-weight:700">T.C. — KİBRİTÇİ İNŞAAT TAAHHÜT TURİZM SAN. VE TİC. LTD. ŞTİ.</p>
+      <p style="margin:0 0 12px;text-align:center;font-size:16px;font-weight:800;letter-spacing:.04em;line-height:1.35">${escapeHtml(belgeAdi)}</p>
+      <table style="width:100%;border-collapse:collapse;font-size:12px;margin:0 0 14px">
+        <tr>
+          <td style="border:1px solid #0f172a;padding:6px 8px;width:22%;font-weight:700;background:#f1f5f9">Belge türü</td>
+          <td style="border:1px solid #0f172a;padding:6px 8px">İş bitirme / teslim tutanağı (hakediş eki)</td>
+          <td style="border:1px solid #0f172a;padding:6px 8px;width:18%;font-weight:700;background:#f1f5f9">Tarih</td>
+          <td style="border:1px solid #0f172a;padding:6px 8px">${escapeHtml(tarih)}</td>
+        </tr>
+        <tr>
+          <td style="border:1px solid #0f172a;padding:6px 8px;font-weight:700;background:#f1f5f9">Parsel</td>
+          <td style="border:1px solid #0f172a;padding:6px 8px"><strong>${escapeHtml(opts.parsel)}</strong> (${escapeHtml(kisa)})</td>
+          <td style="border:1px solid #0f172a;padding:6px 8px;font-weight:700;background:#f1f5f9">Kapsam</td>
+          <td style="border:1px solid #0f172a;padding:6px 8px">Parsel geneli — 4 iş kalemi</td>
+        </tr>
+        <tr>
+          <td style="border:1px solid #0f172a;padding:6px 8px;font-weight:700;background:#f1f5f9">Konu</td>
+          <td colspan="3" style="border:1px solid #0f172a;padding:6px 8px">Blok kaba-ince temizlik, altyapı pit/baca temizliği, asansör kuyusu temizliği, çevre düzenleme ve saha genel temizliği</td>
+        </tr>
+      </table>
+
+      ${kalemSatir(
+        'MADDE 1',
+        'Yer ve iş tanımı',
+        `İşbu tutanak, ${escapeHtml(opts.parsel)} (${escapeHtml(kisa)}) üzerinde tamamlanan temizlik ve çevre düzenleme işlerinin saha kontrolü ile teslimini belgelemek üzere düzenlenmiştir. İş dört ana kalem halinde yürütülmüş ve ekli fotoğraflarla tespit edilmiştir.`
+      )}
+
+      ${kalemSatir(
+        'MADDE 2',
+        'Blok kaba-ince temizlik',
+        `${escapeHtml(kisa)} parselinde ${blokAdlari.length} bloğun ( ${escapeHtml(blokAdlari.join(', '))} ) kaba ve ince temizlik işi tamamlanmıştır.`
+      )}
+      <table style="width:100%;border-collapse:collapse;font-size:12px;margin:0 0 12px">
+        <tr>
+          <th style="border:1px solid #0f172a;padding:6px 8px;background:#0f172a;color:#fff;text-align:left">Sıra</th>
+          <th style="border:1px solid #0f172a;padding:6px 8px;background:#0f172a;color:#fff;text-align:left">Blok</th>
+          <th style="border:1px solid #0f172a;padding:6px 8px;background:#0f172a;color:#fff;text-align:left">Durum</th>
+          <th style="border:1px solid #0f172a;padding:6px 8px;background:#0f172a;color:#fff;text-align:left">Fotoğraf</th>
+        </tr>
+        ${bloklar
+          .map(
+            (b, i) => `<tr>
+              <td style="border:1px solid #0f172a;padding:6px 8px">${i + 1}</td>
+              <td style="border:1px solid #0f172a;padding:6px 8px;font-weight:800">BLOK ${escapeHtml(b.blok.toLocaleUpperCase('tr-TR'))}</td>
+              <td style="border:1px solid #0f172a;padding:6px 8px;font-weight:700">KABA-İNCE TEMİZLİK TAMAMLANDI</td>
+              <td style="border:1px solid #0f172a;padding:6px 8px">${(b.fotoUrls || []).filter(Boolean).length}</td>
+            </tr>`
+          )
+          .join('')}
+      </table>
+
+      ${kalemSatir(
+        'MADDE 3',
+        'Altyapı pit çukuru ve baca temizliği',
+        opts.baca.not?.trim() ||
+          `${escapeHtml(kisa)} parselinde altyapı pit çukurları ve baca ağızlarının temizliği parsel geneli tamamlanmıştır.`
+      )}
+      ${imgGrid(opts.baca.fotoUrls || [], `${kisa} pit / baca`)}
+
+      ${kalemSatir(
+        'MADDE 4',
+        'Asansör kuyusu temizliği',
+        opts.asansor.not?.trim() ||
+          `${escapeHtml(kisa)} parselinde blok asansör kuyularının temizliği tamamlanmıştır.`
+      )}
+      ${imgGrid(opts.asansor.fotoUrls || [], `${kisa} asansör kuyusu`)}
+
+      ${kalemSatir(
+        'MADDE 5',
+        'Çevre düzenleme ve saha genel temizliği',
+        opts.cevre.not?.trim() ||
+          `${escapeHtml(kisa)} parselinde çevre düzenleme ve saha genel temizliği tamamlanmıştır.`
+      )}
+      ${imgGrid(opts.cevre.fotoUrls || [], `${kisa} çevre / saha`)}
+
+      <p style="margin:16px 0 6px;font-size:12px;font-weight:800;text-decoration:underline">MADDE 6 — Tespit ve sonuç</p>
+      <p style="margin:0 0 10px;font-size:13px;line-height:1.55;text-align:justify;font-weight:700;border:1px solid #0f172a;padding:10px 12px;background:#fffbeb">
+        Yapılan saha kontrolü sonucunda ${escapeHtml(kisa)} parselinde blok kaba-ince temizlik (${escapeHtml(blokAdlari.join(', '))}),
+        altyapı pit/baca temizliği, asansör kuyusu temizliği ile çevre düzenleme ve saha genel temizliği işleri tamamlanmış;
+        iş teslime hazır kabul edilmiştir.
+      </p>
+      ${
+        opts.genelNot?.trim()
+          ? `<p style="margin:0 0 4px;font-size:11px;font-weight:800">Saha tutanak notu</p>
+             <p style="margin:0 0 12px;font-size:12px;line-height:1.5;text-align:justify;border:1px solid #cbd5e1;padding:8px 10px">${escapeHtml(opts.genelNot.trim())}</p>`
+          : ''
+      }
+
+      <p style="margin:0 0 6px;font-size:12px;font-weight:800;text-decoration:underline">MADDE 7 — Blok fotoğraf ekleri</p>
+      ${bloklar
+        .map((b, i) => {
+          const ad = b.blok.toLocaleUpperCase('tr-TR');
+          return `<p style="margin:14px 0 6px;font-size:12px;font-weight:800">EK-1.${i + 1} — BLOK ${escapeHtml(ad)}${b.not ? ` — ${escapeHtml(b.not)}` : ''}</p>${imgGrid(b.fotoUrls || [], `Blok ${ad}`)}`;
+        })
+        .join('')}
+
+      <p style="margin:16px 0 0;font-size:12px;line-height:1.55;text-align:justify">
+        MADDE 8 — İşbu tutanak gerçeğe aykırı husus taşımadığını beyan eden aşağıda imzası bulunanlarca imzalanmış olup
+        <strong>${escapeHtml(kisa)} parselindeki dört kalem temizlik ve çevre düzenleme işi teslim edilmiştir.</strong>
+      </p>
+      ${resmiImzaCetveliHtml(opts.imza)}
+    </div>
+  `;
+  return wrapCorporateReportHtml(body, {
+    title: `${opts.parsel} Parsel İş Bitirme ve Teslim Tutanağı`,
+    docCode: 'PTT-PARSEL-TESLIM',
     orientation: 'portrait',
     letterhead: true,
     autoPrint: true,
