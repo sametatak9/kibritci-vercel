@@ -53,7 +53,17 @@ function resmiImzaCetveliHtml(imza?: {
     { unvan: 'Onaylayan', gorev: 'Proje müdürü / işveren vekili', ad: imza?.projeMuduru || '' },
   ];
   return `
-    <table style="width:100%;border-collapse:collapse;margin-top:28px;page-break-inside:avoid">
+    <div style="border:1px solid #0f172a;padding:10px 12px;margin:18px 0 12px;background:#f8fafc">
+      <p style="margin:0 0 6px;font-size:11px;font-weight:800;letter-spacing:.06em;text-transform:uppercase">Hukuki nitelik — kanıt, kabul ve bağlayıcılık</p>
+      <p style="margin:0;font-size:11px;line-height:1.55;text-align:justify;color:#0f172a">
+        İşbu tutanak sözleşme ve teslim niteliğinde resmi belgedir. Yukarıda yazılı işlerin saha üzerinde yapıldığını
+        ve tamamlandığını <strong>kanıtlar</strong>. Tutanak metni, tespitler ve ekli fotoğraflar birlikte işin delilidir;
+        fotoğraflar bu evrakın ayrılmaz parçasıdır. Aşağıdaki imza ve kaşeler bu evrakı destekler ve içeriğini, kapsamını,
+        eklerini doğrular. İmzalayanlar işi yerinde görmüş, kontrol etmiş ve <strong>kabul etmiş sayılır</strong>.
+        Bu tutanak teslim, hakediş ve ödeme işlemlerinde dayanak olarak kullanılır. Üç nüsha düzenlenmiştir.
+      </p>
+    </div>
+    <table style="width:100%;border-collapse:collapse;margin-top:8px;page-break-inside:avoid">
       <tr>
         ${cells
           .map(
@@ -67,12 +77,7 @@ function resmiImzaCetveliHtml(imza?: {
           )
           .join('')}
       </tr>
-    </table>
-    <p style="font-size:10px;line-height:1.5;color:#1e293b;margin:16px 0 0;text-align:justify">
-      İşbu tutanak üç nüsha düzenlenmiş olup hazırlayan, kontrol eden ve onaylayan tarafından imzalanmıştır.
-      Tespit fotoğrafları tutanağın ayrılmaz ekidir. İmza ve kaşe tamamlandıktan sonra bu belge, ilgili parseldeki
-      <strong>altyapı baca temizliği ve çevre düzenleme</strong> işinin tamamlandığına dair hakediş / ödeme dayanağı olarak kullanılabilir.
-    </p>`;
+    </table>`;
 }
 
 function imgGrid(urls: string[], etiket: string, max = 16): string {
@@ -645,9 +650,19 @@ export function buildParselTeslimTutanakHtml(opts: {
         })
         .join('')}
 
-      <p style="margin:16px 0 0;font-size:12px;line-height:1.55;text-align:justify">
+      <p style="margin:16px 0 8px;font-size:12px;line-height:1.55;text-align:justify">
         MADDE 8 — İşbu tutanak gerçeğe aykırı husus taşımadığını beyan eden aşağıda imzası bulunanlarca imzalanmış olup
         <strong>${escapeHtml(kisa)} parselindeki dört kalem temizlik ve çevre düzenleme işi teslim edilmiştir.</strong>
+      </p>
+      <p style="margin:0 0 6px;font-size:12px;font-weight:800;text-decoration:underline">MADDE 9 — Kanıt, kabul ve bağlayıcılık</p>
+      <p style="margin:0 0 12px;font-size:12px;line-height:1.6;text-align:justify;border:2px solid #0f172a;padding:12px 14px">
+        İşbu evrak, ${escapeHtml(opts.parsel)} (${escapeHtml(kisa)}) kapsamında yapılan blok kaba-ince temizlik,
+        altyapı pit/baca temizliği, asansör kuyusu temizliği ile çevre düzenleme ve saha genel temizlik işlerinin
+        <strong>yerinde tamamlandığının resmi kaydı, kanıtı ve teslim belgesidir</strong>. Ekli fotoğraflar tutanağın
+        ayrılmaz parçası ve yapılan işin delilidir. Hazırlayan, kontrol eden ve onaylayanın imza ve kaşesi bu tutanağın
+        içeriğini destekler; imza ile iş <strong>görülmüş, kontrol edilmiş ve kabul edilmiş</strong> sayılır.
+        Taraflar bu tutanağı sözleşme eki, teslim belgesi ve hakediş dayanağı olarak kabul eder. İmza tarihinden itibaren
+        iş teslim edilmiş kabul olunur.
       </p>
       ${resmiImzaCetveliHtml(opts.imza)}
     </div>
