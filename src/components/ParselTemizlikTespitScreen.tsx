@@ -49,16 +49,26 @@ import type {
 } from '../types/erp';
 
 const PARSEL_SECENEK = PARSEL_LIST.filter((p) => p !== 'GENEL SAHA');
-const BLOK_TEMIZLIK_160 = ['A1A', 'A1B', 'A2A', 'A2B', 'B1', 'B2', 'B3', 'C1', 'C2', 'C3', 'C4'];
+
+/** Bina içi + asansör kuyusu teslim tutanağında kullanılan parsel blokları (kullanıcı listesi). */
+const TESLIM_BLOKLARI: Record<string, string[]> = {
+  'Parsel Bölge 160/2': ['C1', 'C2', 'C3', 'C4', 'B1', 'B2', 'B3', 'A1A', 'A1B', 'A2A', 'A2B'],
+  'Parsel Bölge 157/51': ['C1', 'C2', 'C3', 'C4', 'A1', 'A2', 'A3', 'B1', 'B2'],
+  'Parsel Bölge 157/46': ['A1', 'A2', 'C1', 'C2', 'F1', 'F2', 'E1', 'E2', 'D1', 'D2', 'I', 'H', 'G'],
+};
+
+function teslimBloklari(parsel: string): string[] {
+  return TESLIM_BLOKLARI[parsel] || [];
+}
 
 type BlokFotoSatir = { blok: string; fotolar: string[]; not: string };
 type KalemFoto = { fotolar: string[]; not: string };
 
-function seedBlokSatirlari(): BlokFotoSatir[] {
-  return BLOK_TEMIZLIK_160.map((blok) => ({
+function seedBlokSatirlari(parsel: string): BlokFotoSatir[] {
+  return teslimBloklari(parsel).map((blok) => ({
     blok,
     fotolar: [],
-    not: `${blok} bloğu kaba-ince temizlik tamamlandı.`,
+    not: `${blok} bloğu bina içi temizlik ve asansör kuyusu temizliği tamamlandı.`,
   }));
 }
 
@@ -156,30 +166,31 @@ export const ParselTemizlikTespitScreen: React.FC<Props> = ({ currentUser }) => 
   const [projeMuduru, setProjeMuduru] = useState('');
   const [tutanakNot, setTutanakNot] = useState('');
   const [topluFotolar, setTopluFotolar] = useState<string[]>([]);
-  const [blokFotoSatirlari, setBlokFotoSatirlari] = useState<BlokFotoSatir[]>(seedBlokSatirlari);
+  const [blokFotoSatirlari, setBlokFotoSatirlari] = useState<BlokFotoSatir[]>(() =>
+    seedBlokSatirlari(TEMIZLIK_DEFAULT_PARSEL)
+  );
   const [bacaKalem, setBacaKalem] = useState<KalemFoto>({
     fotolar: [],
-    not: 'Altyapı pit çukuru ve baca temizliği parsel geneli tamamlandı.',
+    not: 'Altyapı baca ve pit çukuru temizlikleri parsel geneli tamamlandı.',
   });
   const [asansorKalem, setAsansorKalem] = useState<KalemFoto>({
     fotolar: [],
-    not: 'Blok asansör kuyusu temizliği tamamlandı.',
+    not: 'Listelenen tüm blokların asansör kuyusu temizlikleri tamamlandı.',
   });
   const [cevreKalem, setCevreKalem] = useState<KalemFoto>({
     fotolar: [],
-    not: 'Çevre düzenleme ve saha genel temizliği tamamlandı.',
+    not: 'Kırım, çevre temizliği ve düzenleme işi tamamlandı.',
   });
 
   useEffect(() => {
-    if (parsel !== 'Parsel Bölge 160/2') return;
     setBlokFotoSatirlari((prev) => {
       const map = new Map(prev.map((p) => [p.blok, p]));
-      return BLOK_TEMIZLIK_160.map(
+      return teslimBloklari(parsel).map(
         (blok) =>
           map.get(blok) || {
             blok,
             fotolar: [],
-            not: `${blok} bloğu kaba-ince temizlik tamamlandı.`,
+            not: `${blok} bloğu bina içi temizlik ve asansör kuyusu temizliği tamamlandı.`,
           }
       );
     });
@@ -754,15 +765,12 @@ export const ParselTemizlikTespitScreen: React.FC<Props> = ({ currentUser }) => 
     const kisa = parselKisaAd(parsel);
     if (tutanakNot.trim()) return tutanakNot.trim();
     if (konu === 'BACA') {
-      return `${parsel} (${kisa}) kapsamında altyapı baca (çukur) temizlik işleri ile çevre düzenleme işleri parsel geneli tamamlanmıştır. Saha kontrolünde baca ağızları açılmış/temizlenmiş, avlu ve blok çevreleri tesviye ve zemin hazırlığı yapılmış olarak görülmüştür. İş bitimi bu tutanak ve ekli fotoğraflarla belgelenmiştir. Bacalar tek tek kart açılmadan parsel bütününde teslim edilmiştir.`;
+      return `${parsel} (${kisa}) kapsamında altyapı baca / pit çukuru temizlik işleri parsel geneli tamamlanmış ve teslim edilmiştir. Fotoğraf eki varsa tutanağa bağlanır; yoksa teslim bu metin ve imzalarla belgelenir.`;
     }
-    return `${parsel} (${kisa}) kapsamında daire / blok temizlik işleri parsel geneli tamamlanmıştır. Saha kontrol fotoğrafları ekte olup iş bitimi bu tutanakla belgelenmiştir.`;
+    return `${parsel} (${kisa}) kapsamında bina içi temizlik işleri parsel geneli tamamlanmış ve teslim edilmiştir. Fotoğraf eki varsa tutanağa bağlanır; yoksa teslim bu metin ve imzalarla belgelenir.`;
   };
 
   const handleParselTopluTutanak = async (konu: 'BACA' | 'DAIRE') => {
-    if (topluFotolar.length === 0) {
-      return show('Fotoğraf kutuda görünmüyor. “Dosya seç” ile yükleyin; önizleme çıkınca turuncu tuşa basın.', 'err');
-    }
     const raporPencere = window.open('', '_blank');
     if (raporPencere) {
       raporPencere.document.write('<p style="font-family:sans-serif;padding:24px">Tutanak hazırlanıyor…</p>');
@@ -806,12 +814,8 @@ export const ParselTemizlikTespitScreen: React.FC<Props> = ({ currentUser }) => 
   };
 
   const handleBlokTemizlikTutanak = async () => {
-    const dolu = blokFotoSatirlari.filter((r) => r.fotolar.length > 0);
-    if (dolu.length === 0) {
-      return show(`Her bloğun altına o bloğun fotoğrafını yükleyin (${BLOK_TEMIZLIK_160.join(', ')}).`, 'err');
-    }
-    const eksik = blokFotoSatirlari.filter((r) => r.fotolar.length === 0).map((r) => r.blok);
-    if (eksik.length && !window.confirm(`${eksik.join(', ')} bloğunda fotoğraf yok. Yine de tutanak basılsın mı?`)) return;
+    const bloklar = teslimBloklari(parsel);
+    if (!bloklar.length) return show('Bu parselde teslim bloğu yok.', 'err');
     const raporPencere = window.open('', '_blank');
     if (raporPencere) {
       raporPencere.document.write('<p style="font-family:sans-serif;padding:24px">Tutanak hazırlanıyor…</p>');
@@ -821,27 +825,29 @@ export const ParselTemizlikTespitScreen: React.FC<Props> = ({ currentUser }) => 
       const blokFotolar = blokFotoSatirlari.map((r) => ({
         blok: r.blok,
         fotoUrls: r.fotolar,
-        not: r.not.trim() || `${r.blok} bloğu temizliği tamamlandı.`,
+        not: r.not.trim() || `${r.blok} bloğu bina içi temizlik ve asansör kuyusu temizliği tamamlandı.`,
       }));
       const hepsi = blokFotoSatirlari.flatMap((r) => r.fotolar);
       const html = buildParselTopluTutanakHtml({
         parsel,
         konu: 'DAIRE',
         tarih,
-        metin: tutanakNot.trim() || `${parselKisaAd(parsel)} parselinde ${BLOK_TEMIZLIK_160.join(', ')} bloklarının temizlik işi tamamlanmıştır.`,
+        metin:
+          tutanakNot.trim() ||
+          `${parselKisaAd(parsel)} parselinde ${bloklar.join(', ')} bloklarının tüm bina içi temizlikleri ile asansör kuyusu temizlikleri tamamlanmış ve teslim edilmiştir.`,
         fotoUrls: hepsi,
         imza: imza(),
         blokFotolar,
       });
-      openTemizlikRapor(html, `${parsel} ${BLOK_TEMIZLIK_160.length} blok temizlik tutanağı`, raporPencere);
-      show(`${BLOK_TEMIZLIK_160.length} blok tutanağı açıldı — yazdırın / PDF kaydedin.`);
+      openTemizlikRapor(html, `${parsel} ${bloklar.length} blok bina içi teslim tutanağı`, raporPencere);
+      show(`${bloklar.length} blok teslim tutanağı açıldı — yazdırın / PDF kaydedin.`);
       if (await guard()) {
         await arsivleVeYazdir(
           html,
-          `${parsel} ${BLOK_TEMIZLIK_160.length} blok temizlik tutanağı`,
+          `${parsel} ${bloklar.length} blok bina içi teslim tutanağı`,
           'PARSEL_DAIRE_TOPLU',
-          BLOK_TEMIZLIK_160,
-          `${parselKisaAd(parsel)} · ${BLOK_TEMIZLIK_160.join(', ')} · ${hepsi.length} foto`,
+          bloklar,
+          `${parselKisaAd(parsel)} · ${bloklar.join(', ')} · ${hepsi.length} foto`,
           undefined,
           false
         );
@@ -854,11 +860,8 @@ export const ParselTemizlikTespitScreen: React.FC<Props> = ({ currentUser }) => 
   };
 
   const handleParselTeslimTutanak = async () => {
-    const blokFotoVar = blokFotoSatirlari.some((r) => r.fotolar.length > 0);
-    const kalemFotoVar = bacaKalem.fotolar.length + asansorKalem.fotolar.length + cevreKalem.fotolar.length > 0;
-    if (!blokFotoVar && !kalemFotoVar) {
-      return show('En az bir kaleme (blok / baca / asansör / çevre) fotoğraf yükleyin.', 'err');
-    }
+    const bloklar = teslimBloklari(parsel);
+    if (!bloklar.length) return show('Bu parselde teslim bloğu yok.', 'err');
     const raporPencere = window.open('', '_blank');
     if (raporPencere) {
       raporPencere.document.write('<p style="font-family:sans-serif;padding:24px">Teslim tutanağı hazırlanıyor…</p>');
@@ -873,21 +876,21 @@ export const ParselTemizlikTespitScreen: React.FC<Props> = ({ currentUser }) => 
         bloklar: blokFotoSatirlari.map((r) => ({
           blok: r.blok,
           fotoUrls: r.fotolar,
-          not: r.not.trim() || `${r.blok} bloğu kaba-ince temizlik tamamlandı.`,
+          not: r.not.trim() || `${r.blok} bloğu bina içi temizlik ve asansör kuyusu temizliği tamamlandı.`,
         })),
         baca: { fotoUrls: bacaKalem.fotolar, not: bacaKalem.not },
         asansor: { fotoUrls: asansorKalem.fotolar, not: asansorKalem.not },
         cevre: { fotoUrls: cevreKalem.fotolar, not: cevreKalem.not },
       });
       openTemizlikRapor(html, `${parsel} iş bitirme ve teslim tutanağı`, raporPencere);
-      show('Teslim tutanağı açıldı — yazdırın, imzalayın, PDF kaydedin.');
+      show('Teslim tutanağı açıldı — yazdırın, imzalayın, PDF kaydedin. Fotoğraf zorunlu değildir.');
       if (await guard()) {
         await arsivleVeYazdir(
           html,
           `${parsel} iş bitirme ve teslim tutanağı`,
           'PARSEL_DAIRE_TOPLU',
-          ['TESLIM', ...BLOK_TEMIZLIK_160],
-          `${parselKisaAd(parsel)} · teslim · ${BLOK_TEMIZLIK_160.length} blok`,
+          ['TESLIM', ...bloklar],
+          `${parselKisaAd(parsel)} · teslim · ${bloklar.length} blok`,
           undefined,
           false
         );
@@ -910,7 +913,7 @@ export const ParselTemizlikTespitScreen: React.FC<Props> = ({ currentUser }) => 
         <div>
           <h1 className="text-lg font-black text-slate-900 uppercase tracking-wide">Parsel Temizlik Tespit</h1>
           <p className="text-[11px] text-slate-500 mt-0.5">
-            Üç parsel · 160/2 teslim: 11 blok + pit/baca + asansör kuyusu + çevre · imza: Hazırlayan / Kontrol eden / Onaylayan
+            Üç parsel · bina içi + asansör kuyusu listedeki tüm bloklarda · imza: bir veya birden fazla isim (satır satır)
           </p>
         </div>
         <div className="flex gap-2">
@@ -984,27 +987,31 @@ export const ParselTemizlikTespitScreen: React.FC<Props> = ({ currentUser }) => 
         </label>
         <label className="text-[10px] font-black uppercase text-slate-400">
           Hazırlayan
-          <input
+          <textarea
             value={hazirlayan}
             onChange={(e) => setHazirlayan(e.target.value)}
+            rows={3}
+            placeholder="Her satıra bir isim — bir veya birden fazla"
             className="mt-1 w-full border border-slate-200 rounded-xl px-2 py-1.5 text-xs font-bold"
           />
         </label>
         <label className="text-[10px] font-black uppercase text-slate-400">
           Kontrol eden
-          <input
+          <textarea
             value={parselSefi}
             onChange={(e) => setParselSefi(e.target.value)}
-            placeholder="İsim"
+            rows={3}
+            placeholder="Her satıra bir isim — bir veya birden fazla"
             className="mt-1 w-full border border-slate-200 rounded-xl px-2 py-1.5 text-xs font-bold"
           />
         </label>
         <label className="text-[10px] font-black uppercase text-slate-400">
           Onaylayan
-          <input
+          <textarea
             value={projeMuduru}
             onChange={(e) => setProjeMuduru(e.target.value)}
-            placeholder="İsim"
+            rows={3}
+            placeholder="Her satıra bir isim — bir veya birden fazla"
             className="mt-1 w-full border border-slate-200 rounded-xl px-2 py-1.5 text-xs font-bold"
           />
         </label>
@@ -1091,18 +1098,21 @@ export const ParselTemizlikTespitScreen: React.FC<Props> = ({ currentUser }) => 
         </div>
       </div>
 
-      {parsel === 'Parsel Bölge 160/2' ? (
+      {teslimBloklari(parsel).length ? (
       <div className="rounded-2xl border-2 border-slate-900 bg-white p-4 space-y-4">
         <div>
-          <p className="text-sm font-black uppercase text-slate-900">160/2 teslim tutanağı — 4 iş kalemi</p>
+          <p className="text-sm font-black uppercase text-slate-900">
+            {parselKisaAd(parsel)} iş teslim tutanağı — 4 ana başlık
+          </p>
           <p className="text-[11px] text-slate-600 mt-1 leading-snug">
-            Fotoğrafları sohbete atmayın. 11 blok: A1A A1B A2A A2B B1 B2 B3 C1 C2 C3 C4.
-            Her kaleme kendi fotoğrafını yükleyin; en alttaki siyah tuş antetli teslim tutanağını basar (3 imza barı).
+            Fotoğraf isteğe bağlıdır; fotoğrafsız da teslim tutanağı basılır. Dört başlık: bina içi temizlik;
+            altyapı baca / pit çukuru; asansör kuyusu; kırım, çevre temizliği ve düzenleme. Siyah tuş antetli
+            teslim tutanağını açar (sözleşme ibareleri, 3 imza).
           </p>
         </div>
 
         <div className="rounded-xl border border-teal-300 bg-teal-50 p-3 space-y-2">
-          <p className="text-[11px] font-black uppercase text-teal-950">1 · Blok kaba-ince temizlik</p>
+          <p className="text-[11px] font-black uppercase text-teal-950">1 · Bina içi temizlikler (tüm bloklar + asansör kuyusu)</p>
           {blokFotoSatirlari.map((row, idx) => (
           <div key={row.blok} className="bg-white border border-teal-200 rounded-xl p-3 space-y-2">
             <div className="flex flex-wrap items-center gap-2">
@@ -1156,14 +1166,14 @@ export const ParselTemizlikTespitScreen: React.FC<Props> = ({ currentUser }) => 
             onClick={() => void handleBlokTemizlikTutanak()}
             className="inline-flex items-center gap-1.5 bg-teal-800 text-white text-[10px] font-black px-3 py-2 rounded-xl cursor-pointer disabled:opacity-50"
           >
-            <FileSignature size={13} /> Yalnız blok tutanağı
+            <FileSignature size={13} /> Yalnız bina içi teslim tutanağı
           </button>
         </div>
 
         {[
-          { key: 'baca' as const, no: '2', baslik: 'Altyapı pit çukuru / baca temizliği', kalem: bacaKalem, set: setBacaKalem },
-          { key: 'asansor' as const, no: '3', baslik: 'Asansör kuyusu temizliği', kalem: asansorKalem, set: setAsansorKalem },
-          { key: 'cevre' as const, no: '4', baslik: 'Çevre düzenleme ve saha genel temizliği', kalem: cevreKalem, set: setCevreKalem },
+          { key: 'baca' as const, no: '2', baslik: 'Altyapı baca / pit çukuru temizlikleri', kalem: bacaKalem, set: setBacaKalem },
+          { key: 'asansor' as const, no: '3', baslik: 'Asansör kuyusu temizlikleri', kalem: asansorKalem, set: setAsansorKalem },
+          { key: 'cevre' as const, no: '4', baslik: 'Kırım, çevre temizliği ve düzenleme', kalem: cevreKalem, set: setCevreKalem },
         ].map((k) => (
           <div key={k.key} className="rounded-xl border border-slate-300 bg-slate-50 p-3 space-y-2">
             <p className="text-[11px] font-black uppercase text-slate-800">{k.no} · {k.baslik}</p>
@@ -1207,7 +1217,7 @@ export const ParselTemizlikTespitScreen: React.FC<Props> = ({ currentUser }) => 
           onClick={() => void handleParselTeslimTutanak()}
           className="w-full inline-flex items-center justify-center gap-2 bg-slate-900 text-white text-sm font-black px-4 py-3.5 rounded-xl cursor-pointer disabled:opacity-50"
         >
-          <FileSignature size={16} /> 160/2 TESLİM TUTANAĞI — 4 kalem, antet, 3 imza
+          <FileSignature size={16} /> TESLİM TUTANAĞI (rapor) — 4 başlık, fotoğraf zorunlu değil
         </button>
       </div>
       ) : null}
@@ -1318,9 +1328,9 @@ export const ParselTemizlikTespitScreen: React.FC<Props> = ({ currentUser }) => 
               <p className="text-[11px] text-slate-400 italic">Bloğa tıklayarak daire fotoğrafı ve tespit girin.</p>
             )}
             <div className="rounded-2xl border-2 border-teal-700 bg-teal-50 p-3 space-y-2">
-              <p className="text-[10px] font-black uppercase text-teal-900">Rapor / tutanak burada üretilir</p>
+              <p className="text-[10px] font-black uppercase text-teal-900">Teslim tutanağı burada üretilir</p>
               <p className="text-[10px] text-teal-800 leading-snug">
-                Fotoğraflar daire kartına kaydedilir. Antetli tutanak bu iki tuşla açılır — ayrı bir rapor ekranı yoktur.
+                Fotoğraflar daire kartına kaydedilir (isteğe bağlı). Antetli iş teslim tutanağı bu tuşlarla açılır.
               </p>
               <div className="flex flex-wrap gap-2">
               <button
@@ -1484,9 +1494,9 @@ export const ParselTemizlikTespitScreen: React.FC<Props> = ({ currentUser }) => 
               </p>
             ) : null}
             <div className="rounded-2xl border-2 border-amber-700 bg-amber-50 p-3 space-y-2">
-              <p className="text-[10px] font-black uppercase text-amber-900">Rapor / tutanak burada üretilir</p>
+              <p className="text-[10px] font-black uppercase text-amber-900">Teslim tutanağı burada üretilir</p>
               <p className="text-[10px] text-amber-900 leading-snug">
-                Baca fotoğrafları kaydedilir. Antetli tutanak bu tuşlarla açılır — ayrı bir rapor ekranı yoktur.
+                Baca fotoğrafları isteğe bağlıdır. Antetli iş teslim tutanağı bu tuşlarla açılır.
               </p>
               <div className="flex flex-wrap gap-2">
               <button
