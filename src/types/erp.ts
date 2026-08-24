@@ -1377,6 +1377,10 @@ export interface TemizlikTutanakImza {
   hazirlayan: string;
   parselSefi: string;
   projeMuduru: string;
+  kontrolBina?: string;
+  kontrolAltyapi?: string;
+  kontrolCevre?: string;
+  kontrolAsansor?: string;
 }
 
 export interface TemizlikTutanak {

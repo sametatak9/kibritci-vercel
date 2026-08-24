@@ -42,36 +42,33 @@ function imgRow(urls: string[], max = 6): string {
     .join('')}</div>`;
 }
 
-function splitImzaAdlari(raw?: string): string[] {
-  return String(raw || '')
-    .split(/[\n,;]+/)
-    .map((s) => s.trim())
-    .filter(Boolean);
+export type TemizlikRaporImza = {
+  hazirlayan?: string;
+  projeMuduru?: string;
+  /** Eski kayıtlar — dört kontrol boşsa bina kontrolüne yazılır */
+  parselSefi?: string;
+  kontrolBina?: string;
+  kontrolAltyapi?: string;
+  kontrolCevre?: string;
+  kontrolAsansor?: string;
+};
+
+function tekImzaHucre(unvan: string, gorev: string, ad: string, width: string): string {
+  return `<td style="width:${width};border:1px solid #0f172a;vertical-align:top;padding:0">
+    <p style="margin:0;padding:6px 8px;background:#0f172a;color:#fff;font-size:10px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;font-family:Times New Roman,Times,serif">${escapeHtml(unvan)}</p>
+    <p style="margin:0;padding:4px 8px 0;font-size:10px;color:#334155">${escapeHtml(gorev)}</p>
+    <p style="margin:0;padding:8px;font-size:13px;font-weight:700;min-height:20px">${escapeHtml((ad || '').trim() || '…')}</p>
+    <div style="height:52px;border-top:1px dashed #94a3b8;margin:0 8px"></div>
+    <p style="margin:0;padding:4px 8px 8px;font-size:9px;color:#64748b">İmza ve kaşe</p>
+  </td>`;
 }
 
-function resmiImzaCetveliHtml(imza?: {
-  hazirlayan?: string;
-  parselSefi?: string;
-  projeMuduru?: string;
-}): string {
-  const cells = [
-    { unvan: 'Hazırlayan', gorev: 'Saha tespit / tutanak', ad: imza?.hazirlayan || '' },
-    { unvan: 'Kontrol eden', gorev: 'Parsel şefi / saha kontrol', ad: imza?.parselSefi || '' },
-    { unvan: 'Onaylayan', gorev: 'Proje müdürü / işveren vekili', ad: imza?.projeMuduru || '' },
-  ];
-  const adBlok = (raw: string) => {
-    const adlar = splitImzaAdlari(raw);
-    const list = adlar.length ? adlar : ['…'];
-    return list
-      .map(
-        (ad) => `<div style="padding:6px 8px 8px;border-bottom:1px solid #e2e8f0">
-          <p style="margin:0;font-size:13px;font-weight:700;min-height:18px">${escapeHtml(ad)}</p>
-          <div style="height:48px;border-bottom:1px dashed #94a3b8;margin-top:4px"></div>
-          <p style="margin:4px 0 0;font-size:9px;color:#64748b">İmza ve kaşe</p>
-        </div>`
-      )
-      .join('');
-  };
+function resmiImzaCetveliHtml(imza?: TemizlikRaporImza): string {
+  const hasSplit = !!(imza?.kontrolBina || imza?.kontrolAltyapi || imza?.kontrolCevre || imza?.kontrolAsansor);
+  const bina = (hasSplit ? imza?.kontrolBina : imza?.parselSefi) || '';
+  const altyapi = (imza?.kontrolAltyapi || '').trim();
+  const cevre = (imza?.kontrolCevre || '').trim();
+  const asansor = (imza?.kontrolAsansor || '').trim();
   return `
     <div style="border:1px solid #0f172a;padding:10px 12px;margin:18px 0 12px;background:#f8fafc">
       <p style="margin:0 0 6px;font-size:11px;font-weight:800;letter-spacing:.06em;text-transform:uppercase">Hukuki nitelik — kanıt, kabul ve bağlayıcılık</p>
@@ -79,22 +76,24 @@ function resmiImzaCetveliHtml(imza?: {
         İşbu tutanak sözleşme ve teslim niteliğinde resmi belgedir. Yukarıda yazılı işlerin saha üzerinde yapıldığını
         ve teslim edildiğini <strong>kanıtlar</strong>. Tutanak metni ve imzalar işin delilidir; ekli fotoğraf varsa
         tutanağın ayrılmaz parçasıdır, yoksa teslim yine bu evrak ve imzalarla belgelenir. Aşağıdaki imza ve kaşeler
-        bu evrakı destekler. İmzalayanlar (bir veya birden fazla hazırlayan, kontrol eden, onaylayan) işi yerinde
-        görmüş, kontrol etmiş ve <strong>kabul etmiş sayılır</strong>.
+        bu evrakı destekler. Hazırlayan ve onaylayan tek kişi olabilir; kontrol, dört ana kalem için ayrı imzalanır
+        (bina, altyapı, çevre, asansör). İmzalayanlar işi yerinde görmüş, kontrol etmiş ve <strong>kabul etmiş sayılır</strong>.
         Bu tutanak teslim, hakediş ve ödeme işlemlerinde dayanak olarak kullanılır. Üç nüsha düzenlenmiştir.
       </p>
     </div>
     <table style="width:100%;border-collapse:collapse;margin-top:8px;page-break-inside:avoid">
       <tr>
-        ${cells
-          .map(
-            (c) => `<td style="width:33.33%;border:1px solid #0f172a;vertical-align:top;padding:0">
-              <p style="margin:0;padding:6px 8px;background:#0f172a;color:#fff;font-size:10px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;font-family:Times New Roman,Times,serif">${escapeHtml(c.unvan)}</p>
-              <p style="margin:0;padding:6px 8px 0;font-size:10px;color:#334155">${escapeHtml(c.gorev)}</p>
-              ${adBlok(c.ad)}
-            </td>`
-          )
-          .join('')}
+        ${tekImzaHucre('Hazırlayan', 'Saha tespit / tutanak', imza?.hazirlayan || '', '50%')}
+        ${tekImzaHucre('Onaylayan', 'Proje müdürü / işveren vekili', imza?.projeMuduru || '', '50%')}
+      </tr>
+    </table>
+    <p style="margin:12px 0 4px;font-size:11px;font-weight:800;letter-spacing:.06em;text-transform:uppercase">Kontrol imzaları — dört ana kalem</p>
+    <table style="width:100%;border-collapse:collapse;page-break-inside:avoid">
+      <tr>
+        ${tekImzaHucre('Bina kontrol', 'Bina içi temizlik', bina, '25%')}
+        ${tekImzaHucre('Altyapı kontrol', 'Baca / pit çukuru', altyapi, '25%')}
+        ${tekImzaHucre('Çevre kontrol', 'Kırım / çevre düzenleme', cevre, '25%')}
+        ${tekImzaHucre('Asansör kontrol', 'Asansör kuyusu', asansor, '25%')}
       </tr>
     </table>`;
 }
@@ -292,36 +291,8 @@ export function buildBacaParselRaporHtml(opts: {
   });
 }
 
-export function temizlikImzaBarHtml(imza?: {
-  hazirlayan?: string;
-  parselSefi?: string;
-  projeMuduru?: string;
-}): string {
-  const cells = [
-    { unvan: 'Hazırlayan', ad: imza?.hazirlayan || '' },
-    { unvan: 'Kontrol eden', ad: imza?.parselSefi || '' },
-    { unvan: 'Onaylayan', ad: imza?.projeMuduru || '' },
-  ];
-  return `
-    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:22px;margin-top:42px;page-break-inside:avoid">
-      ${cells
-        .map(
-          (c) => `
-        <div style="text-align:center">
-          <div style="height:52px"></div>
-          <div style="border-top:1px solid #0f172a;padding-top:8px">
-            <p style="margin:0;font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:#64748b;font-weight:800">${escapeHtml(c.unvan)}</p>
-            <p style="margin:6px 0 0;font-size:12px;font-weight:800;min-height:18px">${escapeHtml(c.ad || ' ')}</p>
-            <p style="margin:2px 0 0;font-size:9px;color:#94a3b8">İmza / kaşe</p>
-          </div>
-        </div>`
-        )
-        .join('')}
-    </div>
-    <p style="font-size:10px;color:#64748b;margin-top:18px;line-height:1.45">
-      Bu tutanak, seçilen kapsamda yapılan temizlik tespit ve uygulamasını hakediş esasına göre belgelemek üzere düzenlenmiştir.
-      Tespit fotoğrafları ve oda/baca kartları ek niteliğindedir.
-    </p>`;
+export function temizlikImzaBarHtml(imza?: TemizlikRaporImza): string {
+  return resmiImzaCetveliHtml(imza);
 }
 
 export function buildDaireTemizlikTutanakHtml(opts: {
@@ -332,7 +303,7 @@ export function buildDaireTemizlikTutanakHtml(opts: {
   uygulamalar: TemizlikUygulama[];
   tarih?: string;
   not?: string;
-  imza?: { hazirlayan?: string; parselSefi?: string; projeMuduru?: string };
+  imza?: TemizlikRaporImza;
   /** Yalnız tespit veya uygulama olan daireler (hakediş) */
   yalnizIslenen?: boolean;
 }): string {
@@ -423,7 +394,7 @@ export function buildParselTopluTutanakHtml(opts: {
   tarih?: string;
   metin: string;
   fotoUrls: string[];
-  imza?: { hazirlayan?: string; parselSefi?: string; projeMuduru?: string };
+  imza?: TemizlikRaporImza;
   blokFotolar?: { blok: string; fotoUrls: string[]; not?: string }[];
 }): string {
   const tarih = formatDateLabelTr(opts.tarih || new Date().toISOString());
@@ -519,7 +490,13 @@ export function buildParselTopluTutanakHtml(opts: {
           : ''
       }
 
-      <p style="margin:0 0 6px;font-size:12px;font-weight:800;text-decoration:underline">MADDE 4 — Ekler</p>
+      ${
+        (() => {
+          const fotoVar = blokModu
+            ? bloklar.some((b) => (b.fotoUrls || []).some(Boolean))
+            : (opts.fotoUrls || []).some(Boolean);
+          if (!fotoVar) return '';
+          return `<p style="margin:0 0 6px;font-size:12px;font-weight:800;text-decoration:underline">MADDE 4 — Ekler</p>
       <p style="margin:0 0 8px;font-size:12px;line-height:1.5">
         ${
           blokModu
@@ -530,12 +507,15 @@ export function buildParselTopluTutanakHtml(opts: {
       ${
         blokModu
           ? bloklar
+              .filter((b) => (b.fotoUrls || []).some(Boolean))
               .map((b, i) => {
                 const ad = b.blok.toLocaleUpperCase('tr-TR');
-                return `<p style="margin:14px 0 6px;font-size:12px;font-weight:800">EK-1.${i + 1} — BLOK ${escapeHtml(ad)}${b.not ? ` — ${escapeHtml(b.not)}` : ''}</p>${imgGrid(b.fotoUrls || [], `Blok ${ad}`)}`;
+                return `<p style="margin:14px 0 6px;font-size:12px;font-weight:800">EK-1.${i + 1} — BLOK ${escapeHtml(ad)}${b.not ? ` — ${escapeHtml(b.not)}` : ''}</p>${imgGridIfAny(b.fotoUrls || [], `Blok ${ad}`)}`;
               })
               .join('')
-          : imgGrid(opts.fotoUrls, kisa)
+          : imgGridIfAny(opts.fotoUrls, kisa)
+      }`;
+        })()
       }
 
       <p style="margin:16px 0 0;font-size:12px;line-height:1.55;text-align:justify">
@@ -563,7 +543,7 @@ export function buildParselTeslimTutanakHtml(opts: {
   parsel: string;
   tarih?: string;
   genelNot?: string;
-  imza?: { hazirlayan?: string; parselSefi?: string; projeMuduru?: string };
+  imza?: TemizlikRaporImza;
   bloklar: { blok: string; fotoUrls: string[]; not?: string }[];
   baca: { fotoUrls: string[]; not?: string };
   asansor: { fotoUrls: string[]; not?: string };
@@ -573,6 +553,7 @@ export function buildParselTeslimTutanakHtml(opts: {
   const kisa = parselKisaAd(opts.parsel);
   const bloklar = (opts.bloklar || []).filter((b) => String(b.blok || '').trim());
   const blokAdlari = bloklar.map((b) => b.blok.trim().toLocaleUpperCase('tr-TR'));
+  const blokFotoVar = bloklar.some((b) => (b.fotoUrls || []).some(Boolean));
   const belgeAdi = 'PARSEL İŞ BİTİRME VE TESLİM TUTANAĞI';
   const kalemSatir = (no: string, baslik: string, icerik: string) =>
     `<p style="margin:14px 0 6px;font-size:12px;font-weight:800;text-decoration:underline">${escapeHtml(no)} — ${escapeHtml(baslik)}</p>
@@ -618,15 +599,15 @@ export function buildParselTeslimTutanakHtml(opts: {
           <th style="border:1px solid #0f172a;padding:6px 8px;background:#0f172a;color:#fff;text-align:left">Sıra</th>
           <th style="border:1px solid #0f172a;padding:6px 8px;background:#0f172a;color:#fff;text-align:left">Blok</th>
           <th style="border:1px solid #0f172a;padding:6px 8px;background:#0f172a;color:#fff;text-align:left">Durum</th>
-          <th style="border:1px solid #0f172a;padding:6px 8px;background:#0f172a;color:#fff;text-align:left">Fotoğraf</th>
+          ${blokFotoVar ? '<th style="border:1px solid #0f172a;padding:6px 8px;background:#0f172a;color:#fff;text-align:left">Fotoğraf</th>' : ''}
         </tr>
         ${bloklar
           .map(
             (b, i) => `<tr>
               <td style="border:1px solid #0f172a;padding:6px 8px">${i + 1}</td>
               <td style="border:1px solid #0f172a;padding:6px 8px;font-weight:800">BLOK ${escapeHtml(b.blok.toLocaleUpperCase('tr-TR'))}</td>
-              <td style="border:1px solid #0f172a;padding:6px 8px;font-weight:700">BİNA İÇİ VE ASANSÖR KUYUSU TAMAMLANDI</td>
-              <td style="border:1px solid #0f172a;padding:6px 8px">${(b.fotoUrls || []).filter(Boolean).length}</td>
+              <td style="border:1px solid #0f172a;padding:6px 8px;font-weight:700;color:#166534">TAMAMLANDI</td>
+              ${blokFotoVar ? `<td style="border:1px solid #0f172a;padding:6px 8px">${(b.fotoUrls || []).filter(Boolean).length}</td>` : ''}
             </tr>`
           )
           .join('')}
@@ -670,17 +651,17 @@ export function buildParselTeslimTutanakHtml(opts: {
           : ''
       }
 
-      <p style="margin:0 0 6px;font-size:12px;font-weight:800;text-decoration:underline">MADDE 7 — Blok fotoğraf ekleri (varsa)</p>
       ${
-        bloklar.some((b) => (b.fotoUrls || []).some(Boolean))
-          ? bloklar
-              .filter((b) => (b.fotoUrls || []).some(Boolean))
-              .map((b, i) => {
-                const ad = b.blok.toLocaleUpperCase('tr-TR');
-                return `<p style="margin:14px 0 6px;font-size:12px;font-weight:800">EK-1.${i + 1} — BLOK ${escapeHtml(ad)}${b.not ? ` — ${escapeHtml(b.not)}` : ''}</p>${imgGridIfAny(b.fotoUrls || [], `Blok ${ad}`)}`;
-              })
-              .join('')
-          : '<p style="margin:0 0 12px;font-size:12px;font-style:italic">Bu tutanak fotoğrafsız düzenlenmiştir. Teslim, aşağıdaki sözleşme hükümleri ve imzalarla belgelenir.</p>'
+        blokFotoVar
+          ? `<p style="margin:0 0 6px;font-size:12px;font-weight:800;text-decoration:underline">MADDE 7 — Blok fotoğraf ekleri</p>
+             ${bloklar
+               .filter((b) => (b.fotoUrls || []).some(Boolean))
+               .map((b, i) => {
+                 const ad = b.blok.toLocaleUpperCase('tr-TR');
+                 return `<p style="margin:14px 0 6px;font-size:12px;font-weight:800">EK-1.${i + 1} — BLOK ${escapeHtml(ad)}${b.not ? ` — ${escapeHtml(b.not)}` : ''}</p>${imgGridIfAny(b.fotoUrls || [], `Blok ${ad}`)}`;
+               })
+               .join('')}`
+          : ''
       }
 
       <p style="margin:16px 0 8px;font-size:12px;line-height:1.55;text-align:justify">
@@ -722,7 +703,7 @@ export function buildBacaTemizlikTutanakHtml(opts: {
   uygulamalar: TemizlikBacaUygulama[];
   tarih?: string;
   not?: string;
-  imza?: { hazirlayan?: string; parselSefi?: string; projeMuduru?: string };
+  imza?: TemizlikRaporImza;
   yalnizIslenen?: boolean;
 }): string {
   const idSet = new Set(opts.bacaIds || []);

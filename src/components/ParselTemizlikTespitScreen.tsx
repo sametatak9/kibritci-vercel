@@ -162,8 +162,11 @@ export const ParselTemizlikTespitScreen: React.FC<Props> = ({ currentUser }) => 
 
   const [tarih, setTarih] = useState(todayDateKey());
   const [hazirlayan, setHazirlayan] = useState(userLabel(currentUser));
-  const [parselSefi, setParselSefi] = useState('');
   const [projeMuduru, setProjeMuduru] = useState('');
+  const [kontrolBina, setKontrolBina] = useState('');
+  const [kontrolAltyapi, setKontrolAltyapi] = useState('');
+  const [kontrolCevre, setKontrolCevre] = useState('');
+  const [kontrolAsansor, setKontrolAsansor] = useState('');
   const [tutanakNot, setTutanakNot] = useState('');
   const [topluFotolar, setTopluFotolar] = useState<string[]>([]);
   const [blokFotoSatirlari, setBlokFotoSatirlari] = useState<BlokFotoSatir[]>(() =>
@@ -279,7 +282,21 @@ export const ParselTemizlikTespitScreen: React.FC<Props> = ({ currentUser }) => 
     return true;
   };
 
-  const imza = () => ({ hazirlayan: hazirlayan.trim(), parselSefi: parselSefi.trim(), projeMuduru: projeMuduru.trim() });
+  const imza = () => {
+    const bina = kontrolBina.trim();
+    const altyapi = kontrolAltyapi.trim();
+    const cevre = kontrolCevre.trim();
+    const asansor = kontrolAsansor.trim();
+    return {
+      hazirlayan: hazirlayan.trim(),
+      projeMuduru: projeMuduru.trim(),
+      kontrolBina: bina,
+      kontrolAltyapi: altyapi,
+      kontrolCevre: cevre,
+      kontrolAsansor: asansor,
+      parselSefi: [bina, altyapi, cevre, asansor].filter(Boolean).join(' / '),
+    };
+  };
 
   const parselDaireler = useMemo(
     () => daireler.filter((d) => d.parsel === parsel),
@@ -913,7 +930,7 @@ export const ParselTemizlikTespitScreen: React.FC<Props> = ({ currentUser }) => 
         <div>
           <h1 className="text-lg font-black text-slate-900 uppercase tracking-wide">Parsel Temizlik Tespit</h1>
           <p className="text-[11px] text-slate-500 mt-0.5">
-            Üç parsel · bina içi + asansör kuyusu listedeki tüm bloklarda · imza: bir veya birden fazla isim (satır satır)
+            Üç parsel · fotoğrafsız tutanakta durum TAMAMLANDI · kontrol: bina / altyapı / çevre / asansör
           </p>
         </div>
         <div className="flex gap-2">
@@ -987,31 +1004,55 @@ export const ParselTemizlikTespitScreen: React.FC<Props> = ({ currentUser }) => 
         </label>
         <label className="text-[10px] font-black uppercase text-slate-400">
           Hazırlayan
-          <textarea
+          <input
             value={hazirlayan}
             onChange={(e) => setHazirlayan(e.target.value)}
-            rows={3}
-            placeholder="Her satıra bir isim — bir veya birden fazla"
-            className="mt-1 w-full border border-slate-200 rounded-xl px-2 py-1.5 text-xs font-bold"
-          />
-        </label>
-        <label className="text-[10px] font-black uppercase text-slate-400">
-          Kontrol eden
-          <textarea
-            value={parselSefi}
-            onChange={(e) => setParselSefi(e.target.value)}
-            rows={3}
-            placeholder="Her satıra bir isim — bir veya birden fazla"
+            placeholder="Tek isim"
             className="mt-1 w-full border border-slate-200 rounded-xl px-2 py-1.5 text-xs font-bold"
           />
         </label>
         <label className="text-[10px] font-black uppercase text-slate-400">
           Onaylayan
-          <textarea
+          <input
             value={projeMuduru}
             onChange={(e) => setProjeMuduru(e.target.value)}
-            rows={3}
-            placeholder="Her satıra bir isim — bir veya birden fazla"
+            placeholder="Tek isim"
+            className="mt-1 w-full border border-slate-200 rounded-xl px-2 py-1.5 text-xs font-bold"
+          />
+        </label>
+        <label className="text-[10px] font-black uppercase text-slate-400">
+          Bina kontrol
+          <input
+            value={kontrolBina}
+            onChange={(e) => setKontrolBina(e.target.value)}
+            placeholder="Bina içi"
+            className="mt-1 w-full border border-slate-200 rounded-xl px-2 py-1.5 text-xs font-bold"
+          />
+        </label>
+        <label className="text-[10px] font-black uppercase text-slate-400">
+          Altyapı kontrol
+          <input
+            value={kontrolAltyapi}
+            onChange={(e) => setKontrolAltyapi(e.target.value)}
+            placeholder="Baca / pit"
+            className="mt-1 w-full border border-slate-200 rounded-xl px-2 py-1.5 text-xs font-bold"
+          />
+        </label>
+        <label className="text-[10px] font-black uppercase text-slate-400">
+          Çevre kontrol
+          <input
+            value={kontrolCevre}
+            onChange={(e) => setKontrolCevre(e.target.value)}
+            placeholder="Kırım / çevre"
+            className="mt-1 w-full border border-slate-200 rounded-xl px-2 py-1.5 text-xs font-bold"
+          />
+        </label>
+        <label className="text-[10px] font-black uppercase text-slate-400">
+          Asansör kontrol
+          <input
+            value={kontrolAsansor}
+            onChange={(e) => setKontrolAsansor(e.target.value)}
+            placeholder="Asansör kuyusu"
             className="mt-1 w-full border border-slate-200 rounded-xl px-2 py-1.5 text-xs font-bold"
           />
         </label>
