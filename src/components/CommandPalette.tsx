@@ -21,7 +21,7 @@ const ROUTES = [
   { key: 'onay_islemleri', label: 'Onay Havuzu & İmzalar', icon: ShieldCheck },
   { key: 'guvenlik_ekrani', label: 'Güvenlik & Kapı Kontrol', icon: ShieldCheck },
   { key: 'personel', label: 'Personel Yönetimi', icon: Users },
-  { key: 'personel_kartlari', label: 'Personel Detay Kartları', icon: Users },
+  { key: 'personel_kartlari', label: 'Personel Kartı', icon: Users },
   { key: 'yoklama', label: 'Yoklama & Puantaj', icon: ClipboardList },
   { key: 'faaliyet_personel', label: 'Faaliyeti Olan Personeller', icon: Camera },
   { key: 'maas', label: 'Maaş Hesaplama', icon: CreditCard },

@@ -61,7 +61,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       group: "PERSONEL",
       items: [
         { key: "personel", label: "Personel Yönetimi", icon: Users },
-        { key: "personel_kartlari", label: "Personel Detay Kartları", icon: Users },
+        { key: "personel_kartlari", label: "Personel Kartı", icon: Users },
         { key: "yoklama", label: "Yoklama ve Puantaj", icon: CalendarCheck2 },
         { key: "faaliyet_personel", label: "Faaliyeti Olan Personeller", icon: Camera },
         { key: "maas", label: "Maaş Hesaplama & Ödeme", icon: CreditCard },
@@ -346,20 +346,20 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         setActiveTab(item.key);
                         if (onClose) onClose();
                       }}
-                      className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-[13px] transition-all duration-300 text-left cursor-pointer ${
+                      className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-[13px] transition-all duration-150 text-left cursor-pointer ${
                         isActive
-                          ? "bg-slate-900 text-white shadow-md shadow-slate-900/15 font-bold translate-x-0.5"
-                          : "text-slate-600 font-medium hover:bg-slate-100/70 hover:text-slate-900 hover:translate-x-0.5"
+                          ? "bg-orange-50 text-orange-950 border border-orange-200 font-bold"
+                          : "text-slate-600 font-medium hover:bg-slate-100/70 hover:text-slate-900 border border-transparent"
                       }`}
                     >
-                      <div className="flex items-center space-x-3 truncate">
+                      <div className="flex items-center space-x-3 min-w-0 pr-6">
                         <Icon
                           size={16}
-                          className={`shrink-0 transition-transform group-hover:scale-105 ${
-                            isActive ? "text-slate-200" : "text-slate-400 group-hover:text-slate-600"
+                          className={`shrink-0 ${
+                            isActive ? "text-orange-600" : "text-slate-400 group-hover:text-slate-600"
                           }`}
                         />
-                        <span className="truncate pr-4">{item.label}</span>
+                        <span className="leading-snug">{item.label}</span>
                       </div>
                     </button>
                     
@@ -371,7 +371,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         );
                       }}
                       className={`absolute right-2 p-1.5 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer ${
-                        isActive ? "hover:bg-slate-800 text-amber-400" : "hover:bg-slate-200 text-slate-400 hover:text-amber-500"
+                        isActive ? "hover:bg-orange-100 text-amber-600" : "hover:bg-slate-200 text-slate-400 hover:text-amber-500"
                       } ${isFav ? "opacity-100 text-amber-400" : ""}`}
                       title={isFav ? "Favorilerden Çıkar" : "Sık Kullanılanlara Ekle"}
                     >

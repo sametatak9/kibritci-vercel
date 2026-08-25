@@ -24,7 +24,7 @@ export const PersonelKartListRow = memo(function PersonelKartListRow({
   return (
     <div
       onClick={() => onSelect(person.id)}
-      className={`flex items-center gap-2 px-2.5 py-2 cursor-pointer border-b border-orange-50/80 transition-colors ${
+      className={`flex items-center gap-2 px-2.5 h-11 cursor-pointer border-b border-orange-50/80 transition-colors ${
         isSelected
           ? 'bg-orange-50 border-l-2 border-l-orange-500'
           : 'hover:bg-orange-50/40 border-l-2 border-l-transparent'

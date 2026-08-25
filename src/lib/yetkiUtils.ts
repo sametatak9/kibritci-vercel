@@ -2,7 +2,7 @@
 export const PORTAL_PAGES = [
   { key: "ana_sayfa", label: "Ana Sayfa Dashboard", group: "BAŞLANGIÇ" },
   { key: "personel", label: "Personel Yönetimi", group: "PERSONEL" },
-  { key: "personel_kartlari", label: "Personel Detay Kartları", group: "PERSONEL" },
+  { key: "personel_kartlari", label: "Personel Kartı", group: "PERSONEL" },
   { key: "yoklama", label: "Yoklama ve Puantaj", group: "PERSONEL" },
   { key: "faaliyet_personel", label: "Faaliyeti Olan Personeller", group: "PERSONEL" },
   { key: "maas", label: "Maaş Hesaplama & Ödeme", group: "PERSONEL" },

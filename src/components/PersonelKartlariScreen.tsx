@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState, useCallback } from 'react';
+import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import {
   Users, User, Phone, Mail, MapPin, Calendar, CreditCard,
   Truck, Tent, Clock, ClipboardList, Sparkles, Activity,
@@ -131,8 +131,8 @@ export const PersonelKartlariScreen: React.FC<PersonelKartlariScreenProps> = ({
   const [izinLoading, setIzinLoading]     = useState(false);
 
   const bugun = new Date().toISOString().split('T')[0];
-  const needsFaaliyetData =
-    selectedTab === 'ozet' || selectedTab === 'saha' || selectedTab === 'mesai';
+  const needsFaaliyetData = selectedTab === 'saha';
+  const needsIzinData = selectedTab === 'belgeler' || selectedTab === 'ozet';
 
   const hasActiveFilters =
     searchQuery.trim() !== '' ||
@@ -151,8 +151,10 @@ export const PersonelKartlariScreen: React.FC<PersonelKartlariScreenProps> = ({
     sahaFaaliyetleri
   );
 
-  /* ── Firebase Yükle ── */
+  /* ── İzin formları: özet/belgeler açılınca bir kez ── */
+  const izinLoadedRef = useRef(false);
   useEffect(() => {
+    if (!needsIzinData || izinLoadedRef.current) return;
     let cancelled = false;
     setIzinLoading(true);
     (async () => {
@@ -161,6 +163,7 @@ export const PersonelKartlariScreen: React.FC<PersonelKartlariScreenProps> = ({
         if (cancelled) return;
         const list: PersonelIzinBelgesi[] = [];
         snap.forEach((d) => list.push({ id: d.id, ...(d.data() as Omit<PersonelIzinBelgesi, 'id'>) }));
+        izinLoadedRef.current = true;
         setIzinBelgeleri(list);
       } catch (err) {
         console.warn('İzin belgeleri yüklenemedi:', err);
@@ -169,7 +172,7 @@ export const PersonelKartlariScreen: React.FC<PersonelKartlariScreenProps> = ({
       }
     })();
     return () => { cancelled = true; };
-  }, []);
+  }, [needsIzinData]);
 
   /* ── Filtre Options ── */
   const firmaOptions = useMemo(() => {
@@ -338,18 +341,21 @@ export const PersonelKartlariScreen: React.FC<PersonelKartlariScreenProps> = ({
   }, [izinBelgeleri, selectedPersonnel]);
 
   const personelSahaFaaliyetleri = useMemo(() => {
-    if (!selectedPersonnel || !needsFaaliyetData) return [] as SahaFaaliyeti[];
+    if (!selectedPersonnel) return [] as SahaFaaliyeti[];
+    const kaynak = needsFaaliyetData ? tumSahaFaaliyetleri : sahaFaaliyetleri;
+    const kamp = needsFaaliyetData ? kampFaaliyetleri : [];
     return getPersonKartFaaliyetleri(
       selectedPersonnel,
-      tumSahaFaaliyetleri,
+      kaynak,
       personeller,
-      kampFaaliyetleri,
+      kamp,
       yoklamalar
     );
   }, [
     selectedPersonnel,
     needsFaaliyetData,
     tumSahaFaaliyetleri,
+    sahaFaaliyetleri,
     personeller,
     kampFaaliyetleri,
     yoklamalar,
@@ -519,6 +525,28 @@ export const PersonelKartlariScreen: React.FC<PersonelKartlariScreenProps> = ({
 
   const handleSelectPerson = useCallback((id: string) => setSelectedPersId(id), []);
 
+  const LIST_ROW_H = 44;
+  const listRef = useRef<HTMLDivElement | null>(null);
+  const [listScrollTop, setListScrollTop] = useState(0);
+  const [listViewportH, setListViewportH] = useState(480);
+
+  useEffect(() => {
+    const el = listRef.current;
+    if (!el) return;
+    const apply = () => setListViewportH(el.clientHeight || 480);
+    apply();
+    const ro = new ResizeObserver(apply);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [filteredPersoneller.length]);
+
+  const listStart = Math.max(0, Math.floor(listScrollTop / LIST_ROW_H) - 10);
+  const listEnd = Math.min(
+    filteredPersoneller.length,
+    Math.ceil((listScrollTop + listViewportH) / LIST_ROW_H) + 10
+  );
+  const visibleListRows = filteredPersoneller.slice(listStart, listEnd);
+
   /* ── RENDER ── */
   if (personeller.length === 0) {
     return (
@@ -646,7 +674,11 @@ export const PersonelKartlariScreen: React.FC<PersonelKartlariScreenProps> = ({
         </div>
 
         {/* Personel Listesi */}
-        <div className="flex-1 overflow-y-auto">
+        <div
+          ref={listRef}
+          className="flex-1 overflow-y-auto"
+          onScroll={(e) => setListScrollTop(e.currentTarget.scrollTop)}
+        >
           {filteredPersoneller.length === 0 ? (
             <div className="p-4 text-center text-[10px] text-slate-400 italic space-y-2">
               <p>Filtre sonucu boş.</p>
@@ -657,18 +689,22 @@ export const PersonelKartlariScreen: React.FC<PersonelKartlariScreenProps> = ({
               )}
             </div>
           ) : (
-            filteredPersoneller.map((p) => (
-              <PersonelKartListRow
-                key={p.id}
-                person={p}
-                isSelected={p.id === selectedPersId}
-                isChecked={selectedIds.has(p.id)}
-                firmaLabel={getFirmaLabel(p)}
-                aktif={isPersonelAktif(p)}
-                onSelect={handleSelectPerson}
-                onToggleCheck={toggleSelect}
-              />
-            ))
+            <div style={{ height: filteredPersoneller.length * LIST_ROW_H, position: 'relative' }}>
+              <div style={{ transform: `translateY(${listStart * LIST_ROW_H}px)` }}>
+                {visibleListRows.map((p) => (
+                  <PersonelKartListRow
+                    key={p.id}
+                    person={p}
+                    isSelected={p.id === selectedPersId}
+                    isChecked={selectedIds.has(p.id)}
+                    firmaLabel={getFirmaLabel(p)}
+                    aktif={isPersonelAktif(p)}
+                    onSelect={handleSelectPerson}
+                    onToggleCheck={toggleSelect}
+                  />
+                ))}
+              </div>
+            </div>
           )}
         </div>
 
@@ -765,6 +801,10 @@ export const PersonelKartlariScreen: React.FC<PersonelKartlariScreenProps> = ({
             {/* ══════ TAB: ÖZET ══════ */}
             {selectedTab === 'ozet' && (
               <div className="p-5 grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <div className="lg:col-span-2 text-[10px] text-slate-500 bg-orange-50/70 border border-orange-100 rounded-xl px-3 py-2">
+                  Bu ekran tek kişinin dosyasıdır: kimlik, yoklama, hakediş, kamp ve saha. Kadro ekleme/çıkarma Personel Yönetimi’ndedir.
+                </div>
+                <PersonelIdCard personel={selectedPersonnel} className="lg:col-span-2" />
                 {/* Kimlik */}
                 <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm space-y-3">
                   <h3 className="text-[9px] font-black tracking-widest text-slate-400 uppercase flex items-center gap-1.5">
@@ -790,29 +830,29 @@ export const PersonelKartlariScreen: React.FC<PersonelKartlariScreenProps> = ({
                 </div>
 
                 {/* Finansal özet */}
-                <div className="bg-slate-900 text-white rounded-2xl border border-slate-800 p-4 shadow-sm space-y-3">
-                  <h3 className="text-[9px] font-black tracking-widest text-slate-400 uppercase flex items-center gap-1.5">
-                    <Banknote size={11} className="text-amber-400" /> Hakediş & Alacak · {AY_ADLARI[selectedMonth]}
+                <div className="bg-amber-50 text-slate-800 rounded-2xl border border-amber-200 p-4 shadow-sm space-y-3">
+                  <h3 className="text-[9px] font-black tracking-widest text-amber-800 uppercase flex items-center gap-1.5">
+                    <Banknote size={11} className="text-amber-600" /> Hakediş & Alacak · {AY_ADLARI[selectedMonth]}
                   </h3>
                   {fin && (
                     <div className="space-y-2 text-xs">
                       {[
-                        { label: 'Aylık Net Maaş', val: `${selectedPersonnel.maas.toLocaleString('tr-TR')} TL`, cls: 'text-white' },
-                        { label: 'Çalışılan Gün', val: `${fin.workedDays} / ${fin.daysInMonth}`, cls: 'text-white' },
-                        { label: 'Mesai Saati', val: `${fin.totalMesaiSaat} saat`, cls: 'text-amber-300' },
-                        { label: 'İzinli Gün', val: `${fin.izinliGun}`, cls: 'text-sky-300' },
-                        { label: 'Devamsız Gün', val: `${fin.yokGun}`, cls: 'text-rose-400' },
-                        { label: 'Kazanılan Hakediş', val: `${fin.grossEarned.toLocaleString('tr-TR')} TL`, cls: 'text-emerald-400' },
-                        { label: 'Dağıtılan Avans', val: `${fin.totalAvans.toLocaleString('tr-TR')} TL`, cls: 'text-rose-400' },
+                        { label: 'Aylık Net Maaş', val: `${selectedPersonnel.maas.toLocaleString('tr-TR')} TL`, cls: 'text-slate-900' },
+                        { label: 'Çalışılan Gün', val: `${fin.workedDays} / ${fin.daysInMonth}`, cls: 'text-slate-800' },
+                        { label: 'Mesai Saati', val: `${fin.totalMesaiSaat} saat`, cls: 'text-amber-800' },
+                        { label: 'İzinli Gün', val: `${fin.izinliGun}`, cls: 'text-sky-700' },
+                        { label: 'Devamsız Gün', val: `${fin.yokGun}`, cls: 'text-rose-600' },
+                        { label: 'Kazanılan Hakediş', val: `${fin.grossEarned.toLocaleString('tr-TR')} TL`, cls: 'text-emerald-700' },
+                        { label: 'Dağıtılan Avans', val: `${fin.totalAvans.toLocaleString('tr-TR')} TL`, cls: 'text-rose-600' },
                       ].map(({ label, val, cls }) => (
-                        <div key={label} className="flex justify-between border-b border-slate-800 pb-1">
-                          <span className="text-slate-400">{label}</span>
+                        <div key={label} className="flex justify-between border-b border-amber-100 pb-1">
+                          <span className="text-slate-500">{label}</span>
                           <span className={`font-bold font-mono ${cls}`}>{val}</span>
                         </div>
                       ))}
                       <div className="flex justify-between items-center pt-1">
-                        <span className="text-[11px] font-black text-amber-400">KALAN NET ALACAK</span>
-                        <span className="text-base font-black font-mono text-amber-400">
+                        <span className="text-[11px] font-black text-amber-800">KALAN NET ALACAK</span>
+                        <span className="text-base font-black font-mono text-amber-900">
                           {fin.netAlacak.toLocaleString('tr-TR')} TL
                         </span>
                       </div>
