@@ -1544,6 +1544,30 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
     }
   }, [filteredPersonel, sortMode]);
 
+  const groupedVisiblePersonel = useMemo(() => {
+    const aktifler = visiblePersonel.filter((p) => is_aktif_status(p.durum));
+    const pasifler = visiblePersonel.filter((p) => !is_aktif_status(p.durum));
+    return { aktifler, pasifler };
+  }, [visiblePersonel]);
+
+  const personelListSections = useMemo(() => {
+    if (showOnlyActive) {
+      return [{ key: 'all', title: null as string | null, rows: visiblePersonel }];
+    }
+    return [
+      {
+        key: 'aktif',
+        title: `Aktifler (${groupedVisiblePersonel.aktifler.length})`,
+        rows: groupedVisiblePersonel.aktifler,
+      },
+      {
+        key: 'pasif',
+        title: `Pasifler (${groupedVisiblePersonel.pasifler.length})`,
+        rows: groupedVisiblePersonel.pasifler,
+      },
+    ].filter((s) => s.rows.length > 0);
+  }, [showOnlyActive, visiblePersonel, groupedVisiblePersonel]);
+
   const sorunBadgeClass = (sorun: PersonelKayitSorunu) => {
     if (sorun === 'ISIMDE_RAKAM' || sorun === 'GECERSIZ_ISIM' || sorun === 'TEK_KELIME_ISIM') {
       return 'bg-orange-50 text-orange-900 border-orange-200';
@@ -2479,7 +2503,7 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
                     ? ' · Sorunlu kayıtlar (pasifler dahil)'
                     : showOnlyActive
                       ? ' · Aktif'
-                      : ' · Tüm durumlar'}
+                      : ` · Aktif ${groupedVisiblePersonel.aktifler.length} · Pasif ${groupedVisiblePersonel.pasifler.length}`}
                   {problematicInKadro > 0 && (
                     <span className="text-rose-600 font-bold">
                       {' '}· bu sekmede {problematicInKadro} sorunlu ({duplicateInKadro} çift isim)
@@ -2848,7 +2872,20 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
               )}
             </div>
           ) : (
-            visiblePersonel.map((p) => {
+            personelListSections.map((section) => (
+              <div key={section.key} className="space-y-3">
+                {section.title ? (
+                  <div
+                    className={`sticky top-0 z-[1] -mx-1 px-3 py-2 rounded-xl border text-[11px] font-black uppercase tracking-wide ${
+                      section.key === 'pasif'
+                        ? 'bg-rose-50 text-rose-900 border-rose-200'
+                        : 'bg-emerald-50 text-emerald-900 border-emerald-200'
+                    }`}
+                  >
+                    {section.title}
+                  </div>
+                ) : null}
+                {section.rows.map((p) => {
               const isActive = p.durum;
               const isSelected = selectedPersonel?.id === p.id;
 
@@ -3043,7 +3080,9 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
                   </div>
                 </div>
               );
-            })
+            })}
+              </div>
+            ))
           )}
         </div>
       </div>
