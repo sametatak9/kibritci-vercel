@@ -207,6 +207,8 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
   const [gorevListeOpen, setGorevListeOpen] = useState(false);
   const [gorevListeExporting, setGorevListeExporting] = useState(false);
   const [screenView, setScreenView] = useState<PersonelScreenView>('liste');
+  const [savingPersonel, setSavingPersonel] = useState(false);
+  const saveLockRef = useRef(false);
 
   // SGK PDF parsing states
   const [regMethod, setRegMethod] = useState<'manual' | 'sgk_pdf'>('manual');
@@ -675,13 +677,21 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
     let savingAsEdit = Boolean(resolvedEditId);
 
     try {
+      setSavingPersonel(true);
       const prev = savingAsEdit ? personeller.find((p) => p.id === savedPersonel.id) : undefined;
       if (savingAsEdit) {
         const lean = leanPersonelForFirestore(savedPersonel, prev);
         await saveDocument('personeller', lean as Personel);
       } else {
-        // Form kaydı: mükerrer yalnızca aynı TC ile engellenir (isim benzerliği ayrı kişi olabilir).
-        await saveDocument('personeller', savedPersonel);
+        const result = await upsertPersonelAvoidDuplicate(personeller, savedPersonel, {
+          rawName: `${savedPersonel.ad} ${savedPersonel.soyad}`,
+          tcNo: savedPersonel.tcNo,
+          telefonNo: savedPersonel.telefonNo,
+          firmaAdi: savedPersonel.firmaAdi,
+          firmaTipi: savedPersonel.firmaTipi === 'TASERON' ? 'TASERON' : 'ANA_FIRMA',
+        });
+        savedPersonel = result.personel;
+        savingAsEdit = !result.created;
       }
     } catch (err: any) {
       console.error(err);
@@ -692,6 +702,9 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
             : err?.message || 'bilinmeyen hata')
       );
       return;
+    } finally {
+      setSavingPersonel(false);
+      saveLockRef.current = false;
     }
 
     setPersoneller((prev) => {
@@ -952,6 +965,9 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (saveLockRef.current || savingPersonel) return;
+    saveLockRef.current = true;
+    try {
     const isTaseronForm = formData.firmaTipi === 'TASERON';
     if (!formData.ad || !formData.soyad) {
       alert('Lütfen en az Ad ve Soyad alanlarını doldurun.');
@@ -1098,6 +1114,9 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
     }
 
     await finalizePersonelSave(normalizedPayload, isEdit, undefined, undefined, editingId || undefined);
+    } finally {
+      saveLockRef.current = false;
+    }
   };
 
   const handleDelete = (id: string) => {
@@ -2473,10 +2492,15 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
           <div className="shrink-0 p-4 border-t border-slate-100 flex gap-2 bg-white shadow-[0_-4px_12px_rgba(0,0,0,0.06)] z-10">
             <button
               type="button"
-              onClick={handleSave}
-              className="flex-1 bg-slate-900 hover:bg-slate-800 active:scale-[0.98] transition cursor-pointer text-white font-bold text-xs py-2.5 rounded-xl shadow-md"
+              disabled={savingPersonel}
+              onClick={(ev) => {
+                ev.preventDefault();
+                ev.stopPropagation();
+                void handleSave(ev as unknown as React.FormEvent);
+              }}
+              className="flex-1 bg-slate-900 hover:bg-slate-800 active:scale-[0.98] transition cursor-pointer text-white font-bold text-xs py-2.5 rounded-xl shadow-md disabled:opacity-60 disabled:cursor-wait"
             >
-              { isEditMode ? "Verileri Güncelle" : "Kaydı Tamamla" }
+              {savingPersonel ? 'Kaydediliyor…' : isEditMode ? 'Verileri Güncelle' : 'Kaydı Tamamla'}
             </button>
             <button
               type="button"
