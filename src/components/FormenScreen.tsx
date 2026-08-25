@@ -1482,14 +1482,16 @@ ${satirlar
   const fillViewport = isStandalone === true || isRealMobile;
   const navTabClass = (active: boolean) =>
     `min-h-[3.15rem] sm:min-h-[3.4rem] py-1.5 px-0.5 rounded-xl text-[8px] sm:text-[10px] font-extrabold flex flex-col items-center justify-center gap-0.5 transition duration-150 cursor-pointer ${
-      active ? 'bg-amber-400 text-slate-950 shadow-sm' : 'text-slate-400 hover:text-white hover:bg-slate-800/80'
+      active
+        ? 'bg-amber-400 text-slate-950 shadow-sm'
+        : 'text-slate-500 hover:text-slate-800 hover:bg-white/80'
     }`;
 
   return (
     <div className={
       fillViewport
-        ? "w-full h-full min-h-0 flex flex-col bg-slate-100 font-sans select-none overflow-hidden"
-        : "flex-grow p-3 sm:p-4 h-[calc(100vh-52px)] min-h-0 overflow-hidden flex flex-col font-sans bg-slate-100 select-none"
+        ? "w-full h-full min-h-0 flex flex-col bg-[#FFFBF7] font-sans select-none overflow-hidden"
+        : "flex-grow p-3 sm:p-4 h-[calc(100vh-52px)] min-h-0 overflow-hidden flex flex-col font-sans bg-[#FFFBF7] select-none"
     }>
       {statusMessage && (
         <div className={`fixed top-16 left-1/2 transform -translate-x-1/2 z-50 max-w-md w-11/12 p-3.5 rounded-2xl shadow-xl flex items-center space-x-3 text-xs font-bold border transition-all duration-300 animate-in fade-in slide-in-from-top-4 ${
@@ -1506,21 +1508,21 @@ ${satirlar
         fillViewport ? '' : 'rounded-2xl border border-slate-200 shadow-sm'
       }`}>
             {/* Panel header — device-width, no simulated phone */}
-            <div className="bg-slate-900 text-white px-3 sm:px-5 pt-3 sm:pt-4 pb-3 space-y-3 shrink-0">
+            <div className="bg-white border-b border-orange-100 px-3 sm:px-5 pt-3 sm:pt-4 pb-3 space-y-3 shrink-0">
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center space-x-2.5 min-w-0">
                   <KibritciLogo size="sm" className="h-7 sm:h-8 shrink-0" />
                   <div className="min-w-0">
-                    <p className="text-[11px] sm:text-sm font-black tracking-wide truncate">Saha Paneli</p>
-                    <p className="text-[8px] sm:text-[10px] text-slate-400 font-medium uppercase tracking-wider truncate">Kullanıcı: FORMEN</p>
+                    <p className="text-[11px] sm:text-sm font-black tracking-wide truncate text-slate-800">Saha Paneli</p>
+                    <p className="text-[8px] sm:text-[10px] text-slate-500 font-medium uppercase tracking-wider truncate">Kullanıcı: FORMEN</p>
                   </div>
                 </div>
                 
                 {/* Active Date and Logout button row */}
                 <div className="flex items-center space-x-1.5 shrink-0">
-                  <div className="bg-slate-800 border border-slate-700 rounded-xl py-1 px-2.5 flex items-center space-x-1.5">
-                    <Calendar size={10} className="text-amber-400" />
-                    <span className="text-[10px] font-mono font-bold tracking-tight text-gray-200">
+                  <div className="bg-amber-50 border border-amber-200 rounded-xl py-1 px-2.5 flex items-center space-x-1.5">
+                    <Calendar size={10} className="text-amber-600" />
+                    <span className="text-[10px] font-mono font-bold tracking-tight text-slate-700">
                       {selectedDate.split('-').reverse().join('.')}
                     </span>
                   </div>
@@ -1540,7 +1542,7 @@ ${satirlar
               <div className="flex flex-wrap gap-1.5">
                 <button 
                   onClick={() => handleSetQuickDate(-1)}
-                  className="flex-1 min-w-[4.5rem] bg-slate-800 hover:bg-slate-750 text-[9px] sm:text-[10px] font-bold py-2 px-1 rounded-lg text-slate-300 transition cursor-pointer"
+                  className="flex-1 min-w-[4.5rem] bg-slate-50 hover:bg-slate-100 border border-slate-200 text-[9px] sm:text-[10px] font-bold py-2 px-1 rounded-lg text-slate-600 transition cursor-pointer"
                 >
                   ◀ Dün
                 </button>
@@ -1552,7 +1554,7 @@ ${satirlar
                 </button>
                 <button 
                   onClick={() => handleSetQuickDate(1)}
-                  className="flex-1 min-w-[4.5rem] bg-slate-800 hover:bg-slate-750 text-[9px] sm:text-[10px] font-bold py-2 px-1 rounded-lg text-slate-300 transition cursor-pointer"
+                  className="flex-1 min-w-[4.5rem] bg-slate-50 hover:bg-slate-100 border border-slate-200 text-[9px] sm:text-[10px] font-bold py-2 px-1 rounded-lg text-slate-600 transition cursor-pointer"
                 >
                   Yarın ▶
                 </button>
@@ -1560,13 +1562,13 @@ ${satirlar
                   type="date"
                   value={selectedDate}
                   onChange={(e) => setSelectedDate(normalizeDateKey(e.target.value))}
-                  className="bg-slate-800 text-white border border-slate-700 py-2 px-1.5 rounded-lg text-[10px] font-bold focus:ring-1 focus:ring-amber-400 outline-none min-w-[7.5rem] flex-1 sm:flex-none cursor-pointer"
+                  className="bg-white text-slate-800 border border-slate-200 py-2 px-1.5 rounded-lg text-[10px] font-bold focus:ring-1 focus:ring-amber-400 outline-none min-w-[7.5rem] flex-1 sm:flex-none cursor-pointer"
                   title="Başka Tarih Seç"
                 />
               </div>
 
               {/* Segmented control tabs */}
-              <div className="grid grid-cols-4 sm:grid-cols-7 gap-1 bg-slate-950 p-1 rounded-2xl">
+              <div className="grid grid-cols-4 sm:grid-cols-7 gap-1 bg-orange-50 border border-orange-100 p-1 rounded-2xl">
                 <button
                   type="button"
                   onClick={() => setActiveTab('yoklama')}
@@ -1627,7 +1629,7 @@ ${satirlar
             </div>
 
             {/* Inner Content Area - Scrollable */}
-            <div className="flex-1 min-h-0 overflow-y-auto p-3 sm:p-5 space-y-3 pb-8 bg-slate-50">
+            <div className="flex-1 min-h-0 overflow-y-auto p-3 sm:p-5 space-y-3 pb-8 bg-[#FFFBF7]">
               <div className="w-full max-w-4xl mx-auto space-y-3">
               
               {/* TAB 1: YOKLAMA ALMA PANELİ */}
@@ -1652,25 +1654,25 @@ ${satirlar
 
                   {/* 1. THE SPOTLIGHT SINGLE STAFF CARD FOR EXTREME TACTILE SPEED */}
                   {spotlightStaff ? (
-                    <div className="bg-gradient-to-br from-slate-900 to-slate-950 text-white rounded-3xl p-4 shadow-md border border-slate-800 space-y-3 relative overflow-hidden">
+                    <div className="bg-white text-slate-800 rounded-3xl p-4 shadow-sm border border-amber-200 space-y-3 relative overflow-hidden">
                       
                       {/* Decorative tag */}
-                      <span className="absolute top-2 right-2 bg-amber-400/10 border border-amber-400/20 text-amber-400 text-[8px] font-black tracking-widest px-2 py-0.5 rounded-full uppercase">
+                      <span className="absolute top-2 right-2 bg-amber-100 border border-amber-200 text-amber-800 text-[8px] font-black tracking-widest px-2 py-0.5 rounded-full uppercase">
                         Sıradaki Personel
                       </span>
 
                       <div className="flex items-center space-x-3 pt-1">
-                        <div className="w-12 h-12 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center font-bold text-amber-400 text-lg uppercase shadow-inner shrink-0">
+                        <div className="w-12 h-12 rounded-2xl bg-amber-50 border border-amber-200 flex items-center justify-center font-bold text-amber-700 text-lg uppercase shrink-0">
                           {getInitials(spotlightStaff.ad, spotlightStaff.soyad)}
                         </div>
                         <div className="min-w-0">
-                          <h4 className="font-bold text-xs tracking-wide text-gray-100 truncate">
+                          <h4 className="font-bold text-xs tracking-wide text-slate-800 truncate">
                             {getDisplayName(spotlightStaff.ad, spotlightStaff.soyad)}
                           </h4>
-                          <p className="text-[9px] text-slate-400 font-mono font-medium tracking-tight mt-0.5">
+                          <p className="text-[9px] text-slate-500 font-mono font-medium tracking-tight mt-0.5">
                             💼 {spotlightStaff.departman} / {spotlightStaff.gorev}
                           </p>
-                          <p className="text-[8px] text-slate-500 font-sans tracking-tight mt-0.5">
+                          <p className="text-[8px] text-slate-400 font-sans tracking-tight mt-0.5">
                             Baba Adı: {spotlightStaff.babaAdi || '-'} • TC: {spotlightStaff.tcNo?.substring(0, 4)}***
                           </p>
                         </div>
@@ -1678,8 +1680,8 @@ ${satirlar
 
                       {/* Mesai Saati ve Eylem Butonları */}
                       <div className="space-y-2 pt-1">
-                        <div className="flex items-center justify-between bg-slate-900 border border-slate-800 rounded-xl px-2.5 py-1.5">
-                          <label className="text-[9px] font-bold text-slate-400 tracking-wider">İLAVE MESAİ (SAAT):</label>
+                        <div className="flex items-center justify-between bg-amber-50/80 border border-amber-100 rounded-xl px-2.5 py-1.5">
+                          <label className="text-[9px] font-bold text-slate-500 tracking-wider">İLAVE MESAİ (SAAT):</label>
                           <div className="flex items-center space-x-1">
                             <button
                               type="button"
@@ -1689,7 +1691,7 @@ ${satirlar
                                   return next <= 0 ? '' : String(next);
                                 })
                               }
-                              className="w-5 h-5 rounded bg-slate-800 flex items-center justify-center font-black text-xs hover:bg-slate-750 active:scale-90"
+                              className="w-5 h-5 rounded bg-white border border-slate-200 text-slate-700 flex items-center justify-center font-black text-xs hover:bg-slate-50 active:scale-90"
                             >
                               -
                             </button>
@@ -1712,14 +1714,14 @@ ${satirlar
                                 }
                                 setSpotlightMesai(String(Math.min(12, n)));
                               }}
-                              className="w-9 bg-slate-950 border border-slate-800 text-center font-black text-amber-400 text-xs py-0.5 rounded focus:outline-none focus:ring-1 focus:ring-amber-500"
+                              className="w-9 bg-white border border-amber-200 text-center font-black text-amber-700 text-xs py-0.5 rounded focus:outline-none focus:ring-1 focus:ring-amber-400"
                             />
                             <button
                               type="button"
                               onClick={() =>
                                 setSpotlightMesai((m) => String(Math.min(12, Number(m || 0) + 1)))
                               }
-                              className="w-5 h-5 rounded bg-slate-800 flex items-center justify-center font-black text-xs hover:bg-slate-750 active:scale-90"
+                              className="w-5 h-5 rounded bg-white border border-slate-200 text-slate-700 flex items-center justify-center font-black text-xs hover:bg-slate-50 active:scale-90"
                             >
                               +
                             </button>
@@ -1907,7 +1909,7 @@ ${satirlar
 
                     <button
                       onClick={handleSaveYoklama}
-                      className="w-full bg-slate-900 hover:bg-slate-950 disabled:bg-slate-400 disabled:cursor-not-allowed text-white font-extrabold text-[10px] py-2.5 px-4 rounded-xl transition duration-150 shadow-md flex items-center justify-center space-x-1.5 cursor-pointer"
+                      className="w-full bg-amber-500 hover:bg-amber-600 disabled:bg-slate-300 disabled:text-slate-500 disabled:cursor-not-allowed text-slate-950 font-extrabold text-[10px] py-2.5 px-4 rounded-xl transition duration-150 shadow-sm flex items-center justify-center space-x-1.5 cursor-pointer"
                       disabled={!hasLocalAttendanceDraft || savingAttendance}
                     >
                       <span>{savingAttendance ? '⏳ KAYDEDİLİYOR...' : hasLocalAttendanceDraft ? '✍️ YOKLAMAYI İMZALA VE KAYDET' : '✅ YOKLAMA KAYITLI'}</span>
@@ -1943,7 +1945,7 @@ ${satirlar
                       <button
                         type="button"
                         onClick={handlePrintGunlukCalisanPdf}
-                        className="w-full bg-slate-900 hover:bg-slate-950 text-white font-black text-[10px] py-2.5 rounded-xl transition"
+                        className="w-full bg-white hover:bg-slate-50 text-slate-800 border border-slate-200 font-black text-[10px] py-2.5 rounded-xl transition"
                       >
                         PDF: Günlük Çalışan Listesi
                       </button>
