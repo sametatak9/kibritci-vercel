@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Calendar, CheckCircle, XCircle, Users, ClipboardCheck, 
   MapPin, Camera, Sparkles, Undo2, ChevronRight, User, 
-  Info, Smartphone, Monitor, Search, PlusCircle, Trash2, 
+  Info, Search, PlusCircle, Trash2, 
   FileSignature, Briefcase, RefreshCw, Send, Image as ImageIcon, MessageCircle,
   Check, X, FileText, UserPlus, Upload, ShieldCheck, Edit2, ArrowLeft, Eye, Tag
 } from 'lucide-react';
@@ -85,10 +85,7 @@ export const FormenScreen: React.FC<FormenScreenProps> = ({
   isStandalone,
   kullanicilar = []
 }) => {
-  // Mobile Frame simulation toggle
-  const [isMobileFrame, setIsMobileFrame] = useState(true);
-  
-  // Real mobile detection (screen width < 768px or isStandalone)
+  // Real device: fill the viewport. Desktop ERP: fill the remaining content pane.
   const [isRealMobile, setIsRealMobile] = useState(false);
 
   useEffect(() => {
@@ -1482,49 +1479,18 @@ ${satirlar
     }
   };
 
+  const fillViewport = isStandalone === true || isRealMobile;
+  const navTabClass = (active: boolean) =>
+    `min-h-[3.15rem] sm:min-h-[3.4rem] py-1.5 px-0.5 rounded-xl text-[8px] sm:text-[10px] font-extrabold flex flex-col items-center justify-center gap-0.5 transition duration-150 cursor-pointer ${
+      active ? 'bg-amber-400 text-slate-950 shadow-sm' : 'text-slate-400 hover:text-white hover:bg-slate-800/80'
+    }`;
+
   return (
     <div className={
-      isRealMobile 
-        ? "w-full h-full flex flex-col bg-slate-50 font-sans select-none overflow-hidden"
-        : "flex-grow p-4 h-[calc(100vh-52px)] overflow-y-auto flex flex-col font-sans bg-slate-100 select-none"
+      fillViewport
+        ? "w-full h-full min-h-0 flex flex-col bg-slate-100 font-sans select-none overflow-hidden"
+        : "flex-grow p-3 sm:p-4 h-[calc(100vh-52px)] min-h-0 overflow-hidden flex flex-col font-sans bg-slate-100 select-none"
     }>
-      
-      {/* Simulation Toggle Bar - Top */}
-      {!isRealMobile && (
-        <div className="mb-4 bg-white p-3 rounded-2xl shadow-xs border flex items-center justify-between shrink-0">
-          <div className="flex items-center space-x-2.5">
-            <span className="text-lg">👷</span>
-            <div>
-              <h2 className="text-xs font-black text-slate-900 tracking-wide">FORMEN MOBİL SAHA PANELİ</h2>
-              <p className="text-[10px] text-slate-500 font-medium">Sahadan anlık yoklama alma ve günlük faaliyet raporlama ekranı</p>
-            </div>
-          </div>
-          
-          {/* Toggle Mode */}
-          <div className="flex items-center space-x-1 bg-slate-100 p-1 rounded-xl">
-            <button
-              onClick={() => setIsMobileFrame(true)}
-              className={`px-3 py-1.5 rounded-lg text-[10px] font-bold flex items-center space-x-1 transition duration-150 cursor-pointer ${
-                isMobileFrame ? 'bg-amber-500 text-slate-950 shadow-xs' : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              <Smartphone size={12} />
-              <span>Mobil Görünüm</span>
-            </button>
-            <button
-              onClick={() => setIsMobileFrame(false)}
-              className={`px-3 py-1.5 rounded-lg text-[10px] font-bold flex items-center space-x-1 transition duration-150 cursor-pointer ${
-                !isMobileFrame ? 'bg-amber-500 text-slate-950 shadow-xs' : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              <Monitor size={12} />
-              <span>Geniş Ekran</span>
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Banner message overlay */}
       {statusMessage && (
         <div className={`fixed top-16 left-1/2 transform -translate-x-1/2 z-50 max-w-md w-11/12 p-3.5 rounded-2xl shadow-xl flex items-center space-x-3 text-xs font-bold border transition-all duration-300 animate-in fade-in slide-in-from-top-4 ${
           statusMessage.type === 'success' 
@@ -1536,45 +1502,22 @@ ${satirlar
         </div>
       )}
 
-      {/* Primary Layout */}
-      <div className={isRealMobile ? "flex-1 flex flex-col overflow-hidden" : "flex-1 flex justify-center items-start overflow-hidden"}>
-        
-        {/* The Frame Wrapper */}
-        <div className={
-          isRealMobile 
-            ? "w-full h-full flex flex-col overflow-hidden bg-slate-50"
-            : `transition-all duration-300 ${
-                isMobileFrame 
-                  ? 'w-full max-w-[390px] h-[720px] bg-slate-950 rounded-[48px] p-3.5 border-[8px] border-slate-900 shadow-2xl relative flex flex-col overflow-hidden' 
-                  : 'w-full h-full bg-white border rounded-3xl shadow-xs flex flex-col overflow-hidden'
-              }`
-        }>
-          
-          {/* Simulated phone Notch */}
-          {!isRealMobile && isMobileFrame && (
-            <div className="absolute top-0 left-1/2 transform -translate-x-1/2 w-32 h-6 bg-slate-900 rounded-b-2xl z-50 flex items-center justify-center">
-              <div className="w-12 h-1 bg-slate-800 rounded-full" />
-              <div className="w-2.5 h-2.5 bg-slate-800 rounded-full ml-3" />
-            </div>
-          )}
-
-          {/* Simulated phone inner screen */}
-          <div className={`flex-1 flex flex-col bg-slate-50 text-slate-800 relative overflow-hidden ${
-            (!isRealMobile && isMobileFrame) ? 'rounded-[34px] pt-4' : ''
-          }`}>
-            
-            {/* Mobile Header */}
-            <div className="bg-slate-900 text-white p-4 pt-5 pb-4 space-y-3 shrink-0 shadow-sm">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center space-x-2">
-                  <KibritciLogo size="sm" className="h-7" />
-                  <div>
-                    <p className="text-[8px] text-slate-400 font-mono tracking-tighter uppercase">Kullanıcı: FORMEN</p>
+      <div className={`flex-1 min-h-0 flex flex-col overflow-hidden bg-white text-slate-800 ${
+        fillViewport ? '' : 'rounded-2xl border border-slate-200 shadow-sm'
+      }`}>
+            {/* Panel header — device-width, no simulated phone */}
+            <div className="bg-slate-900 text-white px-3 sm:px-5 pt-3 sm:pt-4 pb-3 space-y-3 shrink-0">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center space-x-2.5 min-w-0">
+                  <KibritciLogo size="sm" className="h-7 sm:h-8 shrink-0" />
+                  <div className="min-w-0">
+                    <p className="text-[11px] sm:text-sm font-black tracking-wide truncate">Saha Paneli</p>
+                    <p className="text-[8px] sm:text-[10px] text-slate-400 font-medium uppercase tracking-wider truncate">Kullanıcı: FORMEN</p>
                   </div>
                 </div>
                 
                 {/* Active Date and Logout button row */}
-                <div className="flex items-center space-x-1.5">
+                <div className="flex items-center space-x-1.5 shrink-0">
                   <div className="bg-slate-800 border border-slate-700 rounded-xl py-1 px-2.5 flex items-center space-x-1.5">
                     <Calendar size={10} className="text-amber-400" />
                     <span className="text-[10px] font-mono font-bold tracking-tight text-gray-200">
@@ -1585,7 +1528,7 @@ ${satirlar
                   {onSignOut && (
                     <button 
                       onClick={onSignOut}
-                      className="bg-red-600 hover:bg-red-700 active:scale-95 text-white font-extrabold text-[9px] py-1 px-2 rounded-lg transition cursor-pointer"
+                      className="bg-red-600 hover:bg-red-700 active:scale-95 text-white font-extrabold text-[9px] sm:text-[10px] py-1.5 px-2.5 rounded-lg transition cursor-pointer"
                     >
                       Çıkış
                     </button>
@@ -1594,22 +1537,22 @@ ${satirlar
               </div>
 
               {/* Quick day buttons */}
-              <div className="flex gap-1.5">
+              <div className="flex flex-wrap gap-1.5">
                 <button 
                   onClick={() => handleSetQuickDate(-1)}
-                  className="flex-1 bg-slate-800 hover:bg-slate-750 text-[9px] font-bold py-1 px-1 rounded-lg text-slate-300 transition"
+                  className="flex-1 min-w-[4.5rem] bg-slate-800 hover:bg-slate-750 text-[9px] sm:text-[10px] font-bold py-2 px-1 rounded-lg text-slate-300 transition cursor-pointer"
                 >
                   ◀ Dün
                 </button>
                 <button 
                   onClick={() => handleSetQuickDate(0)}
-                  className="flex-1 bg-amber-500 hover:bg-amber-600 text-[9px] font-extrabold py-1 px-1 rounded-lg text-slate-950 transition"
+                  className="flex-1 min-w-[4.5rem] bg-amber-400 hover:bg-amber-500 text-[9px] sm:text-[10px] font-extrabold py-2 px-1 rounded-lg text-slate-950 transition cursor-pointer"
                 >
                   Bugün
                 </button>
                 <button 
                   onClick={() => handleSetQuickDate(1)}
-                  className="flex-1 bg-slate-800 hover:bg-slate-750 text-[9px] font-bold py-1 px-1 rounded-lg text-slate-300 transition"
+                  className="flex-1 min-w-[4.5rem] bg-slate-800 hover:bg-slate-750 text-[9px] sm:text-[10px] font-bold py-2 px-1 rounded-lg text-slate-300 transition cursor-pointer"
                 >
                   Yarın ▶
                 </button>
@@ -1617,81 +1560,75 @@ ${satirlar
                   type="date"
                   value={selectedDate}
                   onChange={(e) => setSelectedDate(normalizeDateKey(e.target.value))}
-                  className="bg-slate-800 text-white border border-slate-700 py-1 px-1.5 rounded-lg text-[10px] font-bold focus:ring-1 focus:ring-amber-500 outline-none min-w-[7.5rem] cursor-pointer"
+                  className="bg-slate-800 text-white border border-slate-700 py-2 px-1.5 rounded-lg text-[10px] font-bold focus:ring-1 focus:ring-amber-400 outline-none min-w-[7.5rem] flex-1 sm:flex-none cursor-pointer"
                   title="Başka Tarih Seç"
                 />
               </div>
 
               {/* Segmented control tabs */}
-              <div className="flex flex-wrap gap-1 bg-slate-950 p-1 rounded-xl">
+              <div className="grid grid-cols-4 sm:grid-cols-7 gap-1 bg-slate-950 p-1 rounded-2xl">
                 <button
+                  type="button"
                   onClick={() => setActiveTab('yoklama')}
-                  className={`py-1.5 rounded-lg text-[8px] font-extrabold flex flex-col items-center justify-center transition duration-150 cursor-pointer ${
-                    activeTab === 'yoklama' ? 'bg-amber-500 text-slate-950 shadow-xs' : 'text-slate-400 hover:text-white'
-                  }`}
+                  className={navTabClass(activeTab === 'yoklama')}
                 >
-                  <ClipboardCheck size={11} className="mb-0.5" />
+                  <ClipboardCheck size={13} />
                   <span>Yoklama Al</span>
                 </button>
                 <button
+                  type="button"
                   onClick={() => setActiveTab('etiketli_yoklama')}
-                  className={`py-1.5 rounded-lg text-[8px] font-extrabold flex flex-col items-center justify-center transition duration-150 cursor-pointer ${
-                    activeTab === 'etiketli_yoklama' ? 'bg-amber-500 text-slate-950 shadow-xs' : 'text-slate-400 hover:text-white'
-                  }`}
+                  className={navTabClass(activeTab === 'etiketli_yoklama')}
                 >
-                  <Tag size={11} className="mb-0.5" />
+                  <Tag size={13} />
                   <span>Etiketli Yoklama</span>
                 </button>
                 <button
+                  type="button"
                   onClick={() => setActiveTab('aylik_puantaj')}
-                  className={`py-1.5 rounded-lg text-[8px] font-extrabold flex flex-col items-center justify-center transition duration-150 cursor-pointer ${
-                    activeTab === 'aylik_puantaj' ? 'bg-amber-500 text-slate-950 shadow-xs' : 'text-slate-400 hover:text-white'
-                  }`}
+                  className={navTabClass(activeTab === 'aylik_puantaj')}
                 >
-                  <FileText size={11} className="mb-0.5" />
+                  <FileText size={13} />
                   <span>Aylık Puantaj</span>
                 </button>
                 <button
+                  type="button"
                   onClick={() => setActiveTab('saha_faaliyet')}
-                  className={`py-1.5 rounded-lg text-[8px] font-extrabold flex flex-col items-center justify-center transition duration-150 cursor-pointer ${
-                    activeTab === 'saha_faaliyet' ? 'bg-amber-500 text-slate-950 shadow-xs' : 'text-slate-400 hover:text-white'
-                  }`}
+                  className={navTabClass(activeTab === 'saha_faaliyet')}
                 >
-                  <MapPin size={11} className="mb-0.5" />
+                  <MapPin size={13} />
                   <span>Saha Raporu</span>
                 </button>
                 <button
+                  type="button"
                   onClick={() => setActiveTab('personel_giris')}
-                  className={`py-1.5 rounded-lg text-[8px] font-extrabold flex flex-col items-center justify-center transition duration-150 cursor-pointer ${
-                    activeTab === 'personel_giris' ? 'bg-amber-500 text-slate-950 shadow-xs' : 'text-slate-400 hover:text-white'
-                  }`}
+                  className={navTabClass(activeTab === 'personel_giris')}
                 >
-                  <UserPlus size={11} className="mb-0.5" />
+                  <UserPlus size={13} />
                   <span>Girişe Yolla</span>
                 </button>
                 <button
+                  type="button"
                   onClick={() => setActiveTab('personel_listesi')}
-                  className={`py-1.5 rounded-lg text-[8px] font-extrabold flex flex-col items-center justify-center transition duration-150 cursor-pointer ${
-                    activeTab === 'personel_listesi' ? 'bg-amber-500 text-slate-950 shadow-xs' : 'text-slate-400 hover:text-white'
-                  }`}
+                  className={navTabClass(activeTab === 'personel_listesi')}
                 >
-                  <Users size={11} className="mb-0.5" />
+                  <Users size={13} />
                   <span>Personel</span>
                 </button>
                 <button
+                  type="button"
                   onClick={() => setActiveTab('gunluk_akis')}
-                  className={`flex-1 min-w-[4.5rem] py-1.5 rounded-lg text-[8px] font-extrabold flex flex-col items-center justify-center transition duration-150 cursor-pointer ${
-                    activeTab === 'gunluk_akis' ? 'bg-amber-500 text-slate-950 shadow-xs' : 'text-slate-400 hover:text-white'
-                  }`}
+                  className={`${navTabClass(activeTab === 'gunluk_akis')} col-span-2 sm:col-span-1`}
                 >
-                  <Send size={11} className="mb-0.5" />
+                  <Send size={13} />
                   <span>Günlük Akış</span>
                 </button>
               </div>
             </div>
 
             {/* Inner Content Area - Scrollable */}
-            <div className="flex-1 overflow-y-auto p-3 space-y-3 pb-8">
+            <div className="flex-1 min-h-0 overflow-y-auto p-3 sm:p-5 space-y-3 pb-8 bg-slate-50">
+              <div className="w-full max-w-4xl mx-auto space-y-3">
               
               {/* TAB 1: YOKLAMA ALMA PANELİ */}
               {activeTab === 'yoklama' && (
@@ -3386,13 +3323,10 @@ _Lütfen bu personelin sigorta giriş işlemlerini başlatınız._`}
               )}
 
 
+              </div>
             </div>
 
           </div>
-
-        </div>
-
-      </div>
 
       {/* FİİLİ GÜNLÜK SAHA RAPORU - A4 PDF ÖNİZLEME MODALI */}
       {showPdfPreview && (
