@@ -212,6 +212,7 @@ export async function exportPersonelExcel(options: {
   subtitle?: string;
   sheetName?: string;
   onlyActive?: boolean;
+  splitByDurum?: boolean;
   kampKayitlari?: KampKaydi[];
   kampOdalari?: KampOdasi[];
   fileNamePrefix?: string;
@@ -298,8 +299,10 @@ export async function exportPersonelExcel(options: {
 
   const stamp = new Date().toLocaleString('tr-TR');
   const activeCount = rows.filter(isAktif).length;
-  const metaLine = `Oluşturma: ${stamp} · Toplam: ${rows.length} · Aktif: ${activeCount}${
-    options.onlyActive ? ' · Filtre: yalnız aktif' : ''
+  const passiveCount = rows.length - activeCount;
+  const splitByDurum = options.splitByDurum ?? !options.onlyActive;
+  const metaLine = `Oluşturma: ${stamp} · Toplam: ${rows.length} · Aktif: ${activeCount} · Pasif: ${passiveCount}${
+    options.onlyActive ? ' · Filtre: yalnız aktif' : ' · Filtre: aktif ve pasif ayrı listelenir'
   }`;
 
   const headerRowIndex = await applyKibritciPersonelExcelAntet(workbook, sheet, {
@@ -405,26 +408,57 @@ export async function exportPersonelExcel(options: {
     bannerRow.height = 20;
   };
 
+  const writeDurumBanner = (label: string, count: number, kind: 'aktif' | 'pasif') => {
+    const bannerRow = sheet.addRow([`${label} — ${count} kişi`]);
+    sheet.mergeCells(bannerRow.number, 1, bannerRow.number, colCount);
+    const cell = bannerRow.getCell(1);
+    const isPasif = kind === 'pasif';
+    cell.font = { name: 'Arial', size: 12, bold: true, color: { argb: isPasif ? 'FF9F1239' : 'FF14532D' } };
+    setFill(cell, isPasif ? 'FFFEE2E2' : 'FFDCFCE7');
+    cell.alignment = { vertical: 'middle', horizontal: 'left' };
+    cell.border = thinBorder();
+    bannerRow.height = 24;
+  };
+
+  const writeGrouped = (list: Personel[]) => {
+    if (scope === 'ana_firma') {
+      for (const g of groupPersonelByGorev(list)) {
+        writeGorevBanner(g.gorev, g.personeller.length);
+        g.personeller.forEach(writePersonelRow);
+      }
+    } else if (groupByFirma && scope !== 'custom') {
+      for (const group of groupRowsByFirma(list)) {
+        writeFirmaBanner(group.firma, group.personeller.length);
+        group.personeller.forEach(writePersonelRow);
+      }
+    } else if (groupByFirma && scope === 'custom' && groupRowsByFirma(list).length > 1) {
+      for (const group of groupRowsByFirma(list)) {
+        writeFirmaBanner(group.firma, group.personeller.length);
+        group.personeller.forEach(writePersonelRow);
+      }
+    } else {
+      list.forEach(writePersonelRow);
+    }
+  };
+
   const groupByFirma =
     options.groupByFirma ?? (scope === 'all' || scope === 'taseron');
 
-  if (scope === 'ana_firma') {
-    for (const g of groupPersonelByGorev(rows)) {
-      writeGorevBanner(g.gorev, g.personeller.length);
-      g.personeller.forEach(writePersonelRow);
+  const aktifler = rows.filter(isAktif);
+  const pasifler = rows.filter((p) => !isAktif(p));
+  if (splitByDurum) {
+    if (aktifler.length > 0) {
+      writeDurumBanner('AKTİFLER', aktifler.length, 'aktif');
+      rowIndex = 0;
+      writeGrouped(aktifler);
     }
-  } else if (groupByFirma && scope !== 'custom') {
-    for (const group of groupRowsByFirma(rows)) {
-      writeFirmaBanner(group.firma, group.personeller.length);
-      group.personeller.forEach(writePersonelRow);
-    }
-  } else if (groupByFirma && scope === 'custom' && groupRowsByFirma(rows).length > 1) {
-    for (const group of groupRowsByFirma(rows)) {
-      writeFirmaBanner(group.firma, group.personeller.length);
-      group.personeller.forEach(writePersonelRow);
+    if (pasifler.length > 0) {
+      writeDurumBanner('PASİFLER', pasifler.length, 'pasif');
+      rowIndex = 0;
+      writeGrouped(pasifler);
     }
   } else {
-    rows.forEach(writePersonelRow);
+    writeGrouped(rows);
   }
 
   const footerRow = sheet.addRow([
@@ -465,6 +499,7 @@ export function buildPersonelListeRaporHtml(options: {
   title?: string;
   subtitle?: string;
   onlyActive?: boolean;
+  splitByDurum?: boolean;
 }): string {
   const rows = [...options.rows].sort((a, b) => {
     const firma = firmaAdiLabel(a).localeCompare(firmaAdiLabel(b), 'tr', { sensitivity: 'base' });
@@ -476,16 +511,10 @@ export function buildPersonelListeRaporHtml(options: {
 
   const total = rows.length;
   const activeCount = rows.filter(isAktif).length;
+  const passiveCount = total - activeCount;
   const taseronCount = rows.filter((p) => p.firmaTipi === 'TASERON' || isTaseronPersonel(p)).length;
   const missingDocsCount = rows.filter((p) => Boolean(formatPersonelMissingDocs(p))).length;
-
-  const firmaGroups = new Map<string, Personel[]>();
-  for (const p of rows) {
-    const key = firmaAdiLabel(p);
-    const group = firmaGroups.get(key) || [];
-    group.push(p);
-    firmaGroups.set(key, group);
-  }
+  const splitByDurum = options.splitByDurum ?? !options.onlyActive;
 
   const summaryCard = (label: string, value: string | number, tone: string) => `
     <div style="border:1px solid #e2e8f0;border-left:4px solid ${tone};border-radius:8px;padding:8px 10px;background:#fff">
@@ -498,28 +527,35 @@ export function buildPersonelListeRaporHtml(options: {
   const th =
     'padding:6px;border:1px solid #cbd5e1;background:#f1f5f9;color:#334155;font-size:9px;text-align:left;text-transform:uppercase;letter-spacing:.03em';
 
-  const sections = Array.from(firmaGroups.entries())
-    .map(([firma, group]) => {
-      const bodyRows = group
-        .map((p, index) => {
-          const missingDocs = formatPersonelMissingDocs(p);
-          const active = isAktif(p);
-          return `<tr>
+  const firmaSectionsHtml = (list: Personel[]) => {
+    const firmaGroups = new Map<string, Personel[]>();
+    for (const p of list) {
+      const key = firmaAdiLabel(p);
+      const group = firmaGroups.get(key) || [];
+      group.push(p);
+      firmaGroups.set(key, group);
+    }
+    return Array.from(firmaGroups.entries())
+      .map(([firma, group]) => {
+        const bodyRows = group
+          .map((p, index) => {
+            const missingDocs = formatPersonelMissingDocs(p);
+            const active = isAktif(p);
+            return `<tr>
             <td style="${cell};text-align:center;color:#64748b;width:28px">${index + 1}</td>
             <td style="${cell};font-weight:800;color:#0f172a">${esc(p.ad)} ${esc(p.soyad)}<br/><span style="font-weight:600;color:#64748b;font-size:10px">${esc(firmaTipiLabel(p))}</span></td>
             <td style="${cell};font-family:ui-monospace,Consolas,monospace;font-size:10px">${esc(p.tcNo || '-')}</td>
             <td style="${cell}">${esc(displayPersonelGorev(p) || '-')}<br/><span style="color:#64748b;font-size:10px">${esc(p.departman || '-')}</span></td>
             <td style="${cell}">${esc(p.telefonNo || '-')}</td>
-            <td style="${cell}">${esc(p.iseGirisTarihi || '-')}<br/><span style="color:#64748b;font-size:10px">${esc(p.sgkDurumu || '-')}</span></td>
+            <td style="${cell}">${esc(p.iseGirisTarihi || '-')}${p.istenCikisTarihi ? `<br/><span style="color:#9f1239;font-size:10px">Çıkış: ${esc(p.istenCikisTarihi)}</span>` : `<br/><span style="color:#64748b;font-size:10px">${esc(p.sgkDurumu || '-')}</span>`}</td>
             <td style="${cell};text-align:center">
               <span style="display:inline-block;border-radius:999px;padding:2px 7px;font-size:10px;font-weight:800;background:${active ? '#dcfce7' : '#fee2e2'};color:${active ? '#166534' : '#991b1b'}">${active ? 'Aktif' : 'Pasif'}</span>
             </td>
             <td style="${cell};font-size:10px;color:${missingDocs ? '#9f1239' : '#166534'}">${esc(missingDocs || 'Tam')}</td>
           </tr>`;
-        })
-        .join('');
-
-      return `
+          })
+          .join('');
+        return `
         <section style="break-inside:avoid;margin-top:10px">
           <div style="display:flex;align-items:center;justify-content:space-between;background:#eff6ff;color:#1e40af;border:1px solid #bfdbfe;border-radius:8px 8px 0 0;padding:7px 10px">
             <strong style="font-size:12px;letter-spacing:.02em">${esc(firma)}</strong>
@@ -533,7 +569,7 @@ export function buildPersonelListeRaporHtml(options: {
                 <th style="${th}">TC</th>
                 <th style="${th}">Görev / Departman</th>
                 <th style="${th}">Telefon</th>
-                <th style="${th}">İşe Giriş / SGK</th>
+                <th style="${th}">İşe Giriş / Çıkış</th>
                 <th style="${th};text-align:center">Durum</th>
                 <th style="${th}">Evrak</th>
               </tr>
@@ -542,8 +578,26 @@ export function buildPersonelListeRaporHtml(options: {
           </table>
         </section>
       `;
-    })
-    .join('');
+      })
+      .join('');
+  };
+
+  const durumBlok = (title: string, bg: string, fg: string, border: string, list: Personel[]) => {
+    if (!list.length) return '';
+    return `
+      <div style="margin-top:16px">
+        <div style="background:${bg};color:${fg};border:1px solid ${border};border-radius:8px;padding:8px 12px;font-size:13px;font-weight:900;letter-spacing:.04em;text-transform:uppercase">
+          ${esc(title)} — ${list.length} kişi
+        </div>
+        ${firmaSectionsHtml(list)}
+      </div>`;
+  };
+
+  const aktifler = rows.filter(isAktif);
+  const pasifler = rows.filter((p) => !isAktif(p));
+  const sections = splitByDurum
+    ? `${durumBlok('Aktifler', '#dcfce7', '#14532d', '#86efac', aktifler)}${durumBlok('Pasifler', '#fee2e2', '#9f1239', '#fecaca', pasifler)}`
+    : firmaSectionsHtml(rows);
 
   const bodyHtml = `
     <style>
@@ -557,11 +611,15 @@ export function buildPersonelListeRaporHtml(options: {
       <div class="summary-grid" style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-bottom:10px">
         ${summaryCard('Toplam Personel', total, '#1e4e78')}
         ${summaryCard('Aktif', activeCount, '#16a34a')}
-        ${summaryCard('Taşeron', taseronCount, '#d97706')}
-        ${summaryCard('Eksik Evrak', missingDocsCount, '#e11d48')}
+        ${summaryCard('Pasif', passiveCount, '#e11d48')}
+        ${summaryCard(splitByDurum ? 'Eksik Evrak' : 'Taşeron', splitByDurum ? missingDocsCount : taseronCount, splitByDurum ? '#be123c' : '#d97706')}
       </div>
       <p style="margin:0 0 8px;color:#475569;font-size:11px;line-height:1.35">
-        Liste firma bazında gruplanmış, her firma içinde görev ve ada göre sıralanmıştır.
+        ${
+          splitByDurum
+            ? 'Aktif ve pasif personel ayrı bölümlerde listelenmiştir. Pasif kayıtlar işten ayrılmış kadrodur; aktif kadro ile karıştırılmaz.'
+            : 'Liste firma bazında gruplanmış, her firma içinde görev ve ada göre sıralanmıştır.'
+        }
       </p>
       ${sections}
     </div>
@@ -572,9 +630,9 @@ export function buildPersonelListeRaporHtml(options: {
     subtitle: options.subtitle || 'Firma bazlı personel raporu',
     meta: [
       `Toplam personel: ${total}`,
-      `Aktif personel: ${activeCount}`,
-      `Firma sayısı: ${firmaGroups.size}`,
-      options.onlyActive ? 'Filtre: Yalnız aktif' : 'Filtre: Aktif + pasif',
+      `Aktif: ${activeCount}`,
+      `Pasif: ${passiveCount}`,
+      options.onlyActive ? 'Filtre: Yalnız aktif' : 'Filtre: Aktif ve pasif ayrı listelenir',
       `Rapor tarihi: ${new Date().toLocaleString('tr-TR')}`,
     ],
     bodyHtml,
@@ -586,6 +644,7 @@ export function openPersonelListeRaporu(options: {
   title?: string;
   subtitle?: string;
   onlyActive?: boolean;
+  splitByDurum?: boolean;
 }): number {
   if (options.rows.length === 0) {
     throw new Error('Rapor oluşturulacak personel bulunamadı. Filtreleri kontrol edin.');
@@ -635,6 +694,7 @@ export async function exportSeciliPersonelExcel(options: {
   subtitle?: string;
   fileNamePrefix?: string;
   onlyActive?: boolean;
+  splitByDurum?: boolean;
   kampKayitlari?: KampKaydi[];
   kampOdalari?: KampOdasi[];
   groupByFirma?: boolean;
@@ -647,6 +707,7 @@ export async function exportSeciliPersonelExcel(options: {
     subtitle: options.subtitle,
     fileNamePrefix: options.fileNamePrefix,
     onlyActive: options.onlyActive,
+    splitByDurum: options.splitByDurum ?? !options.onlyActive,
     kampKayitlari: options.kampKayitlari,
     kampOdalari: options.kampOdalari,
     groupByFirma: options.groupByFirma ?? false,

@@ -1652,6 +1652,8 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
         kampKayitlari,
         kampOdalari,
         groupByFirma: true,
+        onlyActive: showOnlyActive,
+        splitByDurum: !showOnlyActive,
       });
       alert(`${count} personel Kibritçi antetli Excel olarak indirildi.`);
     } catch (err) {
@@ -1672,6 +1674,7 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
         title: `${CANONICAL_ANA_FIRMA_ADI} — Personel Listesi`,
         subtitle: buildListeRaporSubtitle(),
         onlyActive: showOnlyActive,
+        splitByDurum: !showOnlyActive,
       });
       alert(`${count} personel için HTML rapor açıldı (yazdır / PDF kaydet).`);
     } catch (err) {
