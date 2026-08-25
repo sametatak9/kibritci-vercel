@@ -46,17 +46,12 @@ import {
   isIdariPersonel,
   isKibritciCompany,
   isPendingKampPersonel,
+  isSeramikEkibiPersonel,
   isTaseronPersonel,
 } from '../lib/yoklamaUtils';
 import { findPersonelByTcInList, loadPersonellerForDedup, upsertPersonelAvoidDuplicate } from '../lib/personelMatchUtils';
 import {
-  applyPersonelDuplicateMerge,
-  planManualPersonelMerge,
-  planPersonelDuplicateMerge,
-} from '../lib/personelDuplicateMerge';
-import {
   buildPersonelKaliteIndex,
-  formatPersonelKaliteOzet,
   gecersizIsimKaydi,
   isimdeRakamVar,
   isKritikPersonelSorunu,
@@ -176,7 +171,6 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
   setPersoneller,
   onPersonelDeleted,
   yoklamalar = {},
-  saveYoklamalarNow,
   cariKartlar = [],
   setCariKartlar,
   setCariIslemGecmisi,
@@ -196,13 +190,8 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [historyPersonel, setHistoryPersonel] = useState<Personel | null>(null);
   const [showOnlyActive, setShowOnlyActive] = useState(true);
-  const [showOnlyProblematic, setShowOnlyProblematic] = useState(false);
   const [gorevGrupFilters, setGorevGrupFilters] = useState<PersonelGorevGrup[]>([]);
   const [sortMode, setSortMode] = useState<'NAME_ASC' | 'NAME_DESC' | 'DATE_NEWEST' | 'DATE_OLDEST'>('NAME_ASC');
-  const [repairingKampTaseron, setRepairingKampTaseron] = useState(false);
-  const [repairingDuplicates, setRepairingDuplicates] = useState(false);
-  const [mergeKeepId, setMergeKeepId] = useState('');
-  const [mergeDropId, setMergeDropId] = useState('');
   const [exportingListe, setExportingListe] = useState<'excel' | 'html' | null>(null);
   const [gorevListeOpen, setGorevListeOpen] = useState(false);
   const [gorevListeExporting, setGorevListeExporting] = useState(false);
@@ -445,37 +434,6 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
         gorev: AKVIZYON_GOREV,
         firmaTipi: 'TASERON',
       } as Personel);
-    });
-  }, [personeller, setPersoneller]);
-
-  const taseronGorevFixDone = useRef(false);
-  useEffect(() => {
-    if (taseronGorevFixDone.current) return;
-    const toFix = personeller.filter(
-      (p) =>
-        isTaseronPersonelRecord(p) &&
-        p.gorev !== resolveTaseronPersonelGorev({ firmaAdi: p.firmaAdi, firmaTipi: p.firmaTipi })
-    );
-    if (toFix.length === 0) return;
-    taseronGorevFixDone.current = true;
-    setPersoneller((prev) =>
-      prev.map((p) => {
-        if (!isTaseronPersonelRecord(p)) return p;
-        const gorev = resolveTaseronPersonelGorev({ firmaAdi: p.firmaAdi, firmaTipi: p.firmaTipi });
-        if (p.gorev === gorev) return p;
-        return withTaseronPersonelGorev({ ...p, gorev });
-      })
-    );
-    toFix.forEach((p) => {
-      void saveDocument(
-        'personeller',
-        withTaseronPersonelGorev({
-          id: p.id,
-          gorev: resolveTaseronPersonelGorev({ firmaAdi: p.firmaAdi, firmaTipi: p.firmaTipi }),
-          firmaTipi: 'TASERON',
-          departman: TASERON_PERSONEL_DEPARTMAN,
-        } as Personel)
-      );
     });
   }, [personeller, setPersoneller]);
 
@@ -1123,22 +1081,13 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
     const target = personeller.find((p) => p.id === id);
     if (!target) return;
 
-    const nameKey = personelNameKey(target);
-    const dupes = personeller.filter((p) => personelNameKey(p) === nameKey);
-    const toDelete = dupes.length > 1 ? dupes : [target];
-
-    const msg =
-      dupes.length > 1
-        ? `"${target.ad} ${target.soyad}" için ${dupes.length} mükerrer kayıt bulundu. Hepsi kalıcı silinecek ve kamptaki oda kayıtları da tahliye edilecek. Devam?`
-        : `"${target.ad} ${target.soyad}" kalıcı silinsin mi?\n(Kamp oda yerleşimi varsa otomatik tahliye edilir.)`;
-
+    const msg = `"${target.ad} ${target.soyad}" silinsin mi?\nYalnızca bu kart silinir; aynı isimdeki diğer kayıt durur.\n(Kamp oda yerleşimi varsa bu kişi tahliye edilir.)`;
     if (!confirm(msg)) return;
 
-    const deleteIds = new Set(toDelete.map((p) => p.id));
-    setPersoneller((prev) => prev.filter((p) => !deleteIds.has(p.id)));
-    onPersonelDeleted?.(toDelete);
+    setPersoneller((prev) => prev.filter((p) => p.id !== id));
+    onPersonelDeleted?.([target]);
 
-    if (selectedPersonel && deleteIds.has(selectedPersonel.id)) {
+    if (selectedPersonel?.id === id) {
       handleClearForm();
     }
   };
@@ -1212,6 +1161,8 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
     setFirmaFilters((prev) =>
       prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]
     );
+    setGorevGrupFilters([]);
+    setShowOnlyActive(false);
   };
 
   const firmaFilterSummary = useMemo(() => {
@@ -1227,7 +1178,7 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
   const switchKadroMode = (mode: KadroMode) => {
     setKadroMode(mode);
     setFirmaFilterOpen(false);
-    setShowOnlyProblematic(false);
+    setGorevGrupFilters([]);
     if (mode === 'ana_firma') {
       setFirmaFilters(['ANA_FIRMA']);
       setShowOnlyActive(true);
@@ -1237,99 +1188,10 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
     }
   };
 
-  const toggleProblematicFilter = () => {
-    setShowOnlyProblematic((prev) => {
-      const next = !prev;
-      if (next) setShowOnlyActive(false);
-      return next;
-    });
-  };
-
   const matchesKadroMode = (p: Personel) =>
     kadroMode === 'ana_firma' ? !isTaseronPersonel(p) : isTaseronPersonel(p);
 
   const isHiddenPendingKampci = (p: Personel) => isPendingKampPersonel(p);
-
-  /** Kampçı "KAMP PERSONEL" diye kaydetmiş ama kamp/cari taşeron olanlar */
-  const misclassifiedKampTaseron = useMemo(() => {
-    const byId = new Map<string, Personel>(personeller.map((p) => [p.id, p]));
-    const out: Array<{ personel: Personel; firmaAdi: string }> = [];
-    const seen = new Set<string>();
-
-    const push = (p: Personel, firmaAdi: string) => {
-      if (!p?.id || seen.has(p.id)) return;
-      const firma = String(firmaAdi || '').trim();
-      if (!firma || isKibritciCompany(firma)) return;
-      const gorev = String(p.gorev || '');
-      const sameFirma =
-        normalizeCardName(p.firmaAdi || '') === normalizeCardName(firma);
-      const needsRepair =
-        p.firmaTipi !== 'TASERON' ||
-        isKibritciCompany(p.firmaAdi || '') ||
-        /KAMP\s*PERSONEL/i.test(gorev) ||
-        (p.kaynak === 'KAMPCI' && p.onayDurumu === 'ONAY BEKLİYOR') ||
-        !sameFirma;
-      if (!needsRepair) return;
-      seen.add(p.id);
-      out.push({ personel: p, firmaAdi: firma });
-    };
-
-    kampKayitlari.forEach((k) => {
-      const firma = String(k.calistigiFirma || '').trim();
-      if (!firma || isKibritciCompany(firma)) return;
-      if (k.firmaTipi === 'ANA_FIRMA') return;
-      const p = k.personelId ? byId.get(String(k.personelId)) : undefined;
-      if (p) push(p, firma);
-    });
-
-    personeller.forEach((p) => {
-      const firma = String(p.firmaAdi || '').trim();
-      if (!firma || isKibritciCompany(firma)) return;
-      const gorev = String(p.gorev || '').toLocaleUpperCase('tr-TR');
-      if (gorev.includes('KAMP PERSONEL') || (p.kaynak === 'KAMPCI' && p.firmaTipi !== 'TASERON')) {
-        push(p, firma);
-      }
-    });
-
-    return out;
-  }, [personeller, kampKayitlari]);
-
-  const handleRepairKampTaseron = async () => {
-    if (misclassifiedKampTaseron.length === 0) return;
-    if (
-      !window.confirm(
-        `${misclassifiedKampTaseron.length} personel kampçı kaynaklı yanlış sınıflı görünüyor (ör. KAMP PERSONEL / ana firma).\n\nBunları taşeron kadroya (SERAMİK EKİBİ vb.) düzeltmek istiyor musunuz?\n\nPersonel Yönetimi + kamp yoklama listesi düzelir.`
-      )
-    ) {
-      return;
-    }
-    setRepairingKampTaseron(true);
-    try {
-      const patchedList: Personel[] = [];
-      for (const { personel, firmaAdi } of misclassifiedKampTaseron) {
-        const patched = withTaseronPersonelGorev({
-          ...personel,
-          firmaTipi: 'TASERON',
-          firmaAdi,
-          departman: TASERON_PERSONEL_DEPARTMAN,
-          gorev: resolveTaseronPersonelGorev({ firmaAdi, firmaTipi: 'TASERON' }),
-          onayDurumu: 'ONAYLANDI',
-          sgkDurumu: personel.sgkDurumu || 'Sigortasız',
-        });
-        await saveDocument('personeller', leanPersonelForFirestore(patched, personel));
-        patchedList.push(patched);
-      }
-      setPersoneller((prev) =>
-        prev.map((p) => patchedList.find((x) => x.id === p.id) || p)
-      );
-      alert(`${patchedList.length} personel taşeron kadroya düzeltildi.`);
-    } catch (err) {
-      console.error(err);
-      alert('Düzeltme sırasında hata oluştu.');
-    } finally {
-      setRepairingKampTaseron(false);
-    }
-  };
 
   const personelSahaTagData = useMemo(() => {
     const byId = new Set<string>();
@@ -1365,21 +1227,9 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
     [personeller, kadroMode]
   );
 
-  const problematicInKadro = useMemo(
-    () => kadroPool.filter((p) => personelKalite.problematicIds.has(p.id)).length,
-    [kadroPool, personelKalite.problematicIds]
-  );
-
-  const duplicateInKadro = useMemo(
-    () => kadroPool.filter((p) => personelKalite.duplicateNameIds.has(p.id)).length,
-    [kadroPool, personelKalite.duplicateNameIds]
-  );
-
   const gorevGrupPool = useMemo(() => {
     let pool = kadroPool;
-    if (showOnlyProblematic) {
-      pool = pool.filter((p) => personelKalite.problematicIds.has(p.id));
-    } else if (showOnlyActive) {
+    if (showOnlyActive) {
       pool = pool.filter((p) => is_aktif_status(p.durum));
     }
     if (kadroMode === 'ana_firma') {
@@ -1390,9 +1240,7 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
     return pool;
   }, [
     kadroPool,
-    showOnlyProblematic,
     showOnlyActive,
-    personelKalite.problematicIds,
     kadroMode,
     firmaFilters,
   ]);
@@ -1407,86 +1255,6 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
       prev.includes(grup) ? prev.filter((g) => g !== grup) : [...prev, grup]
     );
   };
-
-  const handleRepairDuplicatePersonel = async () => {
-    const plans = planPersonelDuplicateMerge(personeller, yoklamalar, kampKayitlari);
-    if (plans.length === 0) {
-      alert('Birleştirilecek mükerrer personel bulunamadı.');
-      return;
-    }
-    const totalDelete = plans.reduce((n, p) => n + p.deleteIds.length, 0);
-    if (
-      !window.confirm(
-        `${plans.length} mükerrer grup birleştirilecek (${totalDelete} fazla kayıt silinecek).\n\n${plans
-          .slice(0, 8)
-          .map((p) => `• ${p.label}`)
-          .join('\n')}${plans.length > 8 ? '\n…' : ''}\n\nYoklama ve kamp bağlantıları korunan kayda taşınır. Devam?`
-      )
-    ) {
-      return;
-    }
-    setRepairingDuplicates(true);
-    try {
-      const result = await applyPersonelDuplicateMerge(
-        personeller,
-        plans,
-        yoklamalar,
-        kampKayitlari
-      );
-      setPersoneller(result.personeller);
-      if (!result.yoklamaPersisted && saveYoklamalarNow && result.yoklamalar !== yoklamalar) {
-        await saveYoklamalarNow(result.yoklamalar);
-      }
-      alert(
-        `${result.mergedCount} personel birleştirildi, ${result.deletedCount} mükerrer kayıt silindi.` +
-          (result.archivePatched ? ` ${result.archivePatched} yoklama arşivi güncellendi.` : '')
-      );
-    } catch (err) {
-      alert(err instanceof Error ? err.message : 'Mükerrer birleştirme başarısız.');
-    } finally {
-      setRepairingDuplicates(false);
-    }
-  };
-
-  const handleManualPersonelMerge = async () => {
-    const keep = personeller.find((p) => p.id === mergeKeepId);
-    const drop = personeller.find((p) => p.id === mergeDropId);
-    if (!keep || !drop || keep.id === drop.id) {
-      alert('Birleştirmek için kalan kart ve silinecek kopyayı seçin (iki farklı kayıt).');
-      return;
-    }
-    if (
-      !window.confirm(
-        `"${drop.ad} ${drop.soyad}" (${drop.id}) silinip "${keep.ad} ${keep.soyad}" (${keep.id}) kartına birleşecek.\n\nYoklama, kamp oda bağlantısı ve yoklama arşivleri kalan karta taşınır. Devam?`
-      )
-    ) {
-      return;
-    }
-    setRepairingDuplicates(true);
-    try {
-      const plan = planManualPersonelMerge(keep, [drop], yoklamalar, kampKayitlari);
-      const result = await applyPersonelDuplicateMerge(personeller, [plan], yoklamalar, kampKayitlari);
-      setPersoneller(result.personeller);
-      if (!result.yoklamaPersisted && saveYoklamalarNow && result.yoklamalar !== yoklamalar) {
-        await saveYoklamalarNow(result.yoklamalar);
-      }
-      setMergeKeepId('');
-      setMergeDropId('');
-      alert(
-        `Birleştirildi. Kalan kart: ${keep.ad} ${keep.soyad}.` +
-          (result.archivePatched ? ` ${result.archivePatched} arşiv güncellendi.` : '')
-      );
-    } catch (err) {
-      alert(err instanceof Error ? err.message : 'Manuel birleştirme başarısız.');
-    } finally {
-      setRepairingDuplicates(false);
-    }
-  };
-
-  const duplicateMergePlanCount = useMemo(
-    () => planPersonelDuplicateMerge(personeller, yoklamalar, kampKayitlari).length,
-    [personeller, yoklamalar, kampKayitlari]
-  );
 
   const filteredPersonel = useMemo(
     () =>
@@ -1507,9 +1275,7 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
           if (firmaFilters.length > 0 && !matchesFirmaFilter(p, firmaFilters)) return false;
         }
 
-        if (showOnlyProblematic) {
-          if (!personelKalite.problematicIds.has(p.id)) return false;
-        } else if (showOnlyActive && !is_aktif_status(p.durum)) {
+        if (showOnlyActive && !is_aktif_status(p.durum)) {
           return false;
         }
 
@@ -1524,8 +1290,6 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
       kadroMode,
       firmaFilters,
       showOnlyActive,
-      showOnlyProblematic,
-      personelKalite.problematicIds,
       gorevGrupFilters,
       searchTerm,
     ]
@@ -1568,6 +1332,18 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
     const pasifler = visiblePersonel.filter((p) => !is_aktif_status(p.durum));
     return { aktifler, pasifler };
   }, [visiblePersonel]);
+
+  const seramikKadroOzet = useMemo(() => {
+    const all = kadroPool.filter(isSeramikEkibiPersonel);
+    const aktif = all.filter((p) => is_aktif_status(p.durum)).length;
+    return { toplam: all.length, aktif, pasif: all.length - aktif };
+  }, [kadroPool]);
+
+  const seramikListeGizli =
+    kadroMode !== 'ana_firma' &&
+    seramikKadroOzet.toplam > 0 &&
+    visiblePersonel.filter(isSeramikEkibiPersonel).length < seramikKadroOzet.toplam &&
+    gorevGrupFilters.length > 0;
 
   const personelListSections = useMemo(() => {
     if (showOnlyActive) {
@@ -1648,7 +1424,6 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
       firmaFilterSummary,
     ];
     if (showOnlyActive) parts.push('Yalnız aktif');
-    if (showOnlyProblematic) parts.push('Sorunlu kayıtlar');
     if (gorevGrupFilters.length > 0) {
       parts.push(`Görev: ${gorevGrupFilters.map(personelGorevGrupLabel).join(', ')}`);
     }
@@ -2526,17 +2301,23 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
                 </h4>
                 <p className="text-[11px] text-slate-500 mt-1">
                   Gösterilen: {visiblePersonel.length} / Toplam: {personeller.length} · {firmaFilterSummary}
-                  {showOnlyProblematic
-                    ? ' · Sorunlu kayıtlar (pasifler dahil)'
-                    : showOnlyActive
-                      ? ' · Aktif'
-                      : ` · Aktif ${groupedVisiblePersonel.aktifler.length} · Pasif ${groupedVisiblePersonel.pasifler.length}`}
-                  {problematicInKadro > 0 && (
-                    <span className="text-rose-600 font-bold">
-                      {' '}· bu sekmede {problematicInKadro} sorunlu ({duplicateInKadro} çift isim)
-                    </span>
-                  )}
+                  {showOnlyActive
+                    ? ' · Aktif'
+                    : ` · Aktif ${groupedVisiblePersonel.aktifler.length} · Pasif ${groupedVisiblePersonel.pasifler.length}`}
                 </p>
+                {seramikListeGizli && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setGorevGrupFilters([]);
+                      setShowOnlyActive(false);
+                    }}
+                    className="block text-left text-[11px] text-amber-900 font-bold mt-1 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1.5 hover:bg-amber-100 cursor-pointer"
+                  >
+                    Seramik Ekibi kadro duruyor: {seramikKadroOzet.aktif} aktif · {seramikKadroOzet.pasif} pasif
+                    {' '}({seramikKadroOzet.toplam} kart). Görev filtresi listeden gizliyor — tıklayınca tüm kadro açılır.
+                  </button>
+                )}
               </div>
             </div>
 
@@ -2636,35 +2417,6 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
                   {showOnlyActive ? 'Sadece Aktifler' : 'Pasifler Dahil'}
                 </button>
 
-                {problematicInKadro > 0 && (
-                  <button
-                    type="button"
-                    onClick={toggleProblematicFilter}
-                    className={`text-[10px] font-bold px-3 py-2 rounded-xl border cursor-pointer ${
-                      showOnlyProblematic
-                        ? 'bg-rose-600 text-white border-rose-700'
-                        : 'bg-rose-50 text-rose-800 border-rose-200 hover:bg-rose-100'
-                    }`}
-                    title="Çift isim, isimde rakam, geçersiz/eksik kayıt — pasifler dahil listeler"
-                  >
-                    Sorunlu Kayıt ({problematicInKadro})
-                  </button>
-                )}
-
-                {misclassifiedKampTaseron.length > 0 && (
-                  <button
-                    type="button"
-                    disabled={repairingKampTaseron}
-                    onClick={() => void handleRepairKampTaseron()}
-                    className="text-[10px] font-bold px-3 py-2 rounded-xl border cursor-pointer bg-amber-500 text-slate-950 border-amber-600 hover:bg-amber-400 disabled:opacity-60"
-                    title="Kampçının KAMP PERSONEL diye kaydettiği taşeronları (SERAMİK EKİBİ vb.) düzelt"
-                  >
-                    {repairingKampTaseron
-                      ? 'Düzeltiliyor…'
-                      : `Kamp→Taşeron Düzelt (${misclassifiedKampTaseron.length})`}
-                  </button>
-                )}
-
                 <button
                   type="button"
                   onClick={() => void handleExportListeExcel()}
@@ -2762,141 +2514,14 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
             </div>
           </div>
 
-        {(personelKalite.problematicIds.size > 0 ||
-          personelKalite.duplicateNameGroups.length > 0 ||
-          duplicateMergePlanCount > 0) && (
-          <div className="mx-4 mt-0 mb-0 rounded-xl border border-rose-200 bg-rose-50/80 px-4 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-            <div className="flex items-start gap-2 text-rose-900">
-              <AlertCircle size={16} className="shrink-0 mt-0.5" />
-              <div>
-                <p className="text-xs font-bold">
-                  {formatPersonelKaliteOzet(personelKalite)} / Firestore
-                </p>
-                <p className="text-[10px] text-rose-700/90 mt-0.5">
-                  Bu sekme ({kadroMode === 'ana_firma' ? 'Ana Firma' : 'Taşeron'}): {problematicInKadro} gerçek sorunlu
-                  {problematicInKadro === 0 && personelKalite.problematicIds.size > 0
-                    ? ' — diğer sekmede veya pasif olabilir.'
-                    : ''}
-                  {personelKalite.duplicateNameGroups.length > 0 && (
-                    <>
-                      {' '}· Çift:{' '}
-                      {personelKalite.duplicateNameGroups
-                        .slice(0, 2)
-                        .map(([name, list]) => `${name} (${list.length})`)
-                        .join(' · ')}
-                    </>
-                  )}
-                  {personelKalite.nearDuplicateNameGroups.length > 0 && (
-                    <>
-                      {' '}· Yakın:{' '}
-                      {personelKalite.nearDuplicateNameGroups
-                        .slice(0, 2)
-                        .map((g) => g.label)
-                        .join(' · ')}
-                    </>
-                  )}
-                  {personelKalite.orphanYoklamaIds.length > 0 && (
-                    <>
-                      {' '}· {personelKalite.orphanYoklamaIds.length} yoklama kaydı personel kartında yok
-                    </>
-                  )}
-                </p>
-              </div>
-            </div>
-            <div className="flex flex-wrap gap-2 shrink-0">
-              {duplicateMergePlanCount > 0 && (
-                <button
-                  type="button"
-                  disabled={repairingDuplicates}
-                  onClick={() => void handleRepairDuplicatePersonel()}
-                  className="text-[10px] font-bold px-3 py-2 rounded-xl border cursor-pointer bg-sky-600 text-white border-sky-700 hover:bg-sky-500 disabled:opacity-60"
-                >
-                  {repairingDuplicates
-                    ? 'Birleştiriliyor…'
-                    : `Mükerrerleri Birleştir (${duplicateMergePlanCount})`}
-                </button>
-              )}
-              <div className="flex flex-wrap items-center gap-1.5">
-                <select
-                  value={mergeKeepId}
-                  onChange={(e) => setMergeKeepId(e.target.value)}
-                  className="text-[10px] border border-slate-200 rounded-lg px-2 py-1.5 bg-white max-w-[140px]"
-                >
-                  <option value="">Kalan kart</option>
-                  {personeller
-                    .filter((p) => matchesKadroMode(p))
-                    .slice(0, 400)
-                    .map((p) => (
-                      <option key={`k-${p.id}`} value={p.id}>
-                        {p.ad} {p.soyad}
-                      </option>
-                    ))}
-                </select>
-                <select
-                  value={mergeDropId}
-                  onChange={(e) => setMergeDropId(e.target.value)}
-                  className="text-[10px] border border-slate-200 rounded-lg px-2 py-1.5 bg-white max-w-[140px]"
-                >
-                  <option value="">Silinecek kopya</option>
-                  {personeller
-                    .filter((p) => matchesKadroMode(p) && p.id !== mergeKeepId)
-                    .slice(0, 400)
-                    .map((p) => (
-                      <option key={`d-${p.id}`} value={p.id}>
-                        {p.ad} {p.soyad}
-                      </option>
-                    ))}
-                </select>
-                <button
-                  type="button"
-                  disabled={repairingDuplicates || !mergeKeepId || !mergeDropId}
-                  onClick={() => void handleManualPersonelMerge()}
-                  className="text-[10px] font-bold px-3 py-2 rounded-xl border cursor-pointer bg-white text-sky-800 border-sky-300 hover:bg-sky-50 disabled:opacity-60"
-                >
-                  Manuel birleştir
-                </button>
-              </div>
-              <button
-                type="button"
-                onClick={toggleProblematicFilter}
-                className={`text-[10px] font-bold px-3 py-2 rounded-xl border cursor-pointer ${
-                  showOnlyProblematic
-                    ? 'bg-rose-700 text-white border-rose-800'
-                    : 'bg-white text-rose-800 border-rose-300 hover:bg-rose-100'
-                }`}
-              >
-                {showOnlyProblematic ? 'Normal listeye dön' : 'Gerçek sorunluları göster'}
-              </button>
-            </div>
-          </div>
-        )}
-
         {/* Scrollable list grid */}
         <div className="flex-1 overflow-y-auto p-4 space-y-3">
           {visiblePersonel.length === 0 ? (
             <div className="h-full flex flex-col items-center justify-center text-slate-400 py-16 space-y-2 px-6 text-center">
               <span className="text-3xl">👤</span>
               <p className="text-xs font-medium text-slate-600">
-                {(() => {
-                  if (!showOnlyProblematic) return 'Uygun personel kaydı bulunamadı.';
-                  if (problematicInKadro > 0) {
-                    return 'Filtreye uyan sorunlu kayıt bu aralıkta görünmüyor — arama kutusunu temizleyin.';
-                  }
-                  if (kadroMode === 'ana_firma') {
-                    return `Bu sekmede (Ana Firma) sorunlu kayıt yok. Toplam ${personelKalite.problematicIds.size} sorunlu kayıt var — Taşeron Kadrosu sekmesine bakın.`;
-                  }
-                  return 'Bu sekmede sorunlu kayıt bulunamadı.';
-                })()}
+                Uygun personel kaydı bulunamadı.
               </p>
-              {showOnlyProblematic && (
-                <button
-                  type="button"
-                  onClick={toggleProblematicFilter}
-                  className="text-[10px] font-bold px-3 py-2 rounded-xl border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 cursor-pointer"
-                >
-                  Normal listeye dön
-                </button>
-              )}
             </div>
           ) : (
             personelListSections.map((section) => (

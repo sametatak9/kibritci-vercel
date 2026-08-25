@@ -26,10 +26,20 @@ export function isTaseronPersonelRecord(p: Pick<Personel, 'firmaTipi' | 'firmaAd
   return p.firmaTipi === 'TASERON' || isTaseronPersonel(p as Personel);
 }
 
-/** Taşeron kayıtlarında görev otomatik TAŞERON PERSONEL (Akvizyon → GÜVENLİK). */
+/** Taşeron kaydında görev: boş / KAMP PERSONEL ise doldur; SERAMİKÇİ vb. mevcut görevi ezme. */
 export function withTaseronPersonelGorev<T extends Personel>(p: T): T {
   if (!isTaseronPersonelRecord(p)) return p;
-  const gorev = resolveTaseronPersonelGorev({ firmaAdi: p.firmaAdi, firmaTipi: p.firmaTipi });
+  const current = String(p.gorev || '').trim();
+  const firma = String(p.firmaAdi || '')
+    .toLocaleUpperCase('tr-TR')
+    .replace(/İ/g, 'I');
+  const seramikFirma = firma.includes('SERAMIK');
+  const placeholder = !current || /KAMP\s*PERSONEL/i.test(current);
+  const gorev = placeholder
+    ? seramikFirma
+      ? 'SERAMİKÇİ'
+      : resolveTaseronPersonelGorev({ firmaAdi: p.firmaAdi, firmaTipi: p.firmaTipi })
+    : current;
   const departman =
     p.departman === 'TAŞERON' || !p.departman ? TASERON_PERSONEL_DEPARTMAN : p.departman;
   if (p.gorev === gorev && p.firmaTipi === 'TASERON' && departman === p.departman) {
