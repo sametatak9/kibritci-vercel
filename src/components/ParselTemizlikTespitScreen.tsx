@@ -9,6 +9,7 @@ import {
   Pencil,
   Plus,
   Printer,
+  Smartphone,
   Trash2,
 } from 'lucide-react';
 import { PARSEL_LIST } from '../data/parselBlokMap';
@@ -35,6 +36,7 @@ import {
   buildDaireTemizlikTutanakHtml,
   buildParselTopluTutanakHtml,
   buildParselTeslimTutanakHtml,
+  KIBAR_OZER_IMZA_SONRASI_SORUMLULUK,
   openTemizlikRapor,
 } from '../lib/temizlikKirimReport';
 import type {
@@ -68,7 +70,7 @@ function seedBlokSatirlari(parsel: string): BlokFotoSatir[] {
   return teslimBloklari(parsel).map((blok) => ({
     blok,
     fotolar: [],
-    not: `${blok} bloğu bina içi temizlik ve asansör kuyusu temizliği tamamlandı.`,
+    not: `${blok} bloğu bina içi temizlik ve kırım işleri ile asansör kuyusu temizliği tamamlandı.`,
   }));
 }
 
@@ -132,6 +134,142 @@ function durumClass(durum: string): string {
   return 'bg-slate-100 text-slate-600';
 }
 
+/** Saha telefon prototipi: blok seç → kamera çek → tutanak. */
+function MobilBlokFotoPrototype(props: {
+  parsel: string;
+  tarih: string;
+  busy: boolean;
+  satirlari: BlokFotoSatir[];
+  mobilBlokIdx: number;
+  setMobilBlokIdx: (n: number) => void;
+  onIngest: (idx: number, files: FileList | File[] | null) => void;
+  onRemoveFoto: (idx: number, fotoIdx: number) => void;
+  onTeslim: () => void;
+  onBinaOnly: () => void;
+}) {
+  const n = props.satirlari.length;
+  const idx = Math.min(Math.max(0, props.mobilBlokIdx), Math.max(0, n - 1));
+  const row = props.satirlari[idx];
+  const fotoToplam = props.satirlari.reduce((s, r) => s + r.fotolar.length, 0);
+  const bloklarHazir = props.satirlari.filter((r) => r.fotolar.length > 0).length;
+
+  if (!row) return null;
+
+  return (
+    <div className="mx-auto w-full max-w-[420px] rounded-[28px] border-4 border-slate-900 bg-slate-950 p-2 shadow-xl">
+      <div className="rounded-[22px] bg-gradient-to-b from-teal-50 to-white overflow-hidden min-h-[560px] flex flex-col">
+        <div className="bg-slate-900 text-white px-4 py-3">
+          <p className="text-[10px] font-bold uppercase tracking-wider text-teal-300">Mobil saha · prototip</p>
+          <p className="text-base font-black">{parselKisaAd(props.parsel)} · {props.tarih}</p>
+          <p className="text-[11px] text-slate-300 mt-0.5">
+            {bloklarHazir}/{n} blok foto · {fotoToplam} toplam · 3 ana başlık
+          </p>
+        </div>
+
+        <div className="px-3 pt-3 flex gap-1.5 overflow-x-auto pb-1">
+          {props.satirlari.map((r, i) => (
+            <button
+              key={r.blok}
+              type="button"
+              onClick={() => props.setMobilBlokIdx(i)}
+              className={`shrink-0 rounded-full px-3 py-1.5 text-[11px] font-black border cursor-pointer ${
+                i === idx
+                  ? 'bg-teal-700 text-white border-teal-700'
+                  : r.fotolar.length
+                    ? 'bg-emerald-100 text-emerald-900 border-emerald-300'
+                    : 'bg-white text-slate-600 border-slate-200'
+              }`}
+            >
+              {r.blok}
+              {r.fotolar.length ? ` · ${r.fotolar.length}` : ''}
+            </button>
+          ))}
+        </div>
+
+        <div className="flex-1 px-4 py-4 space-y-3">
+          <p className="text-center text-2xl font-black text-slate-900">Blok {row.blok}</p>
+          <p className="text-center text-[11px] text-slate-500 leading-snug px-2">
+            Bina içi temizlik ve kırım · çek → yükle → sonraki blok
+          </p>
+
+          <label className="flex flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-teal-500 bg-teal-50/80 py-10 cursor-pointer active:scale-[0.98] transition">
+            <Camera size={36} className="text-teal-800" />
+            <span className="text-sm font-black text-teal-950 uppercase tracking-wide">Kamera / galeri</span>
+            <span className="text-[10px] font-bold text-teal-800">{row.fotolar.length} foto bu blokta</span>
+            <input
+              type="file"
+              accept="image/*"
+              capture="environment"
+              multiple
+              className="hidden"
+              onChange={(e) => {
+                props.onIngest(idx, e.target.files);
+                e.target.value = '';
+              }}
+            />
+          </label>
+
+          {row.fotolar.length ? (
+            <div className="grid grid-cols-3 gap-2">
+              {row.fotolar.map((u, i) => (
+                <button
+                  key={`${row.blok}_m_${i}`}
+                  type="button"
+                  title="Sil"
+                  onClick={() => props.onRemoveFoto(idx, i)}
+                  className="relative aspect-square rounded-xl overflow-hidden border border-slate-200 cursor-pointer"
+                >
+                  <img src={u} alt="" className="w-full h-full object-cover" />
+                </button>
+              ))}
+            </div>
+          ) : (
+            <p className="text-center text-[11px] font-bold text-slate-400">Henüz foto yok — yukarıdan çekin</p>
+          )}
+
+          <div className="flex gap-2">
+            <button
+              type="button"
+              disabled={idx <= 0}
+              onClick={() => props.setMobilBlokIdx(idx - 1)}
+              className="flex-1 rounded-xl border border-slate-300 py-2.5 text-xs font-black disabled:opacity-40 cursor-pointer"
+            >
+              ← Önceki
+            </button>
+            <button
+              type="button"
+              disabled={idx >= n - 1}
+              onClick={() => props.setMobilBlokIdx(idx + 1)}
+              className="flex-1 rounded-xl bg-teal-700 text-white py-2.5 text-xs font-black disabled:opacity-40 cursor-pointer"
+            >
+              Sonraki →
+            </button>
+          </div>
+        </div>
+
+        <div className="sticky bottom-0 border-t border-slate-200 bg-white px-3 py-3 space-y-2">
+          <button
+            type="button"
+            disabled={props.busy}
+            onClick={props.onTeslim}
+            className="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-slate-900 text-white py-3 text-xs font-black cursor-pointer disabled:opacity-50"
+          >
+            <FileSignature size={14} /> Teslim tutanağı (3 başlık)
+          </button>
+          <button
+            type="button"
+            disabled={props.busy}
+            onClick={props.onBinaOnly}
+            className="w-full rounded-xl border border-teal-700 text-teal-900 py-2 text-[10px] font-black cursor-pointer disabled:opacity-50"
+          >
+            Yalnız bina içi + kırım tutanağı
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export const ParselTemizlikTespitScreen: React.FC<Props> = ({ currentUser }) => {
   const kaydeden = currentUser?.email || 'erp';
   const [parsel, setParsel] = useState(TEMIZLIK_DEFAULT_PARSEL);
@@ -165,9 +303,8 @@ export const ParselTemizlikTespitScreen: React.FC<Props> = ({ currentUser }) => 
   const [projeMuduru, setProjeMuduru] = useState('');
   const [kontrolBina, setKontrolBina] = useState('');
   const [kontrolAltyapi, setKontrolAltyapi] = useState('');
-  const [kontrolCevre, setKontrolCevre] = useState('');
   const [kontrolAsansor, setKontrolAsansor] = useState('');
-  const [tutanakNot, setTutanakNot] = useState('');
+  const [tutanakNot, setTutanakNot] = useState(KIBAR_OZER_IMZA_SONRASI_SORUMLULUK);
   const [topluFotolar, setTopluFotolar] = useState<string[]>([]);
   const [blokFotoSatirlari, setBlokFotoSatirlari] = useState<BlokFotoSatir[]>(() =>
     seedBlokSatirlari(TEMIZLIK_DEFAULT_PARSEL)
@@ -180,12 +317,11 @@ export const ParselTemizlikTespitScreen: React.FC<Props> = ({ currentUser }) => 
     fotolar: [],
     not: 'Listelenen tüm blokların asansör kuyusu temizlikleri tamamlandı.',
   });
-  const [cevreKalem, setCevreKalem] = useState<KalemFoto>({
-    fotolar: [],
-    not: 'Kırım, çevre temizliği ve düzenleme işi tamamlandı.',
-  });
+  const [mobilMod, setMobilMod] = useState(false);
+  const [mobilBlokIdx, setMobilBlokIdx] = useState(0);
 
   useEffect(() => {
+    setMobilBlokIdx(0);
     setBlokFotoSatirlari((prev) => {
       const map = new Map(prev.map((p) => [p.blok, p]));
       return teslimBloklari(parsel).map(
@@ -193,7 +329,7 @@ export const ParselTemizlikTespitScreen: React.FC<Props> = ({ currentUser }) => 
           map.get(blok) || {
             blok,
             fotolar: [],
-            not: `${blok} bloğu bina içi temizlik ve asansör kuyusu temizliği tamamlandı.`,
+            not: `${blok} bloğu bina içi temizlik ve kırım işleri ile asansör kuyusu temizliği tamamlandı.`,
           }
       );
     });
@@ -285,16 +421,14 @@ export const ParselTemizlikTespitScreen: React.FC<Props> = ({ currentUser }) => 
   const imza = () => {
     const bina = kontrolBina.trim();
     const altyapi = kontrolAltyapi.trim();
-    const cevre = kontrolCevre.trim();
     const asansor = kontrolAsansor.trim();
     return {
       hazirlayan: hazirlayan.trim(),
       projeMuduru: projeMuduru.trim(),
       kontrolBina: bina,
       kontrolAltyapi: altyapi,
-      kontrolCevre: cevre,
       kontrolAsansor: asansor,
-      parselSefi: [bina, altyapi, cevre, asansor].filter(Boolean).join(' / '),
+      parselSefi: [bina, altyapi, asansor].filter(Boolean).join(' / '),
     };
   };
 
@@ -842,7 +976,7 @@ export const ParselTemizlikTespitScreen: React.FC<Props> = ({ currentUser }) => 
       const blokFotolar = blokFotoSatirlari.map((r) => ({
         blok: r.blok,
         fotoUrls: r.fotolar,
-        not: r.not.trim() || `${r.blok} bloğu bina içi temizlik ve asansör kuyusu temizliği tamamlandı.`,
+        not: r.not.trim() || `${r.blok} bloğu bina içi temizlik ve kırım işleri ile asansör kuyusu temizliği tamamlandı.`,
       }));
       const hepsi = blokFotoSatirlari.flatMap((r) => r.fotolar);
       const html = buildParselTopluTutanakHtml({
@@ -851,12 +985,12 @@ export const ParselTemizlikTespitScreen: React.FC<Props> = ({ currentUser }) => 
         tarih,
         metin:
           tutanakNot.trim() ||
-          `${parselKisaAd(parsel)} parselinde ${bloklar.join(', ')} bloklarının tüm bina içi temizlikleri ile asansör kuyusu temizlikleri tamamlanmış ve teslim edilmiştir.`,
+          `${parselKisaAd(parsel)} parselinde ${bloklar.join(', ')} bloklarının tüm bina içi temizlik ve kırım işleri ile asansör kuyusu temizlikleri tamamlanmış ve teslim edilmiştir.`,
         fotoUrls: hepsi,
         imza: imza(),
         blokFotolar,
       });
-      openTemizlikRapor(html, `${parsel} ${bloklar.length} blok bina içi teslim tutanağı`, raporPencere);
+      openTemizlikRapor(html, `${parsel} ${bloklar.length} blok bina içi + kırım teslim tutanağı`, raporPencere);
       show(`${bloklar.length} blok teslim tutanağı açıldı — yazdırın / PDF kaydedin.`);
       if (await guard()) {
         await arsivleVeYazdir(
@@ -893,11 +1027,10 @@ export const ParselTemizlikTespitScreen: React.FC<Props> = ({ currentUser }) => 
         bloklar: blokFotoSatirlari.map((r) => ({
           blok: r.blok,
           fotoUrls: r.fotolar,
-          not: r.not.trim() || `${r.blok} bloğu bina içi temizlik ve asansör kuyusu temizliği tamamlandı.`,
+          not: r.not.trim() || `${r.blok} bloğu bina içi temizlik ve kırım işleri ile asansör kuyusu temizliği tamamlandı.`,
         })),
         baca: { fotoUrls: bacaKalem.fotolar, not: bacaKalem.not },
         asansor: { fotoUrls: asansorKalem.fotolar, not: asansorKalem.not },
-        cevre: { fotoUrls: cevreKalem.fotolar, not: cevreKalem.not },
       });
       openTemizlikRapor(html, `${parsel} iş bitirme ve teslim tutanağı`, raporPencere);
       show('Teslim tutanağı açıldı — yazdırın, imzalayın, PDF kaydedin. Fotoğraf zorunlu değildir.');
@@ -930,10 +1063,19 @@ export const ParselTemizlikTespitScreen: React.FC<Props> = ({ currentUser }) => 
         <div>
           <h1 className="text-lg font-black text-slate-900 uppercase tracking-wide">Parsel Temizlik Tespit</h1>
           <p className="text-[11px] text-slate-500 mt-0.5">
-            Üç parsel · fotoğrafsız tutanakta durum TAMAMLANDI · kontrol: bina / altyapı / çevre / asansör
+            Üç parsel · 3 ana kalem: bina içi temizlik ve kırım · altyapı baca · asansör kuyusu
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => setMobilMod((v) => !v)}
+            className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-[10px] font-black uppercase border cursor-pointer ${
+              mobilMod ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-500 border-slate-200'
+            }`}
+          >
+            <Smartphone size={12} /> {mobilMod ? 'Masaüstü' : 'Mobil saha'}
+          </button>
           <button
             type="button"
             onClick={() => setMod('daire')}
@@ -1025,7 +1167,7 @@ export const ParselTemizlikTespitScreen: React.FC<Props> = ({ currentUser }) => 
           <input
             value={kontrolBina}
             onChange={(e) => setKontrolBina(e.target.value)}
-            placeholder="Bina içi"
+            placeholder="Bina içi + kırım"
             className="mt-1 w-full border border-slate-200 rounded-xl px-2 py-1.5 text-xs font-bold"
           />
         </label>
@@ -1039,15 +1181,6 @@ export const ParselTemizlikTespitScreen: React.FC<Props> = ({ currentUser }) => 
           />
         </label>
         <label className="text-[10px] font-black uppercase text-slate-400">
-          Çevre kontrol
-          <input
-            value={kontrolCevre}
-            onChange={(e) => setKontrolCevre(e.target.value)}
-            placeholder="Kırım / çevre"
-            className="mt-1 w-full border border-slate-200 rounded-xl px-2 py-1.5 text-xs font-bold"
-          />
-        </label>
-        <label className="text-[10px] font-black uppercase text-slate-400">
           Asansör kontrol
           <input
             value={kontrolAsansor}
@@ -1057,12 +1190,12 @@ export const ParselTemizlikTespitScreen: React.FC<Props> = ({ currentUser }) => 
           />
         </label>
         <label className="md:col-span-4 text-[10px] font-black uppercase text-slate-400">
-          Tutanak notu
+          Tutanak notu / sözleşme hükmü
           <textarea
             value={tutanakNot}
             onChange={(e) => setTutanakNot(e.target.value)}
-            rows={2}
-            placeholder="Boş bırakırsanız parsel geneli iş bitim yazısı otomatik gelir…"
+            rows={3}
+            placeholder="Kibar Özer imza sonrası sorumluluk maddesi otomatik gelir…"
             className="mt-1 w-full border border-slate-200 rounded-xl px-2 py-1.5 text-xs font-semibold"
           />
         </label>
@@ -1139,21 +1272,43 @@ export const ParselTemizlikTespitScreen: React.FC<Props> = ({ currentUser }) => 
         </div>
       </div>
 
-      {teslimBloklari(parsel).length ? (
+      {teslimBloklari(parsel).length && mobilMod ? (
+        <MobilBlokFotoPrototype
+          parsel={parsel}
+          tarih={tarih}
+          busy={busy}
+          satirlari={blokFotoSatirlari}
+          mobilBlokIdx={mobilBlokIdx}
+          setMobilBlokIdx={setMobilBlokIdx}
+          onIngest={(idx, files) => ingestBlokFoto(idx, files)}
+          onRemoveFoto={(idx, fotoIdx) =>
+            setBlokFotoSatirlari((prev) =>
+              prev.map((r, ri) =>
+                ri === idx ? { ...r, fotolar: r.fotolar.filter((_, j) => j !== fotoIdx) } : r
+              )
+            )
+          }
+          onTeslim={() => void handleParselTeslimTutanak()}
+          onBinaOnly={() => void handleBlokTemizlikTutanak()}
+        />
+      ) : null}
+
+      {teslimBloklari(parsel).length && !mobilMod ? (
       <div className="rounded-2xl border-2 border-slate-900 bg-white p-4 space-y-4">
         <div>
           <p className="text-sm font-black uppercase text-slate-900">
-            {parselKisaAd(parsel)} iş teslim tutanağı — 4 ana başlık
+            {parselKisaAd(parsel)} iş teslim tutanağı — 3 ana başlık
           </p>
           <p className="text-[11px] text-slate-600 mt-1 leading-snug">
-            Fotoğraf isteğe bağlıdır; fotoğrafsız da teslim tutanağı basılır. Dört başlık: bina içi temizlik;
-            altyapı baca / pit çukuru; asansör kuyusu; kırım, çevre temizliği ve düzenleme. Siyah tuş antetli
-            teslim tutanağını açar (sözleşme ibareleri, 3 imza).
+            Fotoğraf isteğe bağlıdır. Üç başlık: bina içi temizlik ve kırım işleri; altyapı baca / pit çukuru;
+            asansör kuyusu. İmza tarihinden sonraki kirlilikten Kibar Özer ve ekibi sorumlu değildir (tutanak notu).
           </p>
         </div>
 
         <div className="rounded-xl border border-teal-300 bg-teal-50 p-3 space-y-2">
-          <p className="text-[11px] font-black uppercase text-teal-950">1 · Bina içi temizlikler (tüm bloklar + asansör kuyusu)</p>
+          <p className="text-[11px] font-black uppercase text-teal-950">
+            1 · Bina içi temizlik ve kırım işleri (tüm bloklar + asansör kuyusu)
+          </p>
           {blokFotoSatirlari.map((row, idx) => (
           <div key={row.blok} className="bg-white border border-teal-200 rounded-xl p-3 space-y-2">
             <div className="flex flex-wrap items-center gap-2">
@@ -1207,14 +1362,13 @@ export const ParselTemizlikTespitScreen: React.FC<Props> = ({ currentUser }) => 
             onClick={() => void handleBlokTemizlikTutanak()}
             className="inline-flex items-center gap-1.5 bg-teal-800 text-white text-[10px] font-black px-3 py-2 rounded-xl cursor-pointer disabled:opacity-50"
           >
-            <FileSignature size={13} /> Yalnız bina içi teslim tutanağı
+            <FileSignature size={13} /> Yalnız bina içi + kırım teslim tutanağı
           </button>
         </div>
 
         {[
           { key: 'baca' as const, no: '2', baslik: 'Altyapı baca / pit çukuru temizlikleri', kalem: bacaKalem, set: setBacaKalem },
           { key: 'asansor' as const, no: '3', baslik: 'Asansör kuyusu temizlikleri', kalem: asansorKalem, set: setAsansorKalem },
-          { key: 'cevre' as const, no: '4', baslik: 'Kırım, çevre temizliği ve düzenleme', kalem: cevreKalem, set: setCevreKalem },
         ].map((k) => (
           <div key={k.key} className="rounded-xl border border-slate-300 bg-slate-50 p-3 space-y-2">
             <p className="text-[11px] font-black uppercase text-slate-800">{k.no} · {k.baslik}</p>
@@ -1258,7 +1412,7 @@ export const ParselTemizlikTespitScreen: React.FC<Props> = ({ currentUser }) => 
           onClick={() => void handleParselTeslimTutanak()}
           className="w-full inline-flex items-center justify-center gap-2 bg-slate-900 text-white text-sm font-black px-4 py-3.5 rounded-xl cursor-pointer disabled:opacity-50"
         >
-          <FileSignature size={16} /> TESLİM TUTANAĞI (rapor) — 4 başlık, fotoğraf zorunlu değil
+          <FileSignature size={16} /> TESLİM TUTANAĞI (rapor) — 3 başlık, fotoğraf zorunlu değil
         </button>
       </div>
       ) : null}

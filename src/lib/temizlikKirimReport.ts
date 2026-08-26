@@ -64,10 +64,9 @@ function tekImzaHucre(unvan: string, gorev: string, ad: string, width: string): 
 }
 
 function resmiImzaCetveliHtml(imza?: TemizlikRaporImza): string {
-  const hasSplit = !!(imza?.kontrolBina || imza?.kontrolAltyapi || imza?.kontrolCevre || imza?.kontrolAsansor);
+  const hasSplit = !!(imza?.kontrolBina || imza?.kontrolAltyapi || imza?.kontrolAsansor || imza?.kontrolCevre);
   const bina = (hasSplit ? imza?.kontrolBina : imza?.parselSefi) || '';
   const altyapi = (imza?.kontrolAltyapi || '').trim();
-  const cevre = (imza?.kontrolCevre || '').trim();
   const asansor = (imza?.kontrolAsansor || '').trim();
   return `
     <div style="border:1px solid #0f172a;padding:10px 12px;margin:18px 0 12px;background:#f8fafc">
@@ -76,8 +75,8 @@ function resmiImzaCetveliHtml(imza?: TemizlikRaporImza): string {
         İşbu tutanak sözleşme ve teslim niteliğinde resmi belgedir. Yukarıda yazılı işlerin saha üzerinde yapıldığını
         ve teslim edildiğini <strong>kanıtlar</strong>. Tutanak metni ve imzalar işin delilidir; ekli fotoğraf varsa
         tutanağın ayrılmaz parçasıdır, yoksa teslim yine bu evrak ve imzalarla belgelenir. Aşağıdaki imza ve kaşeler
-        bu evrakı destekler. Hazırlayan ve onaylayan tek kişi olabilir; kontrol, dört ana kalem için ayrı imzalanır
-        (bina, altyapı, çevre, asansör). İmzalayanlar işi yerinde görmüş, kontrol etmiş ve <strong>kabul etmiş sayılır</strong>.
+        bu evrakı destekler. Hazırlayan ve onaylayan tek kişi olabilir; kontrol, üç ana kalem için ayrı imzalanır
+        (bina içi temizlik ve kırım, altyapı baca, asansör kuyusu). İmzalayanlar işi yerinde görmüş, kontrol etmiş ve <strong>kabul etmiş sayılır</strong>.
         Bu tutanak teslim, hakediş ve ödeme işlemlerinde dayanak olarak kullanılır. Üç nüsha düzenlenmiştir.
       </p>
     </div>
@@ -87,16 +86,19 @@ function resmiImzaCetveliHtml(imza?: TemizlikRaporImza): string {
         ${tekImzaHucre('Onaylayan', 'Proje müdürü / işveren vekili', imza?.projeMuduru || '', '50%')}
       </tr>
     </table>
-    <p style="margin:12px 0 4px;font-size:11px;font-weight:800;letter-spacing:.06em;text-transform:uppercase">Kontrol imzaları — dört ana kalem</p>
+    <p style="margin:12px 0 4px;font-size:11px;font-weight:800;letter-spacing:.06em;text-transform:uppercase">Kontrol imzaları — üç ana kalem</p>
     <table style="width:100%;border-collapse:collapse;page-break-inside:avoid">
       <tr>
-        ${tekImzaHucre('Bina kontrol', 'Bina içi temizlik', bina, '25%')}
-        ${tekImzaHucre('Altyapı kontrol', 'Baca / pit çukuru', altyapi, '25%')}
-        ${tekImzaHucre('Çevre kontrol', 'Kırım / çevre düzenleme', cevre, '25%')}
-        ${tekImzaHucre('Asansör kontrol', 'Asansör kuyusu', asansor, '25%')}
+        ${tekImzaHucre('Bina kontrol', 'Bina içi temizlik ve kırım', bina, '34%')}
+        ${tekImzaHucre('Altyapı kontrol', 'Baca / pit çukuru', altyapi, '33%')}
+        ${tekImzaHucre('Asansör kontrol', 'Asansör kuyusu', asansor, '33%')}
       </tr>
     </table>`;
 }
+
+/** Sözleşme imza tarihinden sonraki kirlilik — Kibar Özer ve ekibi sorumlu değildir. */
+export const KIBAR_OZER_IMZA_SONRASI_SORUMLULUK =
+  'SÖZLEŞME İMZA TARİHİNDEN SONRA SORUMLULUK: İşbu tutanak / sözleşmenin imza tarihinden sonra oluşacak kirlilik, döküntü, tadilat atığı ve yeniden kirlenmeden Kibar Özer ve ekibi sorumlu değildir; imza anındaki teslim durumu esas alınır.';
 
 function imgGrid(urls: string[], etiket: string, max = 16): string {
   const list = (urls || []).filter(Boolean).slice(0, max);
@@ -547,7 +549,8 @@ export function buildParselTeslimTutanakHtml(opts: {
   bloklar: { blok: string; fotoUrls: string[]; not?: string }[];
   baca: { fotoUrls: string[]; not?: string };
   asansor: { fotoUrls: string[]; not?: string };
-  cevre: { fotoUrls: string[]; not?: string };
+  /** @deprecated Kırım bina içi kaleme alındı; yok sayılır */
+  cevre?: { fotoUrls: string[]; not?: string };
 }): string {
   const tarih = formatDateLabelTr(opts.tarih || new Date().toISOString());
   const kisa = parselKisaAd(opts.parsel);
@@ -555,6 +558,9 @@ export function buildParselTeslimTutanakHtml(opts: {
   const blokAdlari = bloklar.map((b) => b.blok.trim().toLocaleUpperCase('tr-TR'));
   const blokFotoVar = bloklar.some((b) => (b.fotoUrls || []).some(Boolean));
   const belgeAdi = 'PARSEL İŞ BİTİRME VE TESLİM TUTANAĞI';
+  const sorumlulukNotu = (opts.genelNot || '').trim().includes('Kibar Özer')
+    ? (opts.genelNot || '').trim()
+    : [opts.genelNot?.trim(), KIBAR_OZER_IMZA_SONRASI_SORUMLULUK].filter(Boolean).join('\n\n');
   const kalemSatir = (no: string, baslik: string, icerik: string) =>
     `<p style="margin:14px 0 6px;font-size:12px;font-weight:800;text-decoration:underline">${escapeHtml(no)} — ${escapeHtml(baslik)}</p>
      <p style="margin:0 0 10px;font-size:12px;line-height:1.55;text-align:justify">${icerik}</p>`;
@@ -573,11 +579,11 @@ export function buildParselTeslimTutanakHtml(opts: {
           <td style="border:1px solid #0f172a;padding:6px 8px;font-weight:700;background:#f1f5f9">Parsel</td>
           <td style="border:1px solid #0f172a;padding:6px 8px"><strong>${escapeHtml(opts.parsel)}</strong> (${escapeHtml(kisa)})</td>
           <td style="border:1px solid #0f172a;padding:6px 8px;font-weight:700;background:#f1f5f9">Kapsam</td>
-          <td style="border:1px solid #0f172a;padding:6px 8px">Parsel geneli — 4 iş kalemi</td>
+          <td style="border:1px solid #0f172a;padding:6px 8px">Parsel geneli — 3 iş kalemi</td>
         </tr>
         <tr>
           <td style="border:1px solid #0f172a;padding:6px 8px;font-weight:700;background:#f1f5f9">Konu</td>
-          <td colspan="3" style="border:1px solid #0f172a;padding:6px 8px">1) Bina içi temizlik 2) Altyapı baca / pit çukuru 3) Asansör kuyusu 4) Kırım, çevre temizliği ve düzenleme</td>
+          <td colspan="3" style="border:1px solid #0f172a;padding:6px 8px">1) Bina içi temizlik ve kırım işleri 2) Altyapı baca / pit çukuru 3) Asansör kuyusu</td>
         </tr>
       </table>
 
@@ -585,14 +591,14 @@ export function buildParselTeslimTutanakHtml(opts: {
         'MADDE 1',
         'Yer ve iş tanımı',
         `İşbu tutanak, ${escapeHtml(opts.parsel)} (${escapeHtml(kisa)}) üzerinde tamamlanan işlerin teslim belgesidir.
-         Dört ana kalem: bina içi temizlik; altyapı baca ve pit çukuru temizliği; asansör kuyusu temizliği; kırım, çevre temizliği ve düzenleme.
+         Üç ana kalem: bina içi temizlik ve kırım işleri; altyapı baca ve pit çukuru temizliği; asansör kuyusu temizliği.
          Fotoğraf eki varsa tutanağa bağlanır; yoksa teslim bu metin ve imzalarla belgelenir.`
       )}
 
       ${kalemSatir(
         'MADDE 2',
-        'Bina içi temizlikler',
-        `${escapeHtml(kisa)} parselinde aşağıdaki ${blokAdlari.length} bloğun tüm bina içi temizlikleri ile asansör kuyusu temizlikleri tamamlanmış ve teslim edilmiştir: ${escapeHtml(blokAdlari.join(', '))}.`
+        'Bina içi temizlik ve kırım işleri',
+        `${escapeHtml(kisa)} parselinde aşağıdaki ${blokAdlari.length} bloğun tüm bina içi temizlik ve kırım işleri ile asansör kuyusu temizlikleri tamamlanmış ve teslim edilmiştir: ${escapeHtml(blokAdlari.join(', '))}.`
       )}
       <table style="width:100%;border-collapse:collapse;font-size:12px;margin:0 0 12px">
         <tr>
@@ -629,31 +635,20 @@ export function buildParselTeslimTutanakHtml(opts: {
       )}
       ${imgGridIfAny(opts.asansor.fotoUrls || [], `${kisa} asansör kuyusu`)}
 
-      ${kalemSatir(
-        'MADDE 5',
-        'Kırım, çevre temizliği ve düzenleme',
-        opts.cevre.not?.trim() ||
-          `${escapeHtml(kisa)} parselinde kırım, çevre temizliği ve düzenleme işi tamamlanmış ve teslim edilmiştir.`
-      )}
-      ${imgGridIfAny(opts.cevre.fotoUrls || [], `${kisa} kırım / çevre`)}
-
-      <p style="margin:16px 0 6px;font-size:12px;font-weight:800;text-decoration:underline">MADDE 6 — Tespit ve sonuç</p>
+      <p style="margin:16px 0 6px;font-size:12px;font-weight:800;text-decoration:underline">MADDE 5 — Tespit ve sonuç</p>
       <p style="margin:0 0 10px;font-size:13px;line-height:1.55;text-align:justify;font-weight:700;border:1px solid #0f172a;padding:10px 12px;background:#fffbeb">
-        Yapılan saha kontrolü sonucunda ${escapeHtml(kisa)} parselinde dört ana iş kalemi —
-        bina içi temizlik ve asansör kuyusu (${escapeHtml(blokAdlari.join(', '))}),
-        altyapı baca / pit çukuru temizliği, asansör kuyusu temizliği ile kırım, çevre temizliği ve düzenleme —
+        Yapılan saha kontrolü sonucunda ${escapeHtml(kisa)} parselinde üç ana iş kalemi —
+        bina içi temizlik ve kırım işleri (${escapeHtml(blokAdlari.join(', '))}),
+        altyapı baca / pit çukuru temizliği ile asansör kuyusu temizliği —
         tamamlanmış ve teslim edilmiştir.
       </p>
-      ${
-        opts.genelNot?.trim()
-          ? `<p style="margin:0 0 4px;font-size:11px;font-weight:800">Saha tutanak notu</p>
-             <p style="margin:0 0 12px;font-size:12px;line-height:1.5;text-align:justify;border:1px solid #cbd5e1;padding:8px 10px">${escapeHtml(opts.genelNot.trim())}</p>`
-          : ''
-      }
+
+      <p style="margin:0 0 4px;font-size:11px;font-weight:800">Saha tutanak notu / sözleşme hükmü</p>
+      <p style="margin:0 0 12px;font-size:12px;line-height:1.5;text-align:justify;border:1px solid #cbd5e1;padding:8px 10px;white-space:pre-wrap">${escapeHtml(sorumlulukNotu)}</p>
 
       ${
         blokFotoVar
-          ? `<p style="margin:0 0 6px;font-size:12px;font-weight:800;text-decoration:underline">MADDE 7 — Blok fotoğraf ekleri</p>
+          ? `<p style="margin:0 0 6px;font-size:12px;font-weight:800;text-decoration:underline">MADDE 6 — Blok fotoğraf ekleri</p>
              ${bloklar
                .filter((b) => (b.fotoUrls || []).some(Boolean))
                .map((b, i) => {
@@ -665,19 +660,19 @@ export function buildParselTeslimTutanakHtml(opts: {
       }
 
       <p style="margin:16px 0 8px;font-size:12px;line-height:1.55;text-align:justify">
-        MADDE 8 — İşbu tutanak gerçeğe aykırı husus taşımadığını beyan eden aşağıda imzası bulunanlarca imzalanmış olup
-        <strong>${escapeHtml(kisa)} parselindeki dört ana kalem iş teslim edilmiştir.</strong>
+        MADDE 7 — İşbu tutanak gerçeğe aykırı husus taşımadığını beyan eden aşağıda imzası bulunanlarca imzalanmış olup
+        <strong>${escapeHtml(kisa)} parselindeki üç ana kalem iş teslim edilmiştir.</strong>
       </p>
-      <p style="margin:0 0 6px;font-size:12px;font-weight:800;text-decoration:underline">MADDE 9 — Kanıt, kabul ve bağlayıcılık</p>
+      <p style="margin:0 0 6px;font-size:12px;font-weight:800;text-decoration:underline">MADDE 8 — Kanıt, kabul ve bağlayıcılık</p>
       <p style="margin:0 0 12px;font-size:12px;line-height:1.6;text-align:justify;border:2px solid #0f172a;padding:12px 14px">
         İşbu evrak, ${escapeHtml(opts.parsel)} (${escapeHtml(kisa)}) kapsamında yapılan
-        <strong>bina içi temizlik, altyapı baca / pit çukuru temizliği, asansör kuyusu temizliği ile kırım, çevre temizliği ve düzenleme</strong>
+        <strong>bina içi temizlik ve kırım işleri, altyapı baca / pit çukuru temizliği ile asansör kuyusu temizliği</strong>
         işlerinin yerinde yapıldığının ve teslim edildiğinin resmi kaydı, kanıtı ve teslim belgesidir.
         Fotoğraf eklenmişse tutanağın ayrılmaz parçası ve delilidir; eklenmemişse teslim yine bu tutanak metni ile
         hazırlayan, kontrol eden ve onaylayanın imza ve kaşesiyle belgelenir. İmza ve kaşe bu evrakı destekler;
         imza ile iş <strong>yapılmış, görülmüş, kontrol edilmiş ve kabul edilmiş</strong> sayılır.
         Taraflar bu tutanağı sözleşme eki, teslim belgesi ve hakediş dayanağı olarak kabul eder. İmza tarihinden itibaren
-        iş teslim edilmiş kabul olunur.
+        iş teslim edilmiş kabul olunur. <strong>${escapeHtml(KIBAR_OZER_IMZA_SONRASI_SORUMLULUK)}</strong>
       </p>
       ${resmiImzaCetveliHtml(opts.imza)}
     </div>
