@@ -617,6 +617,11 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
         : normalizedPayload.firmaTipi,
     } as Personel);
 
+    // Aktif kartta eski çıkış tarihi kalmasın (yeniden giriş / liste sync artığı)
+    if (is_aktif_status(withRules.durum)) {
+      (withRules as Personel).istenCikisTarihi = null as unknown as string;
+    }
+
     const resolvedEditId =
       (editingId && String(editingId).trim()) ||
       (isEdit && 'id' in withRules && withRules.id ? String(withRules.id).trim() : '') ||
@@ -629,7 +634,7 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
     } else {
       savedPersonel = {
         ...(withRules as Omit<Personel, 'id'>),
-        id: `p_${Date.now()}`,
+        id: `p_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
       };
     }
     let savingAsEdit = Boolean(resolvedEditId);
@@ -661,8 +666,8 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
       );
       return;
     } finally {
+      // Kilit handleSave bitene kadar kalsın — erken bırakınca çift kayıt oluşabiliyordu
       setSavingPersonel(false);
-      saveLockRef.current = false;
     }
 
     setPersoneller((prev) => {
@@ -670,10 +675,19 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
         const exists = prev.some((p) => p.id === savedPersonel.id);
         if (exists) {
           return prev.map((p) =>
-            p.id === savedPersonel.id ? { ...p, ...savedPersonel, id: savedPersonel.id } : p
+            p.id === savedPersonel.id
+              ? {
+                  ...p,
+                  ...savedPersonel,
+                  id: savedPersonel.id,
+                  ...(is_aktif_status(savedPersonel.durum)
+                    ? { istenCikisTarihi: undefined }
+                    : null),
+                }
+              : p
           );
         }
-        // Seçili kaydın id'si listedekiyle farklıysa (eski bozuk id alanı) seçiliyi güncelle
+        // Seçili kaydın id'si listedekiyle farklıysa (eski bozuk id alanı) seçiliye güncelle
         if (selectedPersonel?.id) {
           return prev.map((p) =>
             p.id === selectedPersonel.id ? { ...savedPersonel, id: selectedPersonel.id } : p
@@ -925,6 +939,7 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
     e.preventDefault();
     if (saveLockRef.current || savingPersonel) return;
     saveLockRef.current = true;
+    setSavingPersonel(true);
     try {
     const isTaseronForm = formData.firmaTipi === 'TASERON';
     if (!formData.ad || !formData.soyad) {
@@ -1074,6 +1089,7 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
     await finalizePersonelSave(normalizedPayload, isEdit, undefined, undefined, editingId || undefined);
     } finally {
       saveLockRef.current = false;
+      setSavingPersonel(false);
     }
   };
 
@@ -2638,7 +2654,7 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
                             </span>
                           );
                         })()}
-                        {p.istenCikisTarihi && (
+                        {!is_aktif_status(p.durum) && p.istenCikisTarihi && (
                           <span className="bg-red-50 text-rose-700 border border-rose-100 px-2 py-0.5 rounded-full font-bold">
                             Ayrılış: {p.istenCikisTarihi}
                           </span>
@@ -2662,7 +2678,7 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
                           <span>📅 İşe Giriş:</span>
                           <span>{p.iseGirisTarihi || '-'}</span>
                         </span>
-                        {p.istenCikisTarihi && (
+                        {!is_aktif_status(p.durum) && p.istenCikisTarihi && (
                           <span className="inline-flex items-center gap-1 bg-rose-50 border border-rose-200 text-rose-700 px-2 py-0.5 rounded font-black font-mono text-[9px]">
                             <span>🚫 İşten Çıkış:</span>
                             <span>{p.istenCikisTarihi}</span>
