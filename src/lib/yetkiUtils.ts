@@ -20,6 +20,7 @@ export const PORTAL_PAGES = [
   { key: "arac", label: "Araç ve Demirbaş", group: "İDARİ İŞLER & SAHA" },
   { key: "kamp", label: "Kamp Yönetimi", group: "İDARİ İŞLER & SAHA" },
   { key: "saha", label: "Daily Saha Faaliyetleri", group: "İDARİ İŞLER & SAHA" },
+  { key: "proje_ilerleme", label: "Proje İlerlemesi", group: "İDARİ İŞLER & SAHA" },
   { key: "rapor_programlama", label: "Raporlama & Programlama", group: "İDARİ İŞLER & SAHA" },
   { key: "tutanak", label: "Hazır Tutanaklar", group: "İDARİ İŞLER & SAHA" },
   { key: "formen_ekrani", label: "Formen Mobil Paneli", group: "İDARİ İŞLER & SAHA" },
@@ -43,7 +44,7 @@ export type PortalPageKey = (typeof PORTAL_PAGES)[number]["key"];
 /** Mobil saha rolleri → erişilebilir panel sekmeleri */
 export const MOBILE_ROLE_ALLOWED_TABS: Record<string, PortalPageKey[]> = {
   // Formen günlük planı yönetirken ana sayfadaki genel özeti de görebilir.
-  FORMEN: ['ana_sayfa', 'formen_ekrani', 'faaliyet_personel', 'rapor_programlama', 'personel', 'siparis_formu'],
+  FORMEN: ['ana_sayfa', 'formen_ekrani', 'faaliyet_personel', 'proje_ilerleme', 'rapor_programlama', 'personel', 'siparis_formu'],
   GÜVENLİK: ['guvenlik_ekrani', 'siparis_formu'],
   KAMPÇI: ['kampci_ekrani', 'siparis_formu'],
   TESİSATÇI: ['tesisatci_ekrani', 'siparis_formu'],

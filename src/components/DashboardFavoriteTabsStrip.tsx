@@ -33,6 +33,7 @@ const TAB_META: Record<string, { label: string; icon: React.ElementType }> = {
   lojistik_ekrani: { label: 'Lojistik', icon: Truck },
   depocu_ekrani: { label: 'Depocu', icon: Package },
   formen_ekrani: { label: 'Formen', icon: Users },
+  proje_ilerleme: { label: 'Proje İlerlemesi', icon: ClipboardList },
   imalat_terminali: { label: 'İmalat', icon: Settings },
   temizlik_kirim: { label: 'Temizlik / Kırım', icon: ClipboardList },
   parsel_temizlik_tespit: { label: 'Parsel Temizlik Tespit', icon: ClipboardList },

@@ -666,6 +666,40 @@ export interface KampFaaliyet {
 
 export type SahaFaaliyetTipi = 'NORMAL' | 'MESAI_SAHA';
 
+/** Proje kapanış / punch — iş kalemi kovası */
+export type ProjeIlerlemeKova =
+  | 'EKSIK_IMALAT'
+  | 'TADILAT'
+  | 'PEYZAJ'
+  | 'TESLIM_EVRAK'
+  | 'DIGER';
+
+export type ProjeIlerlemeDurum = 'ACIK' | 'DEVAM' | 'BEKLEMEDE' | 'KAPANDI';
+
+/**
+ * Kapanış punch satırı — 2 yıllık şantiye yüzdesi değil,
+ * bitişe kalan işlerin tek doğruluk listesi.
+ */
+export interface ProjeIlerlemeKalemi {
+  id: string;
+  parsel: string;
+  blok: string;
+  baslik: string;
+  kova: ProjeIlerlemeKova;
+  durum: ProjeIlerlemeDurum;
+  /** 1=kolay · 2=normal · 3=kritik / teslimi bloke */
+  agirlik: 1 | 2 | 3;
+  /** Teslim/iskanı bloke eden madde */
+  kirmiziEngel: boolean;
+  hedefTarih?: string;
+  sorumlu?: string;
+  engel?: string;
+  not?: string;
+  olusturmaTarihi: string;
+  guncellemeTarihi?: string;
+  olusturan?: string;
+}
+
 export type FaaliyetIlerlemeDurumu = 'BASLAMADI' | 'DEVAM' | 'TAMAMLANDI';
 
 export interface FaaliyetIlerlemeKaydi {

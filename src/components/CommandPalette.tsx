@@ -40,6 +40,7 @@ const ROUTES = [
   { key: 'lojistik_ekrani', label: 'Lojistik', icon: Truck },
   { key: 'depocu_ekrani', label: 'Depocu', icon: Package },
   { key: 'formen_ekrani', label: 'Formen Ekranı', icon: Users },
+  { key: 'proje_ilerleme', label: 'Proje İlerlemesi', icon: ClipboardList },
   { key: 'imalat_terminali', label: 'İmalat Terminali', icon: Settings },
   { key: 'temizlik_kirim', label: 'Temizlik / Kırım Tespiti', icon: ClipboardList },
   { key: 'parsel_temizlik_tespit', label: 'Parsel Temizlik Tespit', icon: ClipboardList },
