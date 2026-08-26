@@ -10,6 +10,7 @@ import {
   CANONICAL_ANA_FIRMA_ADI,
   canonicalizeAnaFirmaAdi,
   isTaseronPersonel,
+  parseFlexibleDateParts,
 } from './yoklamaUtils';
 import { formatPersonelMissingDocs } from './personelMissingDocs';
 import { createExcelWorkbook } from './exceljsLoader';
@@ -18,6 +19,34 @@ import {
   buildKibritciReportHtml,
   openKibritciReportPrint,
 } from './kibritciReportTemplate';
+
+/**
+ * Taşeron / yoklamasız kadro: işe giriş → çıkış (yoksa bugün) arası takvim günü (iki uç dahil).
+ * Örn. 10.08–10.08 = 1 gün, 11.08–12.08 = 2 gün.
+ */
+export function countPersonelKadroGun(p: Personel, asOf: Date = new Date()): number | '' {
+  const hire = parseFlexibleDateParts(p.iseGirisTarihi);
+  if (!hire) return '';
+  const exit = parseFlexibleDateParts(p.istenCikisTarihi);
+  const end = exit || {
+    year: asOf.getFullYear(),
+    month: asOf.getMonth() + 1,
+    day: asOf.getDate(),
+  };
+  const startMs = Date.UTC(hire.year, hire.month - 1, hire.day);
+  const endMs = Date.UTC(end.year, end.month - 1, end.day);
+  if (endMs < startMs) return 0;
+  return Math.floor((endMs - startMs) / 86_400_000) + 1;
+}
+
+function formatMaasValue(p: Personel): number {
+  const n = Number(p.maas);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function formatUcretTipi(p: Personel): string {
+  return String(p.ucretTipi || '').trim() || '—';
+}
 
 export type PersonelExcelScope = 'taseron' | 'all' | 'ana_firma' | 'custom';
 
@@ -307,6 +336,9 @@ export async function exportPersonelExcel(options: {
     'İşten Çıkış',
     'SGK Durumu',
     'Durum',
+    'Maaş',
+    'Ücret Tipi',
+    'Çalışılan Gün',
   ];
   if (includeKamp) headers.push('Kamp Yerleşimi');
   headers.push('Eksik Evrak');
@@ -338,7 +370,7 @@ export async function exportPersonelExcel(options: {
   const splitByDurum = options.splitByDurum ?? !options.onlyActive;
   const metaLine = `Oluşturma: ${stamp} · Toplam: ${rows.length} · Aktif: ${activeCount} · Pasif: ${passiveCount}${
     options.onlyActive ? ' · Filtre: yalnız aktif' : ' · Filtre: aktif ve pasif ayrı listelenir'
-  }`;
+  } · Çalışılan gün = giriş–çıkış (çıkış yoksa bugün, uçlar dahil)`;
 
   const headerRowIndex = await applyKibritciPersonelExcelAntet(workbook, sheet, {
     title: reportTitle,
@@ -360,6 +392,9 @@ export async function exportPersonelExcel(options: {
     { width: 12 },
     { width: 14 },
     { width: 10 },
+    { width: 12 },
+    { width: 11 },
+    { width: 12 },
     ...(includeKamp ? [{ width: 26 }] : []),
     { width: 28 },
   ];
@@ -375,9 +410,16 @@ export async function exportPersonelExcel(options: {
   });
   headerRow.height = 26;
 
+  const statusCol = 12;
+  const maasCol = 13;
+  const ucretCol = 14;
+  const kadroGunCol = 15;
+  const centerCols = new Set([1, 9, 10, statusCol, maasCol, kadroGunCol]);
+
   let rowIndex = 0;
   const writePersonelRow = (p: Personel) => {
     rowIndex += 1;
+    const kadroGun = countPersonelKadroGun(p);
     const values: (string | number)[] = [
       rowIndex,
       firmaAdiLabel(p),
@@ -391,6 +433,9 @@ export async function exportPersonelExcel(options: {
       isAktif(p) ? '' : p.istenCikisTarihi || '',
       p.sgkDurumu || '',
       isAktif(p) ? 'Aktif' : 'Pasif',
+      formatMaasValue(p),
+      formatUcretTipi(p),
+      kadroGun === '' ? '—' : kadroGun,
     ];
     if (includeKamp) {
       values.push(
@@ -404,8 +449,9 @@ export async function exportPersonelExcel(options: {
     const aktif = isAktif(p);
     row.height = 18;
     row.eachCell((cell, colNumber) => {
-      const isStatus = colNumber === 12;
+      const isStatus = colNumber === statusCol;
       const isName = colNumber === 4;
+      const isMaas = colNumber === maasCol;
       cell.font = {
         name: 'Calibri',
         size: isName ? 10 : 9,
@@ -423,12 +469,15 @@ export async function exportPersonelExcel(options: {
       cell.border = thinBorder();
       cell.alignment = {
         vertical: 'middle',
-        horizontal: colNumber === 1 || colNumber === 12 || colNumber === 9 || colNumber === 10 ? 'center' : 'left',
-        wrapText: colNumber === headers.length || colNumber === 8,
+        horizontal: centerCols.has(colNumber) ? 'center' : 'left',
+        wrapText: colNumber === headers.length || colNumber === 8 || colNumber === ucretCol,
       };
       setFill(cell, alt ? LIGHT.rowAlt : LIGHT.rowBase);
       if (isStatus) {
         setFill(cell, aktif ? LIGHT.aktifCellBg : LIGHT.pasifCellBg);
+      }
+      if (isMaas) {
+        cell.numFmt = '#,##0';
       }
     });
   };
@@ -594,6 +643,8 @@ export function buildPersonelListeRaporHtml(options: {
           .map((p, index) => {
             const missingDocs = formatPersonelMissingDocs(p);
             const active = isAktif(p);
+            const kadroGun = countPersonelKadroGun(p);
+            const maas = formatMaasValue(p);
             return `<tr>
             <td style="${cell};text-align:center;color:#64748b;width:28px">${index + 1}</td>
             <td style="${cell};font-weight:800;color:#0f172a">${esc(p.ad)} ${esc(p.soyad)}<br/><span style="font-weight:600;color:#64748b;font-size:10px">${esc(firmaTipiLabel(p))}</span></td>
@@ -601,6 +652,8 @@ export function buildPersonelListeRaporHtml(options: {
             <td style="${cell}">${esc(displayPersonelGorev(p) || '-')}<br/><span style="color:#64748b;font-size:10px">${esc(p.departman || '-')}</span></td>
             <td style="${cell}">${esc(p.telefonNo || '-')}</td>
             <td style="${cell}">${esc(p.iseGirisTarihi || '-')}${p.istenCikisTarihi ? `<br/><span style="color:#9f1239;font-size:10px">Çıkış: ${esc(p.istenCikisTarihi)}</span>` : `<br/><span style="color:#64748b;font-size:10px">${esc(p.sgkDurumu || '-')}</span>`}</td>
+            <td style="${cell};text-align:center;font-weight:800">${kadroGun === '' ? '—' : esc(kadroGun)}</td>
+            <td style="${cell};text-align:right;font-variant-numeric:tabular-nums">${esc(maas.toLocaleString('tr-TR'))}<br/><span style="color:#64748b;font-size:10px">${esc(formatUcretTipi(p))}</span></td>
             <td style="${cell};text-align:center">
               <span style="display:inline-block;border-radius:999px;padding:2px 7px;font-size:10px;font-weight:800;background:${active ? '#dcfce7' : '#fee2e2'};color:${active ? '#166534' : '#991b1b'}">${active ? 'Aktif' : 'Pasif'}</span>
             </td>
@@ -623,6 +676,8 @@ export function buildPersonelListeRaporHtml(options: {
                 <th style="${th}">Görev / Departman</th>
                 <th style="${th}">Telefon</th>
                 <th style="${th}">İşe Giriş / Çıkış</th>
+                <th style="${th};text-align:center">Çalışılan Gün</th>
+                <th style="${th};text-align:right">Maaş</th>
                 <th style="${th};text-align:center">Durum</th>
                 <th style="${th}">Evrak</th>
               </tr>
@@ -686,6 +741,7 @@ export function buildPersonelListeRaporHtml(options: {
       `Aktif: ${activeCount}`,
       `Pasif: ${passiveCount}`,
       options.onlyActive ? 'Filtre: Yalnız aktif' : 'Filtre: Aktif ve pasif ayrı listelenir',
+      'Çalışılan gün: işe giriş–çıkış (çıkış yoksa bugün, uçlar dahil)',
       `Rapor tarihi: ${new Date().toLocaleString('tr-TR')}`,
     ],
     bodyHtml,
