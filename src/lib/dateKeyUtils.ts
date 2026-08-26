@@ -26,3 +26,19 @@ export function todayDateKey(): string {
   const localToday = new Date(today.getTime() - offset * 60 * 1000);
   return localToday.toISOString().split('T')[0];
 }
+
+/** YYYY-MM-DD anahtarına gün ekler / çıkarır (yerel takvim). */
+export function addDaysToDateKey(raw: unknown, days: number): string {
+  const key = normalizeDateKey(raw) || todayDateKey();
+  const [y, m, d] = key.split('-').map(Number);
+  const dt = new Date(y, (m || 1) - 1, d || 1);
+  dt.setDate(dt.getDate() + days);
+  const yy = dt.getFullYear();
+  const mm = String(dt.getMonth() + 1).padStart(2, '0');
+  const dd = String(dt.getDate()).padStart(2, '0');
+  return `${yy}-${mm}-${dd}`;
+}
+
+export function tomorrowDateKey(): string {
+  return addDaysToDateKey(todayDateKey(), 1);
+}

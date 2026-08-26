@@ -677,8 +677,8 @@ export type ProjeIlerlemeKova =
 export type ProjeIlerlemeDurum = 'ACIK' | 'DEVAM' | 'BEKLEMEDE' | 'KAPANDI';
 
 /**
- * Kapanış punch satırı — 2 yıllık şantiye yüzdesi değil,
- * bitişe kalan işlerin tek doğruluk listesi.
+ * Kapanış punch / açık iş kalemi — teslim öncesi tespit satırı.
+ * Şantiye yüzdesi değil; bitişe kalan işlerin tek doğruluk listesi.
  */
 export interface ProjeIlerlemeKalemi {
   id: string;
@@ -689,12 +689,45 @@ export interface ProjeIlerlemeKalemi {
   durum: ProjeIlerlemeDurum;
   /** 1=kolay · 2=normal · 3=kritik / teslimi bloke */
   agirlik: 1 | 2 | 3;
-  /** Teslim/iskanı bloke eden madde */
+  /** Teslim / iskanı bloke eden madde */
   kirmiziEngel: boolean;
   hedefTarih?: string;
   sorumlu?: string;
   engel?: string;
   not?: string;
+  olusturmaTarihi: string;
+  guncellemeTarihi?: string;
+  olusturan?: string;
+}
+
+/**
+ * Günlük iş programı satırı — açık iş kaleminin programa alınması.
+ * Akış: tespit (punch) → günlük iş programı → imalat gerçekleşmesi.
+ */
+export type ProjeIsPlanDurum =
+  | 'PROGRAMDA'
+  | 'IMALATTA'
+  | 'TAMAMLANDI'
+  | 'ERTELENDI'
+  | 'PROGRAMDAN_CIKARILDI';
+
+export interface ProjeIsPlanSatiri {
+  id: string;
+  /** Program günü YYYY-MM-DD */
+  tarih: string;
+  kalemId: string;
+  parsel: string;
+  blok: string;
+  baslik: string;
+  kova: ProjeIlerlemeKova;
+  agirlik: 1 | 2 | 3;
+  kirmiziEngel?: boolean;
+  durum: ProjeIsPlanDurum;
+  /** Saha gerçekleşme notu (engel, ekip, ölçü vb.) */
+  gerceklesmeNot?: string;
+  /** Eski alan — okuma uyumu */
+  ilerlemeNot?: string;
+  sira: number;
   olusturmaTarihi: string;
   guncellemeTarihi?: string;
   olusturan?: string;
