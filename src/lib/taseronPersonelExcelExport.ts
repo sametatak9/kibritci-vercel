@@ -22,18 +22,31 @@ import {
 export type PersonelExcelScope = 'taseron' | 'all' | 'ana_firma' | 'custom';
 
 const LIGHT = {
-  title: 'FF0F172A',
-  meta: 'FF64748B',
-  accent: 'FF0F766E',
-  accentBar: 'FF99F6E4',
-  tableHeadBg: 'FFF1F5F9',
-  tableHeadText: 'FF334155',
-  firmaBannerBg: 'FFEFF6FF',
-  firmaBannerText: 'FF1E40AF',
-  gorevBannerBg: 'FFECFDF5',
-  gorevBannerText: 'FF065F46',
-  rowAlt: 'FFF8FAFC',
-  border: 'FFE2E8F0',
+  title: 'FF1C1917',
+  meta: 'FF78716C',
+  accent: 'FFD97706',
+  accentBar: 'FFFBBF24',
+  accentSoft: 'FFFFF7ED',
+  tableHeadBg: 'FF292524',
+  tableHeadText: 'FFFFFBEB',
+  firmaBannerBg: 'FFFFF7ED',
+  firmaBannerText: 'FF9A3412',
+  gorevBannerBg: 'FFFAFAF9',
+  gorevBannerText: 'FF44403C',
+  aktifBannerBg: 'FFECFDF5',
+  aktifBannerText: 'FF065F46',
+  pasifBannerBg: 'FFFAf5F5',
+  pasifBannerText: 'FF9F1239',
+  aktifCellBg: 'FFD1FAE5',
+  aktifCellText: 'FF065F46',
+  pasifCellBg: 'FFFEE2E2',
+  pasifCellText: 'FF9F1239',
+  rowAlt: 'FFFAFAF9',
+  rowBase: 'FFFFFFFF',
+  border: 'FFE7E5E4',
+  borderStrong: 'FFD6D3D1',
+  metaStrip: 'FFFFFBEB',
+  footerBg: 'FFFAFAF9',
 } as const;
 
 function thinBorder() {
@@ -41,6 +54,15 @@ function thinBorder() {
     top: { style: 'thin' as const, color: { argb: LIGHT.border } },
     left: { style: 'thin' as const, color: { argb: LIGHT.border } },
     bottom: { style: 'thin' as const, color: { argb: LIGHT.border } },
+    right: { style: 'thin' as const, color: { argb: LIGHT.border } },
+  };
+}
+
+function mediumBottomBorder() {
+  return {
+    top: { style: 'thin' as const, color: { argb: LIGHT.border } },
+    left: { style: 'thin' as const, color: { argb: LIGHT.border } },
+    bottom: { style: 'medium' as const, color: { argb: LIGHT.borderStrong } },
     right: { style: 'thin' as const, color: { argb: LIGHT.border } },
   };
 }
@@ -64,20 +86,20 @@ async function applyKibritciPersonelExcelAntet(
   opts: { title: string; subtitle: string; metaLine: string; colCount: number }
 ): Promise<number> {
   const colCount = Math.max(4, opts.colCount);
-  ws.getRow(1).height = 52;
-  ws.getRow(2).height = 16;
-  ws.getRow(3).height = 14;
+  ws.getRow(1).height = 28;
+  ws.getRow(2).height = 22;
+  ws.getRow(3).height = 18;
   ws.mergeCells(1, 1, 3, Math.min(2, colCount));
 
   const logoDataUrl = await loadKibritciLogoDataUrl();
   const logoBase64 = logoDataUrl?.replace(/^data:image\/png;base64,/i, '') || null;
   if (logoBase64) {
     const logoId = wb.addImage({ base64: logoBase64, extension: 'png' });
-    ws.addImage(logoId, { tl: { col: 0.05, row: 0.08 }, ext: { width: 150, height: 58 } });
+    ws.addImage(logoId, { tl: { col: 0.1, row: 0.15 }, ext: { width: 132, height: 52 } });
   } else {
     const logoCell = ws.getCell(1, 1);
     logoCell.value = KIBRITCI_COMPANY.shortName;
-    logoCell.font = { bold: true, size: 13, color: { argb: 'FF1E4E78' } };
+    logoCell.font = { bold: true, size: 14, color: { argb: 'FF9A3412' }, name: 'Calibri' };
     logoCell.alignment = { vertical: 'middle' };
   }
 
@@ -85,36 +107,40 @@ async function applyKibritciPersonelExcelAntet(
   ws.mergeCells(1, metaStart, 1, colCount);
   const titleCell = ws.getCell(1, metaStart);
   titleCell.value = opts.title;
-  titleCell.font = { bold: true, size: 13, color: { argb: LIGHT.title } };
-  titleCell.alignment = { horizontal: 'right', vertical: 'middle' };
+  titleCell.font = { bold: true, size: 14, color: { argb: LIGHT.title }, name: 'Calibri' };
+  titleCell.alignment = { horizontal: 'right', vertical: 'bottom' };
 
   ws.mergeCells(2, metaStart, 2, colCount);
   const subCell = ws.getCell(2, metaStart);
   subCell.value = opts.subtitle;
-  subCell.font = { size: 9, color: { argb: LIGHT.meta } };
+  subCell.font = { size: 10, color: { argb: LIGHT.meta }, name: 'Calibri' };
   subCell.alignment = { horizontal: 'right', vertical: 'middle' };
 
   ws.mergeCells(3, metaStart, 3, colCount);
   const companyCell = ws.getCell(3, metaStart);
-  companyCell.value = `${KIBRITCI_COMPANY.legalName} · ${KIBRITCI_COMPANY.phone}`;
-  companyCell.font = { size: 8, color: { argb: LIGHT.meta } };
-  companyCell.alignment = { horizontal: 'right', vertical: 'middle' };
+  companyCell.value = `${KIBRITCI_COMPANY.legalName}  ·  ${KIBRITCI_COMPANY.phone}`;
+  companyCell.font = { size: 8, color: { argb: LIGHT.meta }, name: 'Calibri' };
+  companyCell.alignment = { horizontal: 'right', vertical: 'top' };
 
   ws.mergeCells(4, 1, 4, colCount);
   setFill(ws.getCell(4, 1), LIGHT.accentBar);
-  ws.getRow(4).height = 4;
+  ws.getRow(4).height = 5;
 
   ws.mergeCells(5, 1, 5, colCount);
   ws.getCell(5, 1).value = KIBRITCI_COMPANY.address;
-  ws.getCell(5, 1).font = { size: 8, italic: true, color: { argb: LIGHT.meta } };
-  ws.getCell(5, 1).alignment = { wrapText: true };
+  ws.getCell(5, 1).font = { size: 8, color: { argb: LIGHT.meta }, name: 'Calibri' };
+  ws.getCell(5, 1).alignment = { wrapText: true, vertical: 'middle' };
+  setFill(ws.getCell(5, 1), LIGHT.accentSoft);
+  ws.getRow(5).height = 18;
 
   ws.mergeCells(6, 1, 6, colCount);
   ws.getCell(6, 1).value = opts.metaLine;
-  ws.getCell(6, 1).font = { size: 9, color: { argb: LIGHT.meta } };
-  ws.getCell(6, 1).alignment = { horizontal: 'center', vertical: 'middle' };
-  setFill(ws.getCell(6, 1), 'FFF8FAFC');
-  ws.getRow(6).height = 20;
+  ws.getCell(6, 1).font = { size: 9, bold: true, color: { argb: 'FF57534E' }, name: 'Calibri' };
+  ws.getCell(6, 1).alignment = { horizontal: 'left', vertical: 'middle' };
+  setFill(ws.getCell(6, 1), LIGHT.metaStrip);
+  ws.getRow(6).height = 22;
+
+  ws.getRow(7).height = 8;
 
   return 8;
 }
@@ -257,6 +283,15 @@ export async function exportPersonelExcel(options: {
           : 'Taşeron Personel');
   const sheet = workbook.addWorksheet(sheetName, {
     views: [{ state: 'frozen', ySplit: 8 }],
+    pageSetup: {
+      orientation: 'landscape',
+      fitToPage: true,
+      fitToWidth: 1,
+      fitToHeight: 0,
+      paperSize: 9,
+      margins: { left: 0.4, right: 0.4, top: 0.5, bottom: 0.5, header: 0.2, footer: 0.2 },
+    },
+    properties: { defaultRowHeight: 16 },
   });
 
   const headers = [
@@ -314,31 +349,31 @@ export async function exportPersonelExcel(options: {
 
   sheet.columns = [
     { width: 5 },
-    { width: 28 },
-    { width: 12 },
-    { width: 22 },
+    { width: 26 },
+    { width: 11 },
+    { width: 24 },
     { width: 14 },
-    { width: 18 },
+    { width: 20 },
+    { width: 12 },
+    { width: 16 },
+    { width: 12 },
     { width: 12 },
     { width: 14 },
-    { width: 12 },
-    { width: 12 },
-    { width: 12 },
     { width: 10 },
-    ...(includeKamp ? [{ width: 28 }] : []),
-    { width: 32 },
+    ...(includeKamp ? [{ width: 26 }] : []),
+    { width: 28 },
   ];
 
   const headerRow = sheet.getRow(headerRowIndex);
   headers.forEach((label, index) => {
     const cell = headerRow.getCell(index + 1);
     cell.value = label;
-    cell.font = { bold: true, name: 'Arial', size: 10, color: { argb: LIGHT.tableHeadText } };
+    cell.font = { bold: true, name: 'Calibri', size: 10, color: { argb: LIGHT.tableHeadText } };
     setFill(cell, LIGHT.tableHeadBg);
     cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
-    cell.border = thinBorder();
+    cell.border = mediumBottomBorder();
   });
-  headerRow.height = 22;
+  headerRow.height = 26;
 
   let rowIndex = 0;
   const writePersonelRow = (p: Personel) => {
@@ -353,7 +388,7 @@ export async function exportPersonelExcel(options: {
       p.departman || '',
       p.telefonNo || '',
       p.iseGirisTarihi || '',
-      p.istenCikisTarihi || '',
+      isAktif(p) ? '' : p.istenCikisTarihi || '',
       p.sgkDurumu || '',
       isAktif(p) ? 'Aktif' : 'Pasif',
     ];
@@ -366,58 +401,75 @@ export async function exportPersonelExcel(options: {
 
     const row = sheet.addRow(values);
     const alt = rowIndex % 2 === 0;
+    const aktif = isAktif(p);
+    row.height = 18;
     row.eachCell((cell, colNumber) => {
+      const isStatus = colNumber === 12;
+      const isName = colNumber === 4;
       cell.font = {
-        name: 'Arial',
-        size: 10,
-        color: { argb: colNumber === 12 ? (isAktif(p) ? 'FF166534' : 'FF991B1B') : 'FF0F172A' },
-        bold: colNumber === 4,
+        name: 'Calibri',
+        size: isName ? 10 : 9,
+        color: {
+          argb: isStatus
+            ? aktif
+              ? LIGHT.aktifCellText
+              : LIGHT.pasifCellText
+            : isName
+              ? LIGHT.title
+              : 'FF44403C',
+        },
+        bold: isName || isStatus,
       };
       cell.border = thinBorder();
       cell.alignment = {
         vertical: 'middle',
-        horizontal: colNumber === 1 || colNumber === 12 ? 'center' : 'left',
-        wrapText: colNumber === headers.length,
+        horizontal: colNumber === 1 || colNumber === 12 || colNumber === 9 || colNumber === 10 ? 'center' : 'left',
+        wrapText: colNumber === headers.length || colNumber === 8,
       };
-      if (alt) setFill(cell, LIGHT.rowAlt);
-      if (colNumber === 12) {
-        setFill(cell, isAktif(p) ? 'FFDCFCE7' : 'FFFEE2E2');
+      setFill(cell, alt ? LIGHT.rowAlt : LIGHT.rowBase);
+      if (isStatus) {
+        setFill(cell, aktif ? LIGHT.aktifCellBg : LIGHT.pasifCellBg);
       }
     });
   };
 
   const writeFirmaBanner = (firma: string, count: number) => {
-    const bannerRow = sheet.addRow([`${firma} — ${count} personel`]);
+    const bannerRow = sheet.addRow([`${firma}   ·   ${count} personel`]);
     sheet.mergeCells(bannerRow.number, 1, bannerRow.number, colCount);
     const cell = bannerRow.getCell(1);
-    cell.font = { name: 'Arial', size: 11, bold: true, color: { argb: LIGHT.firmaBannerText } };
+    cell.font = { name: 'Calibri', size: 10, bold: true, color: { argb: LIGHT.firmaBannerText } };
     setFill(cell, LIGHT.firmaBannerBg);
-    cell.alignment = { vertical: 'middle', horizontal: 'left' };
+    cell.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
     cell.border = thinBorder();
     bannerRow.height = 20;
   };
 
   const writeGorevBanner = (gorev: string, count: number) => {
-    const bannerRow = sheet.addRow([`${gorev} — ${count} kişi`]);
+    const bannerRow = sheet.addRow([`${gorev}   ·   ${count} kişi`]);
     sheet.mergeCells(bannerRow.number, 1, bannerRow.number, colCount);
     const cell = bannerRow.getCell(1);
-    cell.font = { name: 'Arial', size: 11, bold: true, color: { argb: LIGHT.gorevBannerText } };
+    cell.font = { name: 'Calibri', size: 10, bold: true, color: { argb: LIGHT.gorevBannerText } };
     setFill(cell, LIGHT.gorevBannerBg);
-    cell.alignment = { vertical: 'middle', horizontal: 'left' };
+    cell.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
     cell.border = thinBorder();
     bannerRow.height = 20;
   };
 
   const writeDurumBanner = (label: string, count: number, kind: 'aktif' | 'pasif') => {
-    const bannerRow = sheet.addRow([`${label} — ${count} kişi`]);
+    const bannerRow = sheet.addRow([`${label}  —  ${count} kişi`]);
     sheet.mergeCells(bannerRow.number, 1, bannerRow.number, colCount);
     const cell = bannerRow.getCell(1);
     const isPasif = kind === 'pasif';
-    cell.font = { name: 'Arial', size: 12, bold: true, color: { argb: isPasif ? 'FF9F1239' : 'FF14532D' } };
-    setFill(cell, isPasif ? 'FFFEE2E2' : 'FFDCFCE7');
-    cell.alignment = { vertical: 'middle', horizontal: 'left' };
+    cell.font = {
+      name: 'Calibri',
+      size: 11,
+      bold: true,
+      color: { argb: isPasif ? LIGHT.pasifBannerText : LIGHT.aktifBannerText },
+    };
+    setFill(cell, isPasif ? LIGHT.pasifBannerBg : LIGHT.aktifBannerBg);
+    cell.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
     cell.border = thinBorder();
-    bannerRow.height = 24;
+    bannerRow.height = 26;
   };
 
   const writeGrouped = (list: Personel[]) => {
@@ -462,13 +514,14 @@ export async function exportPersonelExcel(options: {
   }
 
   const footerRow = sheet.addRow([
-    `${KIBRITCI_COMPANY.shortName} · ${KIBRITCI_COMPANY.web} · ${KIBRITCI_COMPANY.email}`,
+    `${KIBRITCI_COMPANY.shortName}  ·  ${KIBRITCI_COMPANY.web}  ·  ${KIBRITCI_COMPANY.email}`,
   ]);
   sheet.mergeCells(footerRow.number, 1, footerRow.number, colCount);
   const footerCell = footerRow.getCell(1);
-  footerCell.font = { size: 8, italic: true, color: { argb: LIGHT.meta } };
-  footerCell.alignment = { horizontal: 'center' };
-  setFill(footerCell, 'FFF8FAFC');
+  footerCell.font = { size: 8, color: { argb: LIGHT.meta }, name: 'Calibri' };
+  footerCell.alignment = { horizontal: 'center', vertical: 'middle' };
+  setFill(footerCell, LIGHT.footerBg);
+  footerRow.height = 20;
 
   const buffer = await workbook.xlsx.writeBuffer();
   const blob = new Blob([buffer as BlobPart], {
