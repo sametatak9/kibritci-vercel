@@ -8,7 +8,7 @@ import {
   CalendarDays,
   ChevronRight,
   Layers,
-  Map,
+  Map as MapIcon,
   X,
 } from 'lucide-react';
 import type {
@@ -981,7 +981,7 @@ export const ProjeBlokKontrolPanel: React.FC<Props> = ({
         <div className="relative p-4 sm:p-5 flex flex-wrap items-end gap-4 justify-between">
           <div className="min-w-[200px] space-y-2">
             <p className="text-[10px] font-black uppercase tracking-[0.25em] text-amber-400/90 flex items-center gap-1.5">
-              <Map size={12} /> Saha blok kontrol
+              <MapIcon size={12} /> Saha blok kontrol
             </p>
             <h2 className="text-2xl sm:text-3xl font-black tracking-tight leading-none">
               {parsel.replace('Parsel Bölge ', '')}
