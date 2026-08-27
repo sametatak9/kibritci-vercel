@@ -23,7 +23,7 @@ export type CBlokKodu = (typeof C_BLOKLAR_157_51)[number];
 export const C_BLOK_DWG =
   '157-51 Parsel C BLOKLAR Daire Yerleşim Planı, Tavan ve Islak Hacim Detayları_2025.03.12.dwg';
 
-export type CDaireTipi = '2+1' | '3+1';
+export type CDaireTipi = '1+1' | '2+1' | '3+1';
 
 export interface CBlokProfilSablon {
   blok: CBlokKodu;
@@ -100,11 +100,23 @@ export const C_PLAN_3_PLUS_1: CDaireOdaSablon[] = [
   { key: 'giris', label: 'Giriş', x: 8, y: 94, w: 16, h: 4, },
 ];
 
+export const C_PLAN_1_PLUS_1: CDaireOdaSablon[] = [
+  { key: 'yatak1', label: 'Yatak', x: 4, y: 4, w: 46, h: 36 },
+  { key: 'salon', label: 'Salon', x: 52, y: 4, w: 44, h: 36 },
+  { key: 'hol', label: 'Hol / Antre', x: 4, y: 44, w: 28, h: 28 },
+  { key: 'mutfak', label: 'Mutfak', x: 34, y: 44, w: 34, h: 28 },
+  { key: 'islak', label: 'Islak hacim', x: 70, y: 44, w: 26, h: 40 },
+  { key: 'balkon', label: 'Balkon', x: 4, y: 76, w: 40, h: 16 },
+  { key: 'giris', label: 'Giriş', x: 10, y: 94, w: 16, h: 4 },
+];
+
 export function planOdalarForTip(tip: CDaireTipi): CDaireOdaSablon[] {
-  return tip === '3+1' ? C_PLAN_3_PLUS_1 : C_PLAN_2_PLUS_1;
+  if (tip === '3+1') return C_PLAN_3_PLUS_1;
+  if (tip === '1+1') return C_PLAN_1_PLUS_1;
+  return C_PLAN_2_PLUS_1;
 }
 
-/** Oda içi kalem şablonu — popup’ta kalem kalem */
+/** Oda içi kalem şablonu — popup’ta kalem kalem (eski API; yeni: takipKalemSablon) */
 export interface COdaKalemSablon {
   kod: string;
   baslik: string;
@@ -134,9 +146,7 @@ export const C_ODA_OZEL_KALEMLER: Partial<Record<CDaireOdaKey, COdaKalemSablon[]
     { kod: 'PARAPET', baslik: 'Parapet / korkuluk' },
     { kod: 'SU_YALITIM', baslik: 'Su yalıtımı' },
   ],
-  giris: [
-    { kod: 'GIRIS_KAPI', baslik: 'Daire giriş kapısı' },
-  ],
+  giris: [{ kod: 'GIRIS_KAPI', baslik: 'Daire giriş kapısı' }],
 };
 
 export function kalemlerForOda(odaKey: CDaireOdaKey): COdaKalemSablon[] {

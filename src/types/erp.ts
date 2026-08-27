@@ -775,18 +775,22 @@ export interface ProjeDisiplinIlerleme {
   olusturan?: string;
 }
 
-/** C blok daire oda kalemi — kat/daire/oda popup ilerleme */
+/** Daire / teknik alan kalemi — kat/daire/oda popup ilerleme */
+export type ProjeTakipKalemGrup = 'KABA' | 'INCE' | 'ALTYAPI';
+
 export interface ProjeCDaireKalem {
   id: string;
   parsel: string;
   blok: string;
   daireNo: string;
   katNo: number;
-  tip: '2+1' | '3+1';
+  tip: '1+1' | '2+1' | '3+1' | 'TEKNIK';
   odaKey: string;
   odaLabel: string;
   kalemKod: string;
   kalemBaslik: string;
+  /** Kaba / ince / altyapı takip başlığı */
+  kalemGrup?: ProjeTakipKalemGrup;
   durum: ProjeDisiplinDurum;
   yuzde: number;
   eksikNot?: string;

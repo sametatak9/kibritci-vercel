@@ -1,4 +1,5 @@
 import { PARSEL_BLOK_MAP } from './parselBlokMap';
+import { profil15746 } from './parsel15746BlokSeed';
 import type { ProjeBlokProfili } from '../types/erp';
 
 /** Parsel bazlı varsayılan kat / daire — Firestore profili yoksa kullanılır */
@@ -19,12 +20,16 @@ export function seedBlokProfilleri(): ProjeBlokProfili[] {
     const def = PARSEL_DEFAULTS[parsel] || { kat: 6, daire: 24 };
     for (const blok of bloklar) {
       if (blok === 'GENEL SAHA') continue;
+      const p46 = parsel.includes('157/46') ? profil15746(blok) : undefined;
       out.push({
         id: blokProfilId(parsel, blok),
         parsel,
         blok,
-        katSayisi: def.kat,
-        daireSayisi: def.daire,
+        katSayisi: p46?.katSayisi ?? def.kat,
+        daireSayisi: p46?.daireSayisi ?? def.daire,
+        not: p46
+          ? `Duvar aplikasyon + ruhsat · ${p46.dwgKaynak}`
+          : undefined,
       });
     }
   }
