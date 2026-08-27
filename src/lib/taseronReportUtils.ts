@@ -1,85 +1,210 @@
 import { OperatorFaaliyet, TaseronEnerjiKaydi, TaseronKesintiRaporu } from '../types/erp';
-import { ayAdi, enerjiAktifKalemler, enerjiToplamTutar, makineEtiketi, makineKaynakGrupLabel, resolveMakineKaynakGrup, sayacFarki, sayacTutari } from './taseronUtils';
+import { ayAdi, enerjiAktifKalemler, enerjiToplamTutar, makineEtiketi, makineKaynakGrupLabel, resolveMakineKaynakGrup, sayacFarki, sayacTutari, type MakineKaynakGrup } from './taseronUtils';
 import { buildKibritciReportHtml, downloadKibritciReportHtml, openKibritciReportPrint } from './kibritciReportTemplate';
 
 function fmt(n: number): string {
   return n.toLocaleString('tr-TR', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
 }
 
-export function buildIsMakinesiKesintiReportHtml(rapor: TaseronKesintiRaporu): string {
-  const ayLabel = ayAdi(Number(rapor.donemAy));
-  const kaynakEtiket = makineKaynakGrupLabel(
-    rapor.makineKaynakGrup ||
-      (rapor.faaliyetler?.[0] ? resolveMakineKaynakGrup(rapor.faaliyetler[0]) : 'ANA_FIRMA')
-  );
-  const rows = rapor.faaliyetler
+function esc(s: unknown): string {
+  return String(s ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function faaliyetSatirlariHtml(faaliyetler: OperatorFaaliyet[]): string {
+  return (faaliyetler || [])
     .map((f) => {
       const fotoCell = f.fotoUrl
-        ? `<a href="${f.fotoUrl}" target="_blank" rel="noopener"><img src="${f.fotoUrl}" alt="Kanıt" style="max-width:72px;max-height:54px;object-fit:cover;border-radius:6px;border:1px solid #cbd5e1"/></a>`
+        ? `<a href="${esc(f.fotoUrl)}" target="_blank" rel="noopener"><img src="${esc(f.fotoUrl)}" alt="Kanıt" style="max-width:72px;max-height:54px;object-fit:cover;border-radius:6px;border:1px solid #cbd5e1"/></a>`
         : '<span style="color:#94a3b8">—</span>';
       return `<tr>
-          <td>${f.tarih}</td>
-          <td>${f.operatorIsim}</td>
-          <td>${makineEtiketi(f)}</td>
-          <td>${f.baslangicSaat}–${f.bitisSaat}</td>
-          <td style="text-align:right;font-weight:bold">${f.calismaSuresi.toFixed(1)} sa</td>
-          <td>${f.yapilanIs}</td>
-          <td style="text-align:center">${fotoCell}</td>
+          <td style="padding:8px;border:1px solid #e2e8f0;white-space:nowrap">${esc(f.tarih)}</td>
+          <td style="padding:8px;border:1px solid #e2e8f0">${esc(f.operatorIsim)}</td>
+          <td style="padding:8px;border:1px solid #e2e8f0">${esc(makineEtiketi(f))}</td>
+          <td style="padding:8px;border:1px solid #e2e8f0;white-space:nowrap">${esc(f.baslangicSaat)}–${esc(f.bitisSaat)}</td>
+          <td style="padding:8px;border:1px solid #e2e8f0;text-align:right;font-weight:800;font-size:13px;color:#0f172a">${Number(f.calismaSuresi || 0).toFixed(1)} sa</td>
+          <td style="padding:8px;border:1px solid #e2e8f0;font-weight:600;color:#1e293b;line-height:1.35">${esc(f.yapilanIs || '—')}</td>
+          <td style="padding:8px;border:1px solid #e2e8f0;text-align:center">${fotoCell}</td>
         </tr>`;
     })
     .join('');
+}
 
-  const fotoGaleri = rapor.faaliyetler
+function faaliyetTabloHtml(faaliyetler: OperatorFaaliyet[]): string {
+  return `<table style="width:100%;border-collapse:collapse;font-size:11px;margin-top:8px">
+      <thead>
+        <tr style="background:#0f172a;color:#fff">
+          <th style="padding:8px;text-align:left">Tarih</th>
+          <th style="padding:8px;text-align:left">Operatör</th>
+          <th style="padding:8px;text-align:left">Makine</th>
+          <th style="padding:8px;text-align:left">Saat Aralığı</th>
+          <th style="padding:8px;text-align:right">Süre (sa)</th>
+          <th style="padding:8px;text-align:left">İş Açıklaması</th>
+          <th style="padding:8px;text-align:center">Foto</th>
+        </tr>
+      </thead>
+      <tbody>${faaliyetSatirlariHtml(faaliyetler)}</tbody>
+    </table>`;
+}
+
+function kaynakBlokBaslik(grup: MakineKaynakGrup): { baslik: string; renk: string } {
+  if (grup === 'KIRALIK') {
+    return { baslik: 'KİRALIK / TAŞERON MAKİNESİ', renk: '#0f766e' };
+  }
+  return { baslik: 'ANA FİRMA MAKİNESİ', renk: '#b45309' };
+}
+
+export function buildIsMakinesiKesintiReportHtml(rapor: TaseronKesintiRaporu): string {
+  const ayLabel = ayAdi(Number(rapor.donemAy));
+  const grup =
+    rapor.makineKaynakGrup ||
+    (rapor.faaliyetler?.[0] ? resolveMakineKaynakGrup(rapor.faaliyetler[0]) : 'ANA_FIRMA');
+  const kaynakEtiket = makineKaynakGrupLabel(grup);
+  const blok = kaynakBlokBaslik(grup);
+  const toplamSaat = Number(rapor.toplamSaat) || 0;
+
+  const fotoGaleri = (rapor.faaliyetler || [])
     .filter((f) => f.fotoUrl)
     .map(
       (f) =>
         `<div style="display:inline-block;margin:6px;text-align:center;vertical-align:top;width:120px">
-          <a href="${f.fotoUrl}" target="_blank" rel="noopener">
-            <img src="${f.fotoUrl}" alt="${f.tarih}" style="width:110px;height:80px;object-fit:cover;border-radius:8px;border:1px solid #cbd5e1"/>
+          <a href="${esc(f.fotoUrl)}" target="_blank" rel="noopener">
+            <img src="${esc(f.fotoUrl)}" alt="${esc(f.tarih)}" style="width:110px;height:80px;object-fit:cover;border-radius:8px;border:1px solid #cbd5e1"/>
           </a>
-          <div style="font-size:9px;color:#64748b;margin-top:4px">${f.tarih}<br/>${f.calismaSuresi.toFixed(1)} sa</div>
+          <div style="font-size:9px;color:#64748b;margin-top:4px">${esc(f.tarih)}<br/><strong>${Number(f.calismaSuresi || 0).toFixed(1)} sa</strong></div>
         </div>`
     )
     .join('');
 
   const bodyHtml = `
-    <p><strong>Taşeron Firma:</strong> ${rapor.taseronFirmaAdi}</p>
-    <p><strong>Makine kaynağı:</strong> ${kaynakEtiket}</p>
-    <p><strong>Dönem:</strong> ${ayLabel} ${rapor.donemYil}</p>
-    <table style="width:100%;border-collapse:collapse;font-size:11px;margin-top:16px">
-      <thead>
-        <tr style="background:#1e3a5f;color:#fff">
-          <th style="padding:8px;text-align:left">Tarih</th>
-          <th style="padding:8px;text-align:left">Operatör</th>
-          <th style="padding:8px;text-align:left">Makine</th>
-          <th style="padding:8px;text-align:left">Saat Aralığı</th>
-          <th style="padding:8px;text-align:right">Süre</th>
-          <th style="padding:8px;text-align:left">İş Açıklaması</th>
-          <th style="padding:8px;text-align:center">Foto</th>
-        </tr>
-      </thead>
-      <tbody>${rows}</tbody>
-    </table>
+    <div style="border:2px solid ${blok.renk};border-radius:10px;padding:12px 14px;margin-bottom:14px;background:#fff">
+      <p style="margin:0 0 4px;font-size:10px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:${blok.renk}">Makine kaynağı</p>
+      <p style="margin:0;font-size:16px;font-weight:900;color:#0f172a">${esc(blok.baslik)}</p>
+      <p style="margin:6px 0 0;font-size:12px"><strong>Kesilecek taşeron:</strong> ${esc(rapor.taseronFirmaAdi)}</p>
+      <p style="margin:2px 0 0;font-size:12px"><strong>Dönem:</strong> ${esc(ayLabel)} ${esc(rapor.donemYil)}</p>
+    </div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">
+      <div style="flex:1;min-width:140px;border:1px solid #cbd5e1;border-radius:8px;padding:10px;background:#fffbeb">
+        <p style="margin:0;font-size:10px;font-weight:800;color:#92400e;text-transform:uppercase">Toplam saat</p>
+        <p style="margin:4px 0 0;font-size:22px;font-weight:900;font-family:monospace">${toplamSaat.toFixed(1)} sa</p>
+      </div>
+      <div style="flex:1;min-width:140px;border:1px solid #cbd5e1;border-radius:8px;padding:10px;background:#f8fafc">
+        <p style="margin:0;font-size:10px;font-weight:800;color:#475569;text-transform:uppercase">Faaliyet</p>
+        <p style="margin:4px 0 0;font-size:22px;font-weight:900;font-family:monospace">${(rapor.faaliyetler || []).length}</p>
+      </div>
+      <div style="flex:1;min-width:140px;border:1px solid #cbd5e1;border-radius:8px;padding:10px;background:#fef2f2">
+        <p style="margin:0;font-size:10px;font-weight:800;color:#991b1b;text-transform:uppercase">Kesinti</p>
+        <p style="margin:4px 0 0;font-size:18px;font-weight:900;color:#b91c1c">${fmt(rapor.kesintiTutari)} TL</p>
+        <p style="margin:2px 0 0;font-size:10px;color:#64748b">${fmt(rapor.saatlikUcret)} TL/sa</p>
+      </div>
+    </div>
+    <p style="margin:0 0 4px;font-size:11px;font-weight:800;color:#334155">Saat ve iş açıklamaları (asıl belgedir)</p>
+    ${faaliyetTabloHtml(rapor.faaliyetler || [])}
     ${
       fotoGaleri
         ? `<div style="margin-top:18px"><p style="font-size:11px;font-weight:bold;color:#334155;margin-bottom:8px">Kanıt Fotoğrafları</p>${fotoGaleri}</div>`
         : ''
-    }
-    <div style="margin-top:20px;padding:12px;background:#f8fafc;border-radius:8px;font-size:12px">
-      <p><strong>Firma:</strong> ${rapor.taseronFirmaAdi}</p>
-      <p><strong>Toplam Çalışma:</strong> ${rapor.toplamSaat.toFixed(1)} saat</p>
-      <p><strong>Saatlik Ücret:</strong> ${fmt(rapor.saatlikUcret)} TL</p>
-      <p style="color:#b91c1c;font-size:14px;font-weight:bold;margin-top:8px">
-        KESİNTİ TOPLAMI: ${fmt(rapor.kesintiTutari)} TL
-      </p>
-    </div>`;
+    }`;
 
   return buildKibritciReportHtml({
     title: 'KİBRİTÇİ İNŞAAT',
-    subtitle: `${ayLabel} ${rapor.donemYil} — İŞ MAKİNESİ KESİNTİ · ${kaynakEtiket.toLocaleUpperCase('tr-TR')}`,
-    meta: [`Taşeron: ${rapor.taseronFirmaAdi}`, kaynakEtiket, `Oluşturan: ${rapor.olusturanKullanici}`],
+    subtitle: `${ayLabel} ${rapor.donemYil} — İŞ MAKİNESİ KESİNTİ · ${blok.baslik}`,
+    meta: [
+      `Taşeron: ${rapor.taseronFirmaAdi}`,
+      kaynakEtiket,
+      `${toplamSaat.toFixed(1)} sa`,
+      `Oluşturan: ${rapor.olusturanKullanici}`,
+    ],
     bodyHtml,
   });
+}
+
+/** Dönemdeki tüm firma raporlarını tek belgede: Ana Firma Makinesi / Kiralık ayrı bloklar */
+export function buildTopluIsMakinesiKesintiReportHtml(
+  raporlar: TaseronKesintiRaporu[],
+  ay: number,
+  yil: number
+): string {
+  const ayLabel = ayAdi(ay);
+  const sorted = [...raporlar].sort((a, b) => {
+    const ga = a.makineKaynakGrup === 'KIRALIK' ? 1 : 0;
+    const gb = b.makineKaynakGrup === 'KIRALIK' ? 1 : 0;
+    if (ga !== gb) return ga - gb;
+    return String(a.taseronFirmaAdi || '').localeCompare(String(b.taseronFirmaAdi || ''), 'tr');
+  });
+
+  const ana = sorted.filter((r) => (r.makineKaynakGrup || resolveMakineKaynakGrup(r.faaliyetler?.[0])) !== 'KIRALIK');
+  const kiralik = sorted.filter((r) => (r.makineKaynakGrup || resolveMakineKaynakGrup(r.faaliyetler?.[0])) === 'KIRALIK');
+
+  const firmaBlok = (list: TaseronKesintiRaporu[], grup: MakineKaynakGrup) => {
+    if (!list.length) return '';
+    const meta = kaynakBlokBaslik(grup);
+    const toplamSaat = list.reduce((s, r) => s + (Number(r.toplamSaat) || 0), 0);
+    const toplamTutar = list.reduce((s, r) => s + (Number(r.kesintiTutari) || 0), 0);
+    const firmalar = list
+      .map((r) => {
+        return `<div style="margin:14px 0 18px;page-break-inside:avoid">
+          <div style="background:#f1f5f9;border-left:4px solid ${meta.renk};padding:8px 12px;margin-bottom:8px">
+            <p style="margin:0;font-size:13px;font-weight:900">${esc(r.taseronFirmaAdi)}</p>
+            <p style="margin:4px 0 0;font-size:11px;color:#334155">
+              <strong>${Number(r.toplamSaat || 0).toFixed(1)} sa</strong> · ${(r.faaliyetler || []).length} faaliyet
+              · ${r.ucretOnayBekliyor ? 'ücret bekliyor' : `${fmt(r.saatlikUcret)} TL/sa → <strong style="color:#b91c1c">${fmt(r.kesintiTutari)} TL</strong>`}
+            </p>
+          </div>
+          ${faaliyetTabloHtml(r.faaliyetler || [])}
+        </div>`;
+      })
+      .join('');
+    return `<section style="margin:22px 0">
+      <h2 style="margin:0 0 8px;padding:10px 12px;background:${meta.renk};color:#fff;font-size:14px;border-radius:8px">${esc(meta.baslik)} — ${list.length} firma · ${toplamSaat.toFixed(1)} sa · ${fmt(toplamTutar)} TL</h2>
+      ${firmalar}
+    </section>`;
+  };
+
+  const genelSaat = sorted.reduce((s, r) => s + (Number(r.toplamSaat) || 0), 0);
+  const bodyHtml = `
+    <div style="border:2px solid #0f172a;padding:12px 14px;border-radius:10px;margin-bottom:16px">
+      <p style="margin:0;font-size:12px;font-weight:800">TOPLU İŞ MAKİNESİ KESİNTİ RAPORU</p>
+      <p style="margin:6px 0 0;font-size:13px"><strong>Dönem:</strong> ${esc(ayLabel)} ${yil}</p>
+      <p style="margin:4px 0 0;font-size:13px"><strong>Toplam:</strong> ${sorted.length} rapor · ${genelSaat.toFixed(1)} saat</p>
+      <p style="margin:8px 0 0;font-size:11px;color:#475569">Ana Firma Makinesi ve Kiralık / Taşeron Makinesi ayrı bloklarda listelenir. Saat ve iş açıklaması asıl belgedir.</p>
+    </div>
+    ${firmaBlok(ana, 'ANA_FIRMA')}
+    ${firmaBlok(kiralik, 'KIRALIK')}
+  `;
+
+  return buildKibritciReportHtml({
+    title: 'KİBRİTÇİ İNŞAAT',
+    subtitle: `${ayLabel} ${yil} — TOPLU İŞ MAKİNESİ KESİNTİ (Ana Firma / Kiralık ayrı)`,
+    meta: [`${sorted.length} rapor`, `${genelSaat.toFixed(1)} sa`, `Ana: ${ana.length}`, `Kiralık: ${kiralik.length}`],
+    bodyHtml,
+  });
+}
+
+export function yazdirTopluIsMakinesiRaporu(raporlar: TaseronKesintiRaporu[], ay: number, yil: number): void {
+  if (!raporlar.length) {
+    alert('Bu dönem için yazdırılacak iş makinesi kesinti raporu yok.');
+    return;
+  }
+  openKibritciReportPrint(
+    buildTopluIsMakinesiKesintiReportHtml(raporlar, ay, yil),
+    `Toplu İş Makinesi Kesinti ${ay}/${yil}`
+  );
+}
+
+export function indirTopluIsMakinesiRaporu(raporlar: TaseronKesintiRaporu[], ay: number, yil: number): void {
+  if (!raporlar.length) {
+    alert('Bu dönem için indirilecek iş makinesi kesinti raporu yok.');
+    return;
+  }
+  const html = buildTopluIsMakinesiKesintiReportHtml(raporlar, ay, yil);
+  downloadKibritciReportHtml(
+    html,
+    `Kibritci_Toplu_IsMakinesi_${String(ay).padStart(2, '0')}_${yil}.html`
+  );
 }
 
 export function buildEnerjiKesintiReportHtml(

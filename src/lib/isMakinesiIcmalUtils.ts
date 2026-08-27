@@ -104,13 +104,23 @@ function isOnayli(f: OperatorFaaliyet): boolean {
   return d === 'ONAYLANDI';
 }
 
+export function isOperatorFaaliyetOnayli(f: OperatorFaaliyet): boolean {
+  return isOnayli(f);
+}
+
 function faaliyetDonemde(f: OperatorFaaliyet, ay: number, yil: number): boolean {
   const raw = String(f.tarih || '');
   const m = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
   if (m) return Number(m[1]) === yil && Number(m[2]) === ay;
+  const tr = raw.match(/^(\d{2})\.(\d{2})\.(\d{4})/);
+  if (tr) return Number(tr[3]) === yil && Number(tr[2]) === ay;
   const d = new Date(raw);
   if (Number.isNaN(d.getTime())) return false;
   return d.getMonth() + 1 === ay && d.getFullYear() === yil;
+}
+
+export function isOperatorFaaliyetDonemde(f: OperatorFaaliyet, ay: number, yil: number): boolean {
+  return faaliyetDonemde(f, ay, yil);
 }
 
 function mergeSatir(into: IsMakinesiIcmalSatir, from: IsMakinesiIcmalSatir) {

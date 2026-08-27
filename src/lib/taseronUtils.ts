@@ -355,7 +355,7 @@ export function resolveMakineKaynakGrup(
 }
 
 export function makineKaynakGrupLabel(g: MakineKaynakGrup): string {
-  return g === 'KIRALIK' ? 'Kiralık Makine' : 'Ana Firma Makinesi';
+  return g === 'KIRALIK' ? 'Kiralık / Taşeron Makinesi' : 'Ana Firma Makinesi';
 }
 
 /** Demirbaş envanterindeki iş makinelerini operatör seçim listesine almak için */

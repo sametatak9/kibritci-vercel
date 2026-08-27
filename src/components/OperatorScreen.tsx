@@ -3,8 +3,10 @@ import { HardHat, Clock, Calendar, Building2, Camera, Save, Search, FileText, Tr
 import { AracBakim, AylikYoklamaMap, CariKart, CariKartIslem, OperatorFaaliyet, TaseronKesintiRaporu, Personel } from '../types/erp';
 import { compressImage } from '../lib/imageCompress';
 import { getTaseronCariKartlar, buildOperatorIsKaydiEtiketi, makineEtiketi, cariIslemIdForOperatorFaaliyet, resolveMakineKaynakGrup, makineKaynakGrupLabel, isIsMakinesiArac } from '../lib/taseronUtils';
+import { isOperatorFaaliyetDonemde, isOperatorFaaliyetOnayli } from '../lib/isMakinesiIcmalUtils';
 import { indirIsMakinesiRaporu } from '../lib/taseronReportUtils';
 import { kibritciLogoHtml } from '../lib/kibritciBrand';
+import { normalizeDateKey } from '../lib/dateKeyUtils';
 import { isOperatorGorev } from '../lib/yoklamaUtils';
 import { RolMobilFaaliyetYoklamaPanel } from './RolMobilFaaliyetYoklamaPanel';
 import { KampGunlukYoklamaTab } from './KampGunlukYoklamaTab';
@@ -385,23 +387,48 @@ export const OperatorScreen: React.FC<OperatorScreenProps> = ({
   };
 
   const handleKesintiRaporuOlustur = () => {
-    const aylikFaaliyetler = operatorFaaliyetleri.filter(f => {
-      const d = new Date(f.tarih);
-      const onayli = f.onayDurumu === 'ONAYLANDI' || f.durum === 'ONAYLANDI';
-      return (
-        d.getMonth() + 1 === selectedAy &&
-        d.getFullYear() === selectedYil &&
-        !f.kesintiYansitildi &&
-        onayli
-      );
-    });
+    const ay = Number(selectedAy);
+    const yil = Number(selectedYil);
+    const donemFaaliyetler = operatorFaaliyetleri.filter((f) => isOperatorFaaliyetDonemde(f, ay, yil));
+
+    // Raporlarda hâlâ duran faaliyet id'leri (silinen taslak sonrası bayrak takılmasın)
+    const raporlananIds = new Set(
+      taseronKesintiRaporlari
+        .filter((r) => !r.kesintiTipi || r.kesintiTipi === 'IS_MAKINESI')
+        .flatMap((r) => (r.faaliyetler || []).map((x) => x.id).filter(Boolean))
+    );
+
+    const onayliDonem = donemFaaliyetler.filter((f) => isOperatorFaaliyetOnayli(f));
+    const bekleyenDonem = donemFaaliyetler.filter((f) => !isOperatorFaaliyetOnayli(f));
+    const zatenRaporda = onayliDonem.filter((f) => raporlananIds.has(f.id));
+    // Bayrak takılı ama rapor yoksa yeniden alınabilir
+    const aylikFaaliyetler = onayliDonem.filter((f) => !raporlananIds.has(f.id));
+    const kurtarilan = aylikFaaliyetler.filter((f) => f.kesintiYansitildi);
 
     if (aylikFaaliyetler.length === 0) {
-      alert('Seçilen ay için onaylanmış ve henüz rapora alınmamış kesinti kaydı bulunamadı.');
+      const ornekTarih = donemFaaliyetler
+        .slice(0, 3)
+        .map((f) => normalizeDateKey(f.tarih) || f.tarih)
+        .join(', ');
+      alert(
+        [
+          `${String(ay).padStart(2, '0')}/${yil} için rapora alınacak kayıt yok.`,
+          ``,
+          `Dönem toplam: ${donemFaaliyetler.length}`,
+          `Onaylı: ${onayliDonem.length}`,
+          `Onay bekleyen: ${bekleyenDonem.length}`,
+          `Zaten raporda: ${zatenRaporda.length}`,
+          ornekTarih ? `Örnek tarihler: ${ornekTarih}` : '',
+          ``,
+          `Not: Onay Havuzu’nda durum «Onaylandı» olmalı. Takılı «Kesintiye Yansıtıldı» bayrağı, rapor silindiyse artık engellemez.`,
+        ]
+          .filter(Boolean)
+          .join('\n')
+      );
       return;
     }
 
-    // Firma + makine kaynağı (Ana Firma / Kiralık) — karışmasın
+    // Firma + makine kaynağı (Ana firma makinesi / Kiralık) — karışmasın
     const gruplar: { [key: string]: OperatorFaaliyet[] } = {};
     aylikFaaliyetler.forEach((f) => {
       const kaynak = resolveMakineKaynakGrup(f);
@@ -417,14 +444,16 @@ export const OperatorScreen: React.FC<OperatorScreenProps> = ({
         | 'ANA_FIRMA'
         | 'KIRALIK';
       const toplamSaat = faaliyetler.reduce((s, f) => s + f.calismaSuresi, 0);
-      const cari = taseronCariler.find((c) => c.unvan === firmaAdi) || cariKartlar.find((c) => c.unvan === firmaAdi);
+      const cari =
+        taseronCariler.find((c) => c.unvan === firmaAdi) ||
+        cariKartlar.find((c) => c.unvan === firmaAdi);
       const rapor: TaseronKesintiRaporu = {
         id: `tkr_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
         kesintiTipi: 'IS_MAKINESI',
         taseronFirmaAdi: firmaAdi,
         taseronFirmaId: cari?.id,
-        donemAy: String(selectedAy).padStart(2, '0'),
-        donemYil: String(selectedYil),
+        donemAy: String(ay).padStart(2, '0'),
+        donemYil: String(yil),
         toplamSaat: Math.round(toplamSaat * 100) / 100,
         kesintiTutari: 0,
         saatlikUcret: 0,
@@ -438,17 +467,17 @@ export const OperatorScreen: React.FC<OperatorScreenProps> = ({
       yeniRaporlar.push(rapor);
     });
 
-    setTaseronKesintiRaporlari(prev => [...prev, ...yeniRaporlar]);
-    
-    // Mark activities as reflected
-    setOperatorFaaliyetleri(prev => prev.map(f => {
-      if (aylikFaaliyetler.some(af => af.id === f.id)) {
-        return { ...f, kesintiYansitildi: true };
-      }
-      return f;
-    }));
+    setTaseronKesintiRaporlari((prev) => [...prev, ...yeniRaporlar]);
 
-    // Aylık özet satırını cari geçmişe de yaz (firma kartı eşleşenler)
+    setOperatorFaaliyetleri((prev) =>
+      prev.map((f) => {
+        if (aylikFaaliyetler.some((af) => af.id === f.id)) {
+          return { ...f, kesintiYansitildi: true };
+        }
+        return f;
+      })
+    );
+
     if (setCariIslemGecmisi) {
       const ozetIslemler: CariKartIslem[] = yeniRaporlar
         .filter((r) => r.taseronFirmaId)
@@ -471,10 +500,13 @@ export const OperatorScreen: React.FC<OperatorScreenProps> = ({
       }
     }
 
-    if (addNotification) {
-      addNotification(`${yeniRaporlar.length} adet iş makinesi kesinti raporu oluşturuldu (${selectedAy}/${selectedYil}) — Ana Firma / Kiralık ayrı.`);
-    }
-    alert(`${yeniRaporlar.length} adet kesinti raporu oluşturuldu (Ana Firma ve Kiralık ayrı). Yönetici saat ücretini Taşeron Yönetimi’nden girecek.`);
+    const anaAdet = yeniRaporlar.filter((r) => r.makineKaynakGrup !== 'KIRALIK').length;
+    const kiralikAdet = yeniRaporlar.filter((r) => r.makineKaynakGrup === 'KIRALIK').length;
+    const msg = `${yeniRaporlar.length} kesinti raporu: ${anaAdet} ana firma makinesi + ${kiralikAdet} kiralık (${ay}/${yil})${kurtarilan.length ? ` · ${kurtarilan.length} takılı bayrak kurtarıldı` : ''}`;
+    if (addNotification) addNotification(msg);
+    alert(
+      `${msg}\n\nRaporlar taşeron firmaya göre ve makine kaynağına göre ayrıldı.\nÜcret onayı: Taşeron Yönetimi.`
+    );
     setShowKesintiModal(false);
   };
 
