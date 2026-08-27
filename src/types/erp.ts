@@ -755,6 +755,26 @@ export interface ProjeBlokProfili {
   guncellemeTarihi?: string;
 }
 
+/** Altyapı / peyzaj disiplin ilerleme satırı (DWG WBS) */
+export type ProjeDisiplinGrup = 'ALTYAPI' | 'PEYZAJ';
+export type ProjeDisiplinDurum = 'PLANLANDI' | 'IMALATTA' | 'TAMAMLANDI' | 'BEKLEMEDE';
+
+export interface ProjeDisiplinIlerleme {
+  id: string;
+  parsel: string;
+  blok: string;
+  grup: ProjeDisiplinGrup;
+  kod: string;
+  baslik: string;
+  durum: ProjeDisiplinDurum;
+  yuzde: number;
+  gorsel?: string;
+  dwgKaynak?: string;
+  not?: string;
+  guncellemeTarihi?: string;
+  olusturan?: string;
+}
+
 export type FaaliyetIlerlemeDurumu = 'BASLAMADI' | 'DEVAM' | 'TAMAMLANDI';
 
 export interface FaaliyetIlerlemeKaydi {

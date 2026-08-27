@@ -6,11 +6,13 @@ import {
   CalendarDays,
   CheckCircle2,
   ClipboardList,
+  Droplets,
   Filter,
   Layers,
   Plus,
   Target,
   Trash2,
+  Trees,
   X,
 } from 'lucide-react';
 import { mergeBlokProfilleri } from '../data/blokMasterSeed';
@@ -24,11 +26,13 @@ import {
   tomorrowDateKey,
 } from '../lib/dateKeyUtils';
 import { buildBlokHaritaOzetleri, buildKaynakHavuzlari } from '../lib/projeBlokHaritaUtils';
+import { mergeDisiplinIlerleme } from '../lib/projeDisiplinUtils';
 import {
   buildMuhendislikOzet,
   buildMuhendislikWbs,
 } from '../lib/projeMuhendislikUtils';
 import { ProjeBlokHaritaPanel } from './ProjeBlokHaritaPanel';
+import { ProjeDisiplinPanel } from './ProjeDisiplinPanel';
 import { ProjeMuhendislikPanel } from './ProjeMuhendislikPanel';
 import {
   PROJE_ILERLEME_DURUM_LABEL,
@@ -50,6 +54,7 @@ import {
 import type {
   Personel,
   ProjeBlokProfili,
+  ProjeDisiplinIlerleme,
   ProjeIlerlemeDurum,
   ProjeIlerlemeKalemi,
   ProjeIlerlemeKova,
@@ -64,6 +69,7 @@ import type {
 const COLLECTION = 'projeIlerlemeKalemleri';
 const PLAN_COLLECTION = 'projeIsPlanSatirlari';
 const BLOK_PROFIL_COLLECTION = 'projeBlokProfilleri';
+const DISIPLIN_COLLECTION = 'projeDisiplinIlerleme';
 const PARSEL_SECENEK = PARSEL_LIST.filter((p) => p !== 'GENEL SAHA');
 const MUHENDISLIK_GUN = 30;
 
@@ -71,7 +77,7 @@ type Props = {
   currentUser?: { email?: string; ad?: string; soyad?: string; displayName?: string } | null;
 };
 
-type Sekme = 'tespit' | 'program' | 'muhendislik' | 'harita';
+type Sekme = 'tespit' | 'program' | 'muhendislik' | 'harita' | 'altyapi' | 'peyzaj';
 
 type Draft = {
   parsel: string;
@@ -134,6 +140,7 @@ export const ProjeIlerlemeScreen: React.FC<Props> = ({ currentUser }) => {
   const [personeller, setPersoneller] = useState<Personel[]>([]);
   const [temizlikDaireleri, setTemizlikDaireleri] = useState<TemizlikDaire[]>([]);
   const [blokProfilleri, setBlokProfilleri] = useState<ProjeBlokProfili[]>([]);
+  const [disiplinKayitlari, setDisiplinKayitlari] = useState<ProjeDisiplinIlerleme[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [sekme, setSekme] = useState<Sekme>('tespit');
@@ -194,6 +201,11 @@ export const ProjeIlerlemeScreen: React.FC<Props> = ({ currentUser }) => {
     const unsubBlokProfil = onSnapshot(collection(db, BLOK_PROFIL_COLLECTION), (snap) => {
       setBlokProfilleri(snap.docs.map((d) => ({ id: d.id, ...d.data() } as ProjeBlokProfili)));
     });
+    const unsubDisiplin = onSnapshot(collection(db, DISIPLIN_COLLECTION), (snap) => {
+      setDisiplinKayitlari(
+        snap.docs.map((d) => ({ id: d.id, ...d.data() } as ProjeDisiplinIlerleme))
+      );
+    });
     return () => {
       unsubKalem();
       unsubPlan();
@@ -203,6 +215,7 @@ export const ProjeIlerlemeScreen: React.FC<Props> = ({ currentUser }) => {
       unsubPersonel();
       unsubDaire();
       unsubBlokProfil();
+      unsubDisiplin();
     };
   }, []);
 
@@ -283,6 +296,37 @@ export const ProjeIlerlemeScreen: React.FC<Props> = ({ currentUser }) => {
       }),
     [mergedBlokProfilleri, kalemler, faaliyetler, temizlikDaireleri, haritaParsel]
   );
+
+  const altyapiSatirlari = useMemo(
+    () => mergeDisiplinIlerleme('ALTYAPI', disiplinKayitlari),
+    [disiplinKayitlari]
+  );
+  const peyzajSatirlari = useMemo(
+    () => mergeDisiplinIlerleme('PEYZAJ', disiplinKayitlari),
+    [disiplinKayitlari]
+  );
+
+  const updateDisiplin = async (
+    row: ProjeDisiplinIlerleme,
+    patch: Partial<ProjeDisiplinIlerleme>
+  ) => {
+    setSaving(true);
+    try {
+      const authBlock = await assertErpWriteAuth();
+      if (authBlock) throw new Error(authBlock);
+      const payload: ProjeDisiplinIlerleme = {
+        ...row,
+        ...patch,
+        guncellemeTarihi: todayDateKey(),
+        olusturan: row.olusturan || userLabel(currentUser) || undefined,
+      };
+      await saveDocument(DISIPLIN_COLLECTION, payload);
+    } catch (err) {
+      alert(formatFirestoreWriteError(err) || 'Disiplin ilerleme yazılamadı.');
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const draftBloklar = useMemo(
     () => blokListForParsel(draft.parsel).filter((b) => b !== 'GENEL SAHA'),
@@ -513,15 +557,12 @@ export const ProjeIlerlemeScreen: React.FC<Props> = ({ currentUser }) => {
         <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div>
             <p className="text-[10px] font-bold uppercase tracking-widest text-amber-800/80">
-              Kapanış · Punch · İlerleme yönetimi · Blok haritası
+              Kapanış · Punch · Altyapı · Peyzaj · Blok haritası
             </p>
             <h1 className="mt-1 text-2xl font-black tracking-tight text-stone-900">Proje İlerlemesi</h1>
             <p className="mt-1 max-w-2xl text-sm text-stone-600">
-              Mühendislik işleyişi: <strong className="font-semibold text-stone-800">tespit</strong> →{' '}
-              <strong className="font-semibold text-stone-800">günlük iş programı</strong> →{' '}
-              <strong className="font-semibold text-stone-800">WBS / plan–fiili</strong> →{' '}
-              <strong className="font-semibold text-stone-800">blok haritası</strong>. Kaynak havuzu personel
-              kartlarından; kat/daire profili temizlik envanterinden beslenir.
+              157/51 DWG’den altyapı ve peyzaj WBS; animasyonlu saha sahnesi; tespit → program → plan–fiili →
+              blok haritası. Slider ile yüzde güncelleyin, sahne canlı dolsun.
             </p>
           </div>
           <div className="flex items-center gap-3">
@@ -653,6 +694,28 @@ export const ProjeIlerlemeScreen: React.FC<Props> = ({ currentUser }) => {
         >
           <Building2 size={14} /> Blok haritası
         </button>
+        <button
+          type="button"
+          onClick={() => setSekme('altyapi')}
+          className={`inline-flex items-center gap-2 rounded-xl border px-4 py-2.5 text-xs font-black uppercase tracking-wide cursor-pointer ${
+            sekme === 'altyapi'
+              ? 'border-sky-600 bg-sky-600 text-white'
+              : 'border-stone-200 bg-white text-stone-600'
+          }`}
+        >
+          <Droplets size={14} /> Altyapı 157/51
+        </button>
+        <button
+          type="button"
+          onClick={() => setSekme('peyzaj')}
+          className={`inline-flex items-center gap-2 rounded-xl border px-4 py-2.5 text-xs font-black uppercase tracking-wide cursor-pointer ${
+            sekme === 'peyzaj'
+              ? 'border-green-700 bg-green-700 text-white'
+              : 'border-stone-200 bg-white text-stone-600'
+          }`}
+        >
+          <Trees size={14} /> Peyzaj 157/51
+        </button>
       </div>
 
       {sekme === 'muhendislik' ? (
@@ -671,6 +734,20 @@ export const ProjeIlerlemeScreen: React.FC<Props> = ({ currentUser }) => {
           blokOzetleri={blokHaritaOzetleri}
           kaynakHavuzlari={kaynakHavuzlari}
           onParselChange={setHaritaParsel}
+        />
+      ) : sekme === 'altyapi' ? (
+        <ProjeDisiplinPanel
+          grup="ALTYAPI"
+          satirlari={altyapiSatirlari}
+          busy={saving}
+          onUpdate={(row, patch) => void updateDisiplin(row, patch)}
+        />
+      ) : sekme === 'peyzaj' ? (
+        <ProjeDisiplinPanel
+          grup="PEYZAJ"
+          satirlari={peyzajSatirlari}
+          busy={saving}
+          onUpdate={(row, patch) => void updateDisiplin(row, patch)}
         />
       ) : sekme === 'tespit' ? (
         <>
