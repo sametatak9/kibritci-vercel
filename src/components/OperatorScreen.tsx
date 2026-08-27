@@ -554,16 +554,29 @@ export const OperatorScreen: React.FC<OperatorScreenProps> = ({
         </div>
         <div className="flex flex-wrap gap-2 w-full md:w-auto">
           <button onClick={() => setActiveSubTab('saha_faaliyet')} className={`px-4 py-2 rounded-xl text-xs font-bold transition ${activeSubTab === 'saha_faaliyet' ? 'bg-amber-500 text-slate-950' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>Saha Faaliyet (N/M)</button>
+          <button onClick={() => setActiveSubTab('toplu')} className={`px-4 py-2 rounded-xl text-xs font-bold transition ${activeSubTab === 'toplu' ? 'bg-violet-500 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>Saha Geçmişi</button>
           <button onClick={() => setActiveSubTab('yoklama')} className={`px-4 py-2 rounded-xl text-xs font-bold transition ${activeSubTab === 'yoklama' ? 'bg-emerald-500 text-slate-950' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>Operatör Yoklama</button>
           <button onClick={() => setActiveSubTab('faaliyet')} className={`px-4 py-2 rounded-xl text-xs font-bold transition ${activeSubTab === 'faaliyet' ? 'bg-rose-500 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>Taşeron Kesinti</button>
-          <button onClick={() => setActiveSubTab('toplu')} className={`px-4 py-2 rounded-xl text-xs font-bold transition ${activeSubTab === 'toplu' ? 'bg-violet-500 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>Toplu Düzelt</button>
           <button onClick={() => setActiveSubTab('rapor')} className={`px-4 py-2 rounded-xl text-xs font-bold transition ${activeSubTab === 'rapor' ? 'bg-amber-500 text-slate-950' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>İş Makinesi Kesinti Raporu</button>
           <button onClick={() => setActiveSubTab('arsiv')} className={`px-4 py-2 rounded-xl text-xs font-bold transition ${activeSubTab === 'arsiv' ? 'bg-amber-500 text-slate-950' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>Arşiv</button>
         </div>
       </div>
 
       {activeSubTab === 'saha_faaliyet' && (
-        <div className="bg-white border rounded-2xl p-4 sm:p-5 shadow-sm">
+        <div className="bg-white border rounded-2xl p-4 sm:p-5 shadow-sm space-y-3">
+          <div className="rounded-xl border border-violet-200 bg-violet-50 px-3 py-2.5 flex flex-wrap items-center justify-between gap-2">
+            <p className="text-[11px] text-violet-900 font-semibold leading-snug">
+              Günlük giriş buradan. Ağustos gibi aylık tüm kayıtları görüp taşeron kesintisini elle
+              ayırmak için <strong>Saha Geçmişi</strong> sekmesini kullanın.
+            </p>
+            <button
+              type="button"
+              onClick={() => setActiveSubTab('toplu')}
+              className="shrink-0 rounded-lg bg-violet-700 px-3 py-2 text-[10px] font-black uppercase text-white cursor-pointer"
+            >
+              Saha Geçmişi →
+            </button>
+          </div>
           <RolMobilFaaliyetYoklamaPanel
             rol="OPERATOR"
             personeller={personeller}

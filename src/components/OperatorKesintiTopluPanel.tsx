@@ -37,6 +37,7 @@ type Props = {
 };
 
 type AltSekme = 'kesinti' | 'saha';
+type SahaChip = 'ALL' | 'NORMAL' | 'MESAI' | 'KESINTI_YOK' | 'KESINTI_VAR';
 
 const AYLAR = [
   'Ocak',
@@ -59,8 +60,7 @@ function pendingOf(f: OperatorFaaliyet): boolean {
   return true;
 }
 
-function sahaSorunlu(f: OperatorSahaFaaliyet): boolean {
-  if (f.faaliyetGrubu !== 'MESAI') return false;
+function sahaKesintiYok(f: OperatorSahaFaaliyet): boolean {
   return !f.taseronKesinti || !f.taseronFirmaId;
 }
 
@@ -71,17 +71,19 @@ export const OperatorKesintiTopluPanel: React.FC<Props> = ({
   currentUser,
 }) => {
   const now = todayDateKey();
-  const [alt, setAlt] = useState<AltSekme>('kesinti');
+  const [alt, setAlt] = useState<AltSekme>('saha');
   const [ay, setAy] = useState(Number(now.slice(5, 7)));
   const [yil, setYil] = useState(Number(now.slice(0, 4)));
   const [q, setQ] = useState('');
   const [filtreFirma, setFiltreFirma] = useState('');
-  const [sadeceSorunlu, setSadeceSorunlu] = useState(true);
+  const [sahaChip, setSahaChip] = useState<SahaChip>('ALL');
+  const [sadeceSorunlu, setSadeceSorunlu] = useState(false);
   const [sadeceBekleyen, setSadeceBekleyen] = useState(false);
   const [seciliKesinti, setSeciliKesinti] = useState<Set<string>>(new Set());
   const [seciliSaha, setSeciliSaha] = useState<Set<string>>(new Set());
   const [topluFirmaId, setTopluFirmaId] = useState('');
   const [topluKaynak, setTopluKaynak] = useState<'' | 'DEMIRBAS' | 'KIRALIK' | 'MANUEL'>('');
+  const [varsayilanSaat, setVarsayilanSaat] = useState(8);
   const [busy, setBusy] = useState(false);
   const [sahaList, setSahaList] = useState<OperatorSahaFaaliyet[]>([]);
   const [msg, setMsg] = useState('');
@@ -135,26 +137,47 @@ export const OperatorKesintiTopluPanel: React.FC<Props> = ({
     taseronCariler,
   ]);
 
+  const sahaDonemHepsi = useMemo(() => {
+    return sahaList.filter((f) => {
+      const dk = normalizeDateKey(f.tarih);
+      if (!dk) return false;
+      const [yy, mm] = dk.split('-').map(Number);
+      return yy === yil && mm === ay;
+    });
+  }, [sahaList, ay, yil]);
+
+  const sahaOzet = useMemo(() => {
+    const toplam = sahaDonemHepsi.length;
+    const normal = sahaDonemHepsi.filter((f) => f.faaliyetGrubu !== 'MESAI').length;
+    const mesai = sahaDonemHepsi.filter((f) => f.faaliyetGrubu === 'MESAI').length;
+    const kesintiVar = sahaDonemHepsi.filter((f) => !sahaKesintiYok(f)).length;
+    const kesintiYok = sahaDonemHepsi.filter((f) => sahaKesintiYok(f)).length;
+    const gunSet = new Set(
+      sahaDonemHepsi.map((f) => normalizeDateKey(f.tarih)).filter(Boolean) as string[]
+    );
+    return { toplam, normal, mesai, kesintiVar, kesintiYok, gunSayisi: gunSet.size };
+  }, [sahaDonemHepsi]);
+
   const sahaFiltreli = useMemo(() => {
     const qq = q.trim().toLocaleLowerCase('tr-TR');
-    return sahaList
+    return sahaDonemHepsi
       .filter((f) => {
-        const dk = normalizeDateKey(f.tarih);
-        if (!dk) return false;
-        const [yy, mm] = dk.split('-').map(Number);
-        if (yy !== yil || mm !== ay) return false;
         if (filtreFirma && f.taseronFirmaAdi !== filtreFirma) return false;
-        if (sadeceSorunlu && !sahaSorunlu(f)) return false;
+        if (sahaChip === 'NORMAL' && f.faaliyetGrubu === 'MESAI') return false;
+        if (sahaChip === 'MESAI' && f.faaliyetGrubu !== 'MESAI') return false;
+        if (sahaChip === 'KESINTI_YOK' && !sahaKesintiYok(f)) return false;
+        if (sahaChip === 'KESINTI_VAR' && sahaKesintiYok(f)) return false;
         if (sadeceBekleyen && String(f.durum || '').toUpperCase().includes('ONAYLANDI')) return false;
         if (qq) {
-          const hay = `${f.aciklama} ${f.isNiteligi} ${f.taseronFirmaAdi || ''} ${f.parsel} ${f.blok}`
-            .toLocaleLowerCase('tr-TR');
+          const hay =
+            `${f.aciklama} ${f.isNiteligi} ${f.taseronFirmaAdi || ''} ${f.parsel} ${f.blok} ${f.kaydeden || ''}`
+              .toLocaleLowerCase('tr-TR');
           if (!hay.includes(qq)) return false;
         }
         return true;
       })
-      .sort((a, b) => String(b.tarih).localeCompare(String(a.tarih)));
-  }, [sahaList, ay, yil, q, filtreFirma, sadeceSorunlu, sadeceBekleyen]);
+      .sort((a, b) => String(b.tarih).localeCompare(String(a.tarih)) || a.id.localeCompare(b.id));
+  }, [sahaDonemHepsi, q, filtreFirma, sahaChip, sadeceBekleyen]);
 
   const firmalarDonem = useMemo(() => {
     const set = new Set<string>();
@@ -287,15 +310,19 @@ export const OperatorKesintiTopluPanel: React.FC<Props> = ({
       for (const sid of seciliSaha) {
         const saha = sahaList.find((f) => f.id === sid);
         if (!saha) continue;
+        const ofId = saha.bagliOperatorFaaliyetId || `of_saha_fix_${sid}`;
+        const existingOf = operatorFaaliyetleri.find((f) => f.id === ofId);
         const mesaiMap = saha.personelMesaiSaatleri || {};
-        const toplamSaat = (Object.values(mesaiMap) as number[]).reduce(
+        const mesaiToplam = (Object.values(mesaiMap) as number[]).reduce(
           (s, h) => s + Number(h || 0),
           0
         );
-        const ofId =
-          saha.bagliOperatorFaaliyetId ||
-          `of_mesai_fix_${sid}`;
-        const existingOf = operatorFaaliyetleri.find((f) => f.id === ofId);
+        const toplamSaat =
+          mesaiToplam > 0
+            ? Math.round(mesaiToplam * 100) / 100
+            : existingOf?.calismaSuresi && existingOf.calismaSuresi > 0
+              ? existingOf.calismaSuresi
+              : Number(varsayilanSaat) || 0;
         const isKaydiEtiketi =
           saha.isKaydiEtiketi ||
           buildOperatorIsKaydiEtiketi({
@@ -315,16 +342,13 @@ export const OperatorKesintiTopluPanel: React.FC<Props> = ({
           tarih: normalizeDateKey(saha.tarih) || saha.tarih,
           baslangicSaat: existingOf?.baslangicSaat || '17:00',
           bitisSaat: existingOf?.bitisSaat || '17:00',
-          calismaSuresi:
-            toplamSaat > 0
-              ? Math.round(toplamSaat * 100) / 100
-              : existingOf?.calismaSuresi || 0,
-          yapilanIs: `[Mesai kesinti] ${saha.aciklama} · ${saha.isNiteligi} (${saha.parsel}/${saha.blok})`,
+          calismaSuresi: toplamSaat,
+          yapilanIs: `[${saha.faaliyetGrubu === 'MESAI' ? 'Mesai' : 'Saha'} kesinti] ${saha.aciklama} · ${saha.isNiteligi} (${saha.parsel}/${saha.blok})`,
           firmaAdi: cari.unvan,
           firmaId: cari.id,
           fotoUrl: saha.fotoUrl || undefined,
-          makineKaynak: saha.makineKaynak || 'MANUEL',
-          makineManuelAd: saha.makineManuelAd || saha.aracPlaka || 'Mesai saha',
+          makineKaynak: saha.makineKaynak || 'DEMIRBAS',
+          makineManuelAd: saha.makineManuelAd || saha.aracPlaka || undefined,
           isKaydiEtiketi,
           onayDurumu: existingOf?.onayDurumu || 'BEKLEMEDE',
           durum: existingOf?.durum || 'ONAY BEKLİYOR',
@@ -358,7 +382,7 @@ export const OperatorKesintiTopluPanel: React.FC<Props> = ({
         for (const n of yeniOf) map.set(n.id, n);
         for (const sid of seciliSaha) {
           const saha = sahaList.find((f) => f.id === sid);
-          const ofId = saha?.bagliOperatorFaaliyetId || `of_mesai_fix_${sid}`;
+          const ofId = saha?.bagliOperatorFaaliyetId || `of_saha_fix_${sid}`;
           const cur = map.get(ofId);
           if (cur) {
             map.set(ofId, {
@@ -411,21 +435,48 @@ export const OperatorKesintiTopluPanel: React.FC<Props> = ({
 
   return (
     <div className="space-y-4">
-      <div className="rounded-2xl border border-amber-200 bg-amber-50/80 p-4">
-        <p className="text-[10px] font-black uppercase tracking-widest text-amber-800 flex items-center gap-1.5">
-          <ClipboardList size={12} /> Toplu inceleme
+      <div className="rounded-2xl border border-violet-200 bg-violet-50/80 p-4">
+        <p className="text-[10px] font-black uppercase tracking-widest text-violet-800 flex items-center gap-1.5">
+          <ClipboardList size={12} /> Saha faaliyet geçmişi
         </p>
-        <h3 className="text-sm font-black text-amber-950 mt-0.5">
-          Operatör faaliyetleri — taşeron kesintisi düzeltme
+        <h3 className="text-sm font-black text-violet-950 mt-0.5">
+          Aylık kayıtlar — taşeron kesintisini elle ayır
         </h3>
-        <p className="text-[11px] text-amber-900/80 mt-1 max-w-2xl leading-snug">
-          Operatör saha girerken «Taşeron için mesai — kesinti» işaretini atladıysa veya yanlış
-          firmaya yazdıysa burada dönemdeki tüm kayıtları görüp toplu düzeltirsiniz. Onay havuzuna
-          düşen kesinti kayıtları ile saha faaliyetleri ayrı listelenir.
+        <p className="text-[11px] text-violet-900/80 mt-1 max-w-2xl leading-snug">
+          Operatörün saha faaliyeti olarak girdiği tüm kayıtlar burada. İnceleyip taşeron kesintisi
+          olması gerekenleri seçin → firma atayın → kesinti kaydı oluşur (Onay Havuzu’na düşer).
         </p>
       </div>
 
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+        {[
+          { label: 'Toplam giriş', value: sahaOzet.toplam },
+          { label: 'Aktif gün', value: sahaOzet.gunSayisi },
+          { label: 'Normal', value: sahaOzet.normal },
+          { label: 'Mesai', value: sahaOzet.mesai },
+          { label: 'Kesinti bağlı', value: sahaOzet.kesintiVar },
+          { label: 'Kesinti yok', value: sahaOzet.kesintiYok },
+        ].map((c) => (
+          <div
+            key={c.label}
+            className="rounded-xl border border-stone-200 bg-white px-3 py-2 text-center shadow-sm"
+          >
+            <p className="text-[9px] font-bold uppercase text-stone-500">{c.label}</p>
+            <p className="text-xl font-black tabular-nums text-stone-900">{c.value}</p>
+          </div>
+        ))}
+      </div>
+
       <div className="flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={() => setAlt('saha')}
+          className={`px-3 py-2 rounded-xl text-[10px] font-black uppercase cursor-pointer ${
+            alt === 'saha' ? 'bg-amber-500 text-slate-950' : 'bg-slate-100 text-slate-600'
+          }`}
+        >
+          Saha geçmişi ({sahaFiltreli.length}/{sahaOzet.toplam})
+        </button>
         <button
           type="button"
           onClick={() => setAlt('kesinti')}
@@ -434,15 +485,6 @@ export const OperatorKesintiTopluPanel: React.FC<Props> = ({
           }`}
         >
           Kesinti kayıtları ({kesintiFiltreli.length})
-        </button>
-        <button
-          type="button"
-          onClick={() => setAlt('saha')}
-          className={`px-3 py-2 rounded-xl text-[10px] font-black uppercase cursor-pointer ${
-            alt === 'saha' ? 'bg-amber-500 text-slate-950' : 'bg-slate-100 text-slate-600'
-          }`}
-        >
-          Saha faaliyetleri ({sahaFiltreli.length})
         </button>
       </div>
 
@@ -468,7 +510,7 @@ export const OperatorKesintiTopluPanel: React.FC<Props> = ({
             onChange={(e) => setYil(Number(e.target.value))}
             className="mt-0.5 block rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 text-xs font-semibold"
           >
-            {[yil - 1, yil, yil + 1].map((y) => (
+            {[2025, 2026, 2027].map((y) => (
               <option key={y} value={y}>
                 {y}
               </option>
@@ -499,14 +541,16 @@ export const OperatorKesintiTopluPanel: React.FC<Props> = ({
             className="w-full rounded-lg border border-slate-200 bg-slate-50 py-1.5 pl-8 pr-2 text-xs font-semibold"
           />
         </div>
-        <label className="flex items-center gap-1.5 text-[10px] font-bold text-slate-700 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={sadeceSorunlu}
-            onChange={(e) => setSadeceSorunlu(e.target.checked)}
-          />
-          Sadece sorunlu
-        </label>
+        {alt === 'kesinti' && (
+          <label className="flex items-center gap-1.5 text-[10px] font-bold text-slate-700 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={sadeceSorunlu}
+              onChange={(e) => setSadeceSorunlu(e.target.checked)}
+            />
+            Sadece sorunlu firma
+          </label>
+        )}
         <label className="flex items-center gap-1.5 text-[10px] font-bold text-slate-700 cursor-pointer">
           <input
             type="checkbox"
@@ -516,6 +560,33 @@ export const OperatorKesintiTopluPanel: React.FC<Props> = ({
           Onay bekleyen
         </label>
       </div>
+
+      {alt === 'saha' && (
+        <div className="flex flex-wrap gap-1.5">
+          {(
+            [
+              ['ALL', 'Tümü'],
+              ['KESINTI_YOK', 'Kesinti yok'],
+              ['KESINTI_VAR', 'Kesinti bağlı'],
+              ['NORMAL', 'Normal'],
+              ['MESAI', 'Mesai'],
+            ] as const
+          ).map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => setSahaChip(id)}
+              className={`rounded-full border px-3 py-1 text-[10px] font-black uppercase cursor-pointer ${
+                sahaChip === id
+                  ? 'border-violet-600 bg-violet-600 text-white'
+                  : 'border-stone-200 bg-white text-stone-600'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
 
       <div className="rounded-2xl border border-slate-200 bg-white p-3 space-y-2">
         <p className="text-[9px] font-black uppercase text-slate-500">Toplu işlem</p>
@@ -535,6 +606,20 @@ export const OperatorKesintiTopluPanel: React.FC<Props> = ({
               ))}
             </select>
           </label>
+          {alt === 'saha' && (
+            <label className="text-[9px] font-bold uppercase text-slate-500">
+              Saat (mesai yoksa)
+              <input
+                type="number"
+                min={0.5}
+                max={24}
+                step={0.5}
+                value={varsayilanSaat}
+                onChange={(e) => setVarsayilanSaat(Number(e.target.value) || 0)}
+                className="mt-0.5 block w-24 rounded-lg border border-slate-200 bg-slate-50 px-2 py-2 text-xs font-semibold"
+              />
+            </label>
+          )}
           {alt === 'kesinti' && (
             <label className="text-[9px] font-bold uppercase text-slate-500">
               Makine kaynağı
@@ -561,7 +646,7 @@ export const OperatorKesintiTopluPanel: React.FC<Props> = ({
             <Save size={12} />
             {alt === 'kesinti'
               ? `Seçilenlere uygula (${seciliKesinti.size})`
-              : `Kesinti bağla (${seciliSaha.size})`}
+              : `Taşeron kesintisi yap (${seciliSaha.size})`}
           </button>
         </div>
         {msg && (
@@ -697,18 +782,18 @@ export const OperatorKesintiTopluPanel: React.FC<Props> = ({
               Tümünü seç ({sahaFiltreli.length})
             </button>
             <span className="text-[10px] text-slate-500 font-semibold">
-              MESAİ + kesinti eksik olanlar vurgulu
+              {AYLAR[ay - 1]} {yil} · {sahaFiltreli.length} kayıt listeleniyor
             </span>
           </div>
           <div className="max-h-[520px] overflow-y-auto divide-y divide-slate-100">
             {sahaFiltreli.length === 0 ? (
               <p className="p-8 text-center text-xs text-slate-400">
-                Bu filtrede saha faaliyeti yok.
+                Bu ay/filtrede saha faaliyeti yok.
               </p>
             ) : (
               sahaFiltreli.map((f) => {
                 const checked = seciliSaha.has(f.id);
-                const sorun = sahaSorunlu(f);
+                const sorun = sahaKesintiYok(f);
                 return (
                   <div
                     key={f.id}
