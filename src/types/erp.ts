@@ -756,7 +756,7 @@ export interface ProjeBlokProfili {
 }
 
 /** Altyapı / peyzaj disiplin ilerleme satırı (DWG WBS) */
-export type ProjeDisiplinGrup = 'ALTYAPI' | 'PEYZAJ';
+export type ProjeDisiplinGrup = 'ALTYAPI' | 'PEYZAJ' | 'MIMARI';
 export type ProjeDisiplinDurum = 'PLANLANDI' | 'IMALATTA' | 'TAMAMLANDI' | 'BEKLEMEDE';
 
 export interface ProjeDisiplinIlerleme {

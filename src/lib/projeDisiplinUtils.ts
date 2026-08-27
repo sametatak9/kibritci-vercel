@@ -5,6 +5,7 @@ import {
   PEYZAJ_WBS_SABLON,
   expandDisiplinSablon,
 } from '../data/parsel15751DisiplinSeed';
+import { expandMimariCSablon } from '../data/parsel15751CBlokSeed';
 
 export const DISIPLIN_DURUM_LABEL: Record<ProjeDisiplinDurum, string> = {
   PLANLANDI: 'Planlandı',
@@ -17,8 +18,10 @@ export function mergeDisiplinIlerleme(
   grup: DisiplinGrup,
   kayitlar: ProjeDisiplinIlerleme[]
 ): ProjeDisiplinIlerleme[] {
-  const sablon = grup === 'ALTYAPI' ? ALTYAPI_WBS_SABLON : PEYZAJ_WBS_SABLON;
-  const expanded = expandDisiplinSablon(sablon);
+  const expanded =
+    grup === 'MIMARI'
+      ? expandMimariCSablon()
+      : expandDisiplinSablon(grup === 'ALTYAPI' ? ALTYAPI_WBS_SABLON : PEYZAJ_WBS_SABLON);
   const map = new Map(kayitlar.filter((k) => k.grup === grup).map((k) => [k.id, k]));
   return expanded.map(({ id, parsel, blok, sablon: s }) => {
     const prev = map.get(id);

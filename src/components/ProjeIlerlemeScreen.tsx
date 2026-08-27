@@ -8,6 +8,7 @@ import {
   ClipboardList,
   Droplets,
   Filter,
+  Home,
   Layers,
   Plus,
   Target,
@@ -32,6 +33,7 @@ import {
   buildMuhendislikWbs,
 } from '../lib/projeMuhendislikUtils';
 import { ProjeBlokHaritaPanel } from './ProjeBlokHaritaPanel';
+import { ProjeCBlokPanel } from './ProjeCBlokPanel';
 import { ProjeDisiplinPanel } from './ProjeDisiplinPanel';
 import { ProjeMuhendislikPanel } from './ProjeMuhendislikPanel';
 import {
@@ -77,7 +79,7 @@ type Props = {
   currentUser?: { email?: string; ad?: string; soyad?: string; displayName?: string } | null;
 };
 
-type Sekme = 'tespit' | 'program' | 'muhendislik' | 'harita' | 'altyapi' | 'peyzaj';
+type Sekme = 'tespit' | 'program' | 'muhendislik' | 'harita' | 'altyapi' | 'peyzaj' | 'cblok';
 
 type Draft = {
   parsel: string;
@@ -303,6 +305,10 @@ export const ProjeIlerlemeScreen: React.FC<Props> = ({ currentUser }) => {
   );
   const peyzajSatirlari = useMemo(
     () => mergeDisiplinIlerleme('PEYZAJ', disiplinKayitlari),
+    [disiplinKayitlari]
+  );
+  const mimariSatirlari = useMemo(
+    () => mergeDisiplinIlerleme('MIMARI', disiplinKayitlari),
     [disiplinKayitlari]
   );
 
@@ -561,7 +567,8 @@ export const ProjeIlerlemeScreen: React.FC<Props> = ({ currentUser }) => {
             </p>
             <h1 className="mt-1 text-2xl font-black tracking-tight text-stone-900">Proje İlerlemesi</h1>
             <p className="mt-1 max-w-2xl text-sm text-stone-600">
-              157/51 DWG’den altyapı ve peyzaj WBS; animasyonlu saha sahnesi; tespit → program → plan–fiili →
+              157/51 DWG’den altyapı, peyzaj ve C blok daire planı; animasyonlu saha; tespit → program →
+              plan–fiili →
               blok haritası. Slider ile yüzde güncelleyin, sahne canlı dolsun.
             </p>
           </div>
@@ -716,6 +723,17 @@ export const ProjeIlerlemeScreen: React.FC<Props> = ({ currentUser }) => {
         >
           <Trees size={14} /> Peyzaj 157/51
         </button>
+        <button
+          type="button"
+          onClick={() => setSekme('cblok')}
+          className={`inline-flex items-center gap-2 rounded-xl border px-4 py-2.5 text-xs font-black uppercase tracking-wide cursor-pointer ${
+            sekme === 'cblok'
+              ? 'border-violet-700 bg-violet-700 text-white'
+              : 'border-stone-200 bg-white text-stone-600'
+          }`}
+        >
+          <Home size={14} /> C Bloklar 157/51
+        </button>
       </div>
 
       {sekme === 'muhendislik' ? (
@@ -746,6 +764,12 @@ export const ProjeIlerlemeScreen: React.FC<Props> = ({ currentUser }) => {
         <ProjeDisiplinPanel
           grup="PEYZAJ"
           satirlari={peyzajSatirlari}
+          busy={saving}
+          onUpdate={(row, patch) => void updateDisiplin(row, patch)}
+        />
+      ) : sekme === 'cblok' ? (
+        <ProjeCBlokPanel
+          satirlari={mimariSatirlari}
           busy={saving}
           onUpdate={(row, patch) => void updateDisiplin(row, patch)}
         />

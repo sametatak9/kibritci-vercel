@@ -11,7 +11,7 @@ import { DisiplinGrup } from '../data/parsel15751DisiplinSeed';
 import { DISIPLIN_DURUM_LABEL, calcDisiplinOzet } from '../lib/projeDisiplinUtils';
 
 type Props = {
-  grup: DisiplinGrup;
+  grup: Exclude<DisiplinGrup, 'MIMARI'>;
   satirlari: ProjeDisiplinIlerleme[];
   busy?: boolean;
   onUpdate: (row: ProjeDisiplinIlerleme, patch: Partial<ProjeDisiplinIlerleme>) => void;

@@ -2,7 +2,7 @@
 
 export const PARSEL_157_51 = 'Parsel Bölge 157/51';
 
-export type DisiplinGrup = 'ALTYAPI' | 'PEYZAJ';
+export type DisiplinGrup = 'ALTYAPI' | 'PEYZAJ' | 'MIMARI';
 
 export type DisiplinKalemDurum = 'PLANLANDI' | 'IMALATTA' | 'TAMAMLANDI' | 'BEKLEMEDE';
 
