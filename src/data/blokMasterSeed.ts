@@ -43,12 +43,30 @@ export function mergeBlokProfilleri(
   const seed = seedBlokProfilleri();
   const map = new Map(seed.map((p) => [p.id, { ...p }]));
   for (const p of firestore) {
-    map.set(p.id, { ...map.get(p.id), ...p, id: blokProfilId(p.parsel, p.blok) });
+    const id = blokProfilId(p.parsel, p.blok);
+    const base = map.get(id);
+    const p46 = p.parsel.includes('157/46') ? profil15746(p.blok) : undefined;
+    // 157/46: ruhsat + duvar aplikasyon kat/daire sayılarını koru (eski 6×24 ezmesin)
+    if (p46) {
+      map.set(id, {
+        ...base,
+        ...p,
+        id,
+        katSayisi: p46.katSayisi,
+        daireSayisi: p46.daireSayisi,
+        not: p.not || base?.not,
+      });
+    } else {
+      map.set(id, { ...base, ...p, id });
+    }
   }
   if (temizlikDaireSayilari) {
     for (const [id, n] of temizlikDaireSayilari) {
       const row = map.get(id);
-      if (row && n > 0) row.daireSayisi = n;
+      if (!row || n <= 0) continue;
+      // 157/46 ruhsat daire sayısını temizlik envanteri ile ezme
+      if (row.parsel.includes('157/46') && profil15746(row.blok)) continue;
+      row.daireSayisi = n;
     }
   }
   return [...map.values()].sort((a, b) =>
