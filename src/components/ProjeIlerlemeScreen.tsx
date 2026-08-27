@@ -33,7 +33,7 @@ import {
   buildMuhendislikWbs,
 } from '../lib/projeMuhendislikUtils';
 import { ProjeBlokHaritaPanel } from './ProjeBlokHaritaPanel';
-import { ProjeCBlokPanel } from './ProjeCBlokPanel';
+import { ProjeBlokKontrolPanel } from './ProjeBlokKontrolPanel';
 import { ProjeDisiplinPanel } from './ProjeDisiplinPanel';
 import { ProjeMuhendislikPanel } from './ProjeMuhendislikPanel';
 import {
@@ -159,6 +159,7 @@ export const ProjeIlerlemeScreen: React.FC<Props> = ({ currentUser }) => {
   const [seciliKalemIds, setSeciliKalemIds] = useState<string[]>([]);
   const [programTarih, setProgramTarih] = useState(tomorrowDateKey());
   const [haritaParsel, setHaritaParsel] = useState(PARSEL_SECENEK[0] || '');
+  const [kontrolParsel, setKontrolParsel] = useState('Parsel Bölge 157/51');
   const muhendislikBaslangic = addDaysToDateKey(todayDateKey(), -MUHENDISLIK_GUN);
 
   useEffect(() => {
@@ -358,6 +359,82 @@ export const ProjeIlerlemeScreen: React.FC<Props> = ({ currentUser }) => {
       });
     } catch (err) {
       alert(formatFirestoreWriteError(err) || 'Daire kalemi yazılamadı.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const blokKontroldenProgramaAl = async (
+    drafts: Array<{
+      baslik: string;
+      parsel: string;
+      blok: string;
+      kova: ProjeIlerlemeKova;
+      refKalemId: string;
+    }>,
+    programTarih: string
+  ) => {
+    if (!drafts.length) return;
+    setSaving(true);
+    try {
+      const authBlock = await assertErpWriteAuth();
+      if (authBlock) throw new Error(authBlock);
+      const now = todayDateKey();
+      let sira =
+        Math.max(0, ...planSatirlari.filter((s) => s.tarih === programTarih).map((s) => s.sira || 0)) +
+        1;
+      let eklendi = 0;
+      for (const d of drafts) {
+        const punchId = `punch_cdaire_${d.refKalemId}`.replace(/\|/g, '_');
+        const mevcutPunch = kalemler.find((k) => k.id === punchId);
+        const punch: ProjeIlerlemeKalemi = {
+          id: punchId,
+          parsel: d.parsel,
+          blok: d.blok,
+          baslik: d.baslik,
+          kova: d.kova,
+          durum: mevcutPunch?.durum === 'KAPANDI' ? 'ACIK' : mevcutPunch?.durum || 'ACIK',
+          agirlik: 2,
+          kirmiziEngel: false,
+          olusturmaTarihi: mevcutPunch?.olusturmaTarihi || now,
+          guncellemeTarihi: now,
+          olusturan: userLabel(currentUser) || undefined,
+          not: `Blok kontrol · ${d.refKalemId}`,
+        };
+        await saveDocument(COLLECTION, punch);
+
+        const already = planSatirlari.some(
+          (s) => s.tarih === programTarih && s.kalemId === punchId
+        );
+        if (already) continue;
+        const payload: ProjeIsPlanSatiri = {
+          id: newProjeIsPlanId(),
+          tarih: programTarih,
+          kalemId: punchId,
+          parsel: d.parsel,
+          blok: d.blok,
+          baslik: d.baslik,
+          kova: d.kova,
+          agirlik: 2,
+          kirmiziEngel: false,
+          durum: 'PROGRAMDA',
+          sira: sira++,
+          olusturmaTarihi: now,
+          guncellemeTarihi: now,
+          olusturan: userLabel(currentUser) || undefined,
+        };
+        await saveDocument(PLAN_COLLECTION, payload);
+        eklendi += 1;
+      }
+      setProgramTarih(programTarih);
+      setSekme('program');
+      alert(
+        eklendi
+          ? `${eklendi} kalem iş programına alındı (${programTarih}).`
+          : 'Seçilen kalemler bu program gününde zaten vardı.'
+      );
+    } catch (err) {
+      alert(formatFirestoreWriteError(err) || 'İş programına alınamadı.');
     } finally {
       setSaving(false);
     }
@@ -761,7 +838,7 @@ export const ProjeIlerlemeScreen: React.FC<Props> = ({ currentUser }) => {
               : 'border-stone-200 bg-white text-stone-600'
           }`}
         >
-          <Home size={14} /> C Bloklar 157/51
+          <Home size={14} /> Blok Kontrol
         </button>
       </div>
 
@@ -797,12 +874,15 @@ export const ProjeIlerlemeScreen: React.FC<Props> = ({ currentUser }) => {
           onUpdate={(row, patch) => void updateDisiplin(row, patch)}
         />
       ) : sekme === 'cblok' ? (
-        <ProjeCBlokPanel
-          satirlari={mimariSatirlari}
+        <ProjeBlokKontrolPanel
+          parsel={kontrolParsel}
+          parselSecenek={PARSEL_SECENEK}
+          blokProfilleri={mergedBlokProfilleri}
           daireKalemleri={cDaireKalemleri}
           busy={saving}
-          onUpdateBlok={(row, patch) => void updateDisiplin(row, patch)}
+          onParselChange={setKontrolParsel}
           onUpdateDaireKalem={(row) => void updateCDaireKalem(row)}
+          onIsProgramaAl={(drafts, tarih) => blokKontroldenProgramaAl(drafts, tarih)}
         />
       ) : sekme === 'tespit' ? (
         <>
