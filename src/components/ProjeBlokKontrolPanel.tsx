@@ -59,6 +59,7 @@ import {
 import { mimariGorsellerForOda, mimariGorsellerForParsel } from '../data/mimariGorselKatalog';
 import { DISIPLIN_DURUM_LABEL } from '../lib/projeDisiplinUtils';
 import { tomorrowDateKey } from '../lib/dateKeyUtils';
+import { DaireKusbakisiPlan } from './DaireKusbakisiPlan';
 
 export type BlokKontrolProgramDraft = {
   baslik: string;
@@ -100,12 +101,35 @@ type BlokOzet = {
   kat: number;
 };
 
+type HeatMode = 'TOPLAM' | 'KABA' | 'INCE' | 'ALTYAPI';
+
 function avgYuzde(rows: { yuzde?: number }[]): number {
   if (!rows.length) return 0;
   return Math.round(rows.reduce((s, r) => s + (r.yuzde || 0), 0) / rows.length);
 }
 
-function heat(yuzde: number): string {
+function heat(yuzde: number, mode: HeatMode = 'TOPLAM'): string {
+  if (mode === 'KABA') {
+    if (yuzde >= 100) return '#b45309';
+    if (yuzde >= 70) return '#d97706';
+    if (yuzde >= 40) return '#fbbf24';
+    if (yuzde > 0) return '#fed7aa';
+    return '#e7e5e4';
+  }
+  if (mode === 'INCE') {
+    if (yuzde >= 100) return '#6d28d9';
+    if (yuzde >= 70) return '#8b5cf6';
+    if (yuzde >= 40) return '#c4b5fd';
+    if (yuzde > 0) return '#ede9fe';
+    return '#e7e5e4';
+  }
+  if (mode === 'ALTYAPI') {
+    if (yuzde >= 100) return '#0369a1';
+    if (yuzde >= 70) return '#0ea5e9';
+    if (yuzde >= 40) return '#7dd3fc';
+    if (yuzde > 0) return '#e0f2fe';
+    return '#e7e5e4';
+  }
   if (yuzde >= 100) return '#059669';
   if (yuzde >= 70) return '#34d399';
   if (yuzde >= 40) return '#fbbf24';
@@ -231,17 +255,19 @@ function buildSeedKalemler(
 }
 
 /** Dairesel ilerleme — Kaba / İnce / Altyapı */
-const Ring: React.FC<{ label: string; yuzde: number; color: string; size?: number }> = ({
-  label,
-  yuzde,
-  color,
-  size = 64,
-}) => {
+const Ring: React.FC<{
+  label: string;
+  yuzde: number;
+  color: string;
+  size?: number;
+  active?: boolean;
+  onClick?: () => void;
+}> = ({ label, yuzde, color, size = 64, active, onClick }) => {
   const r = (size - 10) / 2;
   const c = 2 * Math.PI * r;
   const dash = (Math.min(100, Math.max(0, yuzde)) / 100) * c;
-  return (
-    <div className="flex flex-col items-center gap-1 min-w-[64px]">
+  const inner = (
+    <>
       <svg width={size} height={size} className="block">
         <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="#e7e5e4" strokeWidth="6" />
         <circle
@@ -268,7 +294,21 @@ const Ring: React.FC<{ label: string; yuzde: number; color: string; size?: numbe
         </text>
       </svg>
       <span className="text-[9px] font-black uppercase tracking-wide text-stone-500">{label}</span>
-    </div>
+    </>
+  );
+  if (!onClick) {
+    return <div className="flex flex-col items-center gap-1 min-w-[52px]">{inner}</div>;
+  }
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`flex flex-col items-center gap-1 min-w-[52px] rounded-xl px-1 py-0.5 cursor-pointer ${
+        active ? 'ring-2 ring-stone-900 bg-white' : 'hover:bg-white/50'
+      }`}
+    >
+      {inner}
+    </button>
   );
 };
 
@@ -1074,81 +1114,22 @@ export const ProjeBlokKontrolPanel: React.FC<Props> = ({
           />
 
           {!teknikKat && tip && (
-            <div className="space-y-2">
-              <div className="flex flex-wrap items-end justify-between gap-2">
-                <div>
-                  <p className="text-[10px] font-black uppercase tracking-widest text-stone-500">
-                    Daire oda planı
-                  </p>
-                  <h4 className="text-lg font-black text-stone-900">
-                    {daireNo}{' '}
-                    <span className="text-stone-400 text-sm font-bold">{tip}</span>
-                    <span className="ml-2 text-sm font-black text-emerald-700">%{daireYuzde}</span>
-                  </h4>
-                </div>
-                <div className="flex gap-2">
-                  <Ring label="Kaba" yuzde={daireKaba} color="#d97706" size={52} />
-                  <Ring label="İnce" yuzde={daireInce} color="#7c3aed" size={52} />
-                  <Ring label="Alty." yuzde={daireAlty} color="#0284c7" size={52} />
-                </div>
+            <div className="flex flex-wrap items-end justify-between gap-2">
+              <div>
+                <p className="text-[10px] font-black uppercase tracking-widest text-stone-500">
+                  Seçili daire
+                </p>
+                <h4 className="text-lg font-black text-stone-900">
+                  {daireNo}{' '}
+                  <span className="text-stone-400 text-sm font-bold">{tip}</span>
+                  <span className="ml-2 text-sm font-black text-emerald-700">%{daireYuzde}</span>
+                </h4>
               </div>
-              <svg
-                viewBox="0 0 100 100"
-                className="w-full rounded-xl border-2 border-stone-800 bg-white shadow-inner"
-              >
-                {plan.map((oda) => {
-                  const y = odaYuzde(oda.key);
-                  const isGiris = oda.key === 'giris';
-                  const active = odaKey === oda.key;
-                  return (
-                    <g
-                      key={oda.key}
-                      className="cursor-pointer"
-                      onClick={() => setOdaKey(oda.key)}
-                    >
-                      <rect
-                        x={oda.x}
-                        y={oda.y}
-                        width={oda.w}
-                        height={oda.h}
-                        rx="1.2"
-                        fill={isGiris ? '#1c1917' : heat(y)}
-                        stroke={active ? '#0c0a09' : '#57534e'}
-                        strokeWidth={active ? 2 : 0.7}
-                      />
-                      {!isGiris && (
-                        <>
-                          <text
-                            x={oda.x + oda.w / 2}
-                            y={oda.y + oda.h / 2 - 1.5}
-                            textAnchor="middle"
-                            dominantBaseline="middle"
-                            fontSize="2.8"
-                            fontWeight="800"
-                            fill="#1c1917"
-                          >
-                            {oda.label}
-                          </text>
-                          <text
-                            x={oda.x + oda.w / 2}
-                            y={oda.y + oda.h / 2 + 2.8}
-                            textAnchor="middle"
-                            dominantBaseline="middle"
-                            fontSize="2.4"
-                            fontWeight="700"
-                            fill="#44403c"
-                          >
-                            %{y}
-                          </text>
-                        </>
-                      )}
-                    </g>
-                  );
-                })}
-              </svg>
-              <p className="text-[10px] text-stone-500 text-center font-semibold">
-                Odaya tıklayın → kaba / ince / altyapı kalemleri + hedef görsel
-              </p>
+              <div className="flex gap-2">
+                <Ring label="Kaba" yuzde={daireKaba} color="#d97706" size={52} />
+                <Ring label="İnce" yuzde={daireInce} color="#7c3aed" size={52} />
+                <Ring label="Alty." yuzde={daireAlty} color="#0284c7" size={52} />
+              </div>
             </div>
           )}
 
@@ -1160,49 +1141,18 @@ export const ProjeBlokKontrolPanel: React.FC<Props> = ({
         </div>
       </div>
 
-      {/* Oda komuta: kalemler + büyük mimari */}
-      {seciliOda && seciliOda.key !== 'giris' && (
-        <div className="grid grid-cols-1 lg:grid-cols-[1fr_1.15fr] gap-4">
-          <div className="rounded-2xl border border-stone-200 bg-white p-3 sm:p-4 space-y-3 shadow-sm">
-            <div className="flex items-center justify-between gap-2">
-              <div>
-                <p className="text-[10px] font-black uppercase tracking-widest text-stone-500">
-                  {blok} · {daireNo} · kontrol
-                </p>
-                <h4 className="text-xl font-black text-stone-900">{seciliOda.label}</h4>
-              </div>
-              <button
-                type="button"
-                onClick={() => setOdaKey(null)}
-                className="rounded-lg border border-stone-200 p-1.5 cursor-pointer hover:bg-stone-50"
-              >
-                <X size={14} />
-              </button>
-            </div>
-            <div className="space-y-3 max-h-[520px] overflow-y-auto pr-1">
-              {odaGruplari.map((g) => (
-                <div key={g.grup} className="space-y-1.5">
-                  <p
-                    className={`sticky top-0 z-[1] rounded-lg border px-2.5 py-1.5 text-[10px] font-black uppercase tracking-wide ${grupTone(g.grup)}`}
-                  >
-                    {g.label}
-                    <span className="ml-2 opacity-70">
-                      %{avgYuzde(g.rows)} · {g.rows.length} kalem
-                    </span>
-                  </p>
-                  {g.rows.map((row) => (
-                    <KalemEditor
-                      key={row.id}
-                      row={row}
-                      busy={busy}
-                      onUpdate={onUpdateDaireKalem}
-                    />
-                  ))}
-                </div>
-              ))}
-            </div>
+      {!teknikKat && tip && (
+        <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)] gap-4 items-stretch">
+          <div className="rounded-2xl border border-stone-200 bg-white p-3 sm:p-4 shadow-sm">
+            <DaireKusbakisiPlan
+              plan={plan}
+              odaKey={odaKey}
+              yuzdeFor={odaYuzde}
+              onSelect={setOdaKey}
+              daireNo={daireNo}
+              tip={tip}
+            />
           </div>
-
           <div className="rounded-2xl border border-stone-800 overflow-hidden bg-stone-900 shadow-lg min-h-[320px] flex flex-col">
             {heroSrc ? (
               <>
@@ -1218,7 +1168,9 @@ export const ProjeBlokKontrolPanel: React.FC<Props> = ({
                     </p>
                     <p className="text-lg font-black text-white">{heroSrc.baslik}</p>
                     <p className="text-[11px] text-stone-300">
-                      {seciliOda.label} — saha ile hedefi karşılaştırın
+                      {seciliOda && seciliOda.key !== 'giris'
+                        ? `${seciliOda.label} — plandan görsele bakın, işi hayal edin`
+                        : 'Oda seçin — görsel odaya göre değişir'}
                     </p>
                   </div>
                 </div>
@@ -1243,11 +1195,51 @@ export const ProjeBlokKontrolPanel: React.FC<Props> = ({
               </>
             ) : (
               <div className="flex-1 flex items-center justify-center p-8 text-center text-stone-400 text-sm">
-                {teknikKat
-                  ? 'Teknik kat — iç mimari hedef görsel yok.'
-                  : 'Bu oda / parsel için görsel yok.'}
+                Bu parsel için iç mimari hedef görsel yok.
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {seciliOda && seciliOda.key !== 'giris' && (
+        <div className="rounded-2xl border border-stone-200 bg-white p-3 sm:p-4 space-y-3 shadow-sm">
+          <div className="flex items-center justify-between gap-2">
+            <div>
+              <p className="text-[10px] font-black uppercase tracking-widest text-stone-500">
+                {blok} · {daireNo} · iş kalemleri
+              </p>
+              <h4 className="text-xl font-black text-stone-900">{seciliOda.label}</h4>
+            </div>
+            <button
+              type="button"
+              onClick={() => setOdaKey(null)}
+              className="rounded-lg border border-stone-200 p-1.5 cursor-pointer hover:bg-stone-50"
+            >
+              <X size={14} />
+            </button>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 max-h-[520px] overflow-y-auto pr-1">
+            {odaGruplari.map((g) => (
+              <div key={g.grup} className="space-y-1.5">
+                <p
+                  className={`sticky top-0 z-[1] rounded-lg border px-2.5 py-1.5 text-[10px] font-black uppercase tracking-wide ${grupTone(g.grup)}`}
+                >
+                  {g.label}
+                  <span className="ml-2 opacity-70">
+                    %{avgYuzde(g.rows)} · {g.rows.length} kalem
+                  </span>
+                </p>
+                {g.rows.map((row) => (
+                  <KalemEditor
+                    key={row.id}
+                    row={row}
+                    busy={busy}
+                    onUpdate={onUpdateDaireKalem}
+                  />
+                ))}
+              </div>
+            ))}
           </div>
         </div>
       )}
