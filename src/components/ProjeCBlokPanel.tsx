@@ -262,8 +262,7 @@ export const ProjeCBlokPanel: React.FC<Props> = ({
             </p>
             <h2 className="text-lg font-black text-stone-900">C Bloklar (157/51)</h2>
             <p className="mt-1 text-xs text-stone-600 max-w-xl">
-              {parselOzet.blokSayisi} blok · {parselOzet.kat} kat · {parselOzet.dairePerKat}{' '}
-              daire/kat · {parselOzet.daire} daire. DWG: {C_BLOK_DWG}
+              Kaynak: {C_BLOK_DWG}
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -280,6 +279,38 @@ export const ProjeCBlokPanel: React.FC<Props> = ({
               <p className="text-xl font-black tabular-nums">{ozet.yuzde}%</p>
             </div>
           </div>
+        </div>
+
+        <div className="mt-4 grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-2">
+          {[
+            { label: 'Blok', value: String(parselOzet.blokSayisi), sub: 'C1–C4' },
+            { label: 'Kat / blok', value: String(parselOzet.kat), sub: 'toplam kat' },
+            { label: 'Daire / kat', value: String(parselOzet.dairePerKat), sub: 'her katta' },
+            {
+              label: 'Daire / blok',
+              value: String(parselOzet.kat * parselOzet.dairePerKat),
+              sub: `${parselOzet.kat}×${parselOzet.dairePerKat}`,
+            },
+            {
+              label: 'Toplam daire',
+              value: String(parselOzet.daire),
+              sub: '4 blok',
+            },
+            {
+              label: 'Seçili blok',
+              value: seciliBlok,
+              sub: `${profil.katSayisi} kat · ${profil.dairePerKat}/kat`,
+            },
+          ].map((c) => (
+            <div
+              key={c.label}
+              className="rounded-xl border border-violet-100 bg-violet-50/60 px-3 py-2.5 text-center"
+            >
+              <p className="text-[9px] font-bold uppercase text-violet-700/80">{c.label}</p>
+              <p className="text-2xl font-black tabular-nums text-violet-950">{c.value}</p>
+              <p className="text-[9px] font-semibold text-violet-800/70">{c.sub}</p>
+            </div>
+          ))}
         </div>
       </div>
 
@@ -305,23 +336,44 @@ export const ProjeCBlokPanel: React.FC<Props> = ({
             <p className="text-[10px] font-black uppercase text-violet-700 flex items-center gap-1">
               <Home size={12} /> {seciliBlok} · kat planı
             </p>
-            <p className="text-xs text-stone-600">Daireye tıklayınca popup açılır</p>
+            <p className="text-sm font-black text-stone-900 mt-0.5">
+              Kat {katNo} / {profil.katSayisi}
+              <span className="mx-1.5 text-stone-300">·</span>
+              Bu katta {profil.dairePerKat} daire
+            </p>
+            <p className="text-xs text-stone-500 mt-0.5">
+              Daireye tıklayınca popup · blokta toplam {profil.katSayisi * profil.dairePerKat}{' '}
+              daire
+            </p>
           </div>
-          <label className="text-[9px] font-bold uppercase text-stone-500">
-            Kat
-            <select
-              value={katNo}
-              onChange={(e) => setKatNo(Number(e.target.value))}
-              className="mt-0.5 ml-1 rounded-lg border border-stone-200 bg-white px-2 py-1.5 text-xs font-semibold"
-            >
-              {Array.from({ length: profil.katSayisi }, (_, i) => i + 1).map((k) => (
-                <option key={k} value={k}>
-                  {k}
-                </option>
-              ))}
-            </select>
-          </label>
+          <div className="flex flex-wrap gap-1.5 max-w-full">
+            {Array.from({ length: profil.katSayisi }, (_, i) => i + 1).map((k) => (
+              <button
+                key={k}
+                type="button"
+                onClick={() => setKatNo(k)}
+                className={`min-w-[2.25rem] rounded-lg border px-2 py-1.5 text-[11px] font-black tabular-nums cursor-pointer ${
+                  katNo === k
+                    ? 'border-violet-600 bg-violet-600 text-white'
+                    : 'border-stone-200 bg-stone-50 text-stone-700 hover:border-violet-300'
+                }`}
+                title={`Kat ${k} · ${profil.dairePerKat} daire`}
+              >
+                {k}
+              </button>
+            ))}
+          </div>
         </div>
+
+        <div className="rounded-xl border border-stone-100 bg-stone-50 px-3 py-2 text-[11px] text-stone-700 font-semibold">
+          Her katta aynı: {profil.dairePerKat} daire
+          <span className="text-stone-400 font-normal"> (</span>
+          {Array.from({ length: profil.dairePerKat }, (_, i) => i + 1)
+            .map((di) => `${cBlokDaireNo(katNo, di)} ${cBlokDaireTipi(di)}`)
+            .join(' · ')}
+          <span className="text-stone-400 font-normal">)</span>
+        </div>
+
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
           {Array.from({ length: profil.dairePerKat }, (_, i) => i + 1).map((di) => {
             const tip = cBlokDaireTipi(di);
