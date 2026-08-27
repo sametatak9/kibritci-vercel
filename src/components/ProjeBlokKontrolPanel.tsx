@@ -1,7 +1,7 @@
 /**
  * Blok kontrol — tek blok / kat / daire drill-down.
- * 157/46: duvar aplikasyon kat etiketleri + ruhsat daire sayıları.
- * Takip başlıkları: Kaba · İnce · Altyapı.
+ * 157/46 · 157/51 · 160/2: duvar aplikasyon kat etiketleri + ruhsat daire sayıları.
+ * Takip başlıkları: Kaba · İnce · Altyapı. Görsel: bina kesiti + kat plakası + oda planı.
  */
 import React, { useEffect, useMemo, useState } from 'react';
 import {
@@ -43,6 +43,13 @@ import {
   profil15751,
   tipForDaire15751,
 } from '../data/parsel15751BlokSeed';
+import {
+  daireSayisiKatta1602,
+  isParsel1602,
+  katSablon1602,
+  profil1602,
+  tipForDaire1602,
+} from '../data/parsel1602BlokSeed';
 import {
   groupKalemlerByTakip,
   kalemlerForOdaTakip,
@@ -106,6 +113,7 @@ function dairePerKatOf(p: ProjeBlokProfili): number {
 function tipForIndex(parsel: string, blok: string, daireIndex: number): CDaireTipi {
   if (isParsel15746(parsel)) return tipForDaire15746(blok, daireIndex);
   if (isParsel15751(parsel)) return tipForDaire15751(blok, daireIndex);
+  if (isParsel1602(parsel)) return tipForDaire1602(blok, daireIndex);
   if (/^C[1-4]$/.test(blok)) return cBlokDaireTipi(daireIndex);
   return daireIndex <= 2 ? '2+1' : '3+1';
 }
@@ -132,7 +140,21 @@ function resolveKatModel(parsel: string, blok: string) {
       katlar: p.katlar as unknown as BlokKatSablon[],
       dwgKaynak: p.dwgKaynak,
       daireKatta: (katNo: number) => daireSayisiKatta15751(blok, katNo),
-      katSablon: (katNo: number) => katSablon15751(blok, katNo) as unknown as BlokKatSablon | undefined,
+      katSablon: (katNo: number) =>
+        katSablon15751(blok, katNo) as unknown as BlokKatSablon | undefined,
+    };
+  }
+  if (isParsel1602(parsel)) {
+    const p = profil1602(blok);
+    if (!p) return null;
+    return {
+      katSayisi: p.katSayisi,
+      daireSayisi: p.daireSayisi,
+      katlar: p.katlar as unknown as BlokKatSablon[],
+      dwgKaynak: p.dwgKaynak,
+      daireKatta: (katNo: number) => daireSayisiKatta1602(blok, katNo),
+      katSablon: (katNo: number) =>
+        katSablon1602(blok, katNo) as unknown as BlokKatSablon | undefined,
     };
   }
   return null;
@@ -183,31 +205,180 @@ function buildSeedKalemler(
   });
 }
 
-const KatChip: React.FC<{
-  label: string;
-  tip?: BlokKatSablon['tip'];
-  active: boolean;
-  onClick: () => void;
-}> = ({ label, tip, active, onClick }) => {
-  const soft =
-    tip === 'TEKNIK'
-      ? 'border-stone-300 bg-stone-100 text-stone-700'
-      : tip === 'ZEMIN'
-        ? 'border-amber-200 bg-amber-50 text-amber-900'
-        : tip === 'CATI'
-          ? 'border-sky-200 bg-sky-50 text-sky-900'
-          : 'border-stone-200 bg-stone-50 text-stone-700';
+function katFill(tip: BlokKatSablon['tip'] | undefined, yuzde: number, active: boolean): string {
+  if (active) return '#5b21b6';
+  if (tip === 'TEKNIK') return yuzde > 0 ? '#a8a29e' : '#e7e5e4';
+  if (tip === 'ZEMIN') return yuzde >= 100 ? '#059669' : yuzde > 0 ? '#fbbf24' : '#fef3c7';
+  if (tip === 'CATI') return yuzde > 0 ? '#7dd3fc' : '#e0f2fe';
+  return odaRenk(yuzde);
+}
+
+/** Bina kesiti — üstten alta kat şeridi; tıklanınca kat seçilir */
+const BinaKesit: React.FC<{
+  blok: string;
+  katlar: { label: string; tip?: BlokKatSablon['tip']; konut: boolean; yuzde: number }[];
+  katNo: number;
+  onSelect: (katNo: number) => void;
+}> = ({ blok, katlar, katNo, onSelect }) => {
+  const n = Math.max(katlar.length, 1);
+  const rowH = Math.min(28, Math.max(16, Math.floor(220 / n)));
+  const h = rowH * n + 36;
+  const w = 148;
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`rounded-lg border px-2.5 py-1.5 text-[11px] font-black cursor-pointer ${
-        active ? 'border-violet-600 bg-violet-600 text-white' : soft
-      }`}
-      title={tip || ''}
+    <svg viewBox={`0 0 ${w} ${h}`} className="w-full max-w-[168px] mx-auto block select-none">
+      <rect x="8" y="4" width={w - 16} height={12} rx="2" fill="#78716c" />
+      <text x={w / 2} y="13" textAnchor="middle" fontSize="7" fontWeight="800" fill="#fff">
+        {blok}
+      </text>
+      {katlar
+        .map((k, i) => ({ ...k, idx: i + 1 }))
+        .slice()
+        .reverse()
+        .map((k, revI) => {
+          const y = 20 + revI * rowH;
+          const active = katNo === k.idx;
+          return (
+            <g
+              key={k.idx}
+              className="cursor-pointer"
+              onClick={() => onSelect(k.idx)}
+            >
+              <rect
+                x="18"
+                y={y}
+                width={w - 36}
+                height={rowH - 2}
+                rx="2"
+                fill={katFill(k.tip, k.yuzde, active)}
+                stroke={active ? '#4c1d95' : '#57534e'}
+                strokeWidth={active ? 1.6 : 0.5}
+              />
+              <text
+                x="24"
+                y={y + rowH / 2}
+                dominantBaseline="middle"
+                fontSize="6.5"
+                fontWeight="700"
+                fill={active ? '#fff' : '#1c1917'}
+              >
+                {k.label}
+              </text>
+              <text
+                x={w - 24}
+                y={y + rowH / 2}
+                textAnchor="end"
+                dominantBaseline="middle"
+                fontSize="6"
+                fontWeight="700"
+                fill={active ? '#ede9fe' : '#57534e'}
+              >
+                {k.konut ? `%${k.yuzde}` : 'T'}
+              </text>
+            </g>
+          );
+        })}
+      <rect x="8" y={h - 10} width={w - 16} height={8} rx="1" fill="#44403c" />
+    </svg>
+  );
+};
+
+/** Kat plakası — daire kutuları (konut) veya teknik alan listesi */
+const KatPlakasi: React.FC<{
+  teknikKat: boolean;
+  dairePerKat: number;
+  katNo: number;
+  daireIndex: number;
+  parsel: string;
+  blok: string;
+  daireKalemleri: ProjeCDaireKalem[];
+  odaKey: string | null;
+  onDaire: (di: number) => void;
+  onTeknik: (key: string) => void;
+  odaYuzde: (key: string) => number;
+}> = ({
+  teknikKat,
+  dairePerKat,
+  katNo,
+  daireIndex,
+  parsel,
+  blok,
+  daireKalemleri,
+  odaKey,
+  onDaire,
+  onTeknik,
+  odaYuzde,
+}) => {
+  if (teknikKat) {
+    return (
+      <div className="grid grid-cols-1 gap-1.5">
+        {TEKNIK_KAT_ALANLARI.map((a) => {
+          const y = odaYuzde(a.key);
+          const active = odaKey === a.key;
+          return (
+            <button
+              key={a.key}
+              type="button"
+              onClick={() => onTeknik(a.key)}
+              className={`rounded-xl border px-3 py-2.5 text-left cursor-pointer transition-shadow ${
+                active
+                  ? 'border-violet-500 bg-violet-50 shadow-[0_0_0_2px_rgba(139,92,246,0.25)]'
+                  : 'border-stone-200 bg-stone-50 hover:border-stone-300'
+              }`}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-black text-stone-900">{a.label}</span>
+                <span className="text-[10px] font-bold tabular-nums text-stone-500">%{y}</span>
+              </div>
+              <div className="mt-1.5 h-1.5 rounded-full bg-stone-200 overflow-hidden">
+                <div
+                  className="h-full rounded-full bg-stone-500 transition-[width]"
+                  style={{ width: `${y}%` }}
+                />
+              </div>
+            </button>
+          );
+        })}
+      </div>
+    );
+  }
+
+  const cols = dairePerKat <= 4 ? 2 : dairePerKat <= 6 ? 3 : 4;
+  return (
+    <div
+      className="grid gap-2"
+      style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}
     >
-      {label}
-    </button>
+      {Array.from({ length: Math.max(dairePerKat, 1) }, (_, i) => i + 1).map((di) => {
+        const no = cBlokDaireNo(katNo, di);
+        const y = avgYuzde(
+          daireKalemleri.filter(
+            (k) => k.parsel === parsel && k.blok === blok && k.daireNo === no
+          )
+        );
+        const active = di === daireIndex;
+        const t = tipForIndex(parsel, blok, di);
+        return (
+          <button
+            key={di}
+            type="button"
+            onClick={() => onDaire(di)}
+            className={`relative rounded-xl border p-2.5 text-left cursor-pointer overflow-hidden transition-shadow ${
+              active
+                ? 'border-violet-500 bg-white shadow-[0_0_0_2px_rgba(139,92,246,0.3)]'
+                : 'border-stone-200 bg-stone-50/80 hover:border-stone-300'
+            }`}
+          >
+            <div
+              className="absolute inset-x-0 bottom-0 h-1"
+              style={{ background: odaRenk(y) }}
+            />
+            <p className="text-[9px] font-bold text-stone-400 uppercase tracking-wide">{t}</p>
+            <p className="text-base font-black text-stone-900 tabular-nums leading-tight">{no}</p>
+            <p className="text-[10px] font-bold text-stone-500 mt-0.5">%{y}</p>
+          </button>
+        );
+      })}
+    </div>
   );
 };
 
@@ -368,6 +539,45 @@ export const ProjeBlokKontrolPanel: React.FC<Props> = ({
     w: 0,
     h: 0,
   }));
+
+  const katKesitRows = useMemo(() => {
+    const rows: { label: string; tip?: BlokKatSablon['tip']; konut: boolean; yuzde: number }[] =
+      [];
+    for (let i = 1; i <= katSayisi; i++) {
+      const meta = model?.katSablon(i);
+      const label = meta?.label || String(i);
+      const konut = meta ? meta.konut : true;
+      if (!konut) {
+        const tNo = `T${i}`;
+        const y = avgYuzde(
+          daireKalemleri.filter(
+            (k) => k.parsel === parsel && k.blok === blok && k.daireNo === tNo
+          )
+        );
+        rows.push({ label, tip: meta?.tip, konut: false, yuzde: y });
+        continue;
+      }
+      const nD = model ? model.daireKatta(i) : profil ? dairePerKatOf(profil) : 4;
+      const ys: number[] = [];
+      for (let di = 1; di <= Math.max(nD, 1); di++) {
+        const no = cBlokDaireNo(i, di);
+        ys.push(
+          avgYuzde(
+            daireKalemleri.filter(
+              (k) => k.parsel === parsel && k.blok === blok && k.daireNo === no
+            )
+          )
+        );
+      }
+      rows.push({
+        label,
+        tip: meta?.tip,
+        konut: true,
+        yuzde: avgYuzde(ys.map((y) => ({ yuzde: y }))),
+      });
+    }
+    return rows;
+  }, [katSayisi, model, daireKalemleri, parsel, blok, profil]);
 
   const seciliOda = teknikKat
     ? teknikPlan.find((o) => o.key === odaKey) || null
@@ -542,110 +752,71 @@ export const ProjeBlokKontrolPanel: React.FC<Props> = ({
         )}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-[1fr_1.4fr] gap-4">
+      <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.35fr)] gap-4">
         <div className="rounded-2xl border border-stone-200 bg-white p-3 space-y-3 shadow-sm">
-          <p className="text-[10px] font-black uppercase text-stone-500">
-            {blok} · Kat seç ({katSayisi} kat
-            {model ? ' · aplikasyon' : ''})
-          </p>
-          <div className="flex flex-wrap gap-1.5">
-            {model
-              ? model.katlar.map((k, i) => (
-                  <KatChip
-                    key={k.kod}
-                    label={k.label}
-                    tip={k.tip}
-                    active={katNo === i + 1}
-                    onClick={() => setKatNo(i + 1)}
-                  />
-                ))
-              : Array.from({ length: katSayisi }, (_, i) => i + 1).map((k) => (
-                  <KatChip
-                    key={k}
-                    label={String(k)}
-                    active={katNo === k}
-                    onClick={() => setKatNo(k)}
-                  />
-                ))}
+          <div className="flex items-baseline justify-between gap-2">
+            <p className="text-[10px] font-black uppercase text-stone-500">
+              {blok} · bina kesiti
+            </p>
+            <p className="text-[10px] font-semibold text-stone-400">
+              {katMeta?.label || `Kat ${katNo}`}
+              {teknikKat ? ' · teknik' : ` · ${dairePerKat} daire`}
+            </p>
           </div>
 
-          {teknikKat ? (
-            <>
+          <div className="grid grid-cols-[auto_1fr] gap-3 items-start">
+            <div className="rounded-xl border border-stone-200 bg-gradient-to-b from-stone-100 to-stone-50 p-2">
+              <BinaKesit
+                blok={blok}
+                katlar={katKesitRows}
+                katNo={katNo}
+                onSelect={setKatNo}
+              />
+            </div>
+            <div className="min-w-0 space-y-2">
               <p className="text-[10px] font-black uppercase text-stone-500">
-                {katMeta?.label} · teknik / ortak alan (daire yok)
+                {teknikKat ? 'Teknik / ortak alan' : 'Kat plakası'}
               </p>
-              <div className="grid grid-cols-1 gap-1.5">
-                {TEKNIK_KAT_ALANLARI.map((a) => {
-                  const y = odaYuzde(a.key);
-                  const active = odaKey === a.key;
-                  return (
+              <KatPlakasi
+                teknikKat={teknikKat}
+                dairePerKat={dairePerKat}
+                katNo={katNo}
+                daireIndex={daireIndex}
+                parsel={parsel}
+                blok={blok}
+                daireKalemleri={daireKalemleri}
+                odaKey={odaKey}
+                onDaire={setDaireIndex}
+                onTeknik={setOdaKey}
+                odaYuzde={odaYuzde}
+              />
+              {!model && (
+                <div className="flex flex-wrap gap-1">
+                  {Array.from({ length: katSayisi }, (_, i) => i + 1).map((k) => (
                     <button
-                      key={a.key}
+                      key={k}
                       type="button"
-                      onClick={() => setOdaKey(a.key)}
-                      className={`rounded-xl border px-3 py-2 text-left cursor-pointer ${
-                        active
-                          ? 'border-violet-500 bg-violet-50 ring-2 ring-violet-200'
-                          : 'border-stone-200 bg-stone-50'
+                      onClick={() => setKatNo(k)}
+                      className={`rounded-md border px-2 py-1 text-[10px] font-black cursor-pointer ${
+                        katNo === k
+                          ? 'border-violet-600 bg-violet-600 text-white'
+                          : 'border-stone-200 bg-stone-50 text-stone-600'
                       }`}
                     >
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-xs font-black text-stone-900">{a.label}</span>
-                        <span className="text-[10px] font-bold text-stone-500">%{y}</span>
-                      </div>
-                      <div className="mt-1.5 h-1 rounded-full bg-stone-200 overflow-hidden">
-                        <div className="h-full bg-violet-500" style={{ width: `${y}%` }} />
-                      </div>
+                      {k}
                     </button>
-                  );
-                })}
-              </div>
-            </>
-          ) : (
-            <>
-              <p className="text-[10px] font-black uppercase text-stone-500">
-                {katMeta?.label || `Kat ${katNo}`} · {dairePerKat} daire
-              </p>
-              <div className="grid grid-cols-2 gap-2">
-                {Array.from({ length: Math.max(dairePerKat, 1) }, (_, i) => i + 1).map((di) => {
-                  const no = cBlokDaireNo(katNo, di);
-                  const y = avgYuzde(
-                    daireKalemleri.filter(
-                      (k) => k.parsel === parsel && k.blok === blok && k.daireNo === no
-                    )
-                  );
-                  const active = di === daireIndex;
-                  const t = tipForIndex(parsel, blok, di);
-                  return (
-                    <button
-                      key={di}
-                      type="button"
-                      onClick={() => setDaireIndex(di)}
-                      className={`rounded-xl border p-2.5 text-left cursor-pointer ${
-                        active
-                          ? 'border-violet-500 bg-violet-50 ring-2 ring-violet-200'
-                          : 'border-stone-200 bg-stone-50 hover:border-stone-300'
-                      }`}
-                    >
-                      <p className="text-[9px] font-bold text-stone-400 uppercase">{t}</p>
-                      <p className="text-sm font-black text-stone-900">{no}</p>
-                      <div className="mt-1.5 h-1 rounded-full bg-stone-200 overflow-hidden">
-                        <div className="h-full bg-violet-500" style={{ width: `${y}%` }} />
-                      </div>
-                      <p className="text-[9px] font-bold text-stone-500 mt-0.5">%{y}</p>
-                    </button>
-                  );
-                })}
-              </div>
-            </>
-          )}
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
         </div>
 
         <div className="rounded-2xl border border-stone-200 bg-white p-3 space-y-3 shadow-sm">
           <div className="flex flex-wrap items-start justify-between gap-2">
             <div>
               <p className="text-[10px] font-black uppercase text-violet-700 flex items-center gap-1">
-                <Home size={12} /> {teknikKat ? 'Teknik kat' : 'Seçili daire'}
+                <Home size={12} /> {teknikKat ? 'Teknik kat' : 'Seçili daire · oda planı'}
               </p>
               <h3 className="text-lg font-black text-stone-900">
                 {blok} · {teknikKat ? katMeta?.label || daireNo : daireNo}

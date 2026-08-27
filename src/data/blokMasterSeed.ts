@@ -1,6 +1,7 @@
 import { PARSEL_BLOK_MAP } from './parselBlokMap';
 import { profil15746 } from './parsel15746BlokSeed';
 import { profil15751 } from './parsel15751BlokSeed';
+import { profil1602 } from './parsel1602BlokSeed';
 import type { ProjeBlokProfili } from '../types/erp';
 
 /** Parsel bazlı varsayılan kat / daire — Firestore profili yoksa kullanılır */
@@ -17,6 +18,7 @@ export function blokProfilId(parsel: string, blok: string): string {
 function ruhsatProfil(parsel: string, blok: string) {
   if (parsel.includes('157/46')) return profil15746(blok);
   if (parsel.includes('157/51')) return profil15751(blok);
+  if (parsel.includes('160/2')) return profil1602(blok);
   return undefined;
 }
 
@@ -51,7 +53,6 @@ export function mergeBlokProfilleri(
     const id = blokProfilId(p.parsel, p.blok);
     const base = map.get(id);
     const ruhsat = ruhsatProfil(p.parsel, p.blok);
-    // Ruhsatlı parsellerde kat/daire sayılarını eski seed/temizlik ezmesin
     if (ruhsat) {
       map.set(id, {
         ...base,
