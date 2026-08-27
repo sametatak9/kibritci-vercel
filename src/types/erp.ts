@@ -775,6 +775,25 @@ export interface ProjeDisiplinIlerleme {
   olusturan?: string;
 }
 
+/** C blok daire oda kalemi — kat/daire/oda popup ilerleme */
+export interface ProjeCDaireKalem {
+  id: string;
+  parsel: string;
+  blok: string;
+  daireNo: string;
+  katNo: number;
+  tip: '2+1' | '3+1';
+  odaKey: string;
+  odaLabel: string;
+  kalemKod: string;
+  kalemBaslik: string;
+  durum: ProjeDisiplinDurum;
+  yuzde: number;
+  eksikNot?: string;
+  guncellemeTarihi?: string;
+  olusturan?: string;
+}
+
 export type FaaliyetIlerlemeDurumu = 'BASLAMADI' | 'DEVAM' | 'TAMAMLANDI';
 
 export interface FaaliyetIlerlemeKaydi {

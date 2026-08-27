@@ -56,6 +56,7 @@ import {
 import type {
   Personel,
   ProjeBlokProfili,
+  ProjeCDaireKalem,
   ProjeDisiplinIlerleme,
   ProjeIlerlemeDurum,
   ProjeIlerlemeKalemi,
@@ -72,6 +73,7 @@ const COLLECTION = 'projeIlerlemeKalemleri';
 const PLAN_COLLECTION = 'projeIsPlanSatirlari';
 const BLOK_PROFIL_COLLECTION = 'projeBlokProfilleri';
 const DISIPLIN_COLLECTION = 'projeDisiplinIlerleme';
+const C_DAIRE_KALEM_COLLECTION = 'projeCDaireKalemleri';
 const PARSEL_SECENEK = PARSEL_LIST.filter((p) => p !== 'GENEL SAHA');
 const MUHENDISLIK_GUN = 30;
 
@@ -143,6 +145,7 @@ export const ProjeIlerlemeScreen: React.FC<Props> = ({ currentUser }) => {
   const [temizlikDaireleri, setTemizlikDaireleri] = useState<TemizlikDaire[]>([]);
   const [blokProfilleri, setBlokProfilleri] = useState<ProjeBlokProfili[]>([]);
   const [disiplinKayitlari, setDisiplinKayitlari] = useState<ProjeDisiplinIlerleme[]>([]);
+  const [cDaireKalemleri, setCDaireKalemleri] = useState<ProjeCDaireKalem[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [sekme, setSekme] = useState<Sekme>('tespit');
@@ -208,6 +211,9 @@ export const ProjeIlerlemeScreen: React.FC<Props> = ({ currentUser }) => {
         snap.docs.map((d) => ({ id: d.id, ...d.data() } as ProjeDisiplinIlerleme))
       );
     });
+    const unsubCDaire = onSnapshot(collection(db, C_DAIRE_KALEM_COLLECTION), (snap) => {
+      setCDaireKalemleri(snap.docs.map((d) => ({ id: d.id, ...d.data() } as ProjeCDaireKalem)));
+    });
     return () => {
       unsubKalem();
       unsubPlan();
@@ -218,6 +224,7 @@ export const ProjeIlerlemeScreen: React.FC<Props> = ({ currentUser }) => {
       unsubDaire();
       unsubBlokProfil();
       unsubDisiplin();
+      unsubCDaire();
     };
   }, []);
 
@@ -329,6 +336,28 @@ export const ProjeIlerlemeScreen: React.FC<Props> = ({ currentUser }) => {
       await saveDocument(DISIPLIN_COLLECTION, payload);
     } catch (err) {
       alert(formatFirestoreWriteError(err) || 'Disiplin ilerleme yazılamadı.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const updateCDaireKalem = async (row: ProjeCDaireKalem) => {
+    setSaving(true);
+    try {
+      const authBlock = await assertErpWriteAuth();
+      if (authBlock) throw new Error(authBlock);
+      const payload: ProjeCDaireKalem = {
+        ...row,
+        guncellemeTarihi: todayDateKey(),
+        olusturan: row.olusturan || userLabel(currentUser) || undefined,
+      };
+      await saveDocument(C_DAIRE_KALEM_COLLECTION, payload);
+      setCDaireKalemleri((prev) => {
+        const rest = prev.filter((x) => x.id !== payload.id);
+        return [...rest, payload];
+      });
+    } catch (err) {
+      alert(formatFirestoreWriteError(err) || 'Daire kalemi yazılamadı.');
     } finally {
       setSaving(false);
     }
@@ -770,8 +799,10 @@ export const ProjeIlerlemeScreen: React.FC<Props> = ({ currentUser }) => {
       ) : sekme === 'cblok' ? (
         <ProjeCBlokPanel
           satirlari={mimariSatirlari}
+          daireKalemleri={cDaireKalemleri}
           busy={saving}
-          onUpdate={(row, patch) => void updateDisiplin(row, patch)}
+          onUpdateBlok={(row, patch) => void updateDisiplin(row, patch)}
+          onUpdateDaireKalem={(row) => void updateCDaireKalem(row)}
         />
       ) : sekme === 'tespit' ? (
         <>
