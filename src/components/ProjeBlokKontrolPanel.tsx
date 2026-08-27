@@ -1,15 +1,14 @@
 /**
- * Blok kontrol — tek blok / kat / daire drill-down.
- * 157/46 · 157/51 · 160/2: duvar aplikasyon kat etiketleri + ruhsat daire sayıları.
- * Takip başlıkları: Kaba · İnce · Altyapı. Görsel: bina kesiti + kat plakası + oda planı.
+ * Blok kontrol — saha komuta yüzeyi.
+ * Parsel → blok cephesi → kat plakası → daire/oda → Kaba/İnce/Altyapı.
+ * Kaynak: duvar aplikasyon + ruhsat (157/46 · 157/51 · 160/2).
  */
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   CalendarDays,
   ChevronRight,
-  ClipboardList,
-  Home,
-  Image as ImageIcon,
+  Layers,
+  Map,
   X,
 } from 'lucide-react';
 import type {
@@ -80,11 +79,38 @@ type Props = {
   onIsProgramaAl: (drafts: BlokKontrolProgramDraft[], programTarih: string) => Promise<void>;
 };
 
-function odaRenk(yuzde: number): string {
+type KatRow = {
+  label: string;
+  tip?: BlokKatSablon['tip'];
+  konut: boolean;
+  yuzde: number;
+  kaba: number;
+  ince: number;
+  altyapi: number;
+};
+
+type BlokOzet = {
+  blok: string;
+  profil: ProjeBlokProfili;
+  yuzde: number;
+  kaba: number;
+  ince: number;
+  altyapi: number;
+  daire: number;
+  kat: number;
+};
+
+function avgYuzde(rows: { yuzde?: number }[]): number {
+  if (!rows.length) return 0;
+  return Math.round(rows.reduce((s, r) => s + (r.yuzde || 0), 0) / rows.length);
+}
+
+function heat(yuzde: number): string {
   if (yuzde >= 100) return '#059669';
-  if (yuzde >= 50) return '#34d399';
-  if (yuzde > 0) return '#a7f3d0';
-  return '#f1f5f9';
+  if (yuzde >= 70) return '#34d399';
+  if (yuzde >= 40) return '#fbbf24';
+  if (yuzde > 0) return '#fb923c';
+  return '#e7e5e4';
 }
 
 function durumTone(d: ProjeDisiplinDurum): string {
@@ -95,14 +121,9 @@ function durumTone(d: ProjeDisiplinDurum): string {
 }
 
 function grupTone(g: TakipKalemGrup): string {
-  if (g === 'KABA') return 'border-amber-200 bg-amber-50 text-amber-950';
-  if (g === 'INCE') return 'border-violet-200 bg-violet-50 text-violet-950';
-  return 'border-sky-200 bg-sky-50 text-sky-950';
-}
-
-function avgYuzde(rows: { yuzde?: number }[]): number {
-  if (!rows.length) return 0;
-  return Math.round(rows.reduce((s, r) => s + (r.yuzde || 0), 0) / rows.length);
+  if (g === 'KABA') return 'border-amber-300/80 bg-amber-500/15 text-amber-950';
+  if (g === 'INCE') return 'border-violet-300/80 bg-violet-500/15 text-violet-950';
+  return 'border-sky-300/80 bg-sky-500/15 text-sky-950';
 }
 
 function dairePerKatOf(p: ProjeBlokProfili): number {
@@ -166,6 +187,10 @@ function resolveGrup(row: ProjeCDaireKalem): TakipKalemGrup {
   return all.find((k) => k.kod === row.kalemKod)?.grup || 'INCE';
 }
 
+function grupAvg(rows: ProjeCDaireKalem[], g: TakipKalemGrup): number {
+  return avgYuzde(rows.filter((k) => resolveGrup(k) === g));
+}
+
 function buildSeedKalemler(
   parsel: string,
   blok: string,
@@ -205,85 +230,305 @@ function buildSeedKalemler(
   });
 }
 
-function katFill(tip: BlokKatSablon['tip'] | undefined, yuzde: number, active: boolean): string {
-  if (active) return '#5b21b6';
-  if (tip === 'TEKNIK') return yuzde > 0 ? '#a8a29e' : '#e7e5e4';
-  if (tip === 'ZEMIN') return yuzde >= 100 ? '#059669' : yuzde > 0 ? '#fbbf24' : '#fef3c7';
-  if (tip === 'CATI') return yuzde > 0 ? '#7dd3fc' : '#e0f2fe';
-  return odaRenk(yuzde);
-}
-
-/** Bina kesiti — üstten alta kat şeridi; tıklanınca kat seçilir */
-const BinaKesit: React.FC<{
-  blok: string;
-  katlar: { label: string; tip?: BlokKatSablon['tip']; konut: boolean; yuzde: number }[];
-  katNo: number;
-  onSelect: (katNo: number) => void;
-}> = ({ blok, katlar, katNo, onSelect }) => {
-  const n = Math.max(katlar.length, 1);
-  const rowH = Math.min(28, Math.max(16, Math.floor(220 / n)));
-  const h = rowH * n + 36;
-  const w = 148;
+/** Dairesel ilerleme — Kaba / İnce / Altyapı */
+const Ring: React.FC<{ label: string; yuzde: number; color: string; size?: number }> = ({
+  label,
+  yuzde,
+  color,
+  size = 64,
+}) => {
+  const r = (size - 10) / 2;
+  const c = 2 * Math.PI * r;
+  const dash = (Math.min(100, Math.max(0, yuzde)) / 100) * c;
   return (
-    <svg viewBox={`0 0 ${w} ${h}`} className="w-full max-w-[168px] mx-auto block select-none">
-      <rect x="8" y="4" width={w - 16} height={12} rx="2" fill="#78716c" />
-      <text x={w / 2} y="13" textAnchor="middle" fontSize="7" fontWeight="800" fill="#fff">
-        {blok}
-      </text>
-      {katlar
-        .map((k, i) => ({ ...k, idx: i + 1 }))
-        .slice()
-        .reverse()
-        .map((k, revI) => {
-          const y = 20 + revI * rowH;
-          const active = katNo === k.idx;
-          return (
-            <g
-              key={k.idx}
-              className="cursor-pointer"
-              onClick={() => onSelect(k.idx)}
-            >
-              <rect
-                x="18"
-                y={y}
-                width={w - 36}
-                height={rowH - 2}
-                rx="2"
-                fill={katFill(k.tip, k.yuzde, active)}
-                stroke={active ? '#4c1d95' : '#57534e'}
-                strokeWidth={active ? 1.6 : 0.5}
-              />
-              <text
-                x="24"
-                y={y + rowH / 2}
-                dominantBaseline="middle"
-                fontSize="6.5"
-                fontWeight="700"
-                fill={active ? '#fff' : '#1c1917'}
-              >
-                {k.label}
-              </text>
-              <text
-                x={w - 24}
-                y={y + rowH / 2}
-                textAnchor="end"
-                dominantBaseline="middle"
-                fontSize="6"
-                fontWeight="700"
-                fill={active ? '#ede9fe' : '#57534e'}
-              >
-                {k.konut ? `%${k.yuzde}` : 'T'}
-              </text>
-            </g>
-          );
-        })}
-      <rect x="8" y={h - 10} width={w - 16} height={8} rx="1" fill="#44403c" />
-    </svg>
+    <div className="flex flex-col items-center gap-1 min-w-[64px]">
+      <svg width={size} height={size} className="block">
+        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="#e7e5e4" strokeWidth="6" />
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          r={r}
+          fill="none"
+          stroke={color}
+          strokeWidth="6"
+          strokeLinecap="round"
+          strokeDasharray={`${dash} ${c - dash}`}
+          transform={`rotate(-90 ${size / 2} ${size / 2})`}
+        />
+        <text
+          x={size / 2}
+          y={size / 2 + 1}
+          textAnchor="middle"
+          dominantBaseline="middle"
+          fontSize="13"
+          fontWeight="800"
+          fill="#1c1917"
+        >
+          {yuzde}
+        </text>
+      </svg>
+      <span className="text-[9px] font-black uppercase tracking-wide text-stone-500">{label}</span>
+    </div>
   );
 };
 
-/** Kat plakası — daire kutuları (konut) veya teknik alan listesi */
-const KatPlakasi: React.FC<{
+/** Parsel sahası — blok siluetleri */
+const ParselSahasi: React.FC<{
+  ozetler: BlokOzet[];
+  aktif: string;
+  onSelect: (blok: string) => void;
+}> = ({ ozetler, aktif, onSelect }) => (
+  <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-2.5">
+    {ozetler.map((o) => {
+      const selected = o.blok === aktif;
+      const floors = Math.min(o.kat || 5, 9);
+      return (
+        <button
+          key={o.blok}
+          type="button"
+          onClick={() => onSelect(o.blok)}
+          className={`group relative overflow-hidden rounded-2xl border text-left p-3 cursor-pointer transition-all ${
+            selected
+              ? 'border-stone-900 bg-stone-900 text-white shadow-lg scale-[1.02]'
+              : 'border-stone-200 bg-white hover:border-stone-400 hover:shadow-md'
+          }`}
+        >
+          <div className="flex items-end justify-between gap-2">
+            <div>
+              <p
+                className={`text-[9px] font-bold uppercase tracking-widest ${
+                  selected ? 'text-stone-400' : 'text-stone-400'
+                }`}
+              >
+                Blok
+              </p>
+              <p className="text-2xl font-black tracking-tight leading-none">{o.blok}</p>
+              <p className={`text-[10px] mt-1 font-semibold ${selected ? 'text-stone-300' : 'text-stone-500'}`}>
+                {o.daire} daire · {o.kat} kat
+              </p>
+            </div>
+            <svg viewBox="0 0 40 56" className="h-14 w-10 shrink-0 opacity-90">
+              <rect x="4" y="2" width="32" height="6" rx="1" fill={selected ? '#a8a29e' : '#78716c'} />
+              {Array.from({ length: floors }, (_, i) => {
+                const y = 10 + i * ((44 - 4) / floors);
+                const h = (44 - 4) / floors - 1.2;
+                const t = i / Math.max(floors - 1, 1);
+                const fill =
+                  o.yuzde >= 100
+                    ? '#34d399'
+                    : o.yuzde > 0
+                      ? `rgba(${selected ? '52,211,153' : '217,119,6'},${0.25 + t * 0.55})`
+                      : selected
+                        ? '#44403c'
+                        : '#e7e5e4';
+                return <rect key={i} x="6" y={y} width="28" height={h} rx="0.8" fill={fill} />;
+              })}
+              <rect x="2" y="52" width="36" height="3" rx="0.5" fill={selected ? '#57534e' : '#44403c'} />
+            </svg>
+          </div>
+          <div className="mt-3 grid grid-cols-3 gap-1">
+            {(
+              [
+                ['K', o.kaba, '#d97706'],
+                ['İ', o.ince, '#7c3aed'],
+                ['A', o.altyapi, '#0284c7'],
+              ] as const
+            ).map(([lab, y, col]) => (
+              <div key={lab} className="space-y-0.5">
+                <div
+                  className={`h-1 rounded-full overflow-hidden ${selected ? 'bg-stone-700' : 'bg-stone-100'}`}
+                >
+                  <div className="h-full rounded-full" style={{ width: `${y}%`, background: col }} />
+                </div>
+                <p className={`text-[8px] font-bold ${selected ? 'text-stone-400' : 'text-stone-400'}`}>
+                  {lab} {y}%
+                </p>
+              </div>
+            ))}
+          </div>
+          <p
+            className={`mt-2 text-lg font-black tabular-nums ${
+              selected ? 'text-emerald-300' : 'text-stone-900'
+            }`}
+          >
+            %{o.yuzde}
+          </p>
+        </button>
+      );
+    })}
+  </div>
+);
+
+/** Cephe — kat şeritleri + daire pencereleri */
+const BlokCephe: React.FC<{
+  blok: string;
+  katlar: KatRow[];
+  katNo: number;
+  daireIndex: number;
+  dairePerKatFn: (katNo: number) => number;
+  daireYuzdeFn: (katNo: number, di: number) => number;
+  onKat: (n: number) => void;
+  onDaire: (katNo: number, di: number) => void;
+}> = ({
+  blok,
+  katlar,
+  katNo,
+  daireIndex,
+  dairePerKatFn,
+  daireYuzdeFn,
+  onKat,
+  onDaire,
+}) => {
+  const n = Math.max(katlar.length, 1);
+  const rowH = Math.min(42, Math.max(26, Math.floor(340 / n)));
+  const maxWin = Math.max(...katlar.map((_, i) => dairePerKatFn(i + 1) || 1), 1);
+  const w = 56 + maxWin * 28;
+  const h = 28 + rowH * n + 18;
+
+  return (
+    <div className="relative rounded-2xl border border-stone-800/20 bg-gradient-to-b from-stone-200 via-stone-100 to-stone-300 p-3 overflow-hidden">
+      <div
+        className="pointer-events-none absolute inset-0 opacity-[0.07]"
+        style={{
+          backgroundImage:
+            'linear-gradient(#000 1px, transparent 1px), linear-gradient(90deg, #000 1px, transparent 1px)',
+          backgroundSize: '18px 18px',
+        }}
+      />
+      <div className="relative flex items-center justify-between mb-2 px-1">
+        <div>
+          <p className="text-[9px] font-black uppercase tracking-[0.2em] text-stone-500">Cephe · ilerleme</p>
+          <h3 className="text-xl font-black text-stone-900 tracking-tight">{blok} BLOK</h3>
+        </div>
+        <Layers size={16} className="text-stone-400" />
+      </div>
+      <svg viewBox={`0 0 ${w} ${h}`} className="w-full max-h-[380px] mx-auto block relative">
+        <rect x="8" y="4" width={w - 16} height="14" rx="2" fill="#57534e" />
+        <text x={w / 2} y="14" textAnchor="middle" fontSize="7" fontWeight="800" fill="#fafaf9">
+          {blok}
+        </text>
+        {katlar
+          .map((k, i) => ({ ...k, idx: i + 1 }))
+          .slice()
+          .reverse()
+          .map((k, revI) => {
+            const y = 22 + revI * rowH;
+            const activeKat = katNo === k.idx;
+            const wins = k.konut ? Math.max(dairePerKatFn(k.idx), 1) : 0;
+            return (
+              <g key={k.idx}>
+                <rect
+                  x="12"
+                  y={y}
+                  width={w - 24}
+                  height={rowH - 3}
+                  rx="2"
+                  fill={activeKat ? '#1c1917' : k.tip === 'TEKNIK' ? '#d6d3d1' : '#fafaf9'}
+                  stroke={activeKat ? '#0c0a09' : '#a8a29e'}
+                  strokeWidth={activeKat ? 1.4 : 0.5}
+                  className="cursor-pointer"
+                  onClick={() => onKat(k.idx)}
+                />
+                <text
+                  x="18"
+                  y={y + rowH / 2 - 1}
+                  dominantBaseline="middle"
+                  fontSize="6.2"
+                  fontWeight="800"
+                  fill={activeKat ? '#fafaf9' : '#292524'}
+                  className="cursor-pointer"
+                  onClick={() => onKat(k.idx)}
+                >
+                  {k.label}
+                </text>
+                {!k.konut ? (
+                  <text
+                    x={w - 20}
+                    y={y + rowH / 2 - 1}
+                    textAnchor="end"
+                    dominantBaseline="middle"
+                    fontSize="5.5"
+                    fontWeight="700"
+                    fill={activeKat ? '#a8a29e' : '#78716c'}
+                  >
+                    TEKNİK
+                  </text>
+                ) : (
+                  Array.from({ length: wins }, (_, wi) => {
+                    const di = wi + 1;
+                    const yy = daireYuzdeFn(k.idx, di);
+                    const ax = 72 + wi * 26;
+                    const active = activeKat && daireIndex === di;
+                    return (
+                      <g
+                        key={di}
+                        className="cursor-pointer"
+                        onClick={() => {
+                          onKat(k.idx);
+                          onDaire(k.idx, di);
+                        }}
+                      >
+                        <rect
+                          x={ax}
+                          y={y + 5}
+                          width="22"
+                          height={rowH - 13}
+                          rx="1.5"
+                          fill={heat(yy)}
+                          stroke={active ? '#fafaf9' : '#57534e'}
+                          strokeWidth={active ? 1.5 : 0.4}
+                        />
+                        <text
+                          x={ax + 11}
+                          y={y + rowH / 2 - 0.5}
+                          textAnchor="middle"
+                          dominantBaseline="middle"
+                          fontSize="5"
+                          fontWeight="800"
+                          fill={yy >= 40 ? '#14532d' : '#44403c'}
+                        >
+                          {di}
+                        </text>
+                      </g>
+                    );
+                  })
+                )}
+                {/* mini disiplin bars */}
+                <rect x="18" y={y + rowH - 8} width="40" height="2.2" rx="1" fill={activeKat ? '#44403c' : '#e7e5e4'} />
+                <rect
+                  x="18"
+                  y={y + rowH - 8}
+                  width={(40 * k.kaba) / 100}
+                  height="2.2"
+                  rx="1"
+                  fill="#d97706"
+                />
+              </g>
+            );
+          })}
+        <rect x="6" y={h - 12} width={w - 12} height="8" rx="1" fill="#292524" />
+      </svg>
+      <div className="mt-2 flex flex-wrap gap-3 text-[9px] font-bold text-stone-500 px-1">
+        <span className="inline-flex items-center gap-1">
+          <i className="h-2.5 w-2.5 rounded-sm" style={{ background: heat(0) }} /> 0%
+        </span>
+        <span className="inline-flex items-center gap-1">
+          <i className="h-2.5 w-2.5 rounded-sm" style={{ background: heat(40) }} /> devam
+        </span>
+        <span className="inline-flex items-center gap-1">
+          <i className="h-2.5 w-2.5 rounded-sm" style={{ background: heat(100) }} /> tamam
+        </span>
+        <span className="inline-flex items-center gap-1">
+          <i className="h-2.5 w-4 rounded-sm bg-amber-500" /> kaba şerit
+        </span>
+      </div>
+    </div>
+  );
+};
+
+/** Kat plakası — daire hücreleri */
+const KatPlaka: React.FC<{
+  label: string;
   teknikKat: boolean;
   dairePerKat: number;
   katNo: number;
@@ -296,6 +541,7 @@ const KatPlakasi: React.FC<{
   onTeknik: (key: string) => void;
   odaYuzde: (key: string) => number;
 }> = ({
+  label,
   teknikKat,
   dairePerKat,
   katNo,
@@ -310,74 +556,109 @@ const KatPlakasi: React.FC<{
 }) => {
   if (teknikKat) {
     return (
-      <div className="grid grid-cols-1 gap-1.5">
-        {TEKNIK_KAT_ALANLARI.map((a) => {
-          const y = odaYuzde(a.key);
-          const active = odaKey === a.key;
-          return (
-            <button
-              key={a.key}
-              type="button"
-              onClick={() => onTeknik(a.key)}
-              className={`rounded-xl border px-3 py-2.5 text-left cursor-pointer transition-shadow ${
-                active
-                  ? 'border-violet-500 bg-violet-50 shadow-[0_0_0_2px_rgba(139,92,246,0.25)]'
-                  : 'border-stone-200 bg-stone-50 hover:border-stone-300'
-              }`}
-            >
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-xs font-black text-stone-900">{a.label}</span>
-                <span className="text-[10px] font-bold tabular-nums text-stone-500">%{y}</span>
-              </div>
-              <div className="mt-1.5 h-1.5 rounded-full bg-stone-200 overflow-hidden">
-                <div
-                  className="h-full rounded-full bg-stone-500 transition-[width]"
-                  style={{ width: `${y}%` }}
-                />
-              </div>
-            </button>
-          );
-        })}
+      <div className="space-y-2">
+        <p className="text-[10px] font-black uppercase tracking-widest text-stone-500">
+          {label} · teknik alanlar
+        </p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          {TEKNIK_KAT_ALANLARI.map((a) => {
+            const y = odaYuzde(a.key);
+            const active = odaKey === a.key;
+            return (
+              <button
+                key={a.key}
+                type="button"
+                onClick={() => onTeknik(a.key)}
+                className={`rounded-xl border px-3 py-3 text-left cursor-pointer ${
+                  active
+                    ? 'border-stone-900 bg-stone-900 text-white'
+                    : 'border-stone-200 bg-white hover:border-stone-400'
+                }`}
+              >
+                <div className="flex justify-between gap-2">
+                  <span className="text-sm font-black">{a.label}</span>
+                  <span className={`text-xs font-bold tabular-nums ${active ? 'text-stone-300' : 'text-stone-500'}`}>
+                    %{y}
+                  </span>
+                </div>
+                <div className={`mt-2 h-1.5 rounded-full overflow-hidden ${active ? 'bg-stone-700' : 'bg-stone-100'}`}>
+                  <div className="h-full rounded-full bg-amber-500" style={{ width: `${y}%` }} />
+                </div>
+              </button>
+            );
+          })}
+        </div>
       </div>
     );
   }
 
-  const cols = dairePerKat <= 4 ? 2 : dairePerKat <= 6 ? 3 : 4;
+  const cols = Math.min(Math.max(dairePerKat, 2), 6);
   return (
-    <div
-      className="grid gap-2"
-      style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}
-    >
-      {Array.from({ length: Math.max(dairePerKat, 1) }, (_, i) => i + 1).map((di) => {
-        const no = cBlokDaireNo(katNo, di);
-        const y = avgYuzde(
-          daireKalemleri.filter(
-            (k) => k.parsel === parsel && k.blok === blok && k.daireNo === no
-          )
-        );
-        const active = di === daireIndex;
-        const t = tipForIndex(parsel, blok, di);
-        return (
-          <button
-            key={di}
-            type="button"
-            onClick={() => onDaire(di)}
-            className={`relative rounded-xl border p-2.5 text-left cursor-pointer overflow-hidden transition-shadow ${
-              active
-                ? 'border-violet-500 bg-white shadow-[0_0_0_2px_rgba(139,92,246,0.3)]'
-                : 'border-stone-200 bg-stone-50/80 hover:border-stone-300'
-            }`}
-          >
-            <div
-              className="absolute inset-x-0 bottom-0 h-1"
-              style={{ background: odaRenk(y) }}
-            />
-            <p className="text-[9px] font-bold text-stone-400 uppercase tracking-wide">{t}</p>
-            <p className="text-base font-black text-stone-900 tabular-nums leading-tight">{no}</p>
-            <p className="text-[10px] font-bold text-stone-500 mt-0.5">%{y}</p>
-          </button>
-        );
-      })}
+    <div className="space-y-2">
+      <div className="flex items-baseline justify-between gap-2">
+        <p className="text-[10px] font-black uppercase tracking-widest text-stone-500">
+          {label} · kat plakası · {dairePerKat} daire
+        </p>
+      </div>
+      <div
+        className="rounded-2xl border-2 border-stone-800/80 bg-stone-50 p-3"
+        style={{
+          backgroundImage:
+            'radial-gradient(circle at 1px 1px, rgba(120,113,108,0.18) 1px, transparent 0)',
+          backgroundSize: '12px 12px',
+        }}
+      >
+        <div
+          className="grid gap-2"
+          style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}
+        >
+          {Array.from({ length: Math.max(dairePerKat, 1) }, (_, i) => i + 1).map((di) => {
+            const no = cBlokDaireNo(katNo, di);
+            const rows = daireKalemleri.filter(
+              (k) => k.parsel === parsel && k.blok === blok && k.daireNo === no
+            );
+            const y = avgYuzde(rows);
+            const kaba = grupAvg(rows, 'KABA');
+            const ince = grupAvg(rows, 'INCE');
+            const alty = grupAvg(rows, 'ALTYAPI');
+            const active = di === daireIndex;
+            const t = tipForIndex(parsel, blok, di);
+            return (
+              <button
+                key={di}
+                type="button"
+                onClick={() => onDaire(di)}
+                className={`relative min-h-[88px] rounded-xl border-2 p-2.5 text-left cursor-pointer transition-transform ${
+                  active
+                    ? 'border-stone-900 bg-white shadow-md scale-[1.03] z-[1]'
+                    : 'border-stone-300/80 bg-white/90 hover:border-stone-500'
+                }`}
+              >
+                <div
+                  className="absolute left-0 top-0 bottom-0 w-1.5 rounded-l-[10px]"
+                  style={{ background: heat(y) }}
+                />
+                <p className="text-[9px] font-bold uppercase text-stone-400 pl-1">{t}</p>
+                <p className="text-lg font-black tabular-nums text-stone-900 leading-none pl-1">{no}</p>
+                <p className="text-[11px] font-black text-stone-600 mt-1 pl-1">%{y}</p>
+                <div className="mt-2 space-y-0.5 pl-1">
+                  {(
+                    [
+                      [kaba, '#d97706'],
+                      [ince, '#7c3aed'],
+                      [alty, '#0284c7'],
+                    ] as const
+                  ).map(([yy, col], idx) => (
+                    <div key={idx} className="h-1 rounded-full bg-stone-100 overflow-hidden">
+                      <div className="h-full rounded-full" style={{ width: `${yy}%`, background: col }} />
+                    </div>
+                  ))}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </div>
     </div>
   );
 };
@@ -386,68 +667,63 @@ const KalemEditor: React.FC<{
   row: ProjeCDaireKalem;
   busy?: boolean;
   onUpdate: (row: ProjeCDaireKalem) => void;
-}> = ({ row, busy, onUpdate }) => {
-  return (
-    <div className="rounded-xl border border-stone-200 bg-white p-2.5 space-y-1.5">
-      <div className="flex items-start justify-between gap-2">
-        <p className="text-xs font-black text-stone-900">{row.kalemBaslik}</p>
-        <span
-          className={`shrink-0 rounded-full border px-2 py-0.5 text-[9px] font-bold ${durumTone(row.durum)}`}
-        >
-          {DISIPLIN_DURUM_LABEL[row.durum]}
-        </span>
-      </div>
-      <div className="flex flex-wrap gap-1">
-        {(['PLANLANDI', 'IMALATTA', 'TAMAMLANDI', 'BEKLEMEDE'] as ProjeDisiplinDurum[]).map((d) => (
-          <button
-            key={d}
-            type="button"
-            disabled={busy || row.durum === d}
-            onClick={() =>
-              onUpdate({
-                ...row,
-                durum: d,
-                yuzde:
-                  d === 'TAMAMLANDI' ? 100 : d === 'IMALATTA' ? Math.max(row.yuzde, 40) : row.yuzde,
-              })
-            }
-            className={`rounded-lg border px-2 py-0.5 text-[9px] font-black cursor-pointer disabled:opacity-40 ${
-              row.durum === d ? durumTone(d) : 'border-stone-200 bg-white text-stone-600'
-            }`}
-          >
-            {DISIPLIN_DURUM_LABEL[d]}
-          </button>
-        ))}
-      </div>
-      <label className="block text-[9px] font-bold uppercase text-stone-500">
-        %{row.yuzde}
-        <input
-          type="range"
-          min={0}
-          max={100}
-          step={5}
-          value={row.yuzde}
-          disabled={busy}
-          onChange={(e) => {
-            const yuzde = Number(e.target.value);
-            const durum: ProjeDisiplinDurum =
-              yuzde >= 100 ? 'TAMAMLANDI' : yuzde > 0 ? 'IMALATTA' : 'PLANLANDI';
-            onUpdate({ ...row, yuzde, durum });
-          }}
-          className="mt-1 w-full accent-violet-700"
-        />
-      </label>
-      <input
-        type="text"
-        placeholder="Eksik / kontrol notu…"
-        value={row.eksikNot || ''}
-        disabled={busy}
-        onChange={(e) => onUpdate({ ...row, eksikNot: e.target.value || undefined })}
-        className="w-full rounded-lg border border-stone-200 bg-white px-2 py-1.5 text-[11px]"
-      />
+}> = ({ row, busy, onUpdate }) => (
+  <div className="rounded-xl border border-stone-200 bg-white p-2.5 space-y-1.5">
+    <div className="flex items-start justify-between gap-2">
+      <p className="text-xs font-black text-stone-900">{row.kalemBaslik}</p>
+      <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[9px] font-bold ${durumTone(row.durum)}`}>
+        {DISIPLIN_DURUM_LABEL[row.durum]}
+      </span>
     </div>
-  );
-};
+    <div className="flex flex-wrap gap-1">
+      {(['PLANLANDI', 'IMALATTA', 'TAMAMLANDI', 'BEKLEMEDE'] as ProjeDisiplinDurum[]).map((d) => (
+        <button
+          key={d}
+          type="button"
+          disabled={busy || row.durum === d}
+          onClick={() =>
+            onUpdate({
+              ...row,
+              durum: d,
+              yuzde: d === 'TAMAMLANDI' ? 100 : d === 'IMALATTA' ? Math.max(row.yuzde, 40) : row.yuzde,
+            })
+          }
+          className={`rounded-lg border px-2 py-0.5 text-[9px] font-black cursor-pointer disabled:opacity-40 ${
+            row.durum === d ? durumTone(d) : 'border-stone-200 bg-white text-stone-600'
+          }`}
+        >
+          {DISIPLIN_DURUM_LABEL[d]}
+        </button>
+      ))}
+    </div>
+    <label className="block text-[9px] font-bold uppercase text-stone-500">
+      %{row.yuzde}
+      <input
+        type="range"
+        min={0}
+        max={100}
+        step={5}
+        value={row.yuzde}
+        disabled={busy}
+        onChange={(e) => {
+          const yuzde = Number(e.target.value);
+          const durum: ProjeDisiplinDurum =
+            yuzde >= 100 ? 'TAMAMLANDI' : yuzde > 0 ? 'IMALATTA' : 'PLANLANDI';
+          onUpdate({ ...row, yuzde, durum });
+        }}
+        className="mt-1 w-full accent-stone-800"
+      />
+    </label>
+    <input
+      type="text"
+      placeholder="Eksik / kontrol notu…"
+      value={row.eksikNot || ''}
+      disabled={busy}
+      onChange={(e) => onUpdate({ ...row, eksikNot: e.target.value || undefined })}
+      className="w-full rounded-lg border border-stone-200 bg-white px-2 py-1.5 text-[11px]"
+    />
+  </div>
+);
 
 export const ProjeBlokKontrolPanel: React.FC<Props> = ({
   parsel,
@@ -473,7 +749,6 @@ export const ProjeBlokKontrolPanel: React.FC<Props> = ({
   const [odaKey, setOdaKey] = useState<string | null>(null);
   const [gorselIdx, setGorselIdx] = useState(0);
   const [programTarih, setProgramTarih] = useState(tomorrowDateKey());
-  const [analizAcik, setAnalizAcik] = useState(false);
 
   const profil = bloklar.find((b) => b.blok === blok) || bloklar[0];
   const model = resolveKatModel(parsel, blok);
@@ -487,7 +762,6 @@ export const ProjeBlokKontrolPanel: React.FC<Props> = ({
       : 4;
   const tip = teknikKat ? null : tipForIndex(parsel, blok, daireIndex);
   const daireNo = teknikKat ? `T${katNo}` : cBlokDaireNo(katNo, daireIndex);
-  const konutKatN = model?.katlar.filter((k) => k.konut).length || katSayisi;
 
   useEffect(() => {
     if (!bloklar.length) return;
@@ -529,7 +803,11 @@ export const ProjeBlokKontrolPanel: React.FC<Props> = ({
     [daireKalemleri, parsel, blok, daireNo]
   );
 
-  const daireYuzde = avgYuzde(daireRows);
+  const blokRows = useMemo(
+    () => daireKalemleri.filter((k) => k.parsel === parsel && k.blok === blok),
+    [daireKalemleri, parsel, blok]
+  );
+
   const plan = tip ? planOdalarForTip(tip) : [];
   const teknikPlan = TEKNIK_KAT_ALANLARI.map((a) => ({
     key: a.key,
@@ -540,50 +818,71 @@ export const ProjeBlokKontrolPanel: React.FC<Props> = ({
     h: 0,
   }));
 
-  const katKesitRows = useMemo(() => {
-    const rows: { label: string; tip?: BlokKatSablon['tip']; konut: boolean; yuzde: number }[] =
-      [];
+  const odaYuzde = (key: string) => avgYuzde(daireRows.filter((k) => k.odaKey === key));
+
+  const katKesitRows = useMemo((): KatRow[] => {
+    const rows: KatRow[] = [];
     for (let i = 1; i <= katSayisi; i++) {
       const meta = model?.katSablon(i);
       const label = meta?.label || String(i);
       const konut = meta ? meta.konut : true;
       if (!konut) {
         const tNo = `T${i}`;
-        const y = avgYuzde(
-          daireKalemleri.filter(
-            (k) => k.parsel === parsel && k.blok === blok && k.daireNo === tNo
-          )
+        const rowsT = daireKalemleri.filter(
+          (k) => k.parsel === parsel && k.blok === blok && k.daireNo === tNo
         );
-        rows.push({ label, tip: meta?.tip, konut: false, yuzde: y });
+        rows.push({
+          label,
+          tip: meta?.tip,
+          konut: false,
+          yuzde: avgYuzde(rowsT),
+          kaba: grupAvg(rowsT, 'KABA'),
+          ince: grupAvg(rowsT, 'INCE'),
+          altyapi: grupAvg(rowsT, 'ALTYAPI'),
+        });
         continue;
       }
       const nD = model ? model.daireKatta(i) : profil ? dairePerKatOf(profil) : 4;
-      const ys: number[] = [];
+      const collected: ProjeCDaireKalem[] = [];
       for (let di = 1; di <= Math.max(nD, 1); di++) {
         const no = cBlokDaireNo(i, di);
-        ys.push(
-          avgYuzde(
-            daireKalemleri.filter(
-              (k) => k.parsel === parsel && k.blok === blok && k.daireNo === no
-            )
-          )
-        );
+        for (const k of daireKalemleri) {
+          if (k.parsel === parsel && k.blok === blok && k.daireNo === no) collected.push(k);
+        }
       }
       rows.push({
         label,
         tip: meta?.tip,
         konut: true,
-        yuzde: avgYuzde(ys.map((y) => ({ yuzde: y }))),
+        yuzde: avgYuzde(collected),
+        kaba: grupAvg(collected, 'KABA'),
+        ince: grupAvg(collected, 'INCE'),
+        altyapi: grupAvg(collected, 'ALTYAPI'),
       });
     }
     return rows;
   }, [katSayisi, model, daireKalemleri, parsel, blok, profil]);
 
+  const blokOzetler = useMemo((): BlokOzet[] => {
+    return bloklar.map((p) => {
+      const rows = daireKalemleri.filter((k) => k.parsel === parsel && k.blok === p.blok);
+      const m = resolveKatModel(parsel, p.blok);
+      return {
+        blok: p.blok,
+        profil: p,
+        yuzde: avgYuzde(rows),
+        kaba: grupAvg(rows, 'KABA'),
+        ince: grupAvg(rows, 'INCE'),
+        altyapi: grupAvg(rows, 'ALTYAPI'),
+        daire: m?.daireSayisi ?? p.daireSayisi,
+        kat: m?.katSayisi ?? p.katSayisi,
+      };
+    });
+  }, [bloklar, daireKalemleri, parsel]);
+
   const seciliOda = teknikKat
     ? teknikPlan.find((o) => o.key === odaKey) || null
     : plan.find((o) => o.key === odaKey) || null;
-
-  const odaYuzde = (key: string) => avgYuzde(daireRows.filter((k) => k.odaKey === key));
 
   const odaKalemleri = useMemo(() => {
     if (!seciliOda) return [];
@@ -622,24 +921,19 @@ export const ProjeBlokKontrolPanel: React.FC<Props> = ({
     setGorselIdx(0);
   }, [hedefGorseller.length, odaKey]);
 
-  const analiz = useMemo(() => {
-    const tamam = daireRows.filter((k) => k.durum === 'TAMAMLANDI').length;
-    const imalat = daireRows.filter((k) => k.durum === 'IMALATTA').length;
-    const planli = daireRows.filter((k) => k.durum === 'PLANLANDI').length;
-    const notlu = daireRows.filter((k) => Boolean(k.eksikNot?.trim())).length;
-    const byGrup = (['KABA', 'INCE', 'ALTYAPI'] as TakipKalemGrup[]).map((g) => {
-      const rows = daireRows.filter((k) => resolveGrup(k) === g);
-      return { grup: g, label: TAKIP_KALEM_GRUP_LABEL[g], yuzde: avgYuzde(rows), n: rows.length };
-    });
-    const byOda = (teknikKat ? teknikPlan : plan.filter((o) => o.key !== 'giris')).map((o) => ({
-      label: o.label,
-      yuzde: odaYuzde(o.key),
-      eksik: daireRows.filter(
-        (k) => k.odaKey === o.key && (k.durum !== 'TAMAMLANDI' || k.yuzde < 100)
-      ).length,
-    }));
-    return { tamam, imalat, planli, notlu, byOda, byGrup, toplam: daireRows.length };
-  }, [daireRows, plan, teknikKat]);
+  const blokKaba = grupAvg(blokRows, 'KABA');
+  const blokInce = grupAvg(blokRows, 'INCE');
+  const blokAlty = grupAvg(blokRows, 'ALTYAPI');
+  const blokYuzde = avgYuzde(blokRows);
+  const daireYuzde = avgYuzde(daireRows);
+  const daireKaba = grupAvg(daireRows, 'KABA');
+  const daireInce = grupAvg(daireRows, 'INCE');
+  const daireAlty = grupAvg(daireRows, 'ALTYAPI');
+
+  const heroSrc =
+    hedefGorseller.length > 0
+      ? hedefGorseller[gorselIdx % hedefGorseller.length]
+      : null;
 
   const handleProgramaAl = async () => {
     const kaynak = seciliOda ? odaKalemleri : [];
@@ -662,218 +956,176 @@ export const ProjeBlokKontrolPanel: React.FC<Props> = ({
     await onIsProgramaAl(drafts, programTarih);
   };
 
+  const daireYuzdeFn = (kNo: number, di: number) => {
+    const no = cBlokDaireNo(kNo, di);
+    return avgYuzde(
+      daireKalemleri.filter((k) => k.parsel === parsel && k.blok === blok && k.daireNo === no)
+    );
+  };
+
+  const dairePerKatFn = (kNo: number) =>
+    model ? model.daireKatta(kNo) : profil ? dairePerKatOf(profil) : 4;
+
   return (
     <div className="space-y-4">
-      <div className="rounded-2xl border border-violet-200 bg-violet-50/80 p-4">
-        <p className="text-[10px] font-black uppercase tracking-widest text-violet-800 flex items-center gap-1.5">
-          <ClipboardList size={12} /> Blok kontrol
-        </p>
-        <h2 className="text-lg font-black text-violet-950 mt-0.5">
-          Tek blok → kat → {teknikKat ? 'teknik alan' : 'daire'} durumu
-        </h2>
-        <p className="text-[11px] text-violet-900/80 mt-1 max-w-2xl leading-snug">
-          Takip başlıkları: <strong>Kaba</strong> · <strong>İnce</strong> · <strong>Altyapı</strong>.
-          {model
-            ? ' Kat etiketleri duvar aplikasyon + ruhsat daire sayılarından.'
-            : ' Seçili dairenin odalarını ve eksiklerini buradan kontrol edin.'}
-        </p>
-      </div>
-
-      <div className="rounded-2xl border border-stone-200 bg-white p-3 space-y-3 shadow-sm">
-        <div className="flex flex-wrap gap-2 items-end">
-          <label className="text-[9px] font-bold uppercase text-stone-500">
-            Parsel
-            <select
-              value={parsel}
-              onChange={(e) => onParselChange(e.target.value)}
-              className="mt-0.5 block min-w-[160px] rounded-lg border border-stone-200 bg-stone-50 px-2 py-2 text-xs font-semibold"
-            >
-              {parselSecenek.map((p) => (
-                <option key={p} value={p}>
-                  {p.replace('Parsel Bölge ', '')}
-                </option>
-              ))}
-            </select>
-          </label>
-          <div className="flex-1 min-w-[200px]">
-            <p className="text-[9px] font-bold uppercase text-stone-500 mb-0.5">Blok (tek seçim)</p>
-            <div className="flex flex-wrap gap-1.5">
-              {bloklar.map((b) => (
-                <button
-                  key={b.blok}
-                  type="button"
-                  onClick={() => setBlok(b.blok)}
-                  className={`rounded-lg border px-3 py-2 text-xs font-black cursor-pointer ${
-                    blok === b.blok
-                      ? 'border-violet-700 bg-violet-700 text-white'
-                      : 'border-stone-200 bg-stone-50 text-stone-700'
-                  }`}
+      {/* Komuta başlık */}
+      <div className="relative overflow-hidden rounded-2xl border border-stone-800 bg-stone-900 text-white">
+        {heroSrc && (
+          <img
+            src={heroSrc.src}
+            alt=""
+            className="absolute inset-0 h-full w-full object-cover opacity-25"
+          />
+        )}
+        <div className="absolute inset-0 bg-gradient-to-r from-stone-950 via-stone-900/90 to-stone-900/70" />
+        <div className="relative p-4 sm:p-5 flex flex-wrap items-end gap-4 justify-between">
+          <div className="min-w-[200px] space-y-2">
+            <p className="text-[10px] font-black uppercase tracking-[0.25em] text-amber-400/90 flex items-center gap-1.5">
+              <Map size={12} /> Saha blok kontrol
+            </p>
+            <h2 className="text-2xl sm:text-3xl font-black tracking-tight leading-none">
+              {parsel.replace('Parsel Bölge ', '')}
+              <span className="text-stone-400 font-bold text-lg ml-2">/ {blok}</span>
+            </h2>
+            <p className="text-[12px] text-stone-300 max-w-xl leading-snug">
+              Parsel → cephe → kat plakası → oda. Takip:{' '}
+              <span className="text-amber-300 font-bold">Kaba</span> ·{' '}
+              <span className="text-violet-300 font-bold">İnce</span> ·{' '}
+              <span className="text-sky-300 font-bold">Altyapı</span>
+              {model ? ` · ${model.dwgKaynak}` : ''}
+            </p>
+            <div className="flex flex-wrap items-center gap-2 pt-1">
+              <label className="text-[9px] font-bold uppercase text-stone-400">
+                Parsel
+                <select
+                  value={parsel}
+                  onChange={(e) => onParselChange(e.target.value)}
+                  className="mt-0.5 block min-w-[140px] rounded-lg border border-stone-600 bg-stone-800 px-2 py-1.5 text-xs font-semibold text-white"
                 >
-                  {b.blok}
-                </button>
-              ))}
+                  {parselSecenek.map((p) => (
+                    <option key={p} value={p}>
+                      {p.replace('Parsel Bölge ', '')}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div className="text-[11px] font-semibold text-stone-400 flex flex-wrap gap-1 items-center pt-4">
+                <span className="text-white font-black">{blok}</span>
+                <ChevronRight size={12} />
+                <span className="text-white font-black">{katMeta?.label || `Kat ${katNo}`}</span>
+                {!teknikKat && (
+                  <>
+                    <ChevronRight size={12} />
+                    <span className="text-white font-black">{daireNo}</span>
+                  </>
+                )}
+                {seciliOda && seciliOda.key !== 'giris' && (
+                  <>
+                    <ChevronRight size={12} />
+                    <span className="text-amber-300 font-black">{seciliOda.label}</span>
+                  </>
+                )}
+              </div>
             </div>
           </div>
-        </div>
-
-        {profil && (
-          <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
-            {[
-              { label: 'Toplam kat', value: String(katSayisi) },
-              { label: 'Konut katı', value: String(konutKatN) },
-              { label: 'Daire / blok', value: String(profil.daireSayisi) },
-              {
-                label: 'Bu kat',
-                value: teknikKat ? 'Teknik' : `${dairePerKat} daire`,
-              },
-              {
-                label: 'Seçili',
-                value: teknikKat
-                  ? `${blok} · ${katMeta?.label || `K${katNo}`}`
-                  : `${daireNo}${tip ? ` · ${tip}` : ''}`,
-              },
-            ].map((c) => (
-              <div
-                key={c.label}
-                className="rounded-xl border border-violet-100 bg-violet-50/50 px-2.5 py-2 text-center"
-              >
-                <p className="text-[9px] font-bold uppercase text-violet-700/80">{c.label}</p>
-                <p className="text-sm font-black tabular-nums text-violet-950 leading-tight">
-                  {c.value}
-                </p>
-              </div>
-            ))}
+          <div className="flex flex-wrap gap-3 items-end">
+            <Ring label="Blok" yuzde={blokYuzde} color="#a8a29e" size={72} />
+            <Ring label="Kaba" yuzde={blokKaba} color="#d97706" />
+            <Ring label="İnce" yuzde={blokInce} color="#7c3aed" />
+            <Ring label="Altyapı" yuzde={blokAlty} color="#0284c7" />
           </div>
-        )}
-        {model && (
-          <p className="text-[10px] text-stone-500 truncate" title={model.dwgKaynak}>
-            Kaynak: {model.dwgKaynak}
-          </p>
-        )}
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.35fr)] gap-4">
-        <div className="rounded-2xl border border-stone-200 bg-white p-3 space-y-3 shadow-sm">
-          <div className="flex items-baseline justify-between gap-2">
-            <p className="text-[10px] font-black uppercase text-stone-500">
-              {blok} · bina kesiti
-            </p>
-            <p className="text-[10px] font-semibold text-stone-400">
-              {katMeta?.label || `Kat ${katNo}`}
-              {teknikKat ? ' · teknik' : ` · ${dairePerKat} daire`}
-            </p>
-          </div>
+      {/* Parsel sahası */}
+      <div className="space-y-2">
+        <p className="text-[10px] font-black uppercase tracking-widest text-stone-500 px-0.5">
+          Parsel sahası — blok seç
+        </p>
+        <ParselSahasi ozetler={blokOzetler} aktif={blok} onSelect={setBlok} />
+      </div>
 
-          <div className="grid grid-cols-[auto_1fr] gap-3 items-start">
-            <div className="rounded-xl border border-stone-200 bg-gradient-to-b from-stone-100 to-stone-50 p-2">
-              <BinaKesit
-                blok={blok}
-                katlar={katKesitRows}
-                katNo={katNo}
-                onSelect={setKatNo}
-              />
-            </div>
-            <div className="min-w-0 space-y-2">
-              <p className="text-[10px] font-black uppercase text-stone-500">
-                {teknikKat ? 'Teknik / ortak alan' : 'Kat plakası'}
-              </p>
-              <KatPlakasi
-                teknikKat={teknikKat}
-                dairePerKat={dairePerKat}
-                katNo={katNo}
-                daireIndex={daireIndex}
-                parsel={parsel}
-                blok={blok}
-                daireKalemleri={daireKalemleri}
-                odaKey={odaKey}
-                onDaire={setDaireIndex}
-                onTeknik={setOdaKey}
-                odaYuzde={odaYuzde}
-              />
-              {!model && (
-                <div className="flex flex-wrap gap-1">
-                  {Array.from({ length: katSayisi }, (_, i) => i + 1).map((k) => (
-                    <button
-                      key={k}
-                      type="button"
-                      onClick={() => setKatNo(k)}
-                      className={`rounded-md border px-2 py-1 text-[10px] font-black cursor-pointer ${
-                        katNo === k
-                          ? 'border-violet-600 bg-violet-600 text-white'
-                          : 'border-stone-200 bg-stone-50 text-stone-600'
-                      }`}
-                    >
-                      {k}
-                    </button>
-                  ))}
+      {/* Cephe + kat plaka */}
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+        <BlokCephe
+          blok={blok}
+          katlar={katKesitRows}
+          katNo={katNo}
+          daireIndex={daireIndex}
+          dairePerKatFn={dairePerKatFn}
+          daireYuzdeFn={daireYuzdeFn}
+          onKat={setKatNo}
+          onDaire={(_k, di) => setDaireIndex(di)}
+        />
+        <div className="rounded-2xl border border-stone-200 bg-white p-3 sm:p-4 space-y-4 shadow-sm">
+          <KatPlaka
+            label={katMeta?.label || `Kat ${katNo}`}
+            teknikKat={teknikKat}
+            dairePerKat={dairePerKat}
+            katNo={katNo}
+            daireIndex={daireIndex}
+            parsel={parsel}
+            blok={blok}
+            daireKalemleri={daireKalemleri}
+            odaKey={odaKey}
+            onDaire={setDaireIndex}
+            onTeknik={setOdaKey}
+            odaYuzde={odaYuzde}
+          />
+
+          {!teknikKat && tip && (
+            <div className="space-y-2">
+              <div className="flex flex-wrap items-end justify-between gap-2">
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-widest text-stone-500">
+                    Daire oda planı
+                  </p>
+                  <h4 className="text-lg font-black text-stone-900">
+                    {daireNo}{' '}
+                    <span className="text-stone-400 text-sm font-bold">{tip}</span>
+                    <span className="ml-2 text-sm font-black text-emerald-700">%{daireYuzde}</span>
+                  </h4>
                 </div>
-              )}
-            </div>
-          </div>
-        </div>
-
-        <div className="rounded-2xl border border-stone-200 bg-white p-3 space-y-3 shadow-sm">
-          <div className="flex flex-wrap items-start justify-between gap-2">
-            <div>
-              <p className="text-[10px] font-black uppercase text-violet-700 flex items-center gap-1">
-                <Home size={12} /> {teknikKat ? 'Teknik kat' : 'Seçili daire · oda planı'}
-              </p>
-              <h3 className="text-lg font-black text-stone-900">
-                {blok} · {teknikKat ? katMeta?.label || daireNo : daireNo}
-                {!teknikKat && tip && (
-                  <span className="text-stone-400 font-bold text-sm ml-2">{tip}</span>
-                )}
-              </h3>
-              <p className="text-xs text-stone-500">
-                Fiili %{daireYuzde}
-                {analiz.toplam
-                  ? ` · ${analiz.tamam} tamam / ${analiz.imalat} imalatta / ${analiz.planli} plan`
-                  : ' · henüz kalem işlenmedi — alan seçin'}
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={() => setAnalizAcik(true)}
-              className="rounded-lg border border-stone-200 bg-stone-50 px-2.5 py-1.5 text-[10px] font-black uppercase cursor-pointer"
-            >
-              Analiz
-            </button>
-          </div>
-
-          {teknikKat ? (
-            <p className="text-[11px] text-stone-500 rounded-xl border border-dashed border-stone-200 bg-stone-50 p-3">
-              Bu kat daire katı değil (bodrum / teknik). Soldan kalorifer, sığınak, depo vb. alanı
-              seçip kaba / ince / altyapı kalemlerini işleyin.
-            </p>
-          ) : (
-            <>
-              <svg viewBox="0 0 100 100" className="w-full rounded-xl border border-stone-300 bg-white">
+                <div className="flex gap-2">
+                  <Ring label="Kaba" yuzde={daireKaba} color="#d97706" size={52} />
+                  <Ring label="İnce" yuzde={daireInce} color="#7c3aed" size={52} />
+                  <Ring label="Alty." yuzde={daireAlty} color="#0284c7" size={52} />
+                </div>
+              </div>
+              <svg
+                viewBox="0 0 100 100"
+                className="w-full rounded-xl border-2 border-stone-800 bg-white shadow-inner"
+              >
                 {plan.map((oda) => {
                   const y = odaYuzde(oda.key);
                   const isGiris = oda.key === 'giris';
                   const active = odaKey === oda.key;
                   return (
-                    <g key={oda.key} className="cursor-pointer" onClick={() => setOdaKey(oda.key)}>
+                    <g
+                      key={oda.key}
+                      className="cursor-pointer"
+                      onClick={() => setOdaKey(oda.key)}
+                    >
                       <rect
                         x={oda.x}
                         y={oda.y}
                         width={oda.w}
                         height={oda.h}
-                        rx="1"
-                        fill={isGiris ? '#334155' : odaRenk(y)}
-                        stroke={active ? '#7c3aed' : '#64748b'}
-                        strokeWidth={active ? 1.5 : 0.6}
+                        rx="1.2"
+                        fill={isGiris ? '#1c1917' : heat(y)}
+                        stroke={active ? '#0c0a09' : '#57534e'}
+                        strokeWidth={active ? 2 : 0.7}
                       />
                       {!isGiris && (
                         <>
                           <text
                             x={oda.x + oda.w / 2}
-                            y={oda.y + oda.h / 2 - 1.2}
+                            y={oda.y + oda.h / 2 - 1.5}
                             textAnchor="middle"
                             dominantBaseline="middle"
-                            fontSize="2.7"
-                            fontWeight="700"
-                            fill="#1e293b"
+                            fontSize="2.8"
+                            fontWeight="800"
+                            fill="#1c1917"
                           >
                             {oda.label}
                           </text>
@@ -882,8 +1134,9 @@ export const ProjeBlokKontrolPanel: React.FC<Props> = ({
                             y={oda.y + oda.h / 2 + 2.8}
                             textAnchor="middle"
                             dominantBaseline="middle"
-                            fontSize="2.3"
-                            fill="#475569"
+                            fontSize="2.4"
+                            fontWeight="700"
+                            fill="#44403c"
                           >
                             %{y}
                           </text>
@@ -893,39 +1146,49 @@ export const ProjeBlokKontrolPanel: React.FC<Props> = ({
                   );
                 })}
               </svg>
-              <p className="text-[10px] text-stone-500 text-center">
-                Odaya tıklayın → kaba / ince / altyapı kalemleri
+              <p className="text-[10px] text-stone-500 text-center font-semibold">
+                Odaya tıklayın → kaba / ince / altyapı kalemleri + hedef görsel
               </p>
-            </>
+            </div>
+          )}
+
+          {teknikKat && (
+            <p className="text-[12px] text-stone-600 rounded-xl border border-dashed border-stone-300 bg-stone-50 p-3">
+              Bu kat konut değil (bodrum / teknik). Yukarıdan alan seçip disiplin kalemlerini işleyin.
+            </p>
           )}
         </div>
       </div>
 
+      {/* Oda komuta: kalemler + büyük mimari */}
       {seciliOda && seciliOda.key !== 'giris' && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <div className="rounded-2xl border border-stone-200 bg-white p-3 space-y-3 shadow-sm">
+        <div className="grid grid-cols-1 lg:grid-cols-[1fr_1.15fr] gap-4">
+          <div className="rounded-2xl border border-stone-200 bg-white p-3 sm:p-4 space-y-3 shadow-sm">
             <div className="flex items-center justify-between gap-2">
               <div>
-                <p className="text-[10px] font-black uppercase text-violet-700">
-                  {blok} · {daireNo}
+                <p className="text-[10px] font-black uppercase tracking-widest text-stone-500">
+                  {blok} · {daireNo} · kontrol
                 </p>
-                <h4 className="text-base font-black text-stone-900">{seciliOda.label}</h4>
+                <h4 className="text-xl font-black text-stone-900">{seciliOda.label}</h4>
               </div>
               <button
                 type="button"
                 onClick={() => setOdaKey(null)}
-                className="rounded-lg border border-stone-200 p-1.5 cursor-pointer"
+                className="rounded-lg border border-stone-200 p-1.5 cursor-pointer hover:bg-stone-50"
               >
                 <X size={14} />
               </button>
             </div>
-            <div className="space-y-3 max-h-[480px] overflow-y-auto">
+            <div className="space-y-3 max-h-[520px] overflow-y-auto pr-1">
               {odaGruplari.map((g) => (
                 <div key={g.grup} className="space-y-1.5">
                   <p
                     className={`sticky top-0 z-[1] rounded-lg border px-2.5 py-1.5 text-[10px] font-black uppercase tracking-wide ${grupTone(g.grup)}`}
                   >
                     {g.label}
+                    <span className="ml-2 opacity-70">
+                      %{avgYuzde(g.rows)} · {g.rows.length} kalem
+                    </span>
                   </p>
                   {g.rows.map((row) => (
                     <KalemEditor
@@ -940,142 +1203,88 @@ export const ProjeBlokKontrolPanel: React.FC<Props> = ({
             </div>
           </div>
 
-          <div className="rounded-2xl border border-stone-200 bg-white p-3 space-y-2 shadow-sm">
-            <p className="text-[10px] font-black uppercase text-stone-500 flex items-center gap-1">
-              <ImageIcon size={12} /> Hedef görünüm (iç mimari)
-            </p>
-            {hedefGorseller.length === 0 ? (
-              <p className="text-xs text-stone-400 italic py-8 text-center">
-                {teknikKat
-                  ? 'Teknik kat — mimari iç görsel yok.'
-                  : 'Bu parsel / oda için görsel yok.'}
-              </p>
-            ) : (
+          <div className="rounded-2xl border border-stone-800 overflow-hidden bg-stone-900 shadow-lg min-h-[320px] flex flex-col">
+            {heroSrc ? (
               <>
-                <div className="relative overflow-hidden rounded-xl border border-stone-200 bg-stone-100 aspect-[4/3]">
+                <div className="relative flex-1 min-h-[280px]">
                   <img
-                    src={hedefGorseller[gorselIdx % hedefGorseller.length].src}
-                    alt={hedefGorseller[gorselIdx % hedefGorseller.length].baslik}
-                    className="h-full w-full object-cover"
+                    src={heroSrc.src}
+                    alt={heroSrc.baslik}
+                    className="absolute inset-0 h-full w-full object-cover"
                   />
+                  <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent p-4 pt-16">
+                    <p className="text-[10px] font-black uppercase tracking-widest text-amber-300">
+                      Hedef görünüm
+                    </p>
+                    <p className="text-lg font-black text-white">{heroSrc.baslik}</p>
+                    <p className="text-[11px] text-stone-300">
+                      {seciliOda.label} — saha ile hedefi karşılaştırın
+                    </p>
+                  </div>
                 </div>
-                <p className="text-[11px] font-semibold text-stone-700 truncate">
-                  {hedefGorseller[gorselIdx % hedefGorseller.length].baslik}
-                </p>
-                <div className="flex flex-wrap gap-1">
-                  {hedefGorseller.map((g, i) => (
-                    <button
-                      key={g.id}
-                      type="button"
-                      onClick={() => setGorselIdx(i)}
-                      className={`h-12 w-16 overflow-hidden rounded-lg border cursor-pointer ${
-                        i === gorselIdx % hedefGorseller.length
-                          ? 'border-violet-500 ring-1 ring-violet-300'
-                          : 'border-stone-200'
-                      }`}
-                    >
-                      <img src={g.src} alt="" className="h-full w-full object-cover" />
-                    </button>
-                  ))}
-                </div>
+                {hedefGorseller.length > 1 && (
+                  <div className="flex gap-1.5 p-2 bg-stone-950 overflow-x-auto">
+                    {hedefGorseller.map((g, i) => (
+                      <button
+                        key={g.id}
+                        type="button"
+                        onClick={() => setGorselIdx(i)}
+                        className={`h-14 w-20 shrink-0 overflow-hidden rounded-lg border cursor-pointer ${
+                          i === gorselIdx % hedefGorseller.length
+                            ? 'border-amber-400'
+                            : 'border-stone-700 opacity-70 hover:opacity-100'
+                        }`}
+                      >
+                        <img src={g.src} alt="" className="h-full w-full object-cover" />
+                      </button>
+                    ))}
+                  </div>
+                )}
               </>
+            ) : (
+              <div className="flex-1 flex items-center justify-center p-8 text-center text-stone-400 text-sm">
+                {teknikKat
+                  ? 'Teknik kat — iç mimari hedef görsel yok.'
+                  : 'Bu oda / parsel için görsel yok.'}
+              </div>
             )}
           </div>
         </div>
       )}
 
-      <div className="rounded-2xl border border-emerald-200 bg-emerald-50/60 p-3 flex flex-wrap items-end gap-2">
+      {/* Sticky program bar */}
+      <div className="sticky bottom-2 z-20 rounded-2xl border border-emerald-800/30 bg-emerald-950 text-white p-3 sm:p-4 flex flex-wrap items-end gap-3 shadow-xl shadow-emerald-950/20">
         <div className="flex-1 min-w-[180px]">
-          <p className="text-[10px] font-black uppercase text-emerald-900">İş programı</p>
-          <p className="text-[11px] text-emerald-900/80">
+          <p className="text-[10px] font-black uppercase tracking-widest text-emerald-300">
+            İş programı komutu
+          </p>
+          <p className="text-[12px] text-emerald-100/90 mt-0.5">
             {seciliOda && seciliOda.key !== 'giris'
-              ? `${seciliOda.label} içindeki açık kalemler (kaba/ince/altyapı)`
-              : 'Önce alan seçin — eksikler programa alınır'}
-            {eksikler.length ? ` (${eksikler.length} açık)` : ''}
+              ? `${seciliOda.label} açık kalemleri programa`
+              : 'Önce oda / alan seçin'}
+            {eksikler.length ? ` · ${eksikler.length} açık` : ''}
           </p>
         </div>
-        <label className="text-[9px] font-bold uppercase text-emerald-900">
-          Program günü
+        <label className="text-[9px] font-bold uppercase text-emerald-300">
+          Gün
           <input
             type="date"
             value={programTarih}
             onChange={(e) => setProgramTarih(e.target.value)}
-            className="mt-0.5 block rounded-lg border border-emerald-200 bg-white px-2 py-1.5 text-xs font-semibold"
+            className="mt-0.5 block rounded-lg border border-emerald-700 bg-emerald-900 px-2 py-1.5 text-xs font-semibold text-white"
           />
         </label>
         <button
           type="button"
           disabled={busy || !seciliOda || seciliOda.key === 'giris'}
           onClick={() => void handleProgramaAl()}
-          className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-700 px-4 py-2.5 text-[10px] font-black uppercase text-white disabled:opacity-40 cursor-pointer"
+          className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-400 px-4 py-2.5 text-[10px] font-black uppercase text-emerald-950 disabled:opacity-40 cursor-pointer hover:bg-emerald-300"
         >
           <CalendarDays size={12} />
-          Eksikleri iş programına al
+          Eksikleri programa al
           <ChevronRight size={12} />
         </button>
       </div>
-
-      {analizAcik && (
-        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 p-3">
-          <div className="w-full max-w-md max-h-[88vh] overflow-y-auto rounded-2xl border border-stone-200 bg-white shadow-xl">
-            <div className="sticky top-0 flex items-center justify-between border-b border-stone-100 bg-white px-4 py-3">
-              <div>
-                <p className="text-[10px] font-black uppercase text-violet-700">Analiz</p>
-                <h3 className="text-base font-black text-stone-900">
-                  {blok} · {teknikKat ? katMeta?.label : daireNo}
-                </h3>
-              </div>
-              <button
-                type="button"
-                onClick={() => setAnalizAcik(false)}
-                className="rounded-lg border border-stone-200 p-2 cursor-pointer"
-              >
-                <X size={16} />
-              </button>
-            </div>
-            <div className="p-4 space-y-3">
-              <div className="grid grid-cols-2 gap-2">
-                <div className="rounded-xl bg-violet-50 border border-violet-100 p-3 text-center">
-                  <p className="text-[9px] font-bold uppercase text-violet-700">Fiili</p>
-                  <p className="text-2xl font-black">%{daireYuzde}</p>
-                </div>
-                <div className="rounded-xl bg-stone-50 border border-stone-200 p-3 text-center">
-                  <p className="text-[9px] font-bold uppercase text-stone-500">Kalem</p>
-                  <p className="text-2xl font-black">{analiz.toplam || '—'}</p>
-                </div>
-              </div>
-              <div className="space-y-1.5">
-                {analiz.byGrup.map((g) => (
-                  <div
-                    key={g.grup}
-                    className={`flex items-center justify-between rounded-lg border px-2.5 py-2 ${grupTone(g.grup)}`}
-                  >
-                    <span className="text-xs font-bold">{g.label}</span>
-                    <span className="text-[11px] font-black">
-                      %{g.yuzde}
-                      {g.n ? ` · ${g.n}` : ''}
-                    </span>
-                  </div>
-                ))}
-              </div>
-              <div className="space-y-1.5">
-                {analiz.byOda.map((o) => (
-                  <div
-                    key={o.label}
-                    className="flex items-center justify-between rounded-lg border border-stone-100 bg-stone-50 px-2.5 py-2"
-                  >
-                    <span className="text-xs font-bold text-stone-800">{o.label}</span>
-                    <span className="text-[11px] font-black text-stone-600">
-                      %{o.yuzde}
-                      {o.eksik ? ` · ${o.eksik} açık` : ''}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };
