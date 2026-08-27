@@ -32,13 +32,17 @@ export interface CBlokProfilSablon {
 }
 
 export const C_BLOK_PROFILLERI: CBlokProfilSablon[] = [
-  { blok: 'C1', katSayisi: 7, dairePerKat: 4 },
-  { blok: 'C2', katSayisi: 7, dairePerKat: 4 },
-  { blok: 'C3', katSayisi: 7, dairePerKat: 4 },
-  { blok: 'C4', katSayisi: 7, dairePerKat: 4 },
+  { blok: 'C1', katSayisi: 6, dairePerKat: 7 }, // 33 daire / 5 konut kat ≈
+  { blok: 'C2', katSayisi: 7, dairePerKat: 7 }, // 40 / 6
+  { blok: 'C3', katSayisi: 7, dairePerKat: 7 }, // 34 / 5
+  { blok: 'C4', katSayisi: 7, dairePerKat: 7 },
 ];
 
+/** @deprecated Ruhsat toplamı için parsel15751BlokSeed kullanın */
 export function cBlokDaireSayisi(p: CBlokProfilSablon): number {
+  if (p.blok === 'C1') return 33;
+  if (p.blok === 'C2') return 40;
+  if (p.blok === 'C3' || p.blok === 'C4') return 34;
   return p.katSayisi * p.dairePerKat;
 }
 

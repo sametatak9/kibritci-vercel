@@ -37,6 +37,13 @@ import {
   type BlokKatSablon,
 } from '../data/parsel15746BlokSeed';
 import {
+  daireSayisiKatta15751,
+  isParsel15751,
+  katSablon15751,
+  profil15751,
+  tipForDaire15751,
+} from '../data/parsel15751BlokSeed';
+import {
   groupKalemlerByTakip,
   kalemlerForOdaTakip,
   kalemlerForTeknikAlan,
@@ -98,8 +105,37 @@ function dairePerKatOf(p: ProjeBlokProfili): number {
 
 function tipForIndex(parsel: string, blok: string, daireIndex: number): CDaireTipi {
   if (isParsel15746(parsel)) return tipForDaire15746(blok, daireIndex);
+  if (isParsel15751(parsel)) return tipForDaire15751(blok, daireIndex);
   if (/^C[1-4]$/.test(blok)) return cBlokDaireTipi(daireIndex);
   return daireIndex <= 2 ? '2+1' : '3+1';
+}
+
+function resolveKatModel(parsel: string, blok: string) {
+  if (isParsel15746(parsel)) {
+    const p = profil15746(blok);
+    if (!p) return null;
+    return {
+      katSayisi: p.katSayisi,
+      daireSayisi: p.daireSayisi,
+      katlar: p.katlar as BlokKatSablon[],
+      dwgKaynak: p.dwgKaynak,
+      daireKatta: (katNo: number) => daireSayisiKatta15746(blok, katNo),
+      katSablon: (katNo: number) => katSablon15746(blok, katNo) as BlokKatSablon | undefined,
+    };
+  }
+  if (isParsel15751(parsel)) {
+    const p = profil15751(blok);
+    if (!p) return null;
+    return {
+      katSayisi: p.katSayisi,
+      daireSayisi: p.daireSayisi,
+      katlar: p.katlar as unknown as BlokKatSablon[],
+      dwgKaynak: p.dwgKaynak,
+      daireKatta: (katNo: number) => daireSayisiKatta15751(blok, katNo),
+      katSablon: (katNo: number) => katSablon15751(blok, katNo) as unknown as BlokKatSablon | undefined,
+    };
+  }
+  return null;
 }
 
 function resolveGrup(row: ProjeCDaireKalem): TakipKalemGrup {
@@ -269,18 +305,18 @@ export const ProjeBlokKontrolPanel: React.FC<Props> = ({
   const [analizAcik, setAnalizAcik] = useState(false);
 
   const profil = bloklar.find((b) => b.blok === blok) || bloklar[0];
-  const p46 = isParsel15746(parsel) ? profil15746(blok) : undefined;
-  const katMeta = p46 ? katSablon15746(blok, katNo) : undefined;
+  const model = resolveKatModel(parsel, blok);
+  const katMeta = model?.katSablon(katNo);
   const teknikKat = Boolean(katMeta && !katMeta.konut);
-  const katSayisi = p46?.katSayisi || profil?.katSayisi || 7;
-  const dairePerKat = p46
-    ? daireSayisiKatta15746(blok, katNo)
+  const katSayisi = model?.katSayisi || profil?.katSayisi || 7;
+  const dairePerKat = model
+    ? model.daireKatta(katNo)
     : profil
       ? dairePerKatOf(profil)
       : 4;
   const tip = teknikKat ? null : tipForIndex(parsel, blok, daireIndex);
   const daireNo = teknikKat ? `T${katNo}` : cBlokDaireNo(katNo, daireIndex);
-  const konutKatN = p46?.katlar.filter((k) => k.konut).length || katSayisi;
+  const konutKatN = model?.katlar.filter((k) => k.konut).length || katSayisi;
 
   useEffect(() => {
     if (!bloklar.length) return;
@@ -427,8 +463,8 @@ export const ProjeBlokKontrolPanel: React.FC<Props> = ({
         </h2>
         <p className="text-[11px] text-violet-900/80 mt-1 max-w-2xl leading-snug">
           Takip başlıkları: <strong>Kaba</strong> · <strong>İnce</strong> · <strong>Altyapı</strong>.
-          {p46
-            ? ' 157/46 kat etiketleri duvar aplikasyon + ruhsat daire sayılarından.'
+          {model
+            ? ' Kat etiketleri duvar aplikasyon + ruhsat daire sayılarından.'
             : ' Seçili dairenin odalarını ve eksiklerini buradan kontrol edin.'}
         </p>
       </div>
@@ -499,9 +535,9 @@ export const ProjeBlokKontrolPanel: React.FC<Props> = ({
             ))}
           </div>
         )}
-        {p46 && (
-          <p className="text-[10px] text-stone-500 truncate" title={p46.dwgKaynak}>
-            Kaynak: {p46.dwgKaynak}
+        {model && (
+          <p className="text-[10px] text-stone-500 truncate" title={model.dwgKaynak}>
+            Kaynak: {model.dwgKaynak}
           </p>
         )}
       </div>
@@ -510,11 +546,11 @@ export const ProjeBlokKontrolPanel: React.FC<Props> = ({
         <div className="rounded-2xl border border-stone-200 bg-white p-3 space-y-3 shadow-sm">
           <p className="text-[10px] font-black uppercase text-stone-500">
             {blok} · Kat seç ({katSayisi} kat
-            {p46 ? ' · aplikasyon' : ''})
+            {model ? ' · aplikasyon' : ''})
           </p>
           <div className="flex flex-wrap gap-1.5">
-            {p46
-              ? p46.katlar.map((k, i) => (
+            {model
+              ? model.katlar.map((k, i) => (
                   <KatChip
                     key={k.kod}
                     label={k.label}

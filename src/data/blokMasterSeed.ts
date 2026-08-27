@@ -1,5 +1,6 @@
 import { PARSEL_BLOK_MAP } from './parselBlokMap';
 import { profil15746 } from './parsel15746BlokSeed';
+import { profil15751 } from './parsel15751BlokSeed';
 import type { ProjeBlokProfili } from '../types/erp';
 
 /** Parsel bazlı varsayılan kat / daire — Firestore profili yoksa kullanılır */
@@ -13,6 +14,12 @@ export function blokProfilId(parsel: string, blok: string): string {
   return `${parsel}|${blok}`;
 }
 
+function ruhsatProfil(parsel: string, blok: string) {
+  if (parsel.includes('157/46')) return profil15746(blok);
+  if (parsel.includes('157/51')) return profil15751(blok);
+  return undefined;
+}
+
 export function seedBlokProfilleri(): ProjeBlokProfili[] {
   const out: ProjeBlokProfili[] = [];
   for (const [parsel, bloklar] of Object.entries(PARSEL_BLOK_MAP)) {
@@ -20,16 +27,14 @@ export function seedBlokProfilleri(): ProjeBlokProfili[] {
     const def = PARSEL_DEFAULTS[parsel] || { kat: 6, daire: 24 };
     for (const blok of bloklar) {
       if (blok === 'GENEL SAHA') continue;
-      const p46 = parsel.includes('157/46') ? profil15746(blok) : undefined;
+      const ruhsat = ruhsatProfil(parsel, blok);
       out.push({
         id: blokProfilId(parsel, blok),
         parsel,
         blok,
-        katSayisi: p46?.katSayisi ?? def.kat,
-        daireSayisi: p46?.daireSayisi ?? def.daire,
-        not: p46
-          ? `Duvar aplikasyon + ruhsat · ${p46.dwgKaynak}`
-          : undefined,
+        katSayisi: ruhsat?.katSayisi ?? def.kat,
+        daireSayisi: ruhsat?.daireSayisi ?? def.daire,
+        not: ruhsat ? `Duvar aplikasyon + ruhsat · ${ruhsat.dwgKaynak}` : undefined,
       });
     }
   }
@@ -45,15 +50,15 @@ export function mergeBlokProfilleri(
   for (const p of firestore) {
     const id = blokProfilId(p.parsel, p.blok);
     const base = map.get(id);
-    const p46 = p.parsel.includes('157/46') ? profil15746(p.blok) : undefined;
-    // 157/46: ruhsat + duvar aplikasyon kat/daire sayılarını koru (eski 6×24 ezmesin)
-    if (p46) {
+    const ruhsat = ruhsatProfil(p.parsel, p.blok);
+    // Ruhsatlı parsellerde kat/daire sayılarını eski seed/temizlik ezmesin
+    if (ruhsat) {
       map.set(id, {
         ...base,
         ...p,
         id,
-        katSayisi: p46.katSayisi,
-        daireSayisi: p46.daireSayisi,
+        katSayisi: ruhsat.katSayisi,
+        daireSayisi: ruhsat.daireSayisi,
         not: p.not || base?.not,
       });
     } else {
@@ -64,8 +69,7 @@ export function mergeBlokProfilleri(
     for (const [id, n] of temizlikDaireSayilari) {
       const row = map.get(id);
       if (!row || n <= 0) continue;
-      // 157/46 ruhsat daire sayısını temizlik envanteri ile ezme
-      if (row.parsel.includes('157/46') && profil15746(row.blok)) continue;
+      if (ruhsatProfil(row.parsel, row.blok)) continue;
       row.daireSayisi = n;
     }
   }
