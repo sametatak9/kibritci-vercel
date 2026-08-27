@@ -2,19 +2,34 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { collection, onSnapshot } from 'firebase/firestore';
 import {
   AlertTriangle,
+  Building2,
   CalendarDays,
   CheckCircle2,
   ClipboardList,
   Filter,
+  Layers,
   Plus,
   Target,
   Trash2,
   X,
 } from 'lucide-react';
+import { mergeBlokProfilleri } from '../data/blokMasterSeed';
 import { PARSEL_LIST, blokListForParsel } from '../data/parselBlokMap';
 import { db, removeDocument, saveDocument } from '../lib/firebase';
 import { assertErpWriteAuth, formatFirestoreWriteError } from '../lib/authWriteGuard';
-import { formatDateLabelTr, todayDateKey, tomorrowDateKey } from '../lib/dateKeyUtils';
+import {
+  addDaysToDateKey,
+  formatDateLabelTr,
+  todayDateKey,
+  tomorrowDateKey,
+} from '../lib/dateKeyUtils';
+import { buildBlokHaritaOzetleri, buildKaynakHavuzlari } from '../lib/projeBlokHaritaUtils';
+import {
+  buildMuhendislikOzet,
+  buildMuhendislikWbs,
+} from '../lib/projeMuhendislikUtils';
+import { ProjeBlokHaritaPanel } from './ProjeBlokHaritaPanel';
+import { ProjeMuhendislikPanel } from './ProjeMuhendislikPanel';
 import {
   PROJE_ILERLEME_DURUM_LABEL,
   PROJE_ILERLEME_KOVALAR,
@@ -33,22 +48,30 @@ import {
   sortPlanSatirlari,
 } from '../lib/projeIlerlemeUtils';
 import type {
+  Personel,
+  ProjeBlokProfili,
   ProjeIlerlemeDurum,
   ProjeIlerlemeKalemi,
   ProjeIlerlemeKova,
   ProjeIsPlanDurum,
   ProjeIsPlanSatiri,
+  SahaFaaliyeti,
+  SahaIsPlani,
+  SahaSiparis,
+  TemizlikDaire,
 } from '../types/erp';
 
 const COLLECTION = 'projeIlerlemeKalemleri';
 const PLAN_COLLECTION = 'projeIsPlanSatirlari';
+const BLOK_PROFIL_COLLECTION = 'projeBlokProfilleri';
 const PARSEL_SECENEK = PARSEL_LIST.filter((p) => p !== 'GENEL SAHA');
+const MUHENDISLIK_GUN = 30;
 
 type Props = {
   currentUser?: { email?: string; ad?: string; soyad?: string; displayName?: string } | null;
 };
 
-type Sekme = 'tespit' | 'program';
+type Sekme = 'tespit' | 'program' | 'muhendislik' | 'harita';
 
 type Draft = {
   parsel: string;
@@ -105,6 +128,12 @@ function planDurumTone(d: ProjeIsPlanDurum): string {
 export const ProjeIlerlemeScreen: React.FC<Props> = ({ currentUser }) => {
   const [kalemler, setKalemler] = useState<ProjeIlerlemeKalemi[]>([]);
   const [planSatirlari, setPlanSatirlari] = useState<ProjeIsPlanSatiri[]>([]);
+  const [faaliyetler, setFaaliyetler] = useState<SahaFaaliyeti[]>([]);
+  const [sahaIsPlanlari, setSahaIsPlanlari] = useState<SahaIsPlani[]>([]);
+  const [siparisler, setSiparisler] = useState<SahaSiparis[]>([]);
+  const [personeller, setPersoneller] = useState<Personel[]>([]);
+  const [temizlikDaireleri, setTemizlikDaireleri] = useState<TemizlikDaire[]>([]);
+  const [blokProfilleri, setBlokProfilleri] = useState<ProjeBlokProfili[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [sekme, setSekme] = useState<Sekme>('tespit');
@@ -117,6 +146,8 @@ export const ProjeIlerlemeScreen: React.FC<Props> = ({ currentUser }) => {
   const [sadeceAcik, setSadeceAcik] = useState(true);
   const [seciliKalemIds, setSeciliKalemIds] = useState<string[]>([]);
   const [programTarih, setProgramTarih] = useState(tomorrowDateKey());
+  const [haritaParsel, setHaritaParsel] = useState(PARSEL_SECENEK[0] || '');
+  const muhendislikBaslangic = addDaysToDateKey(todayDateKey(), -MUHENDISLIK_GUN);
 
   useEffect(() => {
     const unsubKalem = onSnapshot(
@@ -145,9 +176,33 @@ export const ProjeIlerlemeScreen: React.FC<Props> = ({ currentUser }) => {
       },
       (err) => console.error('[proje-is-programi] snapshot', err)
     );
+    const unsubFaaliyet = onSnapshot(collection(db, 'sahaFaaliyetleri'), (snap) => {
+      setFaaliyetler(snap.docs.map((d) => ({ id: d.id, ...d.data() } as SahaFaaliyeti)));
+    });
+    const unsubIsPlan = onSnapshot(collection(db, 'sahaIsPlanlari'), (snap) => {
+      setSahaIsPlanlari(snap.docs.map((d) => ({ id: d.id, ...d.data() } as SahaIsPlani)));
+    });
+    const unsubSiparis = onSnapshot(collection(db, 'sahaSiparisleri'), (snap) => {
+      setSiparisler(snap.docs.map((d) => ({ id: d.id, ...d.data() } as SahaSiparis)));
+    });
+    const unsubPersonel = onSnapshot(collection(db, 'personeller'), (snap) => {
+      setPersoneller(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Personel)));
+    });
+    const unsubDaire = onSnapshot(collection(db, 'temizlikDaireleri'), (snap) => {
+      setTemizlikDaireleri(snap.docs.map((d) => ({ id: d.id, ...d.data() } as TemizlikDaire)));
+    });
+    const unsubBlokProfil = onSnapshot(collection(db, BLOK_PROFIL_COLLECTION), (snap) => {
+      setBlokProfilleri(snap.docs.map((d) => ({ id: d.id, ...d.data() } as ProjeBlokProfili)));
+    });
     return () => {
       unsubKalem();
       unsubPlan();
+      unsubFaaliyet();
+      unsubIsPlan();
+      unsubSiparis();
+      unsubPersonel();
+      unsubDaire();
+      unsubBlokProfil();
     };
   }, []);
 
@@ -181,6 +236,53 @@ export const ProjeIlerlemeScreen: React.FC<Props> = ({ currentUser }) => {
   );
 
   const programOzet = useMemo(() => calcPlanIlerleme(gunlukProgram), [gunlukProgram]);
+
+  const mergedBlokProfilleri = useMemo(() => {
+    const daireSay = new Map<string, number>();
+    for (const d of temizlikDaireleri) {
+      const id = `${d.parsel}|${d.blok}`;
+      daireSay.set(id, (daireSay.get(id) || 0) + 1);
+    }
+    return mergeBlokProfilleri(blokProfilleri, daireSay);
+  }, [blokProfilleri, temizlikDaireleri]);
+
+  const muhendislikInput = useMemo(
+    () => ({
+      kalemler,
+      planSatirlari,
+      faaliyetler,
+      sahaIsPlanlari,
+      siparisler,
+      parsel: filtreParsel || undefined,
+      baslangicTarih: muhendislikBaslangic,
+      bitisTarih: todayDateKey(),
+    }),
+    [
+      kalemler,
+      planSatirlari,
+      faaliyetler,
+      sahaIsPlanlari,
+      siparisler,
+      filtreParsel,
+      muhendislikBaslangic,
+    ]
+  );
+
+  const muhendislikOzet = useMemo(() => buildMuhendislikOzet(muhendislikInput), [muhendislikInput]);
+  const muhendislikWbs = useMemo(() => buildMuhendislikWbs(muhendislikInput), [muhendislikInput]);
+  const kaynakHavuzlari = useMemo(() => buildKaynakHavuzlari(personeller), [personeller]);
+
+  const blokHaritaOzetleri = useMemo(
+    () =>
+      buildBlokHaritaOzetleri({
+        profiller: mergedBlokProfilleri,
+        kalemler,
+        faaliyetler,
+        temizlikDaireleri,
+        parsel: haritaParsel,
+      }),
+    [mergedBlokProfilleri, kalemler, faaliyetler, temizlikDaireleri, haritaParsel]
+  );
 
   const draftBloklar = useMemo(
     () => blokListForParsel(draft.parsel).filter((b) => b !== 'GENEL SAHA'),
@@ -411,14 +513,15 @@ export const ProjeIlerlemeScreen: React.FC<Props> = ({ currentUser }) => {
         <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div>
             <p className="text-[10px] font-bold uppercase tracking-widest text-amber-800/80">
-              Kapanış · Punch · Günlük iş programı
+              Kapanış · Punch · İlerleme yönetimi · Blok haritası
             </p>
             <h1 className="mt-1 text-2xl font-black tracking-tight text-stone-900">Proje İlerlemesi</h1>
             <p className="mt-1 max-w-2xl text-sm text-stone-600">
-              Saha işleyişi: <strong className="font-semibold text-stone-800">tespit</strong> (açık iş
-              kalemi) → <strong className="font-semibold text-stone-800">günlük iş programı</strong> →{' '}
-              <strong className="font-semibold text-stone-800">imalat gerçekleşmesi</strong>. Yüzde =
-              ağırlıklı punch kapanışı; giriş–çıkış / yoklama değil.
+              Mühendislik işleyişi: <strong className="font-semibold text-stone-800">tespit</strong> →{' '}
+              <strong className="font-semibold text-stone-800">günlük iş programı</strong> →{' '}
+              <strong className="font-semibold text-stone-800">WBS / plan–fiili</strong> →{' '}
+              <strong className="font-semibold text-stone-800">blok haritası</strong>. Kaynak havuzu personel
+              kartlarından; kat/daire profili temizlik envanterinden beslenir.
             </p>
           </div>
           <div className="flex items-center gap-3">
@@ -528,9 +631,48 @@ export const ProjeIlerlemeScreen: React.FC<Props> = ({ currentUser }) => {
             </span>
           )}
         </button>
+        <button
+          type="button"
+          onClick={() => setSekme('muhendislik')}
+          className={`inline-flex items-center gap-2 rounded-xl border px-4 py-2.5 text-xs font-black uppercase tracking-wide cursor-pointer ${
+            sekme === 'muhendislik'
+              ? 'border-sky-700 bg-sky-700 text-white'
+              : 'border-stone-200 bg-white text-stone-600'
+          }`}
+        >
+          <Layers size={14} /> WBS / Plan–fiili
+        </button>
+        <button
+          type="button"
+          onClick={() => setSekme('harita')}
+          className={`inline-flex items-center gap-2 rounded-xl border px-4 py-2.5 text-xs font-black uppercase tracking-wide cursor-pointer ${
+            sekme === 'harita'
+              ? 'border-emerald-700 bg-emerald-700 text-white'
+              : 'border-stone-200 bg-white text-stone-600'
+          }`}
+        >
+          <Building2 size={14} /> Blok haritası
+        </button>
       </div>
 
-      {sekme === 'tespit' ? (
+      {sekme === 'muhendislik' ? (
+        <ProjeMuhendislikPanel
+          ozet={muhendislikOzet}
+          wbs={muhendislikWbs}
+          baslangicTarih={muhendislikBaslangic}
+          bitisTarih={todayDateKey()}
+          faaliyetler={faaliyetler}
+          parsel={filtreParsel || undefined}
+        />
+      ) : sekme === 'harita' ? (
+        <ProjeBlokHaritaPanel
+          parsel={haritaParsel}
+          parselSecenek={PARSEL_SECENEK}
+          blokOzetleri={blokHaritaOzetleri}
+          kaynakHavuzlari={kaynakHavuzlari}
+          onParselChange={setHaritaParsel}
+        />
+      ) : sekme === 'tespit' ? (
         <>
           <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-stone-200 bg-white p-3 shadow-sm">
             <Filter size={14} className="text-stone-400" />

@@ -42,3 +42,15 @@ export function addDaysToDateKey(raw: unknown, days: number): string {
 export function tomorrowDateKey(): string {
   return addDaysToDateKey(todayDateKey(), 1);
 }
+
+/** İki YYYY-MM-DD anahtarı arası gün farkı (b − a). */
+export function daysBetweenDateKeys(a: unknown, b: unknown): number {
+  const ka = normalizeDateKey(a);
+  const kb = normalizeDateKey(b);
+  if (!ka || !kb) return 0;
+  const [y1, m1, d1] = ka.split('-').map(Number);
+  const [y2, m2, d2] = kb.split('-').map(Number);
+  const t1 = Date.UTC(y1, (m1 || 1) - 1, d1 || 1);
+  const t2 = Date.UTC(y2, (m2 || 1) - 1, d2 || 1);
+  return Math.round((t2 - t1) / 86400000);
+}

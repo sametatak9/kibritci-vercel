@@ -733,6 +733,28 @@ export interface ProjeIsPlanSatiri {
   olusturan?: string;
 }
 
+/** İmalat aşaması — blok ilerleme ve kat planı renklendirme */
+export type ProjeImalatAsama =
+  | 'KABA'
+  | 'TESISAT'
+  | 'SIVA'
+  | 'BOYA'
+  | 'SERAMIK'
+  | 'TESLIM';
+
+/** Blok master — kat / daire / plan tarihleri (3D harita + bitiş tahmini) */
+export interface ProjeBlokProfili {
+  id: string;
+  parsel: string;
+  blok: string;
+  katSayisi: number;
+  daireSayisi: number;
+  baslangicTarihi?: string;
+  hedefBitisTarihi?: string;
+  not?: string;
+  guncellemeTarihi?: string;
+}
+
 export type FaaliyetIlerlemeDurumu = 'BASLAMADI' | 'DEVAM' | 'TAMAMLANDI';
 
 export interface FaaliyetIlerlemeKaydi {
