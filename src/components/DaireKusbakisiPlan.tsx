@@ -8,10 +8,15 @@ import type { CDaireOdaSablon } from '../data/parsel15751CBlokSeed';
 type Props = {
   plan: CDaireOdaSablon[];
   odaKey: string | null;
+  /** Kamera odağı; null = tüm daire. Verilmezse odaKey kullanılır. */
+  focusOdaKey?: string | null;
   yuzdeFor: (key: string) => number;
+  grupFor?: (key: string) => { kaba: number; ince: number; altyapi: number };
   onSelect: (key: string | null) => void;
+  onFitAll?: () => void;
   daireNo: string;
   tip: string;
+  compact?: boolean;
 };
 
 function almost(a: number, b: number, e = 1.6) {
@@ -199,16 +204,21 @@ function Mobilya({ oda }: { oda: CDaireOdaSablon }) {
 export const DaireKusbakisiPlan: React.FC<Props> = ({
   plan,
   odaKey,
+  focusOdaKey,
   yuzdeFor,
+  grupFor,
   onSelect,
+  onFitAll,
   daireNo,
   tip,
+  compact,
 }) => {
   const [hoverKey, setHoverKey] = useState<string | null>(null);
   const odalar = plan.filter((o) => o.key !== 'giris');
   const giris = plan.find((o) => o.key === 'giris');
   const hol = plan.find((o) => o.key === 'hol');
-  const focusKey = odaKey && odaKey !== 'giris' ? odaKey : null;
+  const camKey = focusOdaKey === undefined ? odaKey : focusOdaKey;
+  const focusKey = camKey && camKey !== 'giris' ? camKey : null;
   const focus = odalar.find((o) => o.key === focusKey);
 
   const targetVb = useMemo((): [number, number, number, number] => {
@@ -223,8 +233,8 @@ export const DaireKusbakisiPlan: React.FC<Props> = ({
 
   const vb = useAnimatedViewBox(targetVb);
   const cx = focus ? focus.x + focus.w / 2 : 50;
-  const tiltZ = focus ? ((cx - 50) / 50) * 6 : -5;
-  const tiltX = focus ? 22 : 16;
+  const tiltZ = compact ? (focus ? ((cx - 50) / 50) * 3 : -2) : focus ? ((cx - 50) / 50) * 6 : -5;
+  const tiltX = compact ? (focus ? 11 : 7) : focus ? 22 : 16;
 
   const doors = useMemo(() => {
     const out: { key: string; edge: Edge }[] = [];
@@ -269,12 +279,12 @@ export const DaireKusbakisiPlan: React.FC<Props> = ({
     <div className="space-y-2">
       <div className="flex items-center justify-between gap-2">
         <p className="text-[10px] font-black uppercase tracking-widest text-stone-500">
-          Kuşbakışı yerleşim · tıklayınca odaya yaklaşır
+          {compact ? 'Kuşbakışı · oda seç' : 'Kuşbakışı yerleşim · tıklayınca odaya yaklaşır'}
         </p>
         {focus && (
           <button
             type="button"
-            onClick={() => onSelect(null)}
+            onClick={() => (onFitAll ? onFitAll() : onSelect(null))}
             className="text-[10px] font-black uppercase text-stone-500 hover:text-stone-800 cursor-pointer"
           >
             Tüm daire
@@ -308,8 +318,8 @@ export const DaireKusbakisiPlan: React.FC<Props> = ({
         >
           <svg
             viewBox={`${vb[0]} ${vb[1]} ${vb[2]} ${vb[3]}`}
-            className="w-full h-auto drop-shadow-2xl"
-            style={{ minHeight: 400 }}
+            className="w-full h-full drop-shadow-2xl"
+            style={{ minHeight: compact ? 200 : 280, maxHeight: compact ? '36vh' : 400, height: compact ? '32vh' : undefined }}
           >
             <defs>
               <pattern id="balkonHatch" width="3" height="3" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
@@ -358,7 +368,7 @@ export const DaireKusbakisiPlan: React.FC<Props> = ({
                 <g
                   key={oda.key}
                   className="cursor-pointer"
-                  onClick={() => onSelect(active ? null : oda.key)}
+                  onClick={() => onSelect(oda.key)}
                   onMouseEnter={() => setHoverKey(oda.key)}
                   onMouseLeave={() => setHoverKey(null)}
                 >
@@ -386,6 +396,22 @@ export const DaireKusbakisiPlan: React.FC<Props> = ({
                     />
                   )}
                   <Mobilya oda={oda} />
+                  {yuzde > 0 && (
+                    <circle
+                      cx={oda.x + oda.w - 3.2}
+                      cy={oda.y + 3.2}
+                      r={hover || active ? 1.6 : 1.15}
+                      fill={yuzde >= 100 ? '#fde68a' : '#fdba74'}
+                      opacity={0.45 + (yuzde / 100) * 0.5}
+                    >
+                      <animate
+                        attributeName="opacity"
+                        values={`${0.35 + yuzde / 400};${0.75};${0.35 + yuzde / 400}`}
+                        dur="2.8s"
+                        repeatCount="indefinite"
+                      />
+                    </circle>
+                  )}
                   <text
                     x={oda.x + oda.w / 2}
                     y={oda.y + oda.h / 2 - (oda.h > 16 ? 1.2 : 0)}
@@ -411,6 +437,28 @@ export const DaireKusbakisiPlan: React.FC<Props> = ({
                   >
                     %{yuzde}
                   </text>
+                  {grupFor && (
+                    <g style={{ pointerEvents: 'none' }}>
+                      {(
+                        [
+                          [grupFor(oda.key).kaba, '#d97706'],
+                          [grupFor(oda.key).ince, '#7c3aed'],
+                          [grupFor(oda.key).altyapi, '#0284c7'],
+                        ] as const
+                      ).map(([yy, col], i) => (
+                        <rect
+                          key={i}
+                          x={oda.x + 1.2}
+                          y={oda.y + oda.h - 3.4 + i * 0.85}
+                          width={Math.max(0.4, ((oda.w - 2.4) * yy) / 100)}
+                          height="0.65"
+                          rx="0.25"
+                          fill={col}
+                          opacity="0.95"
+                        />
+                      ))}
+                    </g>
+                  )}
                 </g>
               );
             })}
