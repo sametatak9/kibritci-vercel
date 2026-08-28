@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Building2, Users, CalendarCheck2, CreditCard, ShoppingCart, Truck, KeySquare, FileText, Tent, Mail, ChartBar as BarChart3, BookOpen, Contact as Contact2, Package, LogOut, Moon, Sun, Wallet, Hop as Home, ShieldCheck, PenTool, MessageSquare, Smartphone, HardHat, Banknote, Images, Sparkles, Link2, ChevronDown, ChevronRight, Search, Pin, PinOff, Wrench, Gem, Camera, Layers, ClipboardList, Droplets } from 'lucide-react';
+import { Building2, Users, CalendarCheck2, CreditCard, ShoppingCart, Truck, KeySquare, FileText, Tent, Mail, ChartBar as BarChart3, BookOpen, Contact as Contact2, Package, LogOut, Moon, Sun, Wallet, Hop as Home, ShieldCheck, PenTool, MessageSquare, HardHat, Banknote, Images, Sparkles, Link2, ChevronDown, ChevronRight, Search, Pin, PinOff, Wrench, Gem, Camera, Layers, ClipboardList } from 'lucide-react';
 import {
   canAccessOnayHavuzu,
   canAccessUyelikAdminPanel,
@@ -8,6 +8,7 @@ import {
   normalizeYetki,
 } from '../lib/yetkiUtils';
 import { readFavoriteTabs, writeFavoriteTabs } from '../lib/navPreferences';
+import { isRetiredPortalTab } from '../lib/yetkiUtils';
 
 interface SidebarProps {
   activeTab: string;
@@ -38,7 +39,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const normalizedYetki = normalizeYetki(userYetki);
   const roleAllowedTabs = getRoleAllowedTabs(normalizedYetki);
   const [searchTerm, setSearchTerm] = useState('');
-  const [favorites, setFavorites] = useState<string[]>(() => readFavoriteTabs());
+  const [favorites, setFavorites] = useState<string[]>(() =>
+    readFavoriteTabs().filter((k) => !isRetiredPortalTab(k))
+  );
 
   useEffect(() => {
     writeFavoriteTabs(favorites);
@@ -98,9 +101,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
         { key: "seramik_ekrani", label: "Götürü / Seramik Mobil", icon: Layers },
         { key: "lojistik_ekrani", label: "Şöför Mobil Paneli", icon: Truck },
         { key: "depocu_ekrani", label: "Depocu Mobil Paneli", icon: Package },
-        { key: "imalat_terminali", label: "İmalat Terminali", icon: Smartphone },
-        { key: "temizlik_kirim", label: "Temizlik / Kırım", icon: Droplets },
-        { key: "parsel_temizlik_tespit", label: "Parsel Temizlik Tespit", icon: ClipboardList },
       ]
     },
     {
@@ -192,10 +192,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
         }
 
         if (item.key === 'depocu_ekrani') {
-          return isYonetici;
-        }
-
-        if (item.key === 'imalat_terminali') {
           return isYonetici;
         }
 

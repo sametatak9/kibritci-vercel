@@ -46,9 +46,6 @@ const SeramikMobilScreen = lazy(() => import('./components/SeramikMobilScreen').
 const LojistikScreen = lazy(() => import('./components/LojistikScreen').then(m => ({ default: m.LojistikScreen })));
 const ProfilScreen = lazy(() => import('./components/ProfilScreen').then(m => ({ default: m.ProfilScreen })));
 const DepocuScreen = lazy(() => import('./components/DepocuScreen').then(m => ({ default: m.DepocuScreen })));
-const ImalatTerminaliScreen = lazy(() => import('./components/ImalatTerminaliScreen').then(m => ({ default: m.ImalatTerminaliScreen })));
-const TemizlikKirimScreen = lazy(() => import('./components/TemizlikKirimScreen').then(m => ({ default: m.TemizlikKirimScreen })));
-const ParselTemizlikTespitScreen = lazy(() => import('./components/ParselTemizlikTespitScreen').then(m => ({ default: m.ParselTemizlikTespitScreen })));
 const ProjeIlerlemeScreen = lazy(() => import('./components/ProjeIlerlemeScreen').then(m => ({ default: m.ProjeIlerlemeScreen })));
 const MobileManagerScreen = lazy(() => import('./components/MobileManagerScreen').then(m => ({ default: m.MobileManagerScreen })));
 const KibarHakedisScreen = lazy(() => import('./components/KibarHakedisScreen').then(m => ({ default: m.KibarHakedisScreen })));
@@ -118,6 +115,7 @@ import {
   guessRoleFromEmail,
   canAccessUyelikAdminPanel,
   isIdariIslerRole,
+  isRetiredPortalTab,
 } from './lib/yetkiUtils';
 import {
   dedupeKullanicilarByEmail,
@@ -199,13 +197,15 @@ function App() {
   const readLastTab = (): string => {
     try {
       const removedTabs = new Set(['evrak_baglama', 'yz_karsilastir']);
+      const normalize = (tab: string) =>
+        removedTabs.has(tab) || isRetiredPortalTab(tab) ? 'ana_sayfa' : tab;
       const direct = localStorage.getItem(LAST_TAB_STORAGE_KEY);
-      if (direct && !removedTabs.has(direct)) return direct;
+      if (direct) return normalize(direct);
       const rawSession = localStorage.getItem('kibritci_portal_session');
       if (!rawSession) return 'ana_sayfa';
       const parsed = JSON.parse(rawSession) as { lastTab?: string };
       const last = parsed.lastTab || 'ana_sayfa';
-      return removedTabs.has(last) ? 'ana_sayfa' : last;
+      return normalize(last);
     } catch {
       return 'ana_sayfa';
     }
@@ -2992,17 +2992,18 @@ function App() {
   };
 
   const handleTabNavigation = (targetTab: string) => {
+    const tab = isRetiredPortalTab(targetTab) ? 'ana_sayfa' : targetTab;
     try {
-      persistLastTab(targetTab);
+      persistLastTab(tab);
     } catch {
       /* no-op */
     }
     try {
-      pushRecentTab(targetTab);
+      pushRecentTab(tab);
     } catch {
       /* no-op */
     }
-    setActiveTab(targetTab);
+    setActiveTab(tab);
   };
 
   const openIrsaliyeFromSatinAlma = (sa: SatinAlmaTalebi) => {
@@ -3433,23 +3434,6 @@ function App() {
         />
       );
     }
-    if (userYetki === 'ANAHTARCI') {
-      return (
-        <ImalatTerminaliScreen
-          cariKartlar={cariKartlar}
-          personeller={personeller}
-          sahaFaaliyetleri={sahaFaaliyetleri}
-          setSahaFaaliyetleri={setSahaFaaliyetleriWithSync}
-          saveSahaFaaliyetNow={saveSahaFaaliyetNow}
-          removeSahaFaaliyetNow={removeSahaFaaliyetNow}
-          hazirTutanaklar={hazirTutanaklar}
-          setHazirTutanaklar={setHazirTutanaklarWithSync}
-          currentUser={currentUser}
-          onSignOut={handleSignOut}
-          isStandalone={true}
-        />
-      );
-    }
   }
 
   if (isMobileMode && currentUser) {
@@ -3605,29 +3589,12 @@ function App() {
         />
       );
     }
-    if (role === 'ANAHTARCI') {
-      return (
-        <ImalatTerminaliScreen
-          cariKartlar={cariKartlar}
-          personeller={personeller}
-          sahaFaaliyetleri={sahaFaaliyetleri}
-          setSahaFaaliyetleri={setSahaFaaliyetleriWithSync}
-          saveSahaFaaliyetNow={saveSahaFaaliyetNow}
-          removeSahaFaaliyetNow={removeSahaFaaliyetNow}
-          hazirTutanaklar={hazirTutanaklar}
-          setHazirTutanaklar={setHazirTutanaklarWithSync}
-          currentUser={currentUser}
-          onSignOut={handleSignOut}
-          isStandalone={true}
-        />
-      );
-    }
 
-    // FORMEN / yönetici / idari: mobilde de tam kabuk (Yoklama, Faaliyet, Saha sekmeleri).
-    // Eski "MOBİL SÜRÜM (İSTATİSTİK)" MobileManagerScreen bu sekmeleri tamamen yutuyordu.
+    // FORMEN / yönetici / idari / anahtarcı: mobilde de tam kabuk.
     const keepFullErpShell =
       isMobileDirect ||
       role === 'FORMEN' ||
+      role === 'ANAHTARCI' ||
       isYonetici ||
       isIdariIsler ||
       !isMobileRole(role);
@@ -4315,33 +4282,6 @@ function App() {
                     addNotification={addNotification}
                   />
                 ) : renderAccessDenied()
-              )}
-
-              {activeTab === "imalat_terminali" && (
-                <ImalatTerminaliScreen
-                  cariKartlar={cariKartlar}
-                  personeller={personeller}
-                  sahaFaaliyetleri={sahaFaaliyetleri}
-                  setSahaFaaliyetleri={setSahaFaaliyetleriWithSync}
-                  saveSahaFaaliyetNow={saveSahaFaaliyetNow}
-                  removeSahaFaaliyetNow={removeSahaFaaliyetNow}
-                  hazirTutanaklar={hazirTutanaklar}
-                  setHazirTutanaklar={setHazirTutanaklarWithSync}
-                  currentUser={currentUser}
-                  onSignOut={handleSignOut}
-                  isStandalone={hideSidebarAndTopbar}
-                />
-              )}
-
-              {activeTab === "temizlik_kirim" && (
-                <TemizlikKirimScreen
-                  currentUser={currentUser}
-                  onOpenTespitTab={() => handleTabNavigation('parsel_temizlik_tespit')}
-                />
-              )}
-
-              {activeTab === "parsel_temizlik_tespit" && (
-                <ParselTemizlikTespitScreen currentUser={currentUser} />
               )}
 
               {activeTab === "proje_ilerleme" && (

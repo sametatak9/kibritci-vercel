@@ -27,7 +27,7 @@ import {
   tomorrowDateKey,
 } from '../lib/dateKeyUtils';
 import { buildBlokHaritaOzetleri, buildKaynakHavuzlari } from '../lib/projeBlokHaritaUtils';
-import { mergeDisiplinIlerleme } from '../lib/projeDisiplinUtils';
+import { mergeDisiplinIlerleme, calcDisiplinOzet } from '../lib/projeDisiplinUtils';
 import {
   buildMuhendislikOzet,
   buildMuhendislikWbs,
@@ -307,6 +307,17 @@ export const ProjeIlerlemeScreen: React.FC<Props> = ({ currentUser }) => {
     [mergedBlokProfilleri, kalemler, faaliyetler, temizlikDaireleri, haritaParsel]
   );
 
+  const tumBlokHaritaOzetleri = useMemo(
+    () =>
+      buildBlokHaritaOzetleri({
+        profiller: mergedBlokProfilleri,
+        kalemler,
+        faaliyetler,
+        temizlikDaireleri,
+      }),
+    [mergedBlokProfilleri, kalemler, faaliyetler, temizlikDaireleri]
+  );
+
   const altyapiSatirlari = useMemo(
     () => mergeDisiplinIlerleme('ALTYAPI', disiplinKayitlari),
     [disiplinKayitlari]
@@ -319,6 +330,20 @@ export const ProjeIlerlemeScreen: React.FC<Props> = ({ currentUser }) => {
     () => mergeDisiplinIlerleme('MIMARI', disiplinKayitlari),
     [disiplinKayitlari]
   );
+
+  const parselDisiplinOzeti = useMemo(() => {
+    const out: Record<string, { altyapi: number; peyzaj: number }> = {};
+    for (const p of PARSEL_SECENEK) {
+      out[p] = {
+        altyapi: calcDisiplinOzet(altyapiSatirlari.filter((r) => r.parsel === p)).yuzde,
+        peyzaj: calcDisiplinOzet(peyzajSatirlari.filter((r) => r.parsel === p)).yuzde,
+      };
+    }
+    return out;
+  }, [altyapiSatirlari, peyzajSatirlari]);
+
+  const haritaAltyapiYuzde = parselDisiplinOzeti[haritaParsel]?.altyapi ?? 0;
+  const haritaPeyzajYuzde = parselDisiplinOzeti[haritaParsel]?.peyzaj ?? 0;
 
   const updateDisiplin = async (
     row: ProjeDisiplinIlerleme,
@@ -856,7 +881,11 @@ export const ProjeIlerlemeScreen: React.FC<Props> = ({ currentUser }) => {
           parsel={haritaParsel}
           parselSecenek={PARSEL_SECENEK}
           blokOzetleri={blokHaritaOzetleri}
+          tumBlokOzetleri={tumBlokHaritaOzetleri}
           kaynakHavuzlari={kaynakHavuzlari}
+          altyapiYuzde={haritaAltyapiYuzde}
+          peyzajYuzde={haritaPeyzajYuzde}
+          parselDisiplinOzeti={parselDisiplinOzeti}
           onParselChange={setHaritaParsel}
         />
       ) : sekme === 'altyapi' ? (

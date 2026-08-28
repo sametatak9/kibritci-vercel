@@ -6,9 +6,14 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   CalendarDays,
+  ChevronDown,
   ChevronRight,
+  ChevronUp,
+  ClipboardList,
   Layers,
+  ListChecks,
   Map as MapIcon,
+  StickyNote,
 } from 'lucide-react';
 import type {
   ProjeBlokProfili,
@@ -58,7 +63,7 @@ import {
 } from '../data/takipKalemSablon';
 import { mimariGorsellerForOda, mimariGorsellerForParsel } from '../data/mimariGorselKatalog';
 import { DISIPLIN_DURUM_LABEL } from '../lib/projeDisiplinUtils';
-import { tomorrowDateKey } from '../lib/dateKeyUtils';
+import { formatDateLabelTr, tomorrowDateKey } from '../lib/dateKeyUtils';
 import { DaireKusbakisiPlan } from './DaireKusbakisiPlan';
 
 export type BlokKontrolProgramDraft = {
@@ -394,11 +399,11 @@ const BlokCephe: React.FC<{
       <div className="relative flex items-center justify-between mb-2 px-1">
         <div>
           <p className="text-[9px] font-black uppercase tracking-[0.2em] text-stone-500">Cephe · ilerleme</p>
-          <h3 className="text-xl font-black text-stone-900 tracking-tight">{blok} BLOK</h3>
+          <h3 className="text-base font-black text-stone-900 tracking-tight">{blok} BLOK</h3>
         </div>
         <Layers size={16} className="text-stone-400" />
       </div>
-      <svg viewBox={`0 0 ${w} ${h}`} className="w-full max-h-[28vh] mx-auto block relative">
+      <svg viewBox={`0 0 ${w} ${h}`} className="w-full max-h-[20vh] mx-auto block relative">
         <rect x="8" y="4" width={w - 16} height="14" rx="2" fill="#57534e" />
         <text x={w / 2} y="14" textAnchor="middle" fontSize="7" fontWeight="800" fill="#fafaf9">
           {blok}
@@ -614,7 +619,7 @@ const KatPlaka: React.FC<{
                 key={di}
                 type="button"
                 onClick={() => onDaire(di)}
-                className={`relative min-h-[68px] rounded-xl border-2 p-2 text-left cursor-pointer transition-transform ${
+                className={`relative min-h-[56px] rounded-xl border-2 p-1.5 text-left cursor-pointer transition-transform ${
                   active
                     ? 'border-stone-900 bg-white shadow-md scale-[1.03] z-[1]'
                     : 'border-stone-300/80 bg-white/90 hover:border-stone-500'
@@ -653,77 +658,102 @@ const KalemEditor: React.FC<{
   row: ProjeCDaireKalem;
   busy?: boolean;
   onUpdate: (row: ProjeCDaireKalem) => void;
-}> = ({ row, busy, onUpdate }) => (
-  <div className="rounded-lg border border-stone-200 bg-white px-2 py-1.5 space-y-1">
-    <div className="flex items-center justify-between gap-2">
-      <p className="text-[11px] font-black text-stone-900 truncate">{row.kalemBaslik}</p>
-      <span className={`shrink-0 rounded-full border px-1.5 py-0.5 text-[8px] font-bold ${durumTone(row.durum)}`}>
-        {DISIPLIN_DURUM_LABEL[row.durum]}
-      </span>
-    </div>
-    <div className="flex items-center gap-2">
-      <input
-        type="range"
-        min={0}
-        max={100}
-        step={5}
-        value={row.yuzde}
-        disabled={busy}
-        onChange={(e) => {
-          const yuzde = Number(e.target.value);
-          const durum: ProjeDisiplinDurum =
-            yuzde >= 100 ? 'TAMAMLANDI' : yuzde > 0 ? 'IMALATTA' : 'PLANLANDI';
-          onUpdate({ ...row, yuzde, durum });
-        }}
-        className="flex-1 accent-stone-800 h-1.5"
-      />
-      <span className="w-8 text-right text-[10px] font-black tabular-nums">%{row.yuzde}</span>
-    </div>
-    <div className="flex flex-wrap gap-0.5">
-      {(['PLANLANDI', 'IMALATTA', 'TAMAMLANDI'] as ProjeDisiplinDurum[]).map((d) => (
+}> = ({ row, busy, onUpdate }) => {
+  const [notAcik, setNotAcik] = useState(false);
+  return (
+    <div className="rounded-lg border border-stone-200/80 bg-white shadow-sm overflow-hidden">
+      <div className="flex items-center gap-2 px-2 py-1.5">
+        <div className="flex-1 min-w-0">
+          <p className="text-[10px] font-bold text-stone-800 truncate leading-tight">{row.kalemBaslik}</p>
+          <div className="mt-1 flex items-center gap-2">
+            <div className="flex-1 h-1.5 rounded-full bg-stone-100 overflow-hidden">
+              <div
+                className="h-full rounded-full bg-stone-800 transition-all"
+                style={{ width: `${row.yuzde}%` }}
+              />
+            </div>
+            <span className="shrink-0 text-[10px] font-black tabular-nums text-stone-700 w-7 text-right">
+              %{row.yuzde}
+            </span>
+          </div>
+        </div>
+        <input
+          type="range"
+          min={0}
+          max={100}
+          step={5}
+          value={row.yuzde}
+          disabled={busy}
+          onChange={(e) => {
+            const yuzde = Number(e.target.value);
+            const durum: ProjeDisiplinDurum =
+              yuzde >= 100 ? 'TAMAMLANDI' : yuzde > 0 ? 'IMALATTA' : 'PLANLANDI';
+            onUpdate({ ...row, yuzde, durum });
+          }}
+          className="w-[4.5rem] shrink-0 accent-stone-800 h-1"
+          title="İlerleme %"
+        />
         <button
-          key={d}
           type="button"
-          disabled={busy || row.durum === d}
-          onClick={() =>
-            onUpdate({
-              ...row,
-              durum: d,
-              yuzde: d === 'TAMAMLANDI' ? 100 : d === 'IMALATTA' ? Math.max(row.yuzde, 40) : row.yuzde,
-            })
-          }
-          className={`rounded border px-1.5 py-0.5 text-[8px] font-black cursor-pointer disabled:opacity-40 ${
-            row.durum === d ? durumTone(d) : 'border-stone-200 bg-white text-stone-500'
+          onClick={() => setNotAcik((v) => !v)}
+          className={`shrink-0 rounded p-1 cursor-pointer ${
+            row.eksikNot || notAcik ? 'text-amber-600 bg-amber-50' : 'text-stone-300 hover:text-stone-500'
           }`}
+          title="Not"
         >
-          {DISIPLIN_DURUM_LABEL[d]}
+          <StickyNote size={12} />
         </button>
-      ))}
+      </div>
+      <div className="grid grid-cols-3 border-t border-stone-100 divide-x divide-stone-100">
+        {(['PLANLANDI', 'IMALATTA', 'TAMAMLANDI'] as ProjeDisiplinDurum[]).map((d) => (
+          <button
+            key={d}
+            type="button"
+            disabled={busy}
+            onClick={() =>
+              onUpdate({
+                ...row,
+                durum: d,
+                yuzde: d === 'TAMAMLANDI' ? 100 : d === 'IMALATTA' ? Math.max(row.yuzde, 40) : row.yuzde,
+              })
+            }
+            className={`py-1 text-[8px] font-black uppercase tracking-wide cursor-pointer transition ${
+              row.durum === d
+                ? `${durumTone(d)} border-0`
+                : 'bg-stone-50 text-stone-400 hover:bg-stone-100 hover:text-stone-600'
+            }`}
+          >
+            {DISIPLIN_DURUM_LABEL[d]}
+          </button>
+        ))}
+      </div>
+      {(notAcik || row.eksikNot) && (
+        <input
+          type="text"
+          placeholder="Eksik / not…"
+          value={row.eksikNot || ''}
+          disabled={busy}
+          onChange={(e) => onUpdate({ ...row, eksikNot: e.target.value || undefined })}
+          className="w-full border-t border-stone-100 px-2 py-1 text-[10px] bg-amber-50/40 focus:outline-none"
+        />
+      )}
     </div>
-    <input
-      type="text"
-      placeholder="Not…"
-      value={row.eksikNot || ''}
-      disabled={busy}
-      onChange={(e) => onUpdate({ ...row, eksikNot: e.target.value || undefined })}
-      className="w-full rounded border border-stone-200 px-1.5 py-1 text-[10px]"
-    />
-  </div>
-);
+  );
+};
 
-const GrupSlider: React.FC<{
+const GrupBar: React.FC<{
   label: string;
   yuzde: number;
   color: string;
   busy?: boolean;
   onChange: (yuzde: number) => void;
 }> = ({ label, yuzde, color, busy, onChange }) => (
-  <label className="block rounded-xl border border-stone-200 bg-stone-50 px-2.5 py-2">
-    <div className="flex items-center justify-between gap-2">
-      <span className="text-[10px] font-black uppercase tracking-wide" style={{ color }}>
+  <label className="flex flex-col gap-1 rounded-lg border border-stone-200 bg-white px-2 py-1.5 min-w-0">
+    <div className="flex items-center justify-between gap-1">
+      <span className="text-[9px] font-black uppercase truncate" style={{ color }}>
         {label}
       </span>
-      <span className="text-sm font-black tabular-nums text-stone-900">%{yuzde}</span>
+      <span className="text-[11px] font-black tabular-nums text-stone-900 shrink-0">%{yuzde}</span>
     </div>
     <input
       type="range"
@@ -733,7 +763,7 @@ const GrupSlider: React.FC<{
       value={yuzde}
       disabled={busy}
       onChange={(e) => onChange(Number(e.target.value))}
-      className="mt-1 w-full h-2"
+      className="w-full h-1.5"
       style={{ accentColor: color }}
     />
   </label>
@@ -769,6 +799,12 @@ export const ProjeBlokKontrolPanel: React.FC<Props> = ({
     KABA: true,
     INCE: true,
     ALTYAPI: true,
+  });
+  const [sagSekme, setSagSekme] = useState<'ilerleme' | 'program'>('ilerleme');
+  const [acikGruplar, setAcikGruplar] = useState<Record<TakipKalemGrup, boolean>>({
+    KABA: true,
+    INCE: false,
+    ALTYAPI: false,
   });
 
   const profil = bloklar.find((b) => b.blok === blok) || bloklar[0];
@@ -1068,73 +1104,78 @@ export const ProjeBlokKontrolPanel: React.FC<Props> = ({
     model ? model.daireKatta(kNo) : profil ? dairePerKatOf(profil) : 4;
 
   return (
-    <div className="flex flex-col gap-2 xl:h-[calc(100dvh-10.5rem)] xl:min-h-[600px]">
-      <div className="relative shrink-0 overflow-hidden rounded-2xl border border-stone-800 bg-stone-900 text-white">
+    <div className="flex flex-col gap-1.5 xl:h-[calc(100dvh-9rem)] xl:max-h-[calc(100dvh-9rem)] xl:min-h-0">
+      <div className="relative shrink-0 overflow-hidden rounded-xl border border-stone-800 bg-stone-900 text-white">
         {heroSrc && (
           <img
             src={heroSrc.src}
             alt=""
-            className="absolute inset-0 h-full w-full object-cover opacity-20"
+            className="absolute inset-0 h-full w-full object-cover opacity-15"
           />
         )}
-        <div className="absolute inset-0 bg-gradient-to-r from-stone-950 via-stone-900/92 to-stone-900/75" />
-        <div className="relative px-3 py-2 flex flex-wrap items-center gap-2 justify-between">
+        <div className="absolute inset-0 bg-gradient-to-r from-stone-950 via-stone-900/95 to-stone-900/80" />
+        <div className="relative px-2.5 py-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 justify-between">
           <div className="flex flex-wrap items-center gap-2 min-w-0 flex-1">
-            <div className="shrink-0">
-              <p className="text-[8px] font-black uppercase tracking-[0.2em] text-amber-400/90 flex items-center gap-1">
-                <MapIcon size={11} /> Blok kontrol
-              </p>
-              <h2 className="text-base font-black tracking-tight leading-none">
-                {parsel.replace('Parsel Bölge ', '')}
-                <span className="text-stone-400 font-bold text-sm ml-1">/ {blok}</span>
-              </h2>
+            <div className="shrink-0 flex items-center gap-2">
+              <MapIcon size={14} className="text-amber-400" />
+              <div>
+                <p className="text-[7px] font-black uppercase tracking-[0.18em] text-amber-400/90">
+                  Blok kontrol
+                </p>
+                <h2 className="text-sm font-black tracking-tight leading-none">
+                  {parsel.replace('Parsel Bölge ', '')}
+                  <span className="text-stone-400 font-bold text-xs ml-1">/ {blok}</span>
+                </h2>
+              </div>
             </div>
-            <label className="text-[8px] font-bold uppercase text-stone-400">
-              Parsel
-              <select
-                value={parsel}
-                onChange={(e) => onParselChange(e.target.value)}
-                className="mt-0.5 block min-w-[110px] rounded-md border border-stone-600 bg-stone-800 px-1.5 py-1 text-[11px] font-semibold text-white"
-              >
-                {parselSecenek.map((p) => (
-                  <option key={p} value={p}>
-                    {p.replace('Parsel Bölge ', '')}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <div className="min-w-0 flex-1">
+            <select
+              value={parsel}
+              onChange={(e) => onParselChange(e.target.value)}
+              className="rounded-md border border-stone-600 bg-stone-800 px-1.5 py-0.5 text-[10px] font-semibold text-white cursor-pointer"
+              title="Parsel"
+            >
+              {parselSecenek.map((p) => (
+                <option key={p} value={p}>
+                  {p.replace('Parsel Bölge ', '')}
+                </option>
+              ))}
+            </select>
+            <div className="min-w-0 flex-1 hidden sm:block">
               <ParselSahasi ozetler={blokOzetler} aktif={blok} onSelect={setBlok} />
             </div>
           </div>
-          <div className="flex items-center gap-1.5">
-            <Ring label="Blok" yuzde={blokYuzde} color="#a8a29e" size={46} />
-            <Ring label="Kaba" yuzde={blokKaba} color="#d97706" size={46} />
-            <Ring label="İnce" yuzde={blokInce} color="#7c3aed" size={46} />
-            <Ring label="Alty." yuzde={blokAlty} color="#0284c7" size={46} />
+          <div className="flex items-center gap-1 shrink-0">
+            <Ring label="Blok" yuzde={blokYuzde} color="#a8a29e" size={40} />
+            <Ring label="Kaba" yuzde={blokKaba} color="#d97706" size={40} />
+            <Ring label="İnce" yuzde={blokInce} color="#7c3aed" size={40} />
+            <Ring label="Alty." yuzde={blokAlty} color="#0284c7" size={40} />
           </div>
         </div>
-        <p className="relative px-3 pb-1.5 text-[10px] text-stone-400 truncate">
+        <div className="relative px-2.5 pb-1 flex flex-wrap items-center gap-x-1 text-[9px] text-stone-400">
+          <span className="sm:hidden w-full mb-0.5">
+            <ParselSahasi ozetler={blokOzetler} aktif={blok} onSelect={setBlok} />
+          </span>
           {blok}
-          <ChevronRight size={10} className="inline mx-0.5" />
+          <ChevronRight size={9} className="inline shrink-0" />
           {katMeta?.label || `Kat ${katNo}`}
           {!teknikKat && (
             <>
-              <ChevronRight size={10} className="inline mx-0.5" />
+              <ChevronRight size={9} className="inline shrink-0" />
               {daireNo}
+              {tip && <span className="text-stone-500 ml-0.5">({tip})</span>}
             </>
           )}
           {seciliOda && seciliOda.key !== 'giris' && (
             <>
-              <ChevronRight size={10} className="inline mx-0.5" />
+              <ChevronRight size={9} className="inline shrink-0" />
               <span className="text-amber-300 font-black">{seciliOda.label}</span>
             </>
           )}
-        </p>
+        </div>
       </div>
 
-      <div className="flex-1 min-h-0 grid grid-cols-1 xl:grid-cols-[minmax(200px,0.85fr)_minmax(0,1.2fr)_minmax(270px,24rem)] gap-2">
-        <div className="min-h-0 overflow-y-auto space-y-2">
+      <div className="flex-1 min-h-0 grid grid-cols-1 xl:grid-cols-[minmax(168px,0.72fr)_minmax(0,1fr)_minmax(248px,21rem)] gap-1.5">
+        <div className="min-h-0 overflow-y-auto space-y-1.5 xl:overflow-y-auto">
           <BlokCephe
             blok={blok}
             katlar={katKesitRows}
@@ -1145,7 +1186,7 @@ export const ProjeBlokKontrolPanel: React.FC<Props> = ({
             onKat={setKatNo}
             onDaire={(_k, di) => setDaireIndex(di)}
           />
-          <div className="rounded-2xl border border-stone-200 bg-white p-2 shadow-sm">
+          <div className="rounded-xl border border-stone-200 bg-white p-1.5 shadow-sm">
             <KatPlaka
               label={katMeta?.label || `Kat ${katNo}`}
               teknikKat={teknikKat}
@@ -1166,9 +1207,9 @@ export const ProjeBlokKontrolPanel: React.FC<Props> = ({
           </div>
         </div>
 
-        <div className="min-h-0 flex flex-col gap-2">
+        <div className="min-h-0 flex flex-col gap-1 relative">
           {!teknikKat && tip ? (
-            <div className="flex-1 min-h-0 rounded-2xl border border-stone-200 bg-white p-2 overflow-hidden">
+            <div className="flex-1 min-h-[200px] xl:min-h-0 rounded-xl border border-stone-200 bg-white p-1.5 overflow-hidden relative">
               <DaireKusbakisiPlan
                 compact
                 plan={plan}
@@ -1193,156 +1234,243 @@ export const ProjeBlokKontrolPanel: React.FC<Props> = ({
                 daireNo={daireNo}
                 tip={tip}
               />
+              {heroSrc && (
+                <button
+                  type="button"
+                  onClick={() => setGorselIdx((i) => i + 1)}
+                  className="absolute bottom-2 right-2 z-10 w-16 h-11 rounded-lg overflow-hidden border-2 border-white shadow-lg cursor-pointer hover:ring-2 hover:ring-amber-400"
+                  title={heroSrc.baslik}
+                >
+                  <img src={heroSrc.src} alt="" className="h-full w-full object-cover" />
+                </button>
+              )}
             </div>
           ) : (
-            <div className="flex-1 rounded-2xl border border-dashed border-stone-300 bg-stone-50 p-4 text-[12px] text-stone-600">
-              Bu kat konut değil (bodrum / teknik). Soldan alan seçip sağdaki disiplin kaydırıcılarıyla işleyin.
-            </div>
-          )}
-          {heroSrc && (
-            <div className="relative h-[4.5rem] shrink-0 overflow-hidden rounded-xl border border-stone-800">
-              <img src={heroSrc.src} alt="" className="absolute inset-0 h-full w-full object-cover" />
-              <div className="absolute inset-0 bg-gradient-to-r from-black/65 to-transparent" />
-              <div className="relative h-full flex items-end px-2.5 py-1.5">
-                <p className="text-[10px] font-black text-white truncate">Hedef · {heroSrc.baslik}</p>
-              </div>
+            <div className="flex-1 rounded-xl border border-dashed border-stone-300 bg-stone-50 p-3 text-[11px] text-stone-600">
+              Bu kat konut değil (bodrum / teknik). Soldan alan seçip sağ panelden disiplin kaydırıcılarıyla işleyin.
             </div>
           )}
         </div>
 
-        <div className="min-h-0 flex flex-col rounded-2xl border border-stone-800 bg-white overflow-hidden shadow-lg">
-          <div className="shrink-0 bg-stone-900 text-white px-3 py-2">
-            <p className="text-[9px] font-black uppercase tracking-widest text-amber-400">
-              İlerleme + program
-            </p>
-            <h3 className="text-base font-black leading-tight">
-              {blok} · {daireNo}{' '}
-              {tip && <span className="text-stone-400 text-xs font-bold">{tip}</span>}
-            </h3>
-            <p className="text-[11px] text-stone-300 truncate">
-              {progKapsam === 'daire'
-                ? `Tüm daire · %${daireYuzde}`
-                : `${seciliOda && seciliOda.key !== 'giris' ? seciliOda.label : 'Oda'} · %${avgYuzde(odaKalemleri)}`}
-            </p>
-          </div>
-
-          <div className="shrink-0 px-3 pt-2 flex gap-1">
-            {(
-              [
-                ['oda', 'Bu oda'],
-                ['daire', 'Tüm daire'],
-              ] as const
-            ).map(([id, lab]) => (
-              <button
-                key={id}
-                type="button"
-                onClick={() => setProgKapsam(id)}
-                className={`flex-1 rounded-lg border px-2 py-1.5 text-[10px] font-black uppercase cursor-pointer ${
-                  progKapsam === id
-                    ? 'border-stone-900 bg-stone-900 text-white'
-                    : 'border-stone-200 bg-stone-50 text-stone-600'
-                }`}
-              >
-                {lab}
-              </button>
-            ))}
-          </div>
-
-          <div className="shrink-0 px-3 py-2 space-y-1.5">
-            <GrupSlider
-              label="Kaba"
-              yuzde={izlemeKaba}
-              color="#d97706"
-              busy={busy}
-              onChange={(y) => applyGrupYuzde('KABA', y)}
-            />
-            <GrupSlider
-              label="İnce"
-              yuzde={izlemeInce}
-              color="#7c3aed"
-              busy={busy}
-              onChange={(y) => applyGrupYuzde('INCE', y)}
-            />
-            <GrupSlider
-              label="Altyapı"
-              yuzde={izlemeAlty}
-              color="#0284c7"
-              busy={busy}
-              onChange={(y) => applyGrupYuzde('ALTYAPI', y)}
-            />
-          </div>
-
-          <div className="flex-1 min-h-0 overflow-y-auto px-3 pb-2 space-y-2">
-            {seciliOda && seciliOda.key !== 'giris' ? (
-              odaGruplari.map((g) => (
-                <div key={g.grup} className="space-y-1">
-                  <p
-                    className={`sticky top-0 z-[1] rounded-md border px-2 py-1 text-[9px] font-black uppercase ${grupTone(g.grup)}`}
+        <div className="min-h-0 flex flex-col rounded-xl border border-stone-200 bg-white overflow-hidden shadow-md xl:max-h-full">
+          <div className="shrink-0 bg-stone-900 text-white px-2.5 py-1.5 border-b border-stone-700">
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <p className="text-[8px] font-black uppercase tracking-widest text-amber-400">
+                  Denetçi paneli
+                </p>
+                <h3 className="text-sm font-black leading-tight truncate">
+                  {blok} · {daireNo}
+                  {tip && <span className="text-stone-400 text-[10px] font-bold ml-1">{tip}</span>}
+                </h3>
+                <p className="text-[10px] text-stone-400 truncate">
+                  {progKapsam === 'daire'
+                    ? `Tüm daire · %${daireYuzde}`
+                    : `${seciliOda && seciliOda.key !== 'giris' ? seciliOda.label : 'Oda seçin'} · %${avgYuzde(odaKalemleri)}`}
+                </p>
+              </div>
+              <div className="flex rounded-lg border border-stone-600 bg-stone-800 p-0.5 shrink-0">
+                {(
+                  [
+                    ['oda', 'Oda'],
+                    ['daire', 'Daire'],
+                  ] as const
+                ).map(([id, lab]) => (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => setProgKapsam(id)}
+                    className={`rounded-md px-2 py-0.5 text-[9px] font-black uppercase cursor-pointer ${
+                      progKapsam === id ? 'bg-white text-stone-900' : 'text-stone-400 hover:text-white'
+                    }`}
                   >
-                    {g.label} · %{avgYuzde(g.rows)}
-                  </p>
-                  {g.rows.map((row) => (
-                    <KalemEditor
-                      key={row.id}
-                      row={row}
-                      busy={busy}
-                      onUpdate={onUpdateDaireKalem}
-                    />
-                  ))}
-                </div>
-              ))
-            ) : (
-              <p className="text-[11px] text-stone-500 py-4 text-center">
-                Plandan oda seçin — kalemler burada açılır.
-              </p>
-            )}
-          </div>
-
-          <div className="shrink-0 border-t border-emerald-900 bg-emerald-950 text-white p-3 space-y-2">
-            <p className="text-[9px] font-black uppercase tracking-widest text-emerald-300">
-              İş programı
-            </p>
-            <div className="flex flex-wrap gap-1.5">
-              {(['KABA', 'INCE', 'ALTYAPI'] as TakipKalemGrup[]).map((g) => (
+                    {lab}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="mt-1.5 flex rounded-lg border border-stone-700 bg-stone-800/80 p-0.5">
+              {(
+                [
+                  ['ilerleme', 'İlerleme', ClipboardList],
+                  ['program', 'Program', ListChecks],
+                ] as const
+              ).map(([id, lab, Icon]) => (
                 <button
-                  key={g}
+                  key={id}
                   type="button"
-                  onClick={() => setProgGrup((p) => ({ ...p, [g]: !p[g] }))}
-                  className={`rounded-md border px-2 py-1 text-[9px] font-black uppercase cursor-pointer ${
-                    progGrup[g]
-                      ? 'border-emerald-400 bg-emerald-400 text-emerald-950'
-                      : 'border-emerald-800 bg-emerald-900 text-emerald-200/60'
+                  onClick={() => setSagSekme(id)}
+                  className={`flex-1 inline-flex items-center justify-center gap-1 rounded-md py-1 text-[9px] font-black uppercase cursor-pointer ${
+                    sagSekme === id
+                      ? 'bg-stone-100 text-stone-900'
+                      : 'text-stone-400 hover:text-stone-200'
                   }`}
                 >
-                  {g === 'INCE' ? 'İnce' : g === 'KABA' ? 'Kaba' : 'Altyapı'}
+                  <Icon size={11} />
+                  {lab}
+                  {id === 'program' && eksikler.length > 0 && (
+                    <span className="rounded-full bg-emerald-500 text-white px-1 text-[8px] min-w-[14px]">
+                      {eksikler.length}
+                    </span>
+                  )}
                 </button>
               ))}
             </div>
-            <div className="flex items-end gap-2">
-              <label className="text-[8px] font-bold uppercase text-emerald-300 flex-1">
-                Gün
-                <input
-                  type="date"
-                  value={programTarih}
-                  onChange={(e) => setProgramTarih(e.target.value)}
-                  className="mt-0.5 block w-full rounded-md border border-emerald-700 bg-emerald-900 px-2 py-1.5 text-[11px] font-semibold text-white"
-                />
-              </label>
-              <button
-                type="button"
-                disabled={busy || !eksikler.length}
-                onClick={() => void handleProgramaAl()}
-                className="inline-flex items-center gap-1 rounded-xl bg-emerald-400 px-3 py-2.5 text-[10px] font-black uppercase text-emerald-950 disabled:opacity-40 cursor-pointer hover:bg-emerald-300"
-              >
-                <CalendarDays size={12} />
-                Al ({eksikler.length})
-              </button>
-            </div>
-            <p className="text-[10px] text-emerald-100/80">
-              {progKapsam === 'daire' ? 'Tüm daire açık kalemleri' : 'Seçili oda açık kalemleri'}
-              {eksikler.length ? ` · ${eksikler.length} adet` : ' · açık yok'}
-            </p>
           </div>
+
+          {sagSekme === 'ilerleme' ? (
+            <>
+              <div className="shrink-0 px-2 py-1.5 grid grid-cols-3 gap-1 border-b border-stone-100 bg-stone-50/80">
+                <GrupBar
+                  label="Kaba"
+                  yuzde={izlemeKaba}
+                  color="#d97706"
+                  busy={busy}
+                  onChange={(y) => applyGrupYuzde('KABA', y)}
+                />
+                <GrupBar
+                  label="İnce"
+                  yuzde={izlemeInce}
+                  color="#7c3aed"
+                  busy={busy}
+                  onChange={(y) => applyGrupYuzde('INCE', y)}
+                />
+                <GrupBar
+                  label="Alty."
+                  yuzde={izlemeAlty}
+                  color="#0284c7"
+                  busy={busy}
+                  onChange={(y) => applyGrupYuzde('ALTYAPI', y)}
+                />
+              </div>
+
+              <div className="flex-1 min-h-0 overflow-y-auto px-2 py-1.5 space-y-1">
+                {seciliOda && seciliOda.key !== 'giris' ? (
+                  odaGruplari.map((g) => {
+                    const acik = acikGruplar[g.grup];
+                    const tam = g.rows.every((r) => r.durum === 'TAMAMLANDI' && (r.yuzde || 0) >= 100);
+                    return (
+                      <div key={g.grup} className="rounded-lg border border-stone-200 overflow-hidden">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setAcikGruplar((p) => ({ ...p, [g.grup]: !p[g.grup] }))
+                          }
+                          className={`w-full flex items-center justify-between gap-2 px-2 py-1.5 text-left cursor-pointer ${grupTone(g.grup)}`}
+                        >
+                          <span className="text-[9px] font-black uppercase">
+                            {g.label} · %{avgYuzde(g.rows)}
+                            {tam && <span className="ml-1 opacity-60">✓</span>}
+                          </span>
+                          {acik ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                        </button>
+                        {acik && (
+                          <div className="p-1.5 space-y-1 bg-white">
+                            {g.rows.map((row) => (
+                              <KalemEditor
+                                key={row.id}
+                                row={row}
+                                busy={busy}
+                                onUpdate={onUpdateDaireKalem}
+                              />
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })
+                ) : (
+                  <p className="text-[10px] text-stone-500 py-6 text-center leading-snug">
+                    Ortadaki plandan oda seçin.
+                    <br />
+                    <span className="text-stone-400">Kalemler burada listelenir.</span>
+                  </p>
+                )}
+              </div>
+            </>
+          ) : (
+            <div className="flex-1 min-h-0 flex flex-col">
+              <div className="shrink-0 px-2.5 py-2 border-b border-stone-100 bg-emerald-50/50 space-y-2">
+                <p className="text-[9px] font-black uppercase text-emerald-800 tracking-wide">
+                  Günlük iş programına al
+                </p>
+                <div className="flex flex-wrap gap-1">
+                  {(['KABA', 'INCE', 'ALTYAPI'] as TakipKalemGrup[]).map((g) => (
+                    <button
+                      key={g}
+                      type="button"
+                      onClick={() => setProgGrup((p) => ({ ...p, [g]: !p[g] }))}
+                      className={`rounded-full border px-2 py-0.5 text-[9px] font-black uppercase cursor-pointer ${
+                        progGrup[g]
+                          ? 'border-emerald-600 bg-emerald-600 text-white'
+                          : 'border-stone-200 bg-white text-stone-500'
+                      }`}
+                    >
+                      {g === 'INCE' ? 'İnce' : g === 'KABA' ? 'Kaba' : 'Altyapı'}
+                    </button>
+                  ))}
+                </div>
+                <div className="flex items-end gap-2">
+                  <label className="flex-1 text-[8px] font-bold uppercase text-stone-500">
+                    Program günü
+                    <input
+                      type="date"
+                      value={programTarih}
+                      onChange={(e) => setProgramTarih(e.target.value)}
+                      className="mt-0.5 block w-full rounded-lg border border-stone-200 bg-white px-2 py-1.5 text-[11px] font-semibold text-stone-900"
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    disabled={busy || !eksikler.length}
+                    onClick={() => void handleProgramaAl()}
+                    className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-3 py-2 text-[10px] font-black uppercase text-white disabled:opacity-40 cursor-pointer hover:bg-emerald-500 shadow-sm"
+                  >
+                    <CalendarDays size={12} />
+                    Al ({eksikler.length})
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex-1 min-h-0 overflow-y-auto px-2.5 py-2">
+                {eksikler.length ? (
+                  <ul className="space-y-1">
+                    {eksikler.map((k) => (
+                      <li
+                        key={k.id}
+                        className="rounded-lg border border-stone-100 bg-stone-50 px-2 py-1.5 text-[10px] leading-snug"
+                      >
+                        <span
+                          className={`inline-block rounded px-1 py-0.5 text-[8px] font-black uppercase mr-1 ${grupTone(resolveGrup(k))}`}
+                        >
+                          {TAKIP_KALEM_GRUP_LABEL[resolveGrup(k)]}
+                        </span>
+                        <span className="font-bold text-stone-800">{k.odaLabel}</span>
+                        <span className="text-stone-500"> · </span>
+                        <span className="text-stone-700">{k.kalemBaslik}</span>
+                        {k.eksikNot && (
+                          <p className="mt-0.5 text-[9px] text-amber-800 italic">{k.eksikNot}</p>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="text-center text-[11px] text-stone-500 py-8 leading-relaxed">
+                    Seçili kapsamda programa alınacak açık kalem yok.
+                    <br />
+                    <span className="text-stone-400 text-[10px]">
+                      Disiplin filtrelerini veya oda/daire kapsamını kontrol edin.
+                    </span>
+                  </p>
+                )}
+              </div>
+
+              <div className="shrink-0 border-t border-stone-100 px-2.5 py-1.5 text-[9px] text-stone-500 bg-stone-50">
+                {progKapsam === 'daire' ? 'Kapsam: tüm daire' : 'Kapsam: seçili oda'} ·{' '}
+                {eksikler.length} kalem · {formatDateLabelTr(programTarih)}
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

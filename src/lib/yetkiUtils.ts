@@ -1,4 +1,14 @@
 /** Portal sayfa anahtarları — Sidebar ile YetkiVerme aynı listeyi kullanır */
+export const RETIRED_PORTAL_TABS = [
+  'imalat_terminali',
+  'temizlik_kirim',
+  'parsel_temizlik_tespit',
+] as const;
+
+export function isRetiredPortalTab(tab: string): boolean {
+  return (RETIRED_PORTAL_TABS as readonly string[]).includes(tab);
+}
+
 export const PORTAL_PAGES = [
   { key: "ana_sayfa", label: "Ana Sayfa Dashboard", group: "BAŞLANGIÇ" },
   { key: "personel", label: "Personel Yönetimi", group: "PERSONEL" },
@@ -31,9 +41,6 @@ export const PORTAL_PAGES = [
   { key: "seramik_ekrani", label: "Götürü / Seramik Mobil Paneli", group: "İDARİ İŞLER & SAHA" },
   { key: "lojistik_ekrani", label: "Şöför Mobil Paneli", group: "İDARİ İŞLER & SAHA" },
   { key: "depocu_ekrani", label: "Depocu Mobil Paneli", group: "İDARİ İŞLER & SAHA" },
-  { key: "imalat_terminali", label: "İmalat Terminali", group: "İDARİ İŞLER & SAHA" },
-  { key: "temizlik_kirim", label: "Temizlik / Kırım Tespiti", group: "İDARİ İŞLER & SAHA" },
-  { key: "parsel_temizlik_tespit", label: "Parsel Temizlik Tespit", group: "İDARİ İŞLER & SAHA" },
   { key: "onay_islemleri", label: "Onay Havuzu & İmzalar", group: "RAPOR VE İLETİŞİM" },
   { key: "admin", label: "Üyelik Onay & İmza", group: "ADMİNİSTRATOR" },
   { key: "yetki_verme", label: "Sayfa Yetkilendirme", group: "ADMİNİSTRATOR" },
@@ -53,7 +60,7 @@ export const MOBILE_ROLE_ALLOWED_TABS: Record<string, PortalPageKey[]> = {
   LOJİSTİK: ['lojistik_ekrani', 'siparis_formu'],
   OPERATÖR: ['operator', 'siparis_formu'],
   DEPOCU: ['depocu_ekrani', 'siparis_formu'],
-  ANAHTARCI: ['imalat_terminali', 'siparis_formu'],
+  ANAHTARCI: ['siparis_formu'],
 };
 
 /** @deprecated MOBILE_ROLE_ALLOWED_TABS kullanın */
@@ -154,7 +161,7 @@ export function getMobileRoleDisplayName(yetki?: string | null): string {
     LOJİSTİK: 'Şöför Mobil',
     OPERATÖR: 'Operatör Mobil',
     DEPOCU: 'Depocu Mobil',
-    ANAHTARCI: 'İmalat Terminali Mobil',
+    ANAHTARCI: 'Sipariş Formu Mobil',
   };
   return labels[n] || n;
 }
