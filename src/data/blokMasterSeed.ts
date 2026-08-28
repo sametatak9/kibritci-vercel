@@ -3,6 +3,7 @@ import { profil15746 } from './parsel15746BlokSeed';
 import { profil15751 } from './parsel15751BlokSeed';
 import { profil1602 } from './parsel1602BlokSeed';
 import type { ProjeBlokProfili } from '../types/erp';
+import { joinFirestoreDocId } from '../lib/firestoreIdUtils';
 
 /** Parsel bazlı varsayılan kat / daire — Firestore profili yoksa kullanılır */
 const PARSEL_DEFAULTS: Record<string, { kat: number; daire: number }> = {
@@ -12,7 +13,7 @@ const PARSEL_DEFAULTS: Record<string, { kat: number; daire: number }> = {
 };
 
 export function blokProfilId(parsel: string, blok: string): string {
-  return `${parsel}|${blok}`;
+  return joinFirestoreDocId(parsel, blok);
 }
 
 function ruhsatProfil(parsel: string, blok: string) {

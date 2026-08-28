@@ -1,5 +1,7 @@
 /** 157/51 — DWG katmanlarından türetilmiş altyapı + peyzaj WBS şablonu */
 
+import { joinFirestoreDocId } from '../lib/firestoreIdUtils';
+
 export const PARSEL_157_51 = 'Parsel Bölge 157/51';
 
 export type DisiplinGrup = 'ALTYAPI' | 'PEYZAJ' | 'MIMARI';
@@ -164,7 +166,7 @@ export const PEYZAJ_WBS_SABLON: DisiplinWbsSablon[] = [
 export const BLOKLAR_157_51 = ['A1', 'A2', 'A3', 'B1', 'B2', 'C1', 'C2', 'C3', 'C4'] as const;
 
 export function disiplinKalemId(parsel: string, blok: string, kod: string): string {
-  return `${parsel}|${blok}|${kod}`.replace(/\s+/g, '_');
+  return joinFirestoreDocId(parsel, blok, kod);
 }
 
 export function expandDisiplinSablon(

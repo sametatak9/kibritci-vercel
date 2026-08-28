@@ -22,6 +22,7 @@ import {
   type CDaireTipi,
 } from '../data/parsel15751CBlokSeed';
 import { PARSEL_157_51 } from '../data/parsel15751DisiplinSeed';
+import { joinFirestoreDocId } from '../lib/firestoreIdUtils';
 import { DISIPLIN_DURUM_LABEL, calcDisiplinOzet } from '../lib/projeDisiplinUtils';
 
 type Props = {
@@ -175,10 +176,21 @@ export const ProjeCBlokPanel: React.FC<Props> = ({
   const parselOzet = cBlokParselOzet();
   const profil = profilForCBlok(seciliBlok)!;
 
-  const existingMap = useMemo(
-    () => new Map(daireKalemleri.map((k) => [k.id, k])),
-    [daireKalemleri]
-  );
+  const existingMap = useMemo(() => {
+    const m = new Map<string, ProjeCDaireKalem>();
+    for (const k of daireKalemleri) {
+      m.set(k.id, k);
+      const canon = joinFirestoreDocId(
+        k.parsel,
+        k.blok,
+        k.daireNo,
+        k.odaKey,
+        k.kalemKod
+      );
+      if (canon !== k.id) m.set(canon, k);
+    }
+    return m;
+  }, [daireKalemleri]);
 
   const blokOzet = useMemo(() => {
     const m = new Map<CBlokKodu, number>();

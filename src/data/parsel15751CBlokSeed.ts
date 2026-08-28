@@ -16,6 +16,7 @@ import {
   PARSEL_157_51,
   disiplinKalemId,
 } from './parsel15751DisiplinSeed';
+import { joinFirestoreDocId } from '../lib/firestoreIdUtils';
 
 export const C_BLOKLAR_157_51 = ['C1', 'C2', 'C3', 'C4'] as const;
 export type CBlokKodu = (typeof C_BLOKLAR_157_51)[number];
@@ -171,7 +172,7 @@ export function cDaireKalemId(
   odaKey: string,
   kalemKod: string
 ): string {
-  return `${parsel}|${blok}|${daireNo}|${odaKey}|${kalemKod}`.replace(/\s+/g, '_');
+  return joinFirestoreDocId(parsel, blok, daireNo, odaKey, kalemKod);
 }
 
 /** Mimari blok WBS (özet ilerleme) */

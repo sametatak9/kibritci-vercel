@@ -25,6 +25,7 @@ import {
   type CDaireOdaKey,
   type CDaireTipi,
 } from '../data/parsel15751CBlokSeed';
+import { joinFirestoreDocId } from '../lib/firestoreIdUtils';
 import {
   daireSayisiKatta15746,
   isParsel15746,
@@ -815,10 +816,21 @@ export const ProjeBlokKontrolPanel: React.FC<Props> = ({
     }
   }, [katNo, daireIndex, teknikKat, tip]);
 
-  const existingMap = useMemo(
-    () => new Map(daireKalemleri.map((k) => [k.id, k])),
-    [daireKalemleri]
-  );
+  const existingMap = useMemo(() => {
+    const m = new Map<string, ProjeCDaireKalem>();
+    for (const k of daireKalemleri) {
+      m.set(k.id, k);
+      const canon = joinFirestoreDocId(
+        k.parsel,
+        k.blok,
+        k.daireNo,
+        k.odaKey,
+        k.kalemKod
+      );
+      if (canon !== k.id) m.set(canon, k);
+    }
+    return m;
+  }, [daireKalemleri]);
 
   const daireRows = useMemo(
     () =>
