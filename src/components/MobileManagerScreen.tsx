@@ -5,9 +5,7 @@ import {
   Send, AlertTriangle, CheckCircle, XCircle, FileText, BadgeInfo, Clock, Calendar, Check, Ban, ArrowLeft
 } from 'lucide-react';
 import { db } from '../lib/firebase';
-import { saveKullanici, findKullaniciByEmail } from '../lib/kullaniciUtils';
 import { collection, onSnapshot, doc, updateDoc, query, orderBy, limit, addDoc, setDoc, deleteDoc } from 'firebase/firestore';
-import { KibritciLogo } from './KibritciLogo';
 
 // Sub-screens for Manager preview
 import { FormenScreen } from './FormenScreen';
@@ -306,7 +304,7 @@ export const MobileManagerScreen: React.FC<MobileManagerScreenProps> = ({
         desc: `${s.talepEden}: ${s.malzemeDetay} (${s.miktar} ${s.birim})`,
         tarih: s.tarih,
         icon: ShoppingCart,
-        color: 'text-slate-600 bg-slate-500/10'
+        color: 'text-blue-500 bg-blue-500/10'
       });
     });
 
@@ -317,37 +315,24 @@ export const MobileManagerScreen: React.FC<MobileManagerScreenProps> = ({
   const feedItems = getCombinedFeed();
 
   // Approval Handlers
-  const handleApproveUser = async (userId: string) => {
-    const target = findKullaniciByEmail(kullanicilar, userId) || kullanicilar.find(u => u.id === userId);
-    if (!target) return;
-    const updated = {
-      ...target,
-      durum: 'AKTİF' as const,
-      yetki: target.yetki === 'MİSAFİR' ? 'YÖNETİCİ' : target.yetki,
-    };
-    try {
-      const saved = await saveKullanici(updated);
-      setKullanicilar((prev: Kullanici[]) =>
-        prev.map(u => (u.email?.toLowerCase() === target.email.toLowerCase() ? { ...u, ...saved } : u))
-      );
-      alert("Kullanıcı hesabı onaylandı ve 'AKTİF' statüsüne getirildi.");
-    } catch {
-      alert('Onay kaydedilemedi. Lütfen tekrar deneyin.');
-    }
+  const handleApproveUser = (userId: string) => {
+    setKullanicilar((prev: Kullanici[]) => prev.map(u => {
+      if (u.id === userId) {
+        return { ...u, durum: 'AKTİF', yetki: u.yetki === 'MİSAFİR' ? 'YÖNETİCİ' : u.yetki };
+      }
+      return u;
+    }));
+    alert("Kullanıcı hesabı onaylandı ve 'AKTİF' statüsüne getirildi.");
   };
 
-  const handleRestrictUser = async (userId: string) => {
-    const target = findKullaniciByEmail(kullanicilar, userId) || kullanicilar.find(u => u.id === userId);
-    if (!target) return;
-    try {
-      const saved = await saveKullanici({ ...target, durum: 'KISITLI' });
-      setKullanicilar((prev: Kullanici[]) =>
-        prev.map(u => (u.email?.toLowerCase() === target.email.toLowerCase() ? { ...u, ...saved } : u))
-      );
-      alert("Kullanıcı hesabı kısıtlandı.");
-    } catch {
-      alert('Kısıtlama kaydedilemedi.');
-    }
+  const handleRestrictUser = (userId: string) => {
+    setKullanicilar((prev: Kullanici[]) => prev.map(u => {
+      if (u.id === userId) {
+        return { ...u, durum: 'KISITLI' };
+      }
+      return u;
+    }));
+    alert("Kullanıcı hesabı kısıtlandı.");
   };
 
   const handleApprovePurchase = (purchaseId: string) => {
@@ -560,8 +545,11 @@ export const MobileManagerScreen: React.FC<MobileManagerScreenProps> = ({
             {/* Premium App Bar Header */}
             <header className="bg-white border-b border-slate-200 px-4 py-3 flex items-center justify-between shrink-0 z-10">
               <div className="flex items-center space-x-2.5">
-                <KibritciLogo size="sm" className="h-8" />
+                <div className="w-9 h-9 bg-amber-500 rounded-xl flex items-center justify-center text-slate-950 font-black shadow-lg shadow-amber-500/10">
+                  <Smartphone size={18} />
+                </div>
                 <div>
+                  <h2 className="text-xs font-black tracking-widest text-amber-600 leading-none">KİBRİTÇİ MOBİL</h2>
                   <span className="text-[9px] text-slate-500 font-medium">{currentUser?.email || 'Yönetici'}</span>
                 </div>
               </div>
@@ -600,7 +588,7 @@ export const MobileManagerScreen: React.FC<MobileManagerScreenProps> = ({
                 <div className="bg-white border border-slate-200 p-3 rounded-2xl flex flex-col justify-between space-y-2 shadow-xs">
                   <div className="flex items-center justify-between">
                     <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Aktif Kadro</span>
-                    <Users size={16} className="text-slate-600" />
+                    <Users size={16} className="text-blue-500" />
                   </div>
                   <div>
                     <h3 className="text-base font-black text-slate-800">{activePersonelCount} <span className="text-[11px] text-slate-400">/ {totalPersonel}</span></h3>
@@ -719,7 +707,7 @@ export const MobileManagerScreen: React.FC<MobileManagerScreenProps> = ({
                     </div>
                     <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden border border-slate-200">
                       <div 
-                        className="bg-slate-500 h-full rounded-full transition-all duration-500"
+                        className="bg-blue-500 h-full rounded-full transition-all duration-500"
                         style={{ width: `${(activePersonelCount / (totalPersonel || 1)) * 100}%` }}
                       />
                     </div>

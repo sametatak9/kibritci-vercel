@@ -1,220 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { 
   auth,
-  db,
-  ensureFirestoreAuth,
+  db
 } from '../lib/firebase';
 import { 
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
-  signInAnonymously,
-  sendPasswordResetEmail,
+  signInAnonymously
 } from 'firebase/auth';
-import { doc, getDoc, setDoc, collection, getDocs, query, where, limit } from 'firebase/firestore';
-import { saveKullanici, saveKullaniciForSignup } from '../lib/kullaniciUtils';
-import {
-  buildBekleyenFromSignup,
-  isFirestoreWriteFailure,
-  queueSignupFallback,
-} from '../lib/bekleyenUyelik';
-import { Building2, Lock, Mail, Loader2, ArrowRight, CheckCircle2, AlertTriangle, ShieldCheck, User, Fingerprint, PenTool, Check, Trash, Smartphone, KeyRound } from 'lucide-react';
-import { syncAuthClaimsFromServer } from '../lib/authClaimsClient';
-import { isFounderEmail, verifyFounderCredentials } from '../lib/roleClaims';
-import { KibritciLogo } from './KibritciLogo';
-import { guessRoleFromEmail } from '../lib/yetkiUtils';
-
-function withReadTimeout<T>(promise: Promise<T>, ms = 8000): Promise<T> {
-  return Promise.race([
-    promise,
-    new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error('FIRESTORE_TIMEOUT')), ms)
-    ),
-  ]);
-}
-
-function withAuthTimeout<T>(promise: Promise<T>, ms = 6000): Promise<T> {
-  return Promise.race([
-    promise,
-    new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error('AUTH_TIMEOUT')), ms)
-    ),
-  ]);
-}
-
-function finishPortalLogin(
-  emailLower: string,
-  uid: string,
-  onLoginSuccess: (user: { email?: string | null; uid: string }) => void
-) {
-  localStorage.setItem(
-    'kibritci_portal_session',
-    JSON.stringify({ email: emailLower, uid, isMock: false })
-  );
-  onLoginSuccess({ email: emailLower, uid });
-}
-
-async function completeEmailLogin(
-  emailLower: string,
-  passTrim: string,
-  onLoginSuccess: (user: { email?: string | null; uid: string }) => void
-) {
-  let cred;
-  try {
-    cred = await withAuthTimeout(signInWithEmailAndPassword(auth, emailLower, passTrim), 12000);
-  } catch (signErr: unknown) {
-    const code = (signErr as { code?: string })?.code;
-    if (code === 'auth/user-not-found' || code === 'auth/invalid-credential' || code === 'auth/wrong-password') {
-      try {
-        cred = await withAuthTimeout(
-          createUserWithEmailAndPassword(auth, emailLower, passTrim),
-          15000
-        );
-      } catch (createErr: any) {
-        if (createErr.code === 'auth/email-already-in-use') {
-          // The user actually exists in Auth, which means they just typed the wrong password.
-          throw new Error('E-posta veya şifre hatalı. Lütfen kontrol edip tekrar deneyin.');
-        }
-        throw createErr;
-      }
-    } else {
-      throw signErr;
-    }
-  }
-
-  await syncAuthClaimsFromServer(emailLower).catch((err) => {
-    console.warn('Claim sync atlandı (giriş devam ediyor):', err);
-  });
-  // Claim sonrası token'ı zorla yenile (syncAuthClaimsFromServer zaten getIdToken(true) çağırır)
-  try {
-    await auth.currentUser?.getIdToken(true);
-  } catch {
-    /* ignore */
-  }
-  finishPortalLogin(emailLower, cred.user.uid, onLoginSuccess);
-}
-
-async function bootstrapFounderViaServer(emailLower: string, passTrim: string): Promise<void> {
-  const res = await fetch('/api/auth/founder-bootstrap', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email: emailLower, password: passTrim }),
-  });
-  if (!res.ok) {
-    const data = (await res.json().catch(() => ({}))) as { error?: string };
-    throw new Error(
-      data.error ||
-        'Kurucu hesabı sunucuda senkronize edilemedi. Render FIREBASE_SERVICE_ACCOUNT_JSON kontrol edin.'
-    );
-  }
-}
-
-async function completeFounderLogin(
-  emailLower: string,
-  passTrim: string,
-  onLoginSuccess: (user: { email?: string | null; uid: string }) => void
-) {
-  const hasMasterPassword = verifyFounderCredentials(emailLower, passTrim);
-
-  if (hasMasterPassword) {
-    await bootstrapFounderViaServer(emailLower, passTrim);
-    await completeEmailLogin(emailLower, passTrim, onLoginSuccess);
-    return;
-  }
-
-  await completeEmailLogin(emailLower, passTrim, onLoginSuccess);
-}
-
-async function preparePasswordResetViaServer(emailLower: string): Promise<void> {
-  const res = await fetch('/api/auth/prepare-password-reset', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email: emailLower }),
-  });
-  if (!res.ok) {
-    const data = (await res.json().catch(() => ({}))) as { error?: string };
-    throw new Error(
-      data.error ||
-        'Şifre sıfırlama hazırlanamadı. Render FIREBASE_SERVICE_ACCOUNT_JSON kontrol edin.'
-    );
-  }
-}
-
-async function requestPasswordResetEmail(emailLower: string): Promise<void> {
-  await withAuthTimeout(
-    sendPasswordResetEmail(auth, emailLower, {
-      url: typeof window !== 'undefined' ? window.location.origin : undefined,
-      handleCodeInApp: false,
-    }),
-    10000
-  );
-}
-
-function seedFounderRecords(emailLower: string, passTrim: string) {
-  const userDocRef = doc(db, 'portalKullanicilar', emailLower);
-  setDoc(
-    userDocRef,
-    {
-      email: emailLower,
-      password: passTrim,
-      role: 'YÖNETİCİ',
-      yetki: 'YÖNETİCİ',
-      createdAt: new Date().toISOString(),
-    },
-    { merge: true }
-  ).catch((err) => console.warn('portalKullanicilar seed atlandı:', err));
-
-  saveKullanici({
-    id: emailLower,
-    email: emailLower,
-    yetki: 'YÖNETİCİ',
-    durum: 'AKTİF',
-    kayitTarihi: new Date().toISOString().split('T')[0],
-  }).catch((err) => console.warn('kullanicilar seed atlandı:', err));
-}
-
-async function getRegistrationState(
-  emailLower: string
-): Promise<'none' | 'complete' | 'partial'> {
-  const [portalSnap, userSnap] = await Promise.all([
-    withReadTimeout(getDoc(doc(db, 'portalKullanicilar', emailLower)), 8000),
-    withReadTimeout(getDoc(doc(db, 'kullanicilar', emailLower)), 8000),
-  ]);
-  if (portalSnap.exists() && userSnap.exists()) return 'complete';
-  if (portalSnap.exists() || userSnap.exists()) return 'partial';
-  return 'none';
-}
-
-async function resolveSignupAuthUid(emailLower: string, passTrim: string): Promise<string> {
-  let uid = `u_${Date.now()}`;
-  try {
-    const cred = await withAuthTimeout(
-      createUserWithEmailAndPassword(auth, emailLower, passTrim),
-      10000
-    );
-    return cred.user.uid;
-  } catch (authErr: any) {
-    if (authErr?.code === 'auth/email-already-in-use') {
-      try {
-        const cred = await withAuthTimeout(
-          signInWithEmailAndPassword(auth, emailLower, passTrim),
-          8000
-        );
-        return cred.user.uid;
-      } catch {
-        console.warn('Mevcut Auth hesabına giriş yapılamadı, yedek oturum deneniyor');
-      }
-    } else {
-      console.warn('Firebase Auth kayıt atlandı:', authErr?.code || authErr?.message);
-    }
-  }
-
-  try {
-    const anon = await withAuthTimeout(signInAnonymously(auth), 4000);
-    return anon.user.uid;
-  } catch {
-    return uid;
-  }
-}
+import { doc, getDoc, setDoc, collection, getDocs } from 'firebase/firestore';
+import { Building2, Lock, Mail, Loader2, ArrowRight, CheckCircle2, AlertTriangle, ShieldCheck, User, Fingerprint, PenTool, Check, Trash, Smartphone } from 'lucide-react';
 
 interface LoginScreenProps {
   onLoginSuccess: (user: any) => void;
@@ -227,10 +22,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [infoMsg, setInfoMsg] = useState<string | null>(null);
-  const [sessionNotice, setSessionNotice] = useState<string | null>(null);
   const [showOfflineBypass, setShowOfflineBypass] = useState(false);
-  const [showForgotPassword, setShowForgotPassword] = useState(false);
-  const [resetLoading, setResetLoading] = useState(false);
   const [isMobileMode, setIsMobileMode] = useState<boolean>(() => {
     return localStorage.getItem('kibritci_mobile_mode') === 'true';
   });
@@ -238,18 +30,6 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
   useEffect(() => {
     localStorage.setItem('kibritci_mobile_mode', isMobileMode ? 'true' : 'false');
   }, [isMobileMode]);
-
-  useEffect(() => {
-    try {
-      const notice = sessionStorage.getItem('kibritci_login_notice');
-      if (notice) {
-        setSessionNotice(notice);
-        sessionStorage.removeItem('kibritci_login_notice');
-      }
-    } catch {
-      /* ignore */
-    }
-  }, []);
 
   // Profile Registration Fields
   const [ad, setAd] = useState('');
@@ -312,44 +92,6 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
     setImzaCanvas('');
   };
 
-  const handleForgotPassword = async () => {
-    const emailLower = email.trim().toLowerCase();
-    if (!emailLower) {
-      setErrorMsg('Şifre sıfırlama için e-posta adresinizi girin.');
-      setInfoMsg(null);
-      return;
-    }
-
-    setErrorMsg(null);
-    setInfoMsg(null);
-    setResetLoading(true);
-
-    try {
-      await preparePasswordResetViaServer(emailLower);
-      await requestPasswordResetEmail(emailLower);
-      setInfoMsg(
-        `${emailLower} adresine şifre sıfırlama bağlantısı gönderildi. Gelen kutusu, spam ve gereksiz klasörünü kontrol edin. Birkaç dakika içinde gelmezse tekrar deneyin.`
-      );
-      setShowForgotPassword(false);
-    } catch (err: unknown) {
-      console.error('Şifre sıfırlama hatası:', err);
-      const code = (err as { code?: string })?.code;
-      if (code === 'auth/invalid-email') {
-        setErrorMsg('Geçersiz e-posta formatı girdiniz.');
-      } else if (code === 'auth/too-many-requests') {
-        setErrorMsg('Çok fazla deneme yapıldı. Lütfen bir süre sonra tekrar deneyin.');
-      } else if (code === 'auth/user-not-found') {
-        setInfoMsg(
-          'Bu e-posta için kayıtlı bir hesap bulunamadıysa bağlantı gönderilmez. Henüz üye değilseniz yeni hesap açın.'
-        );
-      } else {
-        setErrorMsg('Şifre sıfırlama e-postası gönderilemedi. Lütfen tekrar deneyin.');
-      }
-    } finally {
-      setResetLoading(false);
-    }
-  };
-
   const handleAuthAction = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email || !password) {
@@ -362,10 +104,6 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
 
     const emailLower = email.trim().toLowerCase();
     const passTrim = password.trim();
-
-    if (isSignUp) {
-      await ensureFirestoreAuth({ allowAnonymous: true });
-    }
 
     try {
       if (isSignUp) {
@@ -382,48 +120,38 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
           return;
         }
 
-        if (passTrim.length < 6) {
-          setErrorMsg('Şifre en az 6 karakter olmalıdır.');
+        // Let's check first if this email already exists in our Firestore database 'portalKullanicilar'
+        const userDocRef = doc(db, 'portalKullanicilar', emailLower);
+        const userDocSnap = await getDoc(userDocRef);
+        
+        if (userDocSnap.exists()) {
+          setErrorMsg('Bu e-posta adresi zaten kullanımda.');
           setLoading(false);
           return;
         }
 
+        // --- TC NO MATCHING WITH PERSONEL LIST ---
         let matchedPersonelId: string | null = null;
         try {
-          const personelQuery = query(
-            collection(db, 'personeller'),
-            where('tcNo', '==', tcNo.trim()),
-            limit(1)
-          );
-          const snap = await withReadTimeout(getDocs(personelQuery), 8000);
-          if (!snap.empty) matchedPersonelId = snap.docs[0].id;
+          const colRef = collection(db, 'personeller');
+          const snap = await getDocs(colRef);
+          const matchedDoc = snap.docs.find(doc => {
+            const data = doc.data();
+            return String(data.tcNo).trim() === tcNo.trim();
+          });
+          if (matchedDoc) {
+            matchedPersonelId = matchedDoc.id;
+            console.log("Matched personnel record found:", matchedPersonelId);
+          }
         } catch (matchErr) {
-          console.warn('Personel TC eşleştirmesi atlandı:', matchErr);
+          console.warn("Could not check personeller collection for TC No matching:", matchErr);
         }
 
-        let registrationState: 'none' | 'complete' | 'partial' = 'none';
-        try {
-          registrationState = await getRegistrationState(emailLower);
-          if (registrationState === 'complete') {
-            setErrorMsg('Bu e-posta adresi zaten kayıtlı. Giriş yapmayı deneyin.');
-            setLoading(false);
-            return;
-          }
-        } catch (checkErr: unknown) {
-          if ((checkErr as { message?: string })?.message === 'FIRESTORE_TIMEOUT') {
-            console.warn('Kayıt kontrolü zaman aşımı — devam ediliyor');
-            registrationState = 'none';
-          } else {
-            console.warn('Kayıt kontrolü atlandı, devam ediliyor:', checkErr);
-          }
-        }
-
-        const guessedRole = guessRoleFromEmail(emailLower);
+        // Profile payload
         const userPayload = {
           email: emailLower,
           password: passTrim,
-          role: guessedRole,
-          yetki: guessedRole,
+          role: 'MİSAFİR', // default to MİSAFİR until approved by Admin
           ad: ad.trim(),
           soyad: soyad.trim(),
           tcNo: tcNo.trim(),
@@ -434,140 +162,184 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
           createdAt: new Date().toISOString()
         };
 
-        const kullaniciPayload = {
-          id: emailLower,
-          email: emailLower,
-          yetki: guessedRole as any,
-          durum: guessedRole === 'MİSAFİR' ? ('ONAY BEKLİYOR' as const) : ('AKTİF' as const),
-          kayitTarihi: new Date().toISOString().split('T')[0],
-          ad: ad.trim(),
-          soyad: soyad.trim(),
-          tcNo: tcNo.trim(),
-          imzaText: imzaText.trim() || `${ad.trim()} ${soyad.trim()}`,
-          imzaStyle: imzaStyle,
-          imzaCanvas: imzaCanvas || undefined,
-          matchedPersonelId: matchedPersonelId || undefined,
+        // Save account credentials in secure NoSQL fallback FIRST
+        await setDoc(userDocRef, userPayload);
+
+        // Helper to save to 'kullanicilar' collection
+        const saveToKullanicilarCollection = async (uid: string) => {
+          try {
+            const mainUserDocRef = doc(db, 'kullanicilar', uid);
+            await setDoc(mainUserDocRef, {
+              id: uid,
+              email: emailLower,
+              yetki: 'MİSAFİR', // starts as guest
+              durum: 'ONAY BEKLİYOR', // requires admin approval
+              kayitTarihi: new Date().toISOString().split('T')[0],
+              ad: ad.trim(),
+              soyad: soyad.trim(),
+              tcNo: tcNo.trim(),
+              imzaText: imzaText.trim() || `${ad.trim()} ${soyad.trim()}`,
+              imzaStyle: imzaStyle,
+              imzaCanvas: imzaCanvas || null,
+              matchedPersonelId: matchedPersonelId
+            });
+          } catch (dbErr) {
+            console.error("Error saving to central kullanicilar collection:", dbErr);
+          }
         };
 
-        const finishSignup = (uid: string, userObj: { email?: string | null; uid: string; isMock?: boolean }) => {
+        // Try standard Firebase Auth second, to use native user environment if available
+        let finalUid = `u_${Date.now()}`;
+        let useFallback = true;
+        try {
+          const userCredential = await createUserWithEmailAndPassword(auth, emailLower, passTrim);
+          finalUid = userCredential.user.uid;
+          useFallback = false;
+          
+          await saveToKullanicilarCollection(finalUid);
+          
+          // Trigger simulated email verification code
           fetch('/api/send-verification-email', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ email: emailLower })
           }).catch(err => console.warn(err));
-          localStorage.setItem('kibritci_portal_session', JSON.stringify({ email: emailLower, uid }));
-          setInfoMsg(
-            registrationState === 'partial'
-              ? 'Kayıt tamamlandı! Eksik bilgiler güncellendi. Yönetici onayından sonra erişim açılacaktır.'
-              : matchedPersonelId
-                ? 'Hesap oluşturuldu! TC eşleşti. Yönetici onayından sonra erişim açılacaktır.'
-                : 'Hesap oluşturuldu! Yönetici onayından sonra sisteme erişebilirsiniz.'
+          
+          localStorage.setItem('kibritci_portal_session', JSON.stringify({ email: emailLower, uid: finalUid }));
+          setInfoMsg(matchedPersonelId 
+            ? 'Hesap başarıyla oluşturuldu! Doğrulama e-postası simüle edildi ✉️ TC No personel listesiyle eşleşti ✅ Sisteme giriş yapılıyor...'
+            : 'Hesap başarıyla oluşturuldu! Doğrulama e-postası simüle edildi ✉️ Sisteme giriş yapılıyor...'
           );
-          setTimeout(() => onLoginSuccess(userObj), 1200);
-        };
-
-        try {
-          const { imzaCanvas: _portalImza, ...portalPayload } = userPayload;
-
-          const persistSignup = () =>
-            saveKullaniciForSignup(kullaniciPayload, portalPayload as Record<string, unknown>);
-
-          // 1. Create Auth user first so they are signed in (allowing Firestore writes via legacyUnclaimedEmailUser rules)
-          let finalUid = '';
-          try {
-            finalUid = await resolveSignupAuthUid(emailLower, passTrim);
-          } catch (authErr: any) {
-            console.error('Auth kaydı hatası:', authErr);
-            setErrorMsg('Kullanıcı kimlik doğrulaması oluşturulamadı: ' + (authErr.message || authErr.code));
-            return;
-          }
-
-          // 2. Persist to Firestore
-          try {
-            await persistSignup();
-          } catch (firstErr) {
-            console.warn('Doğrudan kayıt başarısız, admin onay kuyruğuna alınıyor...', firstErr);
-            const bekleyen = buildBekleyenFromSignup({
-              email: emailLower,
-              password: passTrim,
-              ad: ad.trim(),
-              soyad: soyad.trim(),
-              tcNo: tcNo.trim(),
-              imzaText: userPayload.imzaText,
-              imzaStyle: imzaStyle,
-              imzaCanvas: imzaCanvas || undefined,
-              matchedPersonelId: matchedPersonelId,
-              hataSebebi: isFirestoreWriteFailure(firstErr) ? 'quota_or_timeout' : 'permission_or_other',
-            });
-            const queueTarget = await queueSignupFallback(bekleyen);
-            setInfoMsg(
-              queueTarget === 'firestore'
-                ? 'Firebase kotası dolu. Kaydınız yönetici onay kuyruğuna alındı. Onaylandıktan sonra giriş yapabilirsiniz.'
-                : queueTarget === 'api'
-                  ? 'Firebase kotası dolu. Kaydınız sunucu yedek kuyruğuna alındı. Yönetici onayından sonra giriş yapabilirsiniz.'
-                  : 'Firebase kotası dolu. Kaydınız yerel yedek kuyruğa alındı. Lütfen yönetici ile iletişime geçin.'
-            );
-            return;
-          }
-
-          finishSignup(finalUid, { email: emailLower, uid: finalUid });
+          setTimeout(() => {
+            onLoginSuccess(userCredential.user);
+          }, 1500);
           return;
-        } catch (signupErr: unknown) {
-          console.error('Üyelik kaydı hatası:', signupErr);
-          if (isFirestoreWriteFailure(signupErr)) {
-            setErrorMsg('Firebase yazma kotası dolu veya bağlantı yavaş. Lütfen bir süre sonra tekrar deneyin.');
-          } else if ((signupErr as { message?: string })?.message === 'FIRESTORE_TIMEOUT') {
-            setErrorMsg('Kayıt zaman aşımına uğradı. İnternet bağlantınızı kontrol edip tekrar deneyin.');
-          } else {
-            setErrorMsg('Üyelik oluşturulamadı. Lütfen tekrar deneyin veya yöneticiye bildirin.');
+        } catch (fbErr: any) {
+          console.log("Firebase Auth SignUp failed or email/password is disabled, continuing with Firestore registration info...", fbErr);
+          if (fbErr.code === 'auth/email-already-in-use') {
+            setErrorMsg('Bu e-posta adresi zaten kullanımda.');
+            setLoading(false);
+            return;
           }
+        }
+
+        // Fallback flow if standard Auth is disabled or fails
+        if (useFallback) {
+          // Initialize standard anonymous auth session as secondary to authenticate the database sync connection
+          let anonUid = finalUid;
+          try {
+            const res = await signInAnonymously(auth);
+            anonUid = res.user.uid;
+          } catch (anonErr) {
+            console.warn("Could not start anonymous backup session, bypassing...", anonErr);
+          }
+
+          await saveToKullanicilarCollection(anonUid);
+
+          // Trigger simulated email verification code
+          fetch('/api/send-verification-email', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email: emailLower })
+          }).catch(err => console.warn(err));
+
+          localStorage.setItem('kibritci_portal_session', JSON.stringify({ email: emailLower, uid: anonUid }));
+          setInfoMsg(matchedPersonelId 
+            ? 'Hesap başarıyla oluşturuldu! Doğrulama e-postası simüle edildi ✉️ TC No personel listesiyle eşleşti ✅ Sisteme giriş yapılıyor...'
+            : 'Hesap başarıyla oluşturuldu! Doğrulama e-postası simüle edildi ✉️ Sisteme giriş yapılıyor...'
+          );
+          setTimeout(() => {
+            onLoginSuccess({ email: emailLower, uid: anonUid, isMock: true });
+          }, 1500);
         }
 
       } else {
         // --- SIGN IN LOGIC ---
+        // 1. Predefined coordinates check for instant absolute administrator access
         const isSamet = emailLower === 'sametatak9@gmail.com' && passTrim === '117270Sa';
         const isSantiye = emailLower === 'santiye@kibritci.com' && passTrim === 'kibritci2026';
 
-        if (isSamet || isSantiye || isFounderEmail(emailLower)) {
-          await completeFounderLogin(emailLower, passTrim, onLoginSuccess);
+        if (isSamet || isSantiye) {
+          const userDocRef = doc(db, 'portalKullanicilar', emailLower);
+          
+          // Seed the account to the database dynamically so they are visible under list of accounts
+          try {
+            await setDoc(userDocRef, {
+              email: emailLower,
+              password: passTrim,
+              role: 'YÖNETİCİ',
+              createdAt: new Date().toISOString()
+            }, { merge: true });
+          } catch (dbErr) {
+            console.warn("Firestore write error during auto-seeding admin, bypassing...", dbErr);
+          }
+
+          let anonUid = isSamet ? 'samet_atak_uid' : 'santiye_kibritci_uid';
+          try {
+            const res = await signInAnonymously(auth);
+            anonUid = res.user.uid;
+          } catch (anonErr) {
+            console.warn("Could not start anonymous user session, bypassing...", anonErr);
+          }
+
+          localStorage.setItem('kibritci_portal_session', JSON.stringify({ email: emailLower, uid: anonUid }));
+          onLoginSuccess({ email: emailLower, uid: anonUid, isMock: true });
           return;
         }
 
+        // 2. Check if user credentials exist in fallback Firestore database
         try {
-          await completeEmailLogin(emailLower, passTrim, onLoginSuccess);
-        } catch (fbErr: unknown) {
-          console.error('Firebase giriş hatası:', fbErr);
-          const err = fbErr as { code?: string; message?: string };
-          let turkishError = 'Giriş yapılamadı. Bilgilerinizi kontrol edip tekrar deneyin.';
+          const userDocRef = doc(db, 'portalKullanicilar', emailLower);
+          const userDocSnap = await getDoc(userDocRef);
 
-          if (err?.message === 'AUTH_TIMEOUT') {
-            turkishError = 'Giriş isteği zaman aşımına uğradı. İnternet bağlantınızı kontrol edip tekrar deneyin.';
-          } else if (err?.code === 'auth/wrong-password' || err?.code === 'auth/invalid-credential') {
+          if (userDocSnap.exists()) {
+            const data = userDocSnap.data();
+            if (data.password === passTrim) {
+              let anonUid = `u_${Date.now()}`;
+              try {
+                const res = await signInAnonymously(auth);
+                anonUid = res.user.uid;
+              } catch (anonErr) {
+                console.warn("Anonymous session initialization failed, bypassing...", anonErr);
+              }
+
+              localStorage.setItem('kibritci_portal_session', JSON.stringify({ email: emailLower, uid: anonUid }));
+              onLoginSuccess({ email: emailLower, uid: anonUid, isMock: true });
+              return;
+            } else {
+              setErrorMsg('Hatalı şifre girdiniz.');
+              setLoading(false);
+              return;
+            }
+          }
+        } catch (dbErr) {
+          console.warn("Firestore user fallback lookup failed:", dbErr);
+        }
+
+        // 3. Fallback: standard Firebase Auth sign-in
+        try {
+          const userCredential = await signInWithEmailAndPassword(auth, email, password);
+          localStorage.setItem('kibritci_portal_session', JSON.stringify({ email: emailLower, uid: userCredential.user.uid }));
+          onLoginSuccess(userCredential.user);
+        } catch (fbErr: any) {
+          console.error("Firebase regular auth failed:", fbErr);
+          let turkishError = 'Giriş yapılamadı. Bilgilerinizi kontrol edip tekrar deneyin.';
+          
+          if (fbErr.code === 'auth/wrong-password' || fbErr.code === 'auth/invalid-credential') {
             turkishError = 'Hatalı şifre girdiniz.';
-          } else if (err?.code === 'auth/user-not-found') {
+          } else if (fbErr.code === 'auth/user-not-found') {
             turkishError = 'Bu e-posta adresine kayıtlı kullanıcı bulunamadı.';
-          } else if (err?.code === 'auth/invalid-email') {
+          } else if (fbErr.code === 'auth/invalid-email') {
             turkishError = 'Geçersiz e-posta formatı girdiniz.';
-          } else if (err?.code === 'auth/operation-not-allowed') {
-            turkishError = 'Firebase E-posta/Şifre girişi kapalı. Yöneticiye bildirin.';
-            setShowOfflineBypass(true);
           }
           setErrorMsg(turkishError);
         }
       }
     } catch (err: any) {
       console.error(err);
-      let turkishError = err?.message || 'Giriş yapılamadı. Bilgilerinizi kontrol edip tekrar deneyin.';
-      if (
-        err.code === 'auth/wrong-password' ||
-        err.code === 'auth/invalid-credential'
-      ) {
-        if (isFounderEmail(emailLower)) {
-          turkishError =
-            'Kurucu şifresi kabul edilmedi. Doğru şifre: 117270Sa (büyük S). Çalışmazsa «Şifremi Unuttum» ile sıfırlayın veya yöneticiye bildirin.';
-        } else {
-          turkishError = 'Hatalı şifre girdiniz.';
-        }
+      let turkishError = "Giriş yapılamadı. Bilgilerinizi kontrol edip tekrar deneyin.";
+      if (err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
+        turkishError = 'Hatalı şifre girdiniz.';
       } else if (err.code === 'auth/user-not-found') {
         turkishError = 'Bu e-posta adresine kayıtlı kullanıcı bulunamadı.';
       } else if (err.code === 'auth/email-already-in-use') {
@@ -604,14 +376,12 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
         }
       }
     } catch (err: any) {
-      // Offline fallback — anonim ERP yazamaz; kullanıcıyı uyar
-      setErrorMsg(
-        'Demo girişi başarısız. E-posta/şifre ile giriş yapın. Anonim oturum kayıt yapamaz.'
-      );
+      // Offline fallback / Anon login
       try {
         const res = await signInAnonymously(auth);
         onLoginSuccess(res.user);
       } catch (nestedErr) {
+        // Fallback simulated success
         onLoginSuccess({ email: 'demo@kibritci.com', displayName: 'Demo Kullanıcı', uid: 'test-user-id' });
       }
     } finally {
@@ -633,18 +403,16 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
         
         {/* Company Header Card */}
         <div className="text-center space-y-3">
-          <KibritciLogo size="xl" className="mx-auto h-16" />
+          <div className="mx-auto w-14 h-14 bg-amber-500 rounded-2xl flex items-center justify-center text-slate-950 shadow-lg transform rotate-3 hover:rotate-0 transition duration-300">
+            <Building2 size={28} className="stroke-[2.5]" />
+          </div>
           <div>
+            <h1 className="text-lg font-black tracking-widest text-[#F59E0B]">KİBRİTÇİ İNŞAAT TAAHHÜT A.Ş.</h1>
             <p className="text-[10px] font-mono tracking-widest text-slate-400 uppercase mt-0.5">Bulut ERP Şantiye Portal Girişi</p>
           </div>
         </div>
 
         {/* Informative Security Banner */}
-        {sessionNotice && (
-          <div className="bg-emerald-950/50 border border-emerald-700 text-emerald-100 p-3 rounded-2xl text-[11px] leading-relaxed">
-            {sessionNotice}
-          </div>
-        )}
         <div className="bg-slate-950/60 border border-slate-800 rounded-2xl p-3 flex items-start space-x-2.5 text-slate-400 text-[10px] leading-relaxed">
           <ShieldCheck size={18} className="text-amber-500 shrink-0 mt-0.5" />
           <span>
@@ -742,28 +510,13 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
           </div>
 
           <div className="space-y-1.5">
-            <div className="flex items-center justify-between">
-              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">ŞİFRE</label>
-              {!isSignUp && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowForgotPassword((prev) => !prev);
-                    setErrorMsg(null);
-                    setInfoMsg(null);
-                  }}
-                  className="text-[10px] text-amber-500 hover:text-amber-400 font-bold transition focus:outline-none"
-                >
-                  Şifremi Unuttum
-                </button>
-              )}
-            </div>
+            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">ŞİFRE</label>
             <div className="relative">
               <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center text-slate-500">
                 <Lock size={14} />
               </span>
               <input
-                required={!showForgotPassword}
+                required
                 type="password"
                 placeholder="••••••"
                 value={password}
@@ -773,35 +526,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
             </div>
           </div>
 
-          {!isSignUp && showForgotPassword && (
-            <div className="rounded-2xl border border-amber-500/30 bg-amber-950/20 p-4 space-y-3">
-              <div className="flex items-start space-x-2">
-                <KeyRound size={16} className="text-amber-500 shrink-0 mt-0.5" />
-                <div className="space-y-1">
-                  <p className="text-xs font-bold text-amber-200">Şifre Sıfırlama</p>
-                  <p className="text-[10px] text-slate-400 leading-relaxed">
-                    E-posta adresinize Firebase üzerinden güvenli bir sıfırlama bağlantısı gönderilir.
-                    Bağlantıya tıklayıp yeni şifrenizi belirleyebilirsiniz.
-                  </p>
-                </div>
-              </div>
-              <button
-                type="button"
-                disabled={resetLoading}
-                onClick={handleForgotPassword}
-                className="w-full bg-amber-500/90 hover:bg-amber-500 active:scale-[0.98] text-slate-950 font-black py-2.5 rounded-xl transition flex items-center justify-center space-x-2 cursor-pointer text-[11px]"
-              >
-                {resetLoading ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : (
-                  <>
-                    <Mail size={13} />
-                    <span>SIFIRLAMA BAĞLANTISI GÖNDER</span>
-                  </>
-                )}
-              </button>
-            </div>
-          )}
+
 
           {isSignUp && (
             <div className="space-y-4 border-t border-slate-800/60 pt-4 mt-2">
@@ -979,14 +704,13 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
                   type="submit"
                   disabled={loading}
                   onClick={() => {
-                    // Tam ERP sekmeleri (Yoklama / Faaliyet / Saha / Formen) — istatistik kabuğu yutmasın
                     localStorage.setItem('kibritci_mobile_mode', 'true');
-                    localStorage.setItem('kibritci_mobile_direct', 'true');
+                    localStorage.setItem('kibritci_mobile_direct', 'false');
                   }}
                   className="bg-slate-800 hover:bg-slate-750 active:scale-[0.98] text-slate-200 font-bold py-2.5 px-2 rounded-xl border border-slate-700/60 transition flex items-center justify-center space-x-1 cursor-pointer text-[10px]"
                 >
                   <Smartphone size={12} className="text-amber-550 shrink-0" />
-                  <span className="truncate">MOBİL SÜRÜM (TAM ERP)</span>
+                  <span className="truncate">MOBİL SÜRÜM (İSTATİSTİK)</span>
                 </button>
 
                 <button
@@ -1010,22 +734,11 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
         <div className="text-center">
           <button
             type="button"
-            onClick={() => {
-              setIsSignUp((prev) => !prev);
-              setShowForgotPassword(false);
-            }}
+            onClick={() => setIsSignUp(prev => !prev)}
             className="text-[11px] text-amber-500 hover:underline font-bold transition focus:outline-none"
           >
             {isSignUp ? 'Zaten hesabınız var mı? Giriş Yapın' : 'Henüz hesabınız yok mu? Yeni Hesap Açın'}
           </button>
-          <div className="mt-3">
-            <a
-              href="/siparis.html"
-              className="text-[11px] text-emerald-400 hover:underline font-bold"
-            >
-              Üyeliksiz malzeme siparişi ver →
-            </a>
-          </div>
         </div>
 
       </div>
