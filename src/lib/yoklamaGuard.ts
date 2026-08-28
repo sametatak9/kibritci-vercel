@@ -42,7 +42,7 @@ export function countYoklamaFilledOnDate(map: AylikYoklamaMap, dateKey: string):
   let total = 0;
   for (const personMap of Object.values(map || {})) {
     if (!personMap || typeof personMap !== 'object') continue;
-    const data = (personMap as Record<string, { durum?: string }>)[dateKey];
+    const data = (personMap as unknown as Record<string, { durum?: string }>)[dateKey];
     const durum = data?.durum;
     if (durum && durum !== 'Girilmedi') total++;
   }

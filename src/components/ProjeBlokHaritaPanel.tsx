@@ -25,7 +25,7 @@ type Props = {
   onParselChange: (p: string) => void;
 };
 
-function IsometricBlok({ ozet, secili, onClick }: { ozet: BlokHaritaOzet; secili: boolean; onClick: () => void }) {
+const IsometricBlok: React.FC<{ ozet: BlokHaritaOzet; secili: boolean; onClick: () => void }> = ({ ozet, secili, onClick }) => {
   return (
     <button
       type="button"

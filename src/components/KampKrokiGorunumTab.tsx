@@ -1,9 +1,5 @@
 import React, { useMemo, useState } from 'react';
-<<<<<<< HEAD
-import { Building2, Layers, Map as MapIcon, Users, ChevronDown, ChevronUp, FileSpreadsheet } from 'lucide-react';
-=======
-import { Building2, Layers, Map as MapIcon, Users, ChevronDown, ChevronUp, X, FileText } from 'lucide-react';
->>>>>>> caf1e4c (feat(kamp): Firma bazli personel ve oda dagilim listesi ve raporlama eklendi)
+import { Building2, Layers, Map as MapIcon, Users, ChevronDown, ChevronUp, FileSpreadsheet, X, FileText } from 'lucide-react';
 import { KampKaydi, KampOdasi, Personel } from '../types/erp';
 import {
   buildKampKrokiModel,
@@ -11,11 +7,8 @@ import {
   type KampKatKroki,
   type KampYerleskeKroki,
 } from '../lib/kampKrokiUtils';
-<<<<<<< HEAD
 import { exportKampKrokiTaseronExcel } from '../lib/kampKrokiTaseronExcel';
-=======
 import { KampFirmaGroupedView } from './KampFirmaGroupedView';
->>>>>>> caf1e4c (feat(kamp): Firma bazli personel ve oda dagilim listesi ve raporlama eklendi)
 
 interface KampKrokiGorunumTabProps {
   kampOdalari: KampOdasi[];
@@ -319,11 +312,8 @@ export const KampKrokiGorunumTab: React.FC<KampKrokiGorunumTabProps> = ({
   );
 
   const [selectedCampus, setSelectedCampus] = useState<string>('HEPSI');
-<<<<<<< HEAD
   const [exportingExcel, setExportingExcel] = useState(false);
-=======
   const [modalFirmaFilter, setModalFirmaFilter] = useState<string | null>(null);
->>>>>>> caf1e4c (feat(kamp): Firma bazli personel ve oda dagilim listesi ve raporlama eklendi)
 
   const visible = useMemo(() => {
     if (selectedCampus === 'HEPSI') return model;

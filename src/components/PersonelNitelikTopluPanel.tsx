@@ -171,7 +171,7 @@ export const PersonelNitelikTopluPanel: React.FC<PersonelNitelikTopluPanelProps>
       );
       for (const val of yeniDegerler) {
         try {
-          await addProgramCatalogItem('nitelik', val);
+          await addProgramCatalogItem('nitelik', String(val));
         } catch {
           /* katalog yazılamasa kart yine güncellenir */
         }

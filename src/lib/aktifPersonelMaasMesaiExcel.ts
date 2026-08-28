@@ -328,7 +328,7 @@ function writeTarihCetveliSheet(
     fitToPage: true,
     fitToWidth: 1,
     fitToHeight: 0,
-    paperSize: 8,
+    paperSize: 8 as any,
   };
   ws.views = [{ state: 'frozen', xSplit: baseCols, ySplit: startRow + 1 }];
 }

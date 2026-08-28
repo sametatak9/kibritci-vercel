@@ -33,7 +33,7 @@ export const ParselSiteHaritaSvg: React.FC<Props> = ({
   peyzajYuzde = 0,
   compact,
 }) => {
-  const ozetMap = new Map(blokOzetleri.map((b) => [b.profil.blok, b]));
+  const ozetMap = new Map<string, BlokHaritaOzet>(blokOzetleri.map((b) => [b.profil.blok, b]));
 
   return (
     <div className={`relative w-full ${compact ? '' : 'min-h-[200px]'}`}>

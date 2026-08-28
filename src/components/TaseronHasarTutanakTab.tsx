@@ -24,13 +24,13 @@ function emptyKalem(): MalzemeTeslimKalem {
   };
 }
 
-function MiniImzaPad({
-  value,
-  onChange,
-}: {
+const MiniImzaPad: React.FC<{
   value: string;
   onChange: (next: string) => void;
-}) {
+}> = ({
+  value,
+  onChange,
+}) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const drawing = useRef(false);
 
@@ -215,7 +215,7 @@ export const TaseronHasarTutanakTab: React.FC<TaseronHasarTutanakTabProps> = ({
         const reader = new FileReader();
         reader.onload = () => resolve(String(reader.result || ''));
         reader.onerror = () => reject(new Error('Dosya okunamadı'));
-        reader.readAsDataURL(file);
+        reader.readAsDataURL(file as unknown as Blob);
       });
       next.push(await compressImage(raw, 900, 900, 0.65));
     }
