@@ -15,6 +15,7 @@ import { KampHaftalikYoklamaTab } from './KampHaftalikYoklamaTab';
 import { KampGunlukYoklamaTab } from './KampGunlukYoklamaTab';
 import { KampVidanjorTab } from './KampVidanjorTab';
 import { KampTaseronSayimTab } from './KampTaseronSayimTab';
+import { KampFirmaGroupedView } from './KampFirmaGroupedView';
 import { AylikPuantajMobilPanel } from './AylikPuantajMobilPanel';
 import { collection, onSnapshot, doc, updateDoc, setDoc, query, orderBy } from 'firebase/firestore';
 import {
@@ -111,7 +112,7 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
   addNotification
 }) => {
   // Tabs: 'rooms' | 'placement' | 'warehouse' | 'activities' | 'haftalik_yoklama' | 'yoklama' | 'aylik_puantaj' | 'vidanjor' | ...
-  const [activeSubTab, setActiveSubTab] = useState<'rooms' | 'placement' | 'warehouse' | 'activities' | 'gunluk_akis' | 'personel_giris' | 'taseron_sayim' | 'haftalik_yoklama' | 'yoklama' | 'aylik_puantaj' | 'vidanjor'>('placement');
+  const [activeSubTab, setActiveSubTab] = useState<'rooms' | 'placement' | 'warehouse' | 'activities' | 'gunluk_akis' | 'personel_giris' | 'taseron_sayim' | 'firma_listesi' | 'haftalik_yoklama' | 'yoklama' | 'aylik_puantaj' | 'vidanjor'>('placement');
 
   const filterKampciPersonel = React.useCallback(
     (p: Personel) => {
@@ -2180,6 +2181,18 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
         </button>
 
         <button
+          onClick={() => setActiveSubTab('firma_listesi')}
+          className={`px-4 py-2.5 rounded-xl font-bold text-xs transition flex items-center space-x-2 border cursor-pointer ${
+            activeSubTab === 'firma_listesi'
+              ? 'bg-teal-600 border-teal-500 text-white shadow-md shadow-teal-500/20'
+              : 'bg-white border-slate-200/80 text-slate-500 hover:bg-slate-50'
+          }`}
+        >
+          <Building2 size={14} />
+          <span>🏢 Firma &amp; Oda Dağılımı</span>
+        </button>
+
+        <button
           onClick={() => setActiveSubTab('rooms')}
           className={`px-4 py-2.5 rounded-xl font-bold text-xs transition flex items-center space-x-2 border cursor-pointer ${
             activeSubTab === 'rooms' 
@@ -3375,6 +3388,25 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
           setYoklamalar={setYoklamalar}
           saveYoklamalarNow={saveYoklamalarNow}
         />
+      )}
+
+      {activeSubTab === 'firma_listesi' && (
+        <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm flex-1 flex flex-col min-h-[500px]">
+          <KampFirmaGroupedView
+            kampKayitlari={kampKayitlari}
+            personeller={personeller}
+            kampOdalari={kampOdalari}
+            onSelectOda={(odaId) => {
+              const room = kampOdalari.find((r) => r.id === odaId);
+              if (room) {
+                if (room.yerleskeId) setPlacementYerleskeId(room.yerleskeId);
+                if (room.katId) setPlacementKatId(room.katId);
+                setSelectedRoomId(room.id);
+                setActiveSubTab('placement');
+              }
+            }}
+          />
+        </div>
       )}
 
       {activeSubTab === 'haftalik_yoklama' && setYoklamalar && (
