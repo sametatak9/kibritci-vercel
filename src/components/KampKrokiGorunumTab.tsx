@@ -1,5 +1,9 @@
 import React, { useMemo, useState } from 'react';
+<<<<<<< HEAD
 import { Building2, Layers, Map as MapIcon, Users, ChevronDown, ChevronUp, FileSpreadsheet } from 'lucide-react';
+=======
+import { Building2, Layers, Map as MapIcon, Users, ChevronDown, ChevronUp, X, FileText } from 'lucide-react';
+>>>>>>> caf1e4c (feat(kamp): Firma bazli personel ve oda dagilim listesi ve raporlama eklendi)
 import { KampKaydi, KampOdasi, Personel } from '../types/erp';
 import {
   buildKampKrokiModel,
@@ -7,12 +11,17 @@ import {
   type KampKatKroki,
   type KampYerleskeKroki,
 } from '../lib/kampKrokiUtils';
+<<<<<<< HEAD
 import { exportKampKrokiTaseronExcel } from '../lib/kampKrokiTaseronExcel';
+=======
+import { KampFirmaGroupedView } from './KampFirmaGroupedView';
+>>>>>>> caf1e4c (feat(kamp): Firma bazli personel ve oda dagilim listesi ve raporlama eklendi)
 
 interface KampKrokiGorunumTabProps {
   kampOdalari: KampOdasi[];
   kampKayitlari: KampKaydi[];
   personeller: Personel[];
+  onSelectOda?: (odaId: string) => void;
 }
 
 function OccupancyMeter({ dolu, kapasite }: { dolu: number; kapasite: number }) {
@@ -302,6 +311,7 @@ export const KampKrokiGorunumTab: React.FC<KampKrokiGorunumTabProps> = ({
   kampOdalari,
   kampKayitlari,
   personeller,
+  onSelectOda,
 }) => {
   const model = useMemo(
     () => buildKampKrokiModel(kampOdalari, kampKayitlari, personeller),
@@ -309,7 +319,11 @@ export const KampKrokiGorunumTab: React.FC<KampKrokiGorunumTabProps> = ({
   );
 
   const [selectedCampus, setSelectedCampus] = useState<string>('HEPSI');
+<<<<<<< HEAD
   const [exportingExcel, setExportingExcel] = useState(false);
+=======
+  const [modalFirmaFilter, setModalFirmaFilter] = useState<string | null>(null);
+>>>>>>> caf1e4c (feat(kamp): Firma bazli personel ve oda dagilim listesi ve raporlama eklendi)
 
   const visible = useMemo(() => {
     if (selectedCampus === 'HEPSI') return model;
@@ -389,10 +403,10 @@ export const KampKrokiGorunumTab: React.FC<KampKrokiGorunumTabProps> = ({
               Kat · Firma · Personel
             </h2>
             <p className="text-[12px] text-slate-300 mt-1 max-w-xl leading-relaxed">
-              Hangi katta hangi firmadan kaç kişi kaldığını kuşbakışı görün. Sağdaki Excel, taşeron bazında oda özetini antetli indirir.
+              Hangi katta hangi firmadan kaç kişi kaldığını kuşbakışı görün. Sağdaki Excel veya Firma etiketlerine tıklayarak personel &amp; oda detay raporunu açabilirsiniz.
             </p>
           </div>
-          <div className="flex flex-wrap gap-2 text-[11px]">
+          <div className="flex flex-wrap gap-2 text-[11px] items-center">
             <div className="bg-white/10 border border-white/15 rounded-xl px-3 py-2 min-w-[5.5rem]">
               <span className="block text-[9px] text-slate-300 uppercase font-bold">Kampta</span>
               <span className="font-display font-bold text-lg tabular-nums flex items-center gap-1">
@@ -417,6 +431,14 @@ export const KampKrokiGorunumTab: React.FC<KampKrokiGorunumTabProps> = ({
             >
               <FileSpreadsheet size={14} />
               {exportingExcel ? 'Excel hazırlanıyor…' : 'Taşeron oda Excel'}
+            </button>
+            <button
+              type="button"
+              onClick={() => setModalFirmaFilter('')}
+              className="py-2 px-3 bg-teal-600 hover:bg-teal-700 text-white font-extrabold rounded-xl text-[10px] uppercase tracking-wide shadow-md transition cursor-pointer flex items-center space-x-1 shrink-0"
+            >
+              <FileText size={14} />
+              <span>🏢 Firma Raporu</span>
             </button>
           </div>
         </div>
@@ -454,20 +476,23 @@ export const KampKrokiGorunumTab: React.FC<KampKrokiGorunumTabProps> = ({
       {totals.firmalar.length > 0 && (
         <div className="shrink-0 bg-white border border-slate-200 rounded-xl px-3 py-2.5 flex flex-wrap items-center gap-2 shadow-sm">
           <span className="text-[9px] font-black uppercase tracking-widest text-slate-400 mr-1">
-            Firma efsanesi
+            Firma efsanesi (Detay için firmaya tıklayın)
           </span>
           {totals.firmalar.map((f) => {
             const c = firmaKrokiColor(f.firma);
             return (
-              <span
+              <button
                 key={f.firma}
-                className="inline-flex items-center gap-1.5 text-[10px] font-bold px-2 py-1 rounded-lg border"
+                type="button"
+                onClick={() => setModalFirmaFilter(f.firma)}
+                className="inline-flex items-center gap-1.5 text-[10px] font-bold px-2 py-1 rounded-lg border transition hover:scale-105 cursor-pointer shadow-2xs"
                 style={{ background: c.soft, color: c.text, borderColor: `${c.bg}40` }}
+                title={`${f.firma} çalışanlarını ve oda listesini gör`}
               >
                 <span className="w-2.5 h-2.5 rounded" style={{ background: c.bg }} />
                 {f.firma}
                 <span className="tabular-nums opacity-80">{f.kisi}</span>
-              </span>
+              </button>
             );
           })}
         </div>
@@ -482,6 +507,39 @@ export const KampKrokiGorunumTab: React.FC<KampKrokiGorunumTabProps> = ({
           />
         ))}
       </div>
+
+      {/* Interactive Modal for Firma Grouped Personnel & Room View */}
+      {modalFirmaFilter !== null && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-6 animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl border border-slate-200 shadow-2xl w-full max-w-5xl h-[90vh] flex flex-col overflow-hidden">
+            <div className="p-3.5 bg-slate-900 text-white shrink-0 flex items-center justify-between">
+              <div className="flex items-center space-x-2">
+                <Building2 size={18} className="text-teal-400" />
+                <span className="font-extrabold text-sm">Firma Bazlı Kamp Sakinleri &amp; Oda Detayı</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setModalFirmaFilter(null)}
+                className="p-1 rounded-lg hover:bg-white/20 text-slate-300 hover:text-white transition cursor-pointer"
+              >
+                <X size={20} />
+              </button>
+            </div>
+            <div className="flex-1 min-h-0 flex flex-col p-2 sm:p-4 overflow-hidden">
+              <KampFirmaGroupedView
+                kampKayitlari={kampKayitlari}
+                personeller={personeller}
+                kampOdalari={kampOdalari}
+                initialFirmaFilter={modalFirmaFilter}
+                onSelectOda={(odaId) => {
+                  setModalFirmaFilter(null);
+                  onSelectOda?.(odaId);
+                }}
+              />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

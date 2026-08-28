@@ -71,6 +71,7 @@ import { ParselBlokAnalizPanel } from './ParselBlokAnalizPanel';
 import { KampFaaliyetTakipTab } from './KampFaaliyetTakipTab';
 import { KampKrokiGorunumTab } from './KampKrokiGorunumTab';
 import { KiralikKamyonPuantajTab } from './KiralikKamyonPuantajTab';
+import { KampFirmaGroupedView } from './KampFirmaGroupedView';
 interface IdariScreenProps {
   currentSubTab: string; // arac, kamp, saha, tutanak, cari_stok, eposta
   araclar: AracBakim[];
@@ -546,6 +547,7 @@ export const IdariScreen: React.FC<IdariScreenProps> = ({
   
   const [campCreationStep, setCampCreationStep] = useState<'campus' | 'floor' | 'room'>('room');
   const [kampMainView, setKampMainView] = useState<'odalar' | 'faaliyet' | 'personel' | 'kroki'>('odalar');
+  const [kampPersonelViewMode, setKampPersonelViewMode] = useState<'firma' | 'flat'>('firma');
   const [kampPersonelSearch, setKampPersonelSearch] = useState('');
   const [kampPersonelFirmFilter, setKampPersonelFirmFilter] = useState('');
   const [newCampusInput, setNewCampusInput] = useState("");
@@ -2940,7 +2942,7 @@ export const IdariScreen: React.FC<IdariScreenProps> = ({
                   : 'text-slate-500 hover:text-slate-800'
               }`}
             >
-              👤 Personel Listesi
+              🏢 Firma &amp; Personel Listesi
             </button>
           </div>
 
@@ -2954,9 +2956,67 @@ export const IdariScreen: React.FC<IdariScreenProps> = ({
               kampOdalari={kampOdalari}
               kampKayitlari={kampKayitlari}
               personeller={personeller}
+              onSelectOda={(odaId) => {
+                const room = kampOdalari.find((r) => r.id === odaId);
+                if (room) {
+                  if (room.yerleskeAdi) setSelectedYerleske(room.yerleskeAdi);
+                  if (room.kogusNo) setSelectedKat(room.kogusNo);
+                  setKampMainView('odalar');
+                }
+              }}
             />
           ) : kampMainView === 'personel' ? (
-            <div className="bg-white border border-[#e2e8f0] rounded-2xl flex flex-col overflow-hidden shadow-sm flex-1">
+            <div className="flex-1 flex flex-col min-h-0 gap-3">
+              {/* View Switcher Header Strip */}
+              <div className="shrink-0 bg-slate-900 text-white p-3 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-sm">
+                <div>
+                  <span className="text-[9px] font-black uppercase tracking-widest text-teal-400">Kamp &amp; Barınma Raporlama</span>
+                  <h3 className="font-display font-bold text-sm text-white flex items-center gap-2">
+                    👥 Kamp Sakinleri Firma ve Personel Listesi
+                  </h3>
+                </div>
+                <div className="flex items-center gap-1.5 bg-slate-800 p-1 rounded-xl shrink-0 border border-slate-700">
+                  <button
+                    type="button"
+                    onClick={() => setKampPersonelViewMode('firma')}
+                    className={`px-3 py-1.5 text-xs font-bold rounded-lg transition cursor-pointer ${
+                      kampPersonelViewMode === 'firma'
+                        ? 'bg-teal-600 text-white shadow-sm'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    🏢 Firma Bazlı Gruplu Liste
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setKampPersonelViewMode('flat')}
+                    className={`px-3 py-1.5 text-xs font-bold rounded-lg transition cursor-pointer ${
+                      kampPersonelViewMode === 'flat'
+                        ? 'bg-indigo-600 text-white shadow-sm'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    📄 Tüm Liste
+                  </button>
+                </div>
+              </div>
+
+              {kampPersonelViewMode === 'firma' ? (
+                <KampFirmaGroupedView
+                  kampKayitlari={kampKayitlari}
+                  personeller={personeller}
+                  kampOdalari={kampOdalari}
+                  onSelectOda={(odaId) => {
+                    const room = kampOdalari.find((r) => r.id === odaId);
+                    if (room) {
+                      if (room.yerleskeAdi) setSelectedYerleske(room.yerleskeAdi);
+                      if (room.kogusNo) setSelectedKat(room.kogusNo);
+                      setKampMainView('odalar');
+                    }
+                  }}
+                />
+              ) : (
+                <div className="bg-white border border-[#e2e8f0] rounded-2xl flex flex-col overflow-hidden shadow-sm flex-1 min-h-0">
               <div className="bg-[#2563EB] text-slate-100 p-4 shrink-0 flex justify-between items-center">
                 <div>
                   <span className="text-[10px] font-bold tracking-widest text-slate-300 uppercase">Kamp & Barınma</span>
@@ -3095,6 +3155,8 @@ export const IdariScreen: React.FC<IdariScreenProps> = ({
                   </tbody>
                 </table>
               </div>
+            </div>
+              )}
             </div>
           ) : (
         <div className="flex-1 flex flex-col lg:flex-row gap-4 lg:gap-6 min-h-0">

@@ -1138,7 +1138,8 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
               urunAdi: String(k.urunAdi || '').trim(),
               miktar: Number(String(k.miktar || '').replace(',', '.')),
               birim: String(k.birim || 'KG').trim() || 'KG',
-              stokKartId: k.stokKartId || undefined,
+              // Firestore undefined kabul etmez — boş string kullan
+              stokKartId: k.stokKartId || '',
             }))
             .filter((k: any) => k.urunAdi && Number.isFinite(k.miktar) && k.miktar > 0);
 
@@ -1336,7 +1337,8 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
         urunAdi: String(k.urunAdi || '').trim(),
         miktar: Number(String(k.miktar || '').replace(',', '.')),
         birim: String(k.birim || 'KG').trim() || 'KG',
-        stokKartId: k.stokKartId || undefined,
+        // Firestore undefined kabul etmez — boş string kullan
+        stokKartId: k.stokKartId || '',
       }));
 
       if (editEvrakTuru === 'İRSALİYE' && cleanedKalemler.length === 0) {
