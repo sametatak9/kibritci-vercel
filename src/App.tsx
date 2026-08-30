@@ -225,6 +225,9 @@ function App() {
   const [activeTab, setActiveTab] = useState<string>(() => {
     return readLastTab();
   });
+  const [yetkiVermeUnlocked, setYetkiVermeUnlocked] = useState(false);
+  const [yetkiVermePasswordInput, setYetkiVermePasswordInput] = useState('');
+  const [yetkiVermePasswordError, setYetkiVermePasswordError] = useState(false);
   const [maasSubTab, setMaasSubTab] = useState<'hesapla' | 'odeme'>('hesapla');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [showSignatureModal, setShowSignatureModal] = useState(false);
@@ -3003,6 +3006,11 @@ function App() {
     } catch {
       /* no-op */
     }
+    if (tab !== 'yetki_verme') {
+      setYetkiVermeUnlocked(false);
+      setYetkiVermePasswordInput('');
+      setYetkiVermePasswordError(false);
+    }
     setActiveTab(tab);
   };
 
@@ -3652,7 +3660,7 @@ function App() {
           userYetki={userYetki}
           isOpen={isSidebarOpen}
           onClose={() => setIsSidebarOpen(false)}
-          kisitliSayfalar={sanitizeKisitliSayfalar(userYetki, matchedU?.kisitliSayfalar)}
+          kisitliSayfalar={isPrivilegedAdmin ? [] : sanitizeKisitliSayfalar(userYetki, matchedU?.kisitliSayfalar)}
           onToggleMobileMode={() => {
             // Tam ERP kabuğu (sidebar + Yoklama/Faaliyet/Saha); istatistik kabuğu sekmeleri yutmasın
             setIsMobileMode(true);
@@ -4290,12 +4298,63 @@ function App() {
 
               {activeTab === "yetki_verme" && (
                 isPrivilegedAdmin ? (
-                  <YetkiVermeScreen 
-                    kullanicilar={kullanicilar}
-                    setKullanicilar={setKullanicilarWithSync}
-                    currentUser={currentUser}
-                    addNotification={addNotification}
-                  />
+                  yetkiVermeUnlocked ? (
+                    <YetkiVermeScreen 
+                      kullanicilar={kullanicilar}
+                      setKullanicilar={setKullanicilarWithSync}
+                      currentUser={currentUser}
+                      addNotification={addNotification}
+                    />
+                  ) : (
+                    <div className="flex-grow flex items-center justify-center bg-slate-50 p-6">
+                      <div className="bg-white border border-slate-200 rounded-3xl shadow-lg p-8 w-full max-w-sm space-y-6">
+                        <div className="text-center space-y-2">
+                          <div className="w-14 h-14 bg-slate-900 rounded-2xl flex items-center justify-center mx-auto">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                          </div>
+                          <h2 className="text-base font-black text-slate-900 uppercase tracking-wider">Erişim Şifresi</h2>
+                          <p className="text-xs text-slate-500">Bu alan kurucu korumalıdır. Devam etmek için şifreyi girin.</p>
+                        </div>
+                        <form
+                          onSubmit={(e) => {
+                            e.preventDefault();
+                            if (yetkiVermePasswordInput === '117270.Sametatak') {
+                              setYetkiVermeUnlocked(true);
+                              setYetkiVermePasswordError(false);
+                              setYetkiVermePasswordInput('');
+                            } else {
+                              setYetkiVermePasswordError(true);
+                              setYetkiVermePasswordInput('');
+                            }
+                          }}
+                          className="space-y-4"
+                        >
+                          <div>
+                            <input
+                              type="password"
+                              value={yetkiVermePasswordInput}
+                              onChange={(e) => {
+                                setYetkiVermePasswordInput(e.target.value);
+                                setYetkiVermePasswordError(false);
+                              }}
+                              placeholder="Şifreyi girin..."
+                              autoFocus
+                              className={`w-full border rounded-xl py-2.5 px-4 text-sm font-semibold text-slate-800 placeholder-slate-400 outline-none transition focus:border-slate-500 ${yetkiVermePasswordError ? 'border-red-400 bg-red-50' : 'border-slate-200 bg-slate-50'}`}
+                            />
+                            {yetkiVermePasswordError && (
+                              <p className="text-xs text-red-600 font-bold mt-1.5 text-center">Hatalı şifre. Lütfen tekrar deneyin.</p>
+                            )}
+                          </div>
+                          <button
+                            type="submit"
+                            className="w-full bg-slate-900 hover:bg-black text-white font-bold text-sm py-2.5 rounded-xl transition cursor-pointer"
+                          >
+                            Giriş
+                          </button>
+                        </form>
+                      </div>
+                    </div>
+                  )
                 ) : renderAccessDenied()
               )}
 
