@@ -1,0 +1,7 @@
+{
+  "projects": {
+    "default": "kibritci-erp",
+    "source": "learned-spark-25xj8",
+    "target": "kibritci-erp"
+  }
+}

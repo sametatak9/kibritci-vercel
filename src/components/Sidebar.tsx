@@ -1,12 +1,20 @@
-import React from 'react';
-import { Building2, Users, CalendarCheck2, CreditCard, ShoppingCart, Truck, KeySquare, FileText, Tent, Mail, ChartBar as BarChart3, BookOpen, Contact as Contact2, Package, LogOut, Wallet, Hop as Home, ShieldCheck, PenTool, MessageSquare, Smartphone, HardHat, Banknote } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { Building2, Users, CalendarCheck2, CreditCard, ShoppingCart, Truck, KeySquare, FileText, Tent, Mail, ChartBar as BarChart3, BookOpen, Contact as Contact2, Package, LogOut, Moon, Sun, Wallet, Hop as Home, ShieldCheck, PenTool, MessageSquare, HardHat, Banknote, Images, Sparkles, Link2, ChevronDown, ChevronRight, Search, Pin, PinOff, Wrench, Gem, Camera, Layers, ClipboardList, Smartphone } from 'lucide-react';
+import {
+  canAccessOnayHavuzu,
+  canAccessUyelikAdminPanel,
+  getRoleAllowedTabs,
+  isIdariIslerRole,
+  normalizeYetki,
+} from '../lib/yetkiUtils';
+import { readFavoriteTabs, writeFavoriteTabs } from '../lib/navPreferences';
+import { isRetiredPortalTab } from '../lib/yetkiUtils';
 
 interface SidebarProps {
   activeTab: string;
   setActiveTab: (tab: string) => void;
   currentUser?: any;
   onSignOut?: () => void;
-  onSignatureEdit?: () => void;
   isYonetici?: boolean;
   userYetki?: string;
   isOpen?: boolean;
@@ -20,7 +28,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
   setActiveTab,
   currentUser,
   onSignOut,
-  onSignatureEdit,
   isYonetici = false,
   userYetki,
   isOpen = false,
@@ -28,6 +35,24 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onToggleMobileMode,
   kisitliSayfalar = []
 }) => {
+  const GROUP_STATE_KEY = 'kibritci_sidebar_group_state_v1';
+  const normalizedYetki = normalizeYetki(userYetki);
+  const roleAllowedTabs = getRoleAllowedTabs(normalizedYetki);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [favorites, setFavorites] = useState<string[]>(() =>
+    readFavoriteTabs().filter((k) => !isRetiredPortalTab(k))
+  );
+
+  useEffect(() => {
+    writeFavoriteTabs(favorites);
+  }, [favorites]);
+
+  useEffect(() => {
+    const sync = () => setFavorites(readFavoriteTabs());
+    window.addEventListener('storage', sync);
+    return () => window.removeEventListener('storage', sync);
+  }, []);
+
   const menuItems = [
     {
       group: "BAŞLANGIÇ",
@@ -39,9 +64,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
       group: "PERSONEL",
       items: [
         { key: "personel", label: "Personel Yönetimi", icon: Users },
+        { key: "personel_kartlari", label: "Personel Kartı", icon: Users },
         { key: "yoklama", label: "Yoklama ve Puantaj", icon: CalendarCheck2 },
-        { key: "maas", label: "Maaş Hesaplama", icon: CreditCard },
-        { key: "maas_odeme", label: "Maaş Ödeme", icon: Banknote },
+        { key: "faaliyet_personel", label: "Faaliyeti Olan Personeller", icon: Camera },
+        { key: "maas", label: "Maaş Hesaplama & Ödeme", icon: CreditCard },
         { key: "personel_izin", label: "Personel İzin Formu", icon: FileText },
       ]
     },
@@ -49,16 +75,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
       group: "FINANS & ENVENTER",
       items: [
         { key: "kasa", label: "Haftalık Kasa", icon: Wallet },
-        { key: "satin_alma", label: "Satın Alma Talep", icon: ShoppingCart },
+        { key: "satin_alma", label: "Satın Alma Talebi", icon: ShoppingCart },
+        { key: "siparis_formu", label: "Sipariş Formu", icon: ClipboardList },
+        { key: "irsaliye_giris", label: "İrsaliye ve Fiş Girişi", icon: Truck },
+        { key: "t_cetveli", label: "T Cetveli", icon: BookOpen },
+        { key: "fatura_giris", label: "Fatura Girişi", icon: CreditCard },
+        { key: "taseron_kesinti", label: "Taşeron Yönetimi", icon: Wallet },
         { key: "cari_stok", label: "Cari ve Stok Kartları", icon: Package },
-        { key: "evrak_aktarimi", label: "AI Belge Aktarımı", icon: BookOpen },
-        { key: "kibar_hakedis", label: "Kibar Hakediş", icon: CreditCard },
-      ]
-    },
-    {
-      group: "İŞ MAKİNESİ & OPERATÖR",
-      items: [
-        { key: "operator", label: "Operatör Faaliyetleri", icon: HardHat },
+        { key: "kibar_hakedis", label: "ZER YAPI Hakediş", icon: CreditCard },
       ]
     },
     {
@@ -67,10 +91,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
         { key: "arac", label: "Araç ve Demirbaş", icon: Truck },
         { key: "kamp", label: "Kamp Yönetimi", icon: Tent },
         { key: "saha", label: "Saha Faaliyetleri", icon: Building2 },
-        { key: "tutanak", label: "Hazır Tutanaklar", icon: FileText },
+        { key: "proje_ilerleme", label: "Proje İlerlemesi", icon: BarChart3 },
+        { key: "operator", label: "Operatör Faaliyetleri", icon: HardHat },
         { key: "formen_ekrani", label: "Formen Mobil Paneli", icon: Contact2 },
         { key: "guvenlik_ekrani", label: "Güvenlik & Kapı Kontrol", icon: ShieldCheck },
         { key: "kampci_ekrani", label: "Kampçı Mobil Paneli", icon: Tent },
+        { key: "tesisatci_ekrani", label: "Tesisatçı Mobil Paneli", icon: Wrench },
+        { key: "mermerci_ekrani", label: "Mermerci Mobil Paneli", icon: Gem },
+        { key: "seramik_ekrani", label: "Götürü / Seramik Mobil", icon: Layers },
         { key: "lojistik_ekrani", label: "Şöför Mobil Paneli", icon: Truck },
         { key: "depocu_ekrani", label: "Depocu Mobil Paneli", icon: Package },
       ]
@@ -78,59 +106,64 @@ export const Sidebar: React.FC<SidebarProps> = ({
     {
       group: "RAPOR VE İLETİŞİM",
       items: [
-        { key: "sohbet", label: "Sohbet & Haberleşme", icon: MessageSquare },
-        { key: "eposta", label: "E-Posta Merkezi", icon: Mail },
         { key: "onay_islemleri", label: "Onay Havuzu & İmzalar", icon: ShieldCheck },
       ]
     },
     {
       group: "ADMİNİSTRATOR",
       items: [
-        { key: "admin", label: "Üyelik & Admin Paneli", icon: KeySquare },
+        { key: "admin", label: "Üyelik Onay & İmza", icon: KeySquare },
         { key: "yetki_verme", label: "Sayfa Yetkilendirme", icon: ShieldCheck },
       ]
     }
   ];
 
+  const emailLower = currentUser?.email?.toLowerCase();
+  const isFounderAdmin = emailLower === 'sametatak9@gmail.com';
+  const isSecondaryAdmin = emailLower === 'mudur@gmail.com';
+  const isPrivilegedAdmin = isFounderAdmin || isSecondaryAdmin;
+  const canSeeUyelikAdmin = canAccessUyelikAdminPanel(normalizedYetki, { isPrivilegedAdmin });
+  const canSeeOnayHavuzu = canAccessOnayHavuzu(normalizedYetki, {
+    isYonetici,
+    isPrivilegedAdmin,
+  });
+  const isIdariIsler = isIdariIslerRole(normalizedYetki);
+
   const filteredMenuItems = menuItems.map(group => {
     return {
       ...group,
       items: group.items.filter(item => {
-        if (kisitliSayfalar && kisitliSayfalar.includes(item.key)) {
-          return false;
+        if (!isPrivilegedAdmin && roleAllowedTabs) {
+          if (item.key === 't_cetveli') {
+            return (
+              roleAllowedTabs.includes('t_cetveli') ||
+              roleAllowedTabs.includes('irsaliye_giris') ||
+              roleAllowedTabs.includes('fatura_giris')
+            );
+          }
+          return roleAllowedTabs.includes(item.key as typeof roleAllowedTabs[number]);
         }
 
-        if (item.key === 'kibar_hakedis') {
-          const emailLower = currentUser?.email?.toLowerCase();
-          return emailLower === 'sametatak9@gmail.com' || emailLower === 'santiye@kibritci.com';
+        if (kisitliSayfalar && kisitliSayfalar.includes(item.key)) {
+          // İdari İşler: üyelik onay + onay havuzu kısıt listesinde olsa bile görünür
+          if (!(isIdariIsler && (item.key === 'admin' || item.key === 'onay_islemleri'))) {
+            return false;
+          }
+        }
+
+        if (item.key === 'admin') {
+          return canSeeUyelikAdmin;
         }
 
         if (item.key === 'yetki_verme') {
-          const emailLower = currentUser?.email?.toLowerCase();
-          return emailLower === 'sametatak9@gmail.com' || emailLower === 'santiye@kibritci.com';
-        }
-
-        if (userYetki === 'FORMEN') {
-          return item.key === 'formen_ekrani';
-        }
-
-        if (userYetki === 'GÜVENLİK') {
-          return item.key === 'guvenlik_ekrani';
-        }
-
-        if (userYetki === 'KAMPÇI') {
-          return item.key === 'kampci_ekrani';
-        }
-
-        if (userYetki === 'LOJİSTİK') {
-          return item.key === 'lojistik_ekrani';
-        }
-
-        if (userYetki === 'DEPOCU') {
-          return item.key === 'depocu_ekrani';
+          return isPrivilegedAdmin;
         }
 
         if (item.key === 'formen_ekrani') {
+          return isYonetici;
+        }
+
+        if (item.key === 'rapor_programlama') {
           return isYonetici;
         }
 
@@ -139,6 +172,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
         }
 
         if (item.key === 'kampci_ekrani') {
+          return isYonetici;
+        }
+
+        if (item.key === 'tesisatci_ekrani') {
+          return isYonetici;
+        }
+
+        if (item.key === 'mermerci_ekrani') {
+          return isYonetici;
+        }
+
+        if (item.key === 'seramik_ekrani') {
           return isYonetici;
         }
 
@@ -151,15 +196,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         }
 
         if (item.key === 'onay_islemleri') {
-          return isYonetici;
-        }
-
-        if (item.key === 'evrak_aktarimi') {
-          return isYonetici;
-        }
-
-        if (item.key === 'maas_odeme') {
-          return isYonetici;
+          return canSeeOnayHavuzu;
         }
 
         if (item.key === 'operator') {
@@ -167,29 +204,73 @@ export const Sidebar: React.FC<SidebarProps> = ({
         }
 
         return true;
+      }).filter(item => {
+        if (!searchTerm) return true;
+        return item.label.toLowerCase().includes(searchTerm.toLowerCase());
       })
     };
   }).filter(group => {
-    if (group.group === "ADMİNİSTRATOR") {
-      const emailLower = currentUser?.email?.toLowerCase();
-      const isSametOrAdmin = emailLower === "sametatak95@gmail.com" || emailLower === "sametatak9@gmail.com" || emailLower === "santiye@kibritci.com";
-      return isSametOrAdmin || isYonetici;
+    if (group.group === "ADMİNİSTRATOR" && !canSeeUyelikAdmin && !isPrivilegedAdmin) {
+      return false;
     }
     return group.items.length > 0;
   });
+
+  const favItems = menuItems.flatMap(g => g.items).filter(item => favorites.includes(item.key)).filter(item => {
+    // Only show if user is allowed
+    return filteredMenuItems.some(g => g.items.some(it => it.key === item.key));
+  });
+
+  const displayMenuItems = favItems.length > 0 && !searchTerm
+    ? [{ group: "SIK KULLANILANLAR", items: favItems }, ...filteredMenuItems]
+    : filteredMenuItems;
+
+  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>(() => {
+    try {
+      const raw = localStorage.getItem(GROUP_STATE_KEY);
+      if (raw) return JSON.parse(raw) as Record<string, boolean>;
+    } catch {
+      /* ignore */
+    }
+    return Object.fromEntries(menuItems.map((g) => [g.group, false]));
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(GROUP_STATE_KEY, JSON.stringify(expandedGroups));
+    } catch {
+      /* ignore */
+    }
+  }, [expandedGroups]);
+
+  useEffect(() => {
+    const activeGroup = displayMenuItems.find((g) => g.items.some((it) => it.key === activeTab));
+    if (!activeGroup) return;
+    setExpandedGroups((prev) => {
+      if (prev[activeGroup.group]) return prev;
+      return { ...prev, [activeGroup.group]: true };
+    });
+  }, [activeTab]);
+
+  useEffect(() => {
+    if (searchTerm) {
+      const allExpanded = Object.fromEntries(displayMenuItems.map(g => [g.group, true]));
+      setExpandedGroups(prev => ({ ...prev, ...allExpanded }));
+    }
+  }, [searchTerm]);
 
   return (
     <>
       {isOpen && (
         <div
           onClick={onClose}
-          className="fixed inset-0 bg-black/60 z-35 lg:hidden backdrop-blur-xs transition-opacity cursor-pointer animate-fade-in"
+          className="fixed inset-0 bg-slate-900/40 z-35 lg:hidden backdrop-blur-sm transition-opacity cursor-pointer animate-fade-in"
         />
       )}
-      <aside className={`fixed lg:static inset-y-0 left-0 z-40 w-68 bg-white h-screen border-r border-slate-200 flex flex-col select-none shrink-0 font-sans text-slate-800 transition-transform duration-300 transform ${isOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}`}>
-        <div className="p-5 border-b border-slate-200 flex items-center justify-between">
+      <aside className={`fixed lg:static inset-y-0 left-0 z-40 w-68 bg-white/95 backdrop-blur-2xl h-screen border-r border-slate-200/60 flex flex-col select-none shrink-0 font-sans text-slate-700 shadow-sm transition-transform duration-300 transform ${isOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}`}>
+        <div className="p-5 border-b border-slate-100 flex items-center justify-between">
           <div className="flex items-center space-x-3">
-            <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center text-white shadow-sm transform hover:rotate-3 transition">
+            <div className="w-10 h-10 bg-slate-900 rounded-xl flex items-center justify-center text-white shadow-sm transform hover:rotate-3 transition">
               <Building2 size={22} className="stroke-[2.5]" />
             </div>
             <div>
@@ -203,80 +284,121 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
           <button
             onClick={onClose}
-            className="lg:hidden text-slate-400 hover:text-slate-650 p-1 rounded-lg"
+            className="lg:hidden text-slate-400 hover:text-slate-600 p-1 rounded-lg"
           >
             ✕
           </button>
         </div>
 
         <div className="flex-1 overflow-y-auto px-3 py-4 space-y-5">
+          
+        <div className="px-3">
+          <button
+            onClick={() => document.documentElement.classList.toggle('dark-mode')}
+            className="w-full flex items-center justify-center space-x-2 bg-slate-900 hover:bg-black text-white py-2.5 rounded-xl font-bold text-[11px] transition cursor-pointer shadow-sm keep-colors"
+          >
+            <Moon size={14} />
+            <span>Gece Modu</span>
+          </button>
+        </div>
+
           <div className="px-3">
+            <div className="relative mb-2">
+              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                <Search size={14} className="text-slate-400" />
+              </div>
+              <input
+                type="text"
+                placeholder="Modül ara..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full bg-slate-50 border border-slate-200 text-xs text-slate-700 rounded-xl pl-9 pr-3 py-2.5 outline-none focus:border-slate-400 focus:bg-white transition-colors"
+              />
+            </div>
             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest leading-none">
               Modüller
             </span>
           </div>
 
-          {filteredMenuItems.map((group, grpIdx) => (
+          {displayMenuItems.map((group, grpIdx) => (
             <div key={grpIdx} className="space-y-1.5">
-              <span className="px-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-2">
-                {group.group}
-              </span>
-              {group.items.map((item) => {
+              <button
+                type="button"
+                onClick={() =>
+                  setExpandedGroups((prev) => ({ ...prev, [group.group]: !prev[group.group] }))
+                }
+                className="w-full px-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1 flex items-center justify-between hover:text-slate-600 transition cursor-pointer"
+              >
+                <span>{group.group}</span>
+                {expandedGroups[group.group] ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+              </button>
+              {expandedGroups[group.group] && group.items.map((item) => {
                 const Icon = item.icon;
                 const isActive = activeTab === item.key;
+                const isFav = favorites.includes(item.key);
                 return (
-                  <button
-                    key={item.key}
-                    onClick={() => {
-                      setActiveTab(item.key);
-                      if (onClose) onClose();
-                    }}
-                    className={`w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg text-[13px] font-semibold transition-all duration-200 group text-left cursor-pointer ${
-                      isActive
-                        ? "bg-blue-50 text-blue-700 border-l-4 border-blue-600 shadow-xs font-semibold"
-                        : "text-slate-650 hover:bg-slate-50 hover:text-slate-900"
-                    }`}
-                  >
-                    <Icon
-                      size={16}
-                      className={`shrink-0 transition-transform group-hover:scale-105 ${
-                        isActive ? "text-blue-650" : "text-slate-400 group-hover:text-slate-700"
+                  <div key={item.key} className="relative group flex items-center">
+                    <button
+                      onClick={() => {
+                        setActiveTab(item.key);
+                        if (onClose) onClose();
+                      }}
+                      className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-[13px] transition-all duration-150 text-left cursor-pointer ${
+                        isActive
+                          ? "bg-orange-50 text-orange-950 border border-orange-200 font-bold"
+                          : "text-slate-600 font-medium hover:bg-slate-100/70 hover:text-slate-900 border border-transparent"
                       }`}
-                    />
-                    <span className="truncate">{item.label}</span>
-                  </button>
+                    >
+                      <div className="flex items-center space-x-3 min-w-0 pr-6">
+                        <Icon
+                          size={16}
+                          className={`shrink-0 ${
+                            isActive ? "text-orange-600" : "text-slate-400 group-hover:text-slate-600"
+                          }`}
+                        />
+                        <span className="leading-snug">{item.label}</span>
+                      </div>
+                    </button>
+                    
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setFavorites(prev => 
+                          isFav ? prev.filter(k => k !== item.key) : [...prev, item.key]
+                        );
+                      }}
+                      className={`absolute right-2 p-1.5 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer ${
+                        isActive ? "hover:bg-orange-100 text-amber-600" : "hover:bg-slate-200 text-slate-400 hover:text-amber-500"
+                      } ${isFav ? "opacity-100 text-amber-400" : ""}`}
+                      title={isFav ? "Favorilerden Çıkar" : "Sık Kullanılanlara Ekle"}
+                    >
+                      {isFav ? <PinOff size={14} /> : <Pin size={14} />}
+                    </button>
+                  </div>
                 );
               })}
             </div>
           ))}
         </div>
 
-        <div className="p-4 border-t border-slate-200 space-y-2">
-          {onSignatureEdit && (
-            <button
-              onClick={onSignatureEdit}
-              className="w-full flex items-center space-x-2 px-3 py-2 rounded-lg text-[13px] font-semibold text-slate-650 hover:bg-slate-50 hover:text-slate-900 transition cursor-pointer"
-            >
-              <PenTool size={16} className="text-slate-400" />
-              <span>İmza Ayarları</span>
-            </button>
-          )}
+        <div className="p-4 border-t border-slate-100 space-y-2">
+
           {onToggleMobileMode && (
             <button
               onClick={onToggleMobileMode}
-              className="w-full flex items-center space-x-2 px-3 py-2 rounded-lg text-[13px] font-semibold text-slate-650 hover:bg-slate-50 hover:text-slate-900 transition cursor-pointer"
+              className="w-full flex items-center space-x-2 px-3 py-2 rounded-xl text-[13px] font-semibold text-slate-600 hover:bg-slate-50 hover:text-slate-900 transition cursor-pointer lg:hidden"
             >
               <Smartphone size={16} className="text-slate-400" />
-              <span>Mobil Mod</span>
+              <span>Mobil Görünüme Geç</span>
             </button>
           )}
           {onSignOut && (
             <button
               onClick={onSignOut}
-              className="w-full flex items-center space-x-2 px-3 py-2 rounded-lg text-[13px] font-semibold text-rose-600 hover:bg-rose-50 transition cursor-pointer"
+              className="w-full flex items-center space-x-2 px-3 py-2 rounded-xl text-[13px] font-semibold text-rose-600 hover:bg-rose-50 hover:text-rose-700 transition cursor-pointer"
             >
               <LogOut size={16} />
-              <span>Oturumu Kapat</span>
+              <span>Çıkış Yap</span>
             </button>
           )}
         </div>

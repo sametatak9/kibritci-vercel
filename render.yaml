@@ -1,0 +1,43 @@
+# Render Blueprint — tek servis: kibritci_web
+# Not: Aynı repo için ikinci bir Web Service (kibritci-erp vb.) bağlamayın; çift deploy olur.
+#
+# Akvizyon grup nöbeti (21:00 İstanbul) otomatik kapanış:
+# - Uygulama açıkken istemci her dakika kontrol eder
+# - Sunucu: POST /api/cron/akvizyon-nobet-kapat (X-Cron-Secret: CRON_SECRET)
+# - İsteğe bağlı harici cron: npm run cron:akvizyon-nobet
+services:
+  - type: web
+    name: kibritci_web
+    runtime: node
+    plan: free
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: GEMINI_API_KEY
+        sync: false
+      # kibritci-erp Firebase — Console > Project settings > Web app değerleri
+      # Tanımlanmazsa firebase-applet-config.json (learned-spark) kullanılır.
+      - key: VITE_FIREBASE_PROJECT_ID
+        sync: false
+      - key: VITE_FIREBASE_API_KEY
+        sync: false
+      - key: VITE_FIREBASE_AUTH_DOMAIN
+        sync: false
+      - key: VITE_FIREBASE_STORAGE_BUCKET
+        sync: false
+      - key: VITE_FIREBASE_MESSAGING_SENDER_ID
+        sync: false
+      - key: VITE_FIREBASE_APP_ID
+        sync: false
+      # kibritci-erp (default) DB için boş bırakın veya tanımlamayın
+      - key: VITE_FIREBASE_FIRESTORE_DATABASE_ID
+        sync: false
+      # Firebase Admin — Authentication şifre sıfırlama ve kurucu bootstrap için zorunlu
+      - key: FIREBASE_SERVICE_ACCOUNT_JSON
+        sync: false
+      # Akvizyon grup nöbeti cron API (X-Cron-Secret)
+      - key: CRON_SECRET
+        sync: false

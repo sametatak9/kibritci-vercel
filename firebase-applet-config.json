@@ -1,10 +1,10 @@
 {
-  "projectId": "learned-spark-25xj8",
-  "appId": "1:716468161582:web:6d366e8a9d7656028823bf",
-  "apiKey": "AIzaSyAIG1kZRAN2zJfzj_ZJzGBpN6w2O3eleWc",
-  "authDomain": "learned-spark-25xj8.firebaseapp.com",
-  "firestoreDatabaseId": "ai-studio-84f7bd62-d0d7-423b-9b98-326934f7a0aa",
-  "storageBucket": "learned-spark-25xj8.firebasestorage.app",
-  "messagingSenderId": "716468161582",
-  "measurementId": ""
+  "projectId": "kibritci-erp",
+  "appId": "1:139416302982:web:3e87f22ca5d29ed1a8a807",
+  "apiKey": "AIzaSyC7DIWBLXrkdDMIufYK_jEnSOjQ7XZQ6VI",
+  "authDomain": "kibritci-erp.firebaseapp.com",
+  "firestoreDatabaseId": "",
+  "storageBucket": "kibritci-erp.firebasestorage.app",
+  "messagingSenderId": "139416302982",
+  "measurementId": "G-Q1E17B3W0H"
 }

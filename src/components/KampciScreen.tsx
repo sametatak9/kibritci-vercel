@@ -1,24 +1,88 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   Tent, Plus, Trash2, Camera, Check, RefreshCw, Eye, 
-  Search, UserPlus, ClipboardList, Package, Layers, MapPin, Sparkles, CheckCircle, Clock, X, ArrowRight, ShieldCheck, DoorOpen, LogOut
+  Search, UserPlus, ClipboardList, Package, Layers, MapPin, Sparkles, CheckCircle, Clock, X, ArrowRight, ShieldCheck, DoorOpen, LogOut, Image as ImageIcon, MessageSquare, Calendar, Truck, AlertTriangle, Building2
 } from 'lucide-react';
-import { KampOdasi, KampKaydi, Personel, StokKart } from '../types/erp';
+import { KampOdasi, KampKaydi, Personel, StokKart, KampYerleske, KampKat, CariKart, CariKartIslem, AylikYoklamaMap, Fatura, Irsaliye, KampFirmaTalep } from '../types/erp';
 import { db, saveDocument } from '../lib/firebase';
 import { compressImage } from '../lib/imageCompress';
-import { collection, onSnapshot, doc, updateDoc, query, orderBy } from 'firebase/firestore';
-
+import { ensureKampFaaliyetFotoPersisted } from '../lib/sahaFaaliyetFotoStorage';
+import { createKampYerleske, createKampKat, katsForYerleske, createKampOdasi, deleteKampOdasi, updateKampOdasi } from '../lib/kampYapisi';
+import { assignKampResident, evictKampResident, reactivateEvictedKampStays, detectMassKampEvictionDate } from '../lib/kampPlacementUtils';
+import { buildKampciGunlukOzet } from '../lib/gunlukAkisUtils';
+import { buildWhatsAppUrl } from '../lib/mobilOnayUtils';
+import { KampHaftalikYoklamaTab } from './KampHaftalikYoklamaTab';
+import { KampGunlukYoklamaTab } from './KampGunlukYoklamaTab';
+import { KampVidanjorTab } from './KampVidanjorTab';
+import { KampTaseronSayimTab } from './KampTaseronSayimTab';
+import { KampFirmaGroupedView } from './KampFirmaGroupedView';
+import { AylikPuantajMobilPanel } from './AylikPuantajMobilPanel';
+import { collection, onSnapshot, doc, updateDoc, setDoc, query, orderBy } from 'firebase/firestore';
+import {
+  applySahaMesaiToYoklama,
+  mesaiInputDisplayValue,
+  normalizeMesaiHours,
+  setMesaiHoursInMap,
+} from '../lib/sahaFaaliyetUtils';
+import { submitPersonelCikisTalebi } from '../lib/personelCikisTalebiUtils';
+import { buildKampIstenCikisNedeni, resolveKampTahliyeChoice } from '../lib/kampTahliyeChoiceUtils';
+import {
+  CANONICAL_ANA_FIRMA_ADI,
+  canonicalizeAnaFirmaAdi,
+  isTaseronPersonel,
+  isKampciYoklamaKapsami,
+  isSoforGorev,
+  isOperatorGorev,
+  isIdariPersonel,
+  isGorevsizPersonel,
+  getYoklamaDay,
+  setYoklamaDay,
+} from '../lib/yoklamaUtils';
+import { todayDateKey, normalizeDateKey } from '../lib/dateKeyUtils';
+import { firmaEslesir, getTaseronCariKartlar, resolveTaseronPersonelGorev, TASERON_PERSONEL_DEPARTMAN, withTaseronPersonelGorev } from '../lib/taseronUtils';
+import {
+  buildKampFirmaTalep,
+  evaluateKampFirmaOnerisi,
+  findSimilarTaseronCariler,
+} from '../lib/kampFirmaTalepUtils';
+import { validateTC } from '../lib/personelOdemeUtils';
+import {
+  AUTO_MERGE_SCORE_MAX,
+  findPersonelMatches,
+  formatPersonelMatchLabel,
+  loadPersonellerForDedup,
+  phoneMatchKey,
+  pickBestPersonelMatch,
+  shouldConfirmPersonelMerge,
+  upsertPersonelAvoidDuplicate,
+} from '../lib/personelMatchUtils';
+import { vibrateVidanjorAlert } from '../lib/vidanjorUtils';
+import { resolveGeldiRolPersonelIds } from '../lib/mobilRolEtiketUtils';
 interface KampciScreenProps {
   kampOdalari: KampOdasi[];
   setKampOdalari: React.Dispatch<React.SetStateAction<KampOdasi[]>>;
   kampKayitlari: KampKaydi[];
   setKampKayitlari: React.Dispatch<React.SetStateAction<KampKaydi[]>>;
+  reloadKampData?: () => Promise<void>;
+  kampYerleskeleri?: KampYerleske[];
+  kampKatlari?: KampKat[];
   personeller: Personel[];
+  setPersoneller?: React.Dispatch<React.SetStateAction<Personel[]>>;
+  cariKartlar?: CariKart[];
+  setCariKartlar?: React.Dispatch<React.SetStateAction<CariKart[]>>;
+  yoklamalar?: AylikYoklamaMap;
+  setYoklamalar?: (updater: AylikYoklamaMap | ((y: AylikYoklamaMap) => AylikYoklamaMap)) => void;
+  saveYoklamalarNow?: (next: AylikYoklamaMap, kaynak?: string) => Promise<void>;
   stokKartlar?: StokKart[];
+  faturalar?: Fatura[];
+  setFaturalar?: React.Dispatch<React.SetStateAction<Fatura[]>>;
+  irsaliyeler?: Irsaliye[];
+  setIrsaliyeler?: React.Dispatch<React.SetStateAction<Irsaliye[]>>;
+  setCariIslemGecmisi?: React.Dispatch<React.SetStateAction<CariKartIslem[]>>;
   currentUser: any;
   onSignOut?: () => void;
   isStandalone?: boolean;
-  addNotification?: (mesaj: string) => void;
+  addNotification?: (mesaj: string, meta?: Record<string, unknown>) => void | Promise<void>;
 }
 
 export const KampciScreen: React.FC<KampciScreenProps> = ({
@@ -26,58 +90,495 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
   setKampOdalari,
   kampKayitlari,
   setKampKayitlari,
+  reloadKampData,
+  kampYerleskeleri = [],
+  kampKatlari = [],
   personeller,
+  setPersoneller,
+  cariKartlar = [],
+  setCariKartlar,
+  yoklamalar = {},
+  setYoklamalar,
+  saveYoklamalarNow,
   stokKartlar = [],
+  faturalar = [],
+  setFaturalar,
+  irsaliyeler = [],
+  setIrsaliyeler,
+  setCariIslemGecmisi,
   currentUser,
   onSignOut,
   isStandalone = false,
   addNotification
 }) => {
-  // Tabs: 'rooms' (Oda & Kat Açma) | 'placement' (Kampa Yerleşim) | 'warehouse' (Depo Sayımı) | 'activities' (Günlük Faaliyetler)
-  const [activeSubTab, setActiveSubTab] = useState<'rooms' | 'placement' | 'warehouse' | 'activities'>('placement');
+  // Tabs: 'rooms' | 'placement' | 'warehouse' | 'activities' | 'haftalik_yoklama' | 'yoklama' | 'aylik_puantaj' | 'vidanjor' | ...
+  const [activeSubTab, setActiveSubTab] = useState<'rooms' | 'placement' | 'warehouse' | 'activities' | 'gunluk_akis' | 'personel_giris' | 'taseron_sayim' | 'firma_listesi' | 'haftalik_yoklama' | 'yoklama' | 'aylik_puantaj' | 'vidanjor'>('placement');
+
+  const filterKampciPersonel = React.useCallback(
+    (p: Personel) => {
+      if (isTaseronPersonel(p) || isIdariPersonel(p) || isGorevsizPersonel(p)) return false;
+      // Şöför / operatör kendi yoklamalarında; kampçı listesinde görünmez
+      if (isSoforGorev(p.gorev) || isOperatorGorev(p.gorev)) return false;
+      // Kampçı + Şenör
+      return isKampciYoklamaKapsami(p.gorev);
+    },
+    []
+  );
+  const [sendingKampAkis, setSendingKampAkis] = useState(false);
   const [viewMode, setViewMode] = useState<'web' | 'mobile'>('web');
 
   // ─────────────────────────────────────────────────────────────
   // STATUS / ALERTS STATE
   // ─────────────────────────────────────────────────────────────
-  const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
+  const statusHideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const showStatus = (type: 'success' | 'error', text: string) => {
+  const showStatus = (type: 'success' | 'error' | 'info', text: string, autoHideMs = 4000) => {
+    if (statusHideTimer.current) clearTimeout(statusHideTimer.current);
     setStatusMessage({ type, text });
-    setTimeout(() => setStatusMessage(null), 4000);
+    if (type !== 'info' && autoHideMs > 0) {
+      statusHideTimer.current = setTimeout(() => setStatusMessage(null), autoHideMs);
+    }
   };
 
+  const showKampYoklamaStatus = (type: 'success' | 'error', text: string) => {
+    showStatus(type, text);
+    void addNotification?.(text);
+  };
+
+  // Kapı vidanjör girişi → kampçı her sekmedeyken bildirim + titreşim
+  const [vidanjorAlert, setVidanjorAlert] = useState<string | null>(null);
+  const seenVidanjorNotifIds = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, 'bildirimler'), (snap) => {
+      const now = Date.now();
+      snap.docChanges().forEach((change) => {
+        if (change.type !== 'added') return;
+        const id = change.doc.id;
+        if (seenVidanjorNotifIds.current.has(id)) return;
+        const data = change.doc.data() as Record<string, unknown>;
+        const tip = String(data.tip || data.metaTip || '');
+        const hedef = String(data.hedefRol || '').toLocaleUpperCase('tr-TR');
+        const mesaj = String(data.mesaj || '');
+        const ts = new Date(String(data.tarih || 0)).getTime();
+        if (Number.isFinite(ts) && now - ts > 120_000) return;
+        const isVidanjor =
+          tip === 'VIDANJOR_GIRIS' ||
+          (hedef.includes('KAMP') && mesaj.toLocaleLowerCase('tr-TR').includes('vidanj'));
+        if (!isVidanjor) return;
+        seenVidanjorNotifIds.current.add(id);
+        vibrateVidanjorAlert();
+        setVidanjorAlert(mesaj || 'Vidanjör sahaya giriş yaptı — fiş yükleyin.');
+        setActiveSubTab('vidanjor');
+        try {
+          window.dispatchEvent(
+            new CustomEvent('app-toast', {
+              detail: { type: 'info', message: mesaj || 'Vidanjör girişi' },
+            })
+          );
+        } catch {
+          /* ignore */
+        }
+      });
+    });
+    return () => unsub();
+  }, []);
+
   // ─────────────────────────────────────────────────────────────
-  // 🏕️ 1. ODA & YERLEŞKE OLUŞTURMA STATE
+  // 🏕️ 1. YERLEŞKE / KAT / ODA — App seviyesinde Firestore dinleyicisi ile senkron
   // ─────────────────────────────────────────────────────────────
-  const [yerleskeAdi, setYerleskeAdi] = useState('Merkez Konteyner Kampı');
-  const [customYerleskeAdi, setCustomYerleskeAdi] = useState("");
-  const [showCustomYerleske, setShowCustomYerleske] = useState(false);
-  const [kogusNo, setKogusNo] = useState('A Blok (Zemin Kat)'); // Acts as Floor / Block
-  const [customKogusNo, setCustomKogusNo] = useState("");
-  const [showCustomKogus, setShowCustomKogus] = useState(false);
+  const [setupStep, setSetupStep] = useState<1 | 2 | 3>(1);
+  const [selectedYerleskeId, setSelectedYerleskeId] = useState('');
+  const [selectedKatId, setSelectedKatId] = useState('');
+  const [newYerleskeAd, setNewYerleskeAd] = useState('');
+  const [newKatAd, setNewKatAd] = useState('');
   const [odaNo, setOdaNo] = useState('');
   const [kapasite, setKapasite] = useState<number>(4);
   const [firmaTipi, setFirmaTipi] = useState<'ANA_FIRMA' | 'TASERON'>('ANA_FIRMA');
   const [loadingRoom, setLoadingRoom] = useState(false);
+  const [loadingYapı, setLoadingYapı] = useState(false);
+
+  const yerleskeler = kampYerleskeleri;
+  const katlar = kampKatlari;
+
+  const taseronCariler = useMemo(() => getTaseronCariKartlar(cariKartlar), [cariKartlar]);
+  const [kampFirmaTalepleri, setKampFirmaTalepleri] = useState<KampFirmaTalep[]>([]);
+  const pendingFirmaTalepleri = useMemo(
+    () => kampFirmaTalepleri.filter((t) => t.durum === 'ONAY BEKLİYOR'),
+    [kampFirmaTalepleri]
+  );
+  const [placementFirmaTipi, setPlacementFirmaTipi] = useState<'ANA_FIRMA' | 'TASERON'>('ANA_FIRMA');
+
+  const selectedYerleske = yerleskeler.find(y => y.id === selectedYerleskeId);
+  const selectedKat = katlar.find(k => k.id === selectedKatId);
+  const yerleskeKatlari = selectedYerleskeId ? katsForYerleske(katlar, selectedYerleskeId) : [];
 
   // ─────────────────────────────────────────────────────────────
   // 👥 2. YERLEŞİM (CHECK-IN / OUT) STATE
   // ─────────────────────────────────────────────────────────────
+  const [placementYerleskeId, setPlacementYerleskeId] = useState('');
+  const [placementKatId, setPlacementKatId] = useState('');
   const [selectedRoomId, setSelectedRoomId] = useState('');
+
+  const placementYerleskeOptions = useMemo(() => {
+    const seen = new Map<string, string>();
+
+    // Primary source: centrally managed campus definitions
+    for (const y of yerleskeler) {
+      if (y.id && y.ad) seen.set(y.id, y.ad);
+    }
+
+    // Fallback source: legacy rooms that may not have normalized structure
+    for (const room of kampOdalari) {
+      const key = room.yerleskeId || room.yerleskeAdi;
+      if (key) seen.set(key, room.yerleskeAdi);
+    }
+
+    return [...seen.entries()]
+      .map(([id, ad]) => ({ id, ad }))
+      .sort((a, b) => a.ad.localeCompare(b.ad, 'tr'));
+  }, [yerleskeler, kampOdalari]);
+
+  const placementKatOptions = useMemo(() => {
+    if (!placementYerleskeId) return [] as KampKat[];
+    const yerleske = placementYerleskeOptions.find(y => y.id === placementYerleskeId);
+    const yerleskeAd = yerleske?.ad || '';
+    const yerleskeRecord = yerleskeler.find(y => y.id === placementYerleskeId || y.ad === yerleskeAd);
+
+    if (yerleskeRecord) {
+      // Do not require an existing room for a floor to be selectable.
+      // This keeps Kampçı and Kamp Yönetimi in sync as soon as floor is created.
+      const kats = katsForYerleske(katlar, yerleskeRecord.id);
+      if (kats.length > 0) {
+        return kats.sort((a, b) => a.sira - b.sira || a.ad.localeCompare(b.ad, 'tr'));
+      }
+    }
+
+    const seen = new Map<string, string>();
+    kampOdalari
+      .filter(r => r.yerleskeId === placementYerleskeId || r.yerleskeAdi === yerleskeAd)
+      .forEach(r => {
+        const key = r.katId || r.kogusNo;
+        if (key) seen.set(key, r.kogusNo);
+      });
+
+    return [...seen.entries()]
+      .map(([id, ad]) => ({
+        id,
+        ad,
+        yerleskeId: placementYerleskeId,
+        yerleskeAdi: yerleskeAd,
+        sira: 0,
+        olusturmaTarihi: '',
+      }))
+      .sort((a, b) => a.ad.localeCompare(b.ad, 'tr'));
+  }, [placementYerleskeId, kampOdalari, katlar, yerleskeler, placementYerleskeOptions]);
+
+  const placementOdaOptions = useMemo(() => {
+    if (!placementYerleskeId || !placementKatId) return [];
+    const yerleske = placementYerleskeOptions.find(y => y.id === placementYerleskeId);
+    const kat = placementKatOptions.find(k => k.id === placementKatId);
+    if (!yerleske || !kat) return [];
+
+    return kampOdalari
+      .filter(r => {
+        const yerleskeMatch = r.yerleskeId === placementYerleskeId || r.yerleskeAdi === yerleske.ad;
+        const katMatch = r.katId === placementKatId || r.kogusNo === kat.ad;
+        return yerleskeMatch && katMatch;
+      })
+      .sort((a, b) => a.odaNo.localeCompare(b.odaNo, 'tr', { numeric: true }));
+  }, [placementYerleskeId, placementKatId, kampOdalari, placementYerleskeOptions, placementKatOptions]);
   const [placementType, setPlacementType] = useState<'DB' | 'MANUAL'>('DB');
   const [selectedPersonelId, setSelectedPersonelId] = useState('');
   const [manualPersonelIsim, setManualPersonelIsim] = useState('');
   const [searchPersonelQuery, setSearchPersonelQuery] = useState('');
+  const [placementTcNo, setPlacementTcNo] = useState('');
+  const [placementTelefonNo, setPlacementTelefonNo] = useState('');
   const [firmaType, setFirmaType] = useState<'DB' | 'MANUAL'>('DB');
   const [selectedFirma, setSelectedFirma] = useState('');
   const [manualFirma, setManualFirma] = useState('');
   const [loadingPlacement, setLoadingPlacement] = useState(false);
+  const [placementModalRoom, setPlacementModalRoom] = useState<KampOdasi | null>(null);
+
+  const digitsOnly = (raw: string) => String(raw || '').replace(/\D/g, '');
+  const phoneMatchKey = (raw: string) => {
+    const d = digitsOnly(raw);
+    if (d.length >= 10) return d.slice(-10);
+    return d;
+  };
+
+  const normalizeNameKey = (raw: string) =>
+    String(raw || '')
+      .toLocaleUpperCase('tr-TR')
+      .replace(/İ/g, 'I')
+      .replace(/Ş/g, 'S')
+      .replace(/Ğ/g, 'G')
+      .replace(/Ü/g, 'U')
+      .replace(/Ö/g, 'O')
+      .replace(/Ç/g, 'C')
+      .replace(/["']/g, '')
+      .replace(/\(.*?\)/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+  const sanitizeManualName = (raw: string) =>
+    raw
+      .replace(/"[^"]*"/g, ' ')
+      .replace(/\bsoyadı?\s+belli\s+değil\b/gi, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+  const isKibritciName = (firma: string) =>
+    normalizeNameKey(firma).includes('KIBRITCI');
+
+  const findDbPersonelByRawName = (rawName: string) => {
+    const cleaned = sanitizeManualName(rawName);
+    const targetKey = normalizeNameKey(cleaned);
+    if (!targetKey) return undefined;
+    const tokens = targetKey.split(' ').filter(Boolean);
+    const exact = personeller.find((p) => normalizeNameKey(`${p.ad} ${p.soyad}`) === targetKey);
+    if (exact) return exact;
+    if (tokens.length >= 2) {
+      return personeller.find((p) => {
+        const full = normalizeNameKey(`${p.ad} ${p.soyad}`);
+        return full.includes(targetKey) || targetKey.includes(full);
+      });
+    }
+    const sameFirstName = personeller.filter((p) => normalizeNameKey(p.ad) === tokens[0]);
+    if (sameFirstName.length === 1) return sameFirstName[0];
+    return undefined;
+  };
+
+  const findExistingTaseronPersonel = (rawName: string, firmaAdi: string) => {
+    const nameKey = normalizeNameKey(sanitizeManualName(rawName));
+    const firmaKey = normalizeNameKey(firmaAdi);
+    if (!nameKey || !firmaKey) return undefined;
+    return personeller.find(
+      (p) =>
+        p.firmaTipi === 'TASERON' &&
+        normalizeNameKey(`${p.ad} ${p.soyad}`) === nameKey &&
+        normalizeNameKey(p.firmaAdi || '') === firmaKey
+    );
+  };
+
+  const findPersonelByTc = (tcRaw: string) => {
+    const tc = digitsOnly(tcRaw);
+    if (!validateTC(tc)) return undefined;
+    return personeller.find((p) => digitsOnly(p.tcNo || '') === tc);
+  };
+
+  /** İsim ve TC birlikte eşleşirse mevcut personeli döndürür (fazladan kayıt açılmasın). */
+  const findPersonelByNameAndTc = (rawName: string, tcRaw: string) => {
+    const tc = digitsOnly(tcRaw);
+    if (!validateTC(tc)) return undefined;
+    const nameKey = normalizeNameKey(sanitizeManualName(rawName));
+    if (!nameKey) return undefined;
+    return personeller.find(
+      (p) =>
+        digitsOnly(p.tcNo || '') === tc &&
+        normalizeNameKey(`${p.ad} ${p.soyad}`) === nameKey
+    );
+  };
+
+  const findPersonelByTel = (telRaw: string) => {
+    const key = phoneMatchKey(telRaw);
+    if (key.length < 10) return undefined;
+    return personeller.find((p) => phoneMatchKey(p.telefonNo || '') === key);
+  };
+
+  /** Kamp kaydı / personel Ana Firma mı? Tahliyede işten çıkış YASAK. */
+  const isAnaFirmaKampKaydi = (reg: KampKaydi): boolean => {
+    if (reg.firmaTipi === 'ANA_FIRMA') return true;
+    if (reg.firmaTipi === 'TASERON') return false;
+    const p = reg.personelId ? personeller.find((x) => x.id === reg.personelId) : undefined;
+    if (p) return !isTaseronPersonel(p);
+    const firma = String(reg.calistigiFirma || '').trim();
+    if (!firma) return true;
+    return isKibritciName(firma);
+  };
+
+  /**
+   * Oda yerleşimi: varsa birleştir (TC / tel / isim / benzer isim), yoksa yeni kur.
+   * Çift kayıt açılmaz.
+   */
+  const resolveOrCreateKampPersonel = async (
+    rawName: string,
+    firmaAdi: string,
+    firmaTipi: 'ANA_FIRMA' | 'TASERON',
+    tcNo: string,
+    telefonNo: string
+  ): Promise<{ personel: Personel; created: boolean; merged: boolean }> => {
+    const dedupList = await loadPersonellerForDedup(personeller);
+    const tc = digitsOnly(tcNo);
+    const matchResults = findPersonelMatches(dedupList, {
+      rawName,
+      tcNo,
+      telefonNo,
+      firmaAdi,
+      firmaTipi,
+    });
+
+    let bestMatch = pickBestPersonelMatch(matchResults);
+
+    if (bestMatch && shouldConfirmPersonelMerge(bestMatch)) {
+      const label = formatPersonelMatchLabel(bestMatch);
+      const ok = window.confirm(
+        `Sistemde benzer bir personel kaydı var:\n\n${label}\n\nBu kişi mi? (Evet = mevcut kayıt kullanılır, yeni kayıt açılmaz)\n\nHayır seçerseniz yeni kayıt açılamaz — lütfen TC SORGU / TEL SORGU ile doğru kaydı bulun.`
+      );
+      if (!ok) {
+        throw new Error(
+          `Mükerrer kayıt engellendi. "${label}" mevcut — TC veya telefon sorgusu ile doğru kaydı seçin.`
+        );
+      }
+    }
+
+    if (bestMatch) {
+      const best = bestMatch.personel;
+      const nextTc = (validateTC(tc) ? tc : '') || digitsOnly(best.tcNo || '');
+      const nextTel = telefonNo.trim() || best.telefonNo || '';
+      const nextFirmaAdi =
+        firmaTipi === 'ANA_FIRMA'
+          ? CANONICAL_ANA_FIRMA_ADI
+          : String(firmaAdi || best.firmaAdi || '').trim() || best.firmaAdi || 'Taşeron';
+      const targetGorev =
+        firmaTipi === 'TASERON'
+          ? resolveTaseronPersonelGorev({ firmaAdi: nextFirmaAdi, firmaTipi: 'TASERON' })
+          : best.gorev;
+      const needsPatch =
+        (nextTc && digitsOnly(best.tcNo || '') !== nextTc) ||
+        (nextTel && phoneMatchKey(best.telefonNo || '') !== phoneMatchKey(nextTel)) ||
+        best.firmaTipi !== firmaTipi ||
+        !firmaEslesir(best.firmaAdi || '', nextFirmaAdi) ||
+        (firmaTipi === 'TASERON' && best.gorev !== targetGorev);
+
+      if (needsPatch) {
+        const patched = withTaseronPersonelGorev({
+          ...best,
+          tcNo: nextTc || best.tcNo,
+          telefonNo: nextTel || best.telefonNo,
+          firmaTipi,
+          firmaAdi: nextFirmaAdi,
+          departman: firmaTipi === 'TASERON' ? TASERON_PERSONEL_DEPARTMAN : best.departman || 'SAHA',
+          gorev: targetGorev,
+          onayDurumu: best.onayDurumu,
+          durum: best.durum === false ? true : best.durum,
+        });
+        await saveDocument('personeller', patched);
+        return { personel: patched, created: false, merged: true };
+      }
+      return { personel: best, created: false, merged: true };
+    }
+
+    const created = await createKampPersonel(rawName, firmaAdi, firmaTipi, tcNo, telefonNo);
+    return {
+      personel: created.personel,
+      created: created.created,
+      merged: created.merged || !created.created,
+    };
+  };
+
+  const createKampPersonel = async (
+    rawName: string,
+    firmaAdi: string,
+    firmaTipi: 'ANA_FIRMA' | 'TASERON',
+    tcNo: string,
+    telefonNo: string
+  ): Promise<{ personel: Personel; created: boolean; merged: boolean }> => {
+    const tc = digitsOnly(tcNo);
+
+    const cleaned = sanitizeManualName(rawName);
+    const parts = cleaned.split(' ').filter(Boolean);
+    const ad = (parts[0] || 'ADI').toLocaleUpperCase('tr-TR');
+    const soyad = (parts.slice(1).join(' ') || 'BİLİNMİYOR').toLocaleUpperCase('tr-TR');
+    const normalizedFirma =
+      firmaTipi === 'ANA_FIRMA'
+        ? CANONICAL_ANA_FIRMA_ADI
+        : String(firmaAdi || '').trim() || 'Taşeron';
+    const personel = withTaseronPersonelGorev({
+      id: `prs_kamp_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      tcNo: tc,
+      ad,
+      soyad,
+      babaAdi: '',
+      dogumTarihi: '1990-01-01',
+      telefonNo: telefonNo.trim() || '',
+      eposta: '',
+      adres: 'Kamp Yerleşimi',
+      il: '',
+      ilce: '',
+      departman: firmaTipi === 'TASERON' ? TASERON_PERSONEL_DEPARTMAN : 'SAHA',
+      gorev: firmaTipi === 'TASERON' ? resolveTaseronPersonelGorev({ firmaAdi: normalizedFirma, firmaTipi: 'TASERON' }) : 'KAMP PERSONEL',
+      iseGirisTarihi: new Date().toISOString().slice(0, 10),
+      cinsiyet: 'Belirtilmedi',
+      maas: 0,
+      ucretTipi: 'Günlük',
+      sgkDurumu: firmaTipi === 'TASERON' ? 'Sigortasız' : "SGK'lı",
+      bankaAdi: '',
+      subeAdi: '',
+      ibanNo: '',
+      durum: true,
+      firmaTipi,
+      firmaAdi: normalizedFirma,
+      onayDurumu: 'ONAY BEKLİYOR',
+      kaynak: 'KAMPCI',
+    } as Personel);
+
+    const result = await upsertPersonelAvoidDuplicate(personeller, personel, {
+      rawName: `${ad} ${soyad}`.trim(),
+      tcNo: tc,
+      telefonNo,
+      firmaAdi: normalizedFirma,
+      firmaTipi,
+    });
+    return result;
+  };
+
+  const requestOrResolveTaseronFirma = async (firmaAdi: string): Promise<CariKart | null> => {
+    const result = evaluateKampFirmaOnerisi(firmaAdi, cariKartlar, pendingFirmaTalepleri);
+    if (result.kind === 'invalid') {
+      showStatus('error', result.message);
+      return null;
+    }
+    if (result.kind === 'existing') return result.cari;
+    if (result.kind === 'pending') {
+      showStatus(
+        'info',
+        `"${result.talep.onerilenUnvan}" zaten yönetici onayında. Onaylanınca kayıtlı firmalardan seçin.`,
+        8000
+      );
+      return null;
+    }
+
+    const email = currentUser?.email || 'kampci';
+    const talep = buildKampFirmaTalep({
+      unvan: result.unvan,
+      email,
+      benzerler: result.benzerler,
+    });
+    await saveDocument('kampFirmaTalepleri', talep);
+    setKampFirmaTalepleri((prev) => [talep, ...prev.filter((t) => t.id !== talep.id)]);
+    await addNotification?.(
+      `Kampçı yeni taşeron firma onayı bekliyor: ${talep.onerilenUnvan}`,
+      { tip: 'KAMP_FIRMA_TALEP', hedefRol: 'YÖNETİCİ', talepId: talep.id }
+    );
+    const benzerNot =
+      result.benzerler.length > 0
+        ? ` Kayıtlı benzer: ${result.benzerler.map((c) => c.unvan).join(', ')}.`
+        : '';
+    showStatus(
+      'info',
+      `Yeni firma yönetici onayına gönderildi (${talep.onerilenUnvan}). Onaylanınca listeden seçebilirsiniz.${benzerNot}`,
+      9000
+    );
+    return null;
+  };
 
   // ─────────────────────────────────────────────────────────────
   // 📦 3. DEPO SAYIMI (WAREHOUSE AUDIT) STATE
   // ─────────────────────────────────────────────────────────────
   const [searchRoomQuery, setSearchRoomQuery] = useState('');
+  const [mesaiPersonelSearch, setMesaiPersonelSearch] = useState('');
   const [depoSavimlari, setDepoSayimlari] = useState<any[]>([]);
   const [loadingSayim, setLoadingSayim] = useState(false);
   const [sayimNotlar, setSayimNotlar] = useState('');
@@ -100,7 +601,8 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
     if (stokKartlar && stokKartlar.length > 0) {
       const dynamicMiktarlar: Record<string, number> = {};
       stokKartlar.forEach(item => {
-        dynamicMiktarlar[item.urunAdi] = 0;
+        const ad = item.stokAdi || item.urunAdi || 'Stok';
+        dynamicMiktarlar[ad] = 0;
       });
       setSayimMiktarlari(dynamicMiktarlar);
     }
@@ -111,10 +613,28 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
   // ─────────────────────────────────────────────────────────────
   const [gunlukFaaliyetler, setGunlukFaaliyetler] = useState<any[]>([]);
   const [faaliyetTipi, setFaaliyetTipi] = useState<'TEMİZLİK' | 'YEMEK' | 'GÜVENLİK' | 'BAKIM' | 'DİĞER'>('TEMİZLİK');
-  const [faaliyetYerleske, setFaaliyetYerleske] = useState('Merkez Konteyner Kampı');
+  const [faaliyetGrubu, setFaaliyetGrubu] = useState<'NORMAL' | 'MESAI'>('NORMAL');
+  const [personelMesaiSaatleri, setPersonelMesaiSaatleri] = useState<Record<string, number>>({});
+  const [faaliyetYerleske, setFaaliyetYerleske] = useState('');
   const [faaliyetAciklama, setFaaliyetAciklama] = useState('');
   const [faaliyetFoto, setFaaliyetFoto] = useState<string | null>(null);
   const [loadingFaaliyet, setLoadingFaaliyet] = useState(false);
+
+  // ─────────────────────────────────────────────────────────────
+  // 🚪 PERSONEL GİRİŞE YOLLA (Formen ile aynı onay akışı)
+  // ─────────────────────────────────────────────────────────────
+  const [yeniAd, setYeniAd] = useState('');
+  const [yeniSoyad, setYeniSoyad] = useState('');
+  const [yeniGorev, setYeniGorev] = useState('');
+  const [yeniTcNo, setYeniTcNo] = useState('');
+  const [yeniTelefonNo, setYeniTelefonNo] = useState('');
+  const [girisFirmaTipi, setGirisFirmaTipi] = useState<'ANA_FIRMA' | 'TASERON'>('ANA_FIRMA');
+  const [girisFirmaType, setGirisFirmaType] = useState<'DB' | 'MANUAL'>('DB');
+  const [girisSelectedFirma, setGirisSelectedFirma] = useState('');
+  const [girisManualFirma, setGirisManualFirma] = useState('');
+  const [yeniKimlikFoto, setYeniKimlikFoto] = useState<string | null>(null);
+  const [sonGirisTalebi, setSonGirisTalebi] = useState<{ id: string; ad: string; soyad: string; gorev: string } | null>(null);
+  const [girisTalepleriList, setGirisTalepleriList] = useState<any[]>([]);
 
   // Real-time Firestore subscriptions for custom collections
   useEffect(() => {
@@ -142,48 +662,117 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
       setGunlukFaaliyetler(list);
     });
 
+    // 3. Personel giriş talepleri
+    const girisColl = collection(db, 'personelGirisTalepleri');
+    const unsubGiris = onSnapshot(girisColl, (snap) => {
+      const list: any[] = [];
+      const email = currentUser?.email?.toLowerCase() || '';
+      snap.forEach((d) => {
+        const data: any = { id: d.id, ...(d.data() as Record<string, any>) };
+        const sender = String(data.gonderenKampci || data.gonderenFormen || '').toLowerCase();
+        if (sender === email && (data.kaynakPanel === 'KAMPÇI' || data.gonderenKampci)) {
+          list.push(data);
+        }
+      });
+      list.sort((a, b) => new Date(b.tarih).getTime() - new Date(a.tarih).getTime());
+      setGirisTalepleriList(list);
+    });
+
+    const firmaColl = collection(db, 'kampFirmaTalepleri');
+    const unsubFirma = onSnapshot(firmaColl, (snap) => {
+      const list: KampFirmaTalep[] = [];
+      snap.forEach((d) => list.push({ id: d.id, ...(d.data() as Omit<KampFirmaTalep, 'id'>) }));
+      list.sort((a, b) => String(b.olusturmaTarihi || '').localeCompare(String(a.olusturmaTarihi || '')));
+      setKampFirmaTalepleri(list);
+    });
+
     return () => {
       unsubCounts();
       unsubActs();
+      unsubGiris();
+      unsubFirma();
     };
-  }, []);
+  }, [currentUser?.email]);
+
+  useEffect(() => {
+    if (yerleskeler.length > 0 && !selectedYerleskeId) {
+      setSelectedYerleskeId(yerleskeler[0].id);
+    }
+    if (yerleskeler.length > 0 && !faaliyetYerleske) {
+      setFaaliyetYerleske(yerleskeler[0].ad);
+    }
+  }, [yerleskeler, selectedYerleskeId, faaliyetYerleske]);
+
+  useEffect(() => {
+    const kats = selectedYerleskeId ? katsForYerleske(katlar, selectedYerleskeId) : [];
+    if (kats.length > 0 && !kats.some(k => k.id === selectedKatId)) {
+      setSelectedKatId(kats[0].id);
+    }
+    if (kats.length === 0) setSelectedKatId('');
+  }, [selectedYerleskeId, katlar, selectedKatId]);
+
+  const handleCreateYerleske = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newYerleskeAd.trim()) return;
+    setLoadingYapı(true);
+    try {
+      const y = await createKampYerleske(newYerleskeAd, currentUser?.email);
+      setSelectedYerleskeId(y.id);
+      setNewYerleskeAd('');
+      setSetupStep(2);
+      showStatus('success', `Yerleşke "${y.ad}" oluşturuldu. Şimdi kat ekleyin.`);
+    } catch (err) {
+      showStatus('error', 'Yerleşke oluşturulamadı.');
+    } finally {
+      setLoadingYapı(false);
+    }
+  };
+
+  const handleCreateKat = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedYerleske || !newKatAd.trim()) return;
+    setLoadingYapı(true);
+    try {
+      const k = await createKampKat(selectedYerleske, newKatAd, yerleskeKatlari.length + 1);
+      setSelectedKatId(k.id);
+      setNewKatAd('');
+      setSetupStep(3);
+      showStatus('success', `Kat "${k.ad}" eklendi. Oda tanımlayabilirsiniz.`);
+    } catch (err) {
+      showStatus('error', 'Kat oluşturulamadı.');
+    } finally {
+      setLoadingYapı(false);
+    }
+  };
 
   // ─────────────────────────────────────────────────────────────
   // 🏕️ ACTIONS: ROOM MANAGEMENT
   // ─────────────────────────────────────────────────────────────
   const handleCreateRoom = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!odaNo) {
-      showStatus('error', 'Lütfen Oda Numarasını belirtin!');
+    if (!odaNo || !selectedYerleske || !selectedKat) {
+      showStatus('error', 'Önce yerleşke ve kat seçin, oda numarası girin.');
       return;
     }
 
     setLoadingRoom(true);
     try {
-      const finalYerleskeAdi = showCustomYerleske ? (customYerleskeAdi.trim() || yerleskeAdi) : yerleskeAdi;
-      const finalKogusNo = showCustomKogus ? (customKogusNo.trim() || kogusNo) : kogusNo;
-
-      const roomId = `room_${Date.now()}`;
-      const newRoom: KampOdasi = {
-        id: roomId,
-        yerleskeAdi: finalYerleskeAdi,
-        kogusNo: finalKogusNo,
-        odaNo,
+      const savedOdaNo = odaNo;
+      await createKampOdasi({
+        yerleskeAdi: selectedYerleske.ad,
+        kogusNo: selectedKat.ad,
+        odaNo: savedOdaNo,
         kapasite: Number(kapasite),
         firmaTipi,
-        durum: 'BOŞ'
-      };
-
-      await saveDocument('kampOdalari', newRoom);
+        yerleskeId: selectedYerleske.id,
+        katId: selectedKat.id,
+        olusturan: currentUser?.email,
+      });
       if (addNotification) {
-        addNotification(`${finalYerleskeAdi} / ${finalKogusNo} - Oda ${odaNo} başarıyla açıldı.`);
+        addNotification(`${selectedYerleske.ad} / ${selectedKat.ad} - Oda ${savedOdaNo} açıldı.`);
       }
       setOdaNo('');
-      setCustomYerleskeAdi("");
-      setCustomKogusNo("");
-      setShowCustomYerleske(false);
-      setShowCustomKogus(false);
-      showStatus('success', `Oda ${odaNo} başarıyla açıldı.`);
+      showStatus('success', `Oda ${savedOdaNo} başarıyla açıldı.`);
     } catch (err) {
       console.error(err);
       showStatus('error', 'Oda oluşturulurken hata oluştu!');
@@ -195,8 +784,7 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
   const handleDeleteRoom = async (id: string, name: string) => {
     if (!window.confirm(`${name} numaralı odayı silmek istediğinize emin misiniz?`)) return;
     try {
-      // Use local state update or deleteDoc directly
-      setKampOdalari(prev => prev.filter(r => r.id !== id));
+      await deleteKampOdasi(id);
       if (addNotification) {
         addNotification(`${name} nolu oda silindi.`);
       }
@@ -207,18 +795,214 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
     }
   };
 
+  const handleReloadKamp = async () => {
+    if (!reloadKampData) {
+      showStatus('info', 'Canlı güncelleme açık. Veriler otomatik yenileniyor.');
+      return;
+    }
+    showStatus('info', 'Kamp verileri yenileniyor…', 0);
+    try {
+      await reloadKampData();
+      showStatus('success', 'Kamp verileri Firestore üzerinden yenilendi.');
+    } catch (err) {
+      console.error(err);
+      showStatus('error', 'Kamp verileri yenilenemedi.');
+    }
+  };
+
+  const handleRestoreYerlesim = async () => {
+    const aktif = kampKayitlari.filter((k) => k.durum === 'AKTIF').length;
+    const mass = detectMassKampEvictionDate(kampKayitlari, 3);
+    const pasifRecent = kampKayitlari.filter((k) => {
+      if (k.durum !== 'PASIF') return false;
+      const d = (k.cikisTarihi || '').slice(0, 10);
+      if (!d) return true;
+      const cutoff = new Date();
+      cutoff.setDate(cutoff.getDate() - 45);
+      return d >= cutoff.toISOString().slice(0, 10);
+    }).length;
+
+    if (pasifRecent === 0) {
+      showStatus('info', 'Geri yüklenecek yakın tarihli PASIF yerleşim bulunamadı.');
+      return;
+    }
+
+    const msg = mass
+      ? `Aktif yerleşim: ${aktif}\n${mass.date} tarihinde ${mass.count} kişi PASIF görünüyor.\n\nBu toplu tahliyeyi geri alıp personelleri odalarına yerleştirmek istiyor musunuz?`
+      : `Aktif yerleşim: ${aktif}\nSon 45 günde ${pasifRecent} PASIF yerleşim var.\n\nUygun olanları odalarına geri yüklemek istiyor musunuz?`;
+
+    if (!window.confirm(msg)) return;
+
+    showStatus('info', 'Yerleşimler geri yükleniyor…', 0);
+    try {
+      const result = await reactivateEvictedKampStays({
+        kampKayitlari,
+        kampOdalari,
+        withinDays: 45,
+        onlyCikisTarihi: mass?.date,
+      });
+      setKampKayitlari(result.kampKayitlari);
+      setKampOdalari(result.kampOdalari);
+      if (result.reactivatedCount > 0) {
+        showStatus(
+          'success',
+          `${result.reactivatedCount} personel odalarına geri yerleştirildi${result.skippedCount ? ` (${result.skippedCount} atlandı)` : ''}.`
+        );
+        void addNotification?.(
+          `Kamp yerleşim geri yükleme: ${result.reactivatedCount} kayıt AKTIF yapıldı.`
+        );
+      } else {
+        showStatus(
+          'info',
+          result.skippedCount > 0
+            ? `Geri yükleme yapılamadı (${result.skippedCount} kayıt atlandı — kapasite veya mükerrer aktif).`
+            : 'Geri yüklenecek uygun kayıt bulunamadı.'
+        );
+      }
+    } catch (err) {
+      console.error(err);
+      showStatus('error', err instanceof Error ? err.message : 'Yerleşim geri yüklenemedi.');
+    }
+  };
+
+  const handleUpdateRoom = async (room: KampOdasi) => {
+    const nextOdaNo = window.prompt('Yeni oda adı/no', room.odaNo);
+    if (!nextOdaNo) return;
+    const nextKapasiteRaw = window.prompt('Yeni kapasite (yatak)', String(room.kapasite));
+    if (!nextKapasiteRaw) return;
+    const nextKapasite = Number(nextKapasiteRaw);
+    if (!Number.isFinite(nextKapasite) || nextKapasite < 1) {
+      showStatus('error', 'Kapasite en az 1 olmalıdır.');
+      return;
+    }
+    try {
+      await updateKampOdasi({
+        room,
+        odaNo: nextOdaNo.trim(),
+        kapasite: nextKapasite,
+        olusturan: currentUser?.email,
+      });
+      showStatus('success', `Oda güncellendi: ${room.odaNo} → ${nextOdaNo.trim()}`);
+    } catch (err) {
+      console.error(err);
+      showStatus('error', 'Oda güncellenemedi.');
+    }
+  };
+
   // ─────────────────────────────────────────────────────────────
   // 👥 ACTIONS: PERSONNEL PLACEMENT
   // ─────────────────────────────────────────────────────────────
+  const resetPlacementPersonFields = () => {
+    setSelectedPersonelId('');
+    setManualPersonelIsim('');
+    setSearchPersonelQuery('');
+    setPlacementTcNo('');
+    setPlacementTelefonNo('');
+    setSelectedFirma('');
+    setManualFirma('');
+    setPlacementType('DB');
+    setPlacementFirmaTipi('ANA_FIRMA');
+    setFirmaType('DB');
+  };
+
+  const prefillPlacementFromRoom = (room: KampOdasi) => {
+    setSelectedRoomId(room.id);
+    const yerleskeMatch = placementYerleskeOptions.find(
+      (y) => y.id === room.yerleskeId || y.ad === room.yerleskeAdi
+    );
+    setPlacementYerleskeId(room.yerleskeId || yerleskeMatch?.id || '');
+    setPlacementKatId(room.katId || room.kogusNo || '');
+  };
+
+  const applyPersonelFirmaMatch = (person: Personel) => {
+    if (person.firmaTipi === 'TASERON' || isTaseronPersonel(person)) {
+      setPlacementFirmaTipi('TASERON');
+      const firmaAdi = String(person.firmaAdi || '').trim();
+      if (!firmaAdi) return;
+      const inDb = taseronCariler.some(
+        (c) => normalizeNameKey(c.unvan) === normalizeNameKey(firmaAdi)
+      );
+      if (inDb) {
+        setFirmaType('DB');
+        setSelectedFirma(firmaAdi);
+        setManualFirma('');
+      } else {
+        setFirmaType('MANUAL');
+        setManualFirma(firmaAdi);
+        setSelectedFirma('');
+      }
+      return;
+    }
+    setPlacementFirmaTipi('ANA_FIRMA');
+    setFirmaType('DB');
+    setSelectedFirma('');
+    setManualFirma('');
+  };
+
+  const applyPersonelFromLookup = (person: Personel) => {
+    setPlacementType('DB');
+    setSelectedPersonelId(person.id);
+    setManualPersonelIsim(`${person.ad} ${person.soyad}`);
+    setPlacementTcNo(digitsOnly(person.tcNo || ''));
+    setPlacementTelefonNo(String(person.telefonNo || '').trim());
+    applyPersonelFirmaMatch(person);
+  };
+
+  const runPlacementTcSorgu = () => {
+    const tc = digitsOnly(placementTcNo);
+    if (!validateTC(tc)) {
+      showStatus('error', 'TC SORGU için 11 haneli geçerli TC girin.');
+      return;
+    }
+    const found = findPersonelByTc(tc);
+    if (!found) {
+      showStatus('info', 'Bu TC ile kayıtlı personel bulunamadı — yeni kayıt için ad/soyad ve firmayı girin.');
+      return;
+    }
+    applyPersonelFromLookup(found);
+    showStatus('success', `${found.ad} ${found.soyad} bulundu (${found.firmaAdi || CANONICAL_ANA_FIRMA_ADI}).`);
+  };
+
+  const runPlacementTelSorgu = () => {
+    const key = phoneMatchKey(placementTelefonNo);
+    if (key.length < 10) {
+      showStatus('error', 'TEL NO SORGU için en az 10 haneli telefon girin.');
+      return;
+    }
+    const found = findPersonelByTel(placementTelefonNo);
+    if (!found) {
+      showStatus('info', 'Bu telefon ile kayıtlı personel bulunamadı — yeni kayıt için ad/soyad ve firmayı girin.');
+      return;
+    }
+    applyPersonelFromLookup(found);
+    showStatus('success', `${found.ad} ${found.soyad} bulundu (${found.firmaAdi || CANONICAL_ANA_FIRMA_ADI}).`);
+  };
+
+  const openPlacementModalForRoom = (room: KampOdasi) => {
+    prefillPlacementFromRoom(room);
+    resetPlacementPersonFields();
+    setPlacementModalRoom(room);
+  };
+
+  const closePlacementModal = () => {
+    setPlacementModalRoom(null);
+  };
+
   const handlePlacementSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedRoomId) {
+    const activeRoomId = placementModalRoom?.id || selectedRoomId;
+    if (!activeRoomId) {
       showStatus('error', 'Lütfen yerleşim yapılacak odayı seçin!');
+      return;
+    }
+    if (!placementModalRoom && (!placementYerleskeId || !placementKatId || !selectedRoomId)) {
+      showStatus('error', 'Lütfen sırayla yerleşke, kat ve oda seçin!');
       return;
     }
 
     let personelIsim = '';
     let personelId: string | undefined = undefined;
+    let matchedPersonel: Personel | undefined = undefined;
 
     if (placementType === 'DB') {
       if (!selectedPersonelId) {
@@ -229,139 +1013,262 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
       if (matched) {
         personelIsim = `${matched.ad} ${matched.soyad}`;
         personelId = matched.id;
+        matchedPersonel = matched;
       }
     } else {
       if (!manualPersonelIsim.trim()) {
         showStatus('error', 'Lütfen personel adını soyadını yazın!');
         return;
       }
-      personelIsim = manualPersonelIsim.trim();
+      const found = findDbPersonelByRawName(manualPersonelIsim);
+      if (found) {
+        personelIsim = `${found.ad} ${found.soyad}`;
+        personelId = found.id;
+        matchedPersonel = found;
+      } else {
+        const nearMatch = pickBestPersonelMatch(
+          findPersonelMatches(personeller, {
+            rawName: manualPersonelIsim,
+            tcNo: placementTcNo,
+            telefonNo: placementTelefonNo,
+            firmaAdi:
+              placementFirmaTipi === 'TASERON'
+                ? firmaType === 'DB'
+                  ? selectedFirma
+                  : manualFirma
+                : CANONICAL_ANA_FIRMA_ADI,
+            firmaTipi: placementFirmaTipi,
+          })
+        );
+        if (nearMatch && nearMatch.score <= AUTO_MERGE_SCORE_MAX) {
+          personelIsim = `${nearMatch.personel.ad} ${nearMatch.personel.soyad}`;
+          personelId = nearMatch.personel.id;
+          matchedPersonel = nearMatch.personel;
+          showStatus(
+            'info',
+            `Benzer kayıt bulundu: ${personelIsim} — mevcut personel kullanılacak.`
+          );
+        } else {
+          personelIsim = sanitizeManualName(manualPersonelIsim);
+        }
+      }
     }
 
     let resolvedFirma = '';
-    if (firmaType === 'DB') {
-      resolvedFirma = selectedFirma || 'Belirtilmedi';
+    if (placementFirmaTipi === 'ANA_FIRMA') {
+      resolvedFirma = matchedPersonel
+        ? canonicalizeAnaFirmaAdi(matchedPersonel.firmaAdi)
+        : CANONICAL_ANA_FIRMA_ADI;
+    } else if (firmaType === 'DB') {
+      resolvedFirma = selectedFirma || '';
     } else {
-      resolvedFirma = manualFirma.trim() || 'Belirtilmedi';
+      resolvedFirma = manualFirma.trim();
     }
 
-    // Check capacity limit
-    const targetRoom = kampOdalari.find(r => r.id === selectedRoomId);
+    const targetRoom = kampOdalari.find(r => r.id === activeRoomId);
     if (!targetRoom) {
       showStatus('error', 'Oda bulunamadı!');
       return;
     }
 
-    const currentOccupants = kampKayitlari.filter(
-      k => (k.odaId === selectedRoomId || k.roomId === selectedRoomId) && k.durum === 'AKTIF'
-    );
-
-    if (currentOccupants.length >= targetRoom.kapasite) {
-      showStatus('error', `Bu oda dolu! Kapasite sınırı: ${targetRoom.kapasite} kişi.`);
+    if (placementFirmaTipi === 'TASERON' && !resolvedFirma) {
+      showStatus('error', 'Taşeron personel için firma bilgisi zorunludur.');
       return;
     }
 
-    // Check if person already checked in elsewhere
-    const alreadyRegistered = kampKayitlari.find(
-      k => k.durum === 'AKTIF' && (
-        (personelId && k.personelId === personelId) || 
-        (!personelId && k.personelIsim.toLowerCase() === personelIsim.toLowerCase())
-      )
-    );
-
-    if (alreadyRegistered) {
-      showStatus('error', `${personelIsim} zaten aktif bir odada yerleşmiş durumda!`);
-      return;
+    if (placementType === 'MANUAL' && !matchedPersonel) {
+      if (!validateTC(placementTcNo)) {
+        showStatus('error', 'Yeni personel kaydı için geçerli 11 haneli TC zorunludur. Önce TC SORGU deneyin.');
+        return;
+      }
+      if (phoneMatchKey(placementTelefonNo).length < 10) {
+        showStatus('error', 'Yeni personel kaydı için geçerli telefon numarası zorunludur. Önce TEL NO SORGU deneyin.');
+        return;
+      }
     }
 
     setLoadingPlacement(true);
     try {
-      const regId = `reg_${Date.now()}`;
-      const newReg: KampKaydi = {
-        id: regId,
+      let createdPersonel = false;
+
+      if (placementFirmaTipi === 'TASERON' && resolvedFirma) {
+        const cari = await requestOrResolveTaseronFirma(resolvedFirma);
+        if (!cari) {
+          setLoadingPlacement(false);
+          return;
+        }
+        resolvedFirma = cari.unvan;
+        setSelectedFirma(cari.unvan);
+        setFirmaType('DB');
+        setManualFirma('');
+      }
+
+      if (!matchedPersonel && placementType === 'MANUAL') {
+        const resolved = await resolveOrCreateKampPersonel(
+          personelIsim,
+          resolvedFirma || (placementFirmaTipi === 'ANA_FIRMA' ? CANONICAL_ANA_FIRMA_ADI : 'Taşeron'),
+          placementFirmaTipi,
+          placementTcNo,
+          placementTelefonNo
+        );
+        personelId = resolved.personel.id;
+        personelIsim = `${resolved.personel.ad} ${resolved.personel.soyad}`;
+        createdPersonel = resolved.created;
+        setPersoneller?.((prev) =>
+          prev.some((p) => p.id === resolved.personel.id)
+            ? prev.map((p) => (p.id === resolved.personel.id ? resolved.personel : p))
+            : [...prev, resolved.personel]
+        );
+        matchedPersonel = resolved.personel;
+        if (resolved.merged) {
+          showStatus(
+            'info',
+            `${personelIsim} sistemde vardı — mevcut kayda birleştirildi (yeni personel açılmadı).`
+          );
+        }
+      } else if (matchedPersonel) {
+        // Seçili personelin TC/tel boşsa kampçı girdikleriyle güncelle; firma seçimini yaz
+        const nextTc = digitsOnly(placementTcNo) || digitsOnly(matchedPersonel.tcNo || '');
+        const nextTel = placementTelefonNo.trim() || matchedPersonel.telefonNo || '';
+        const nextFirmaTipi = placementFirmaTipi;
+        const nextFirmaAdi =
+          nextFirmaTipi === 'ANA_FIRMA'
+            ? CANONICAL_ANA_FIRMA_ADI
+            : resolvedFirma || matchedPersonel.firmaAdi || '';
+        const needsUpdate =
+          (nextTc && digitsOnly(matchedPersonel.tcNo || '') !== nextTc) ||
+          (nextTel && phoneMatchKey(matchedPersonel.telefonNo || '') !== phoneMatchKey(nextTel)) ||
+          matchedPersonel.firmaTipi !== nextFirmaTipi ||
+          !firmaEslesir(matchedPersonel.firmaAdi || '', nextFirmaAdi);
+        if (needsUpdate && nextFirmaAdi) {
+          const patched = withTaseronPersonelGorev({
+            ...matchedPersonel,
+            tcNo: nextTc || matchedPersonel.tcNo,
+            telefonNo: nextTel || matchedPersonel.telefonNo,
+            firmaTipi: nextFirmaTipi,
+            firmaAdi: nextFirmaAdi,
+            departman:
+              nextFirmaTipi === 'TASERON'
+                ? TASERON_PERSONEL_DEPARTMAN
+                : matchedPersonel.departman || 'SAHA',
+            gorev:
+              nextFirmaTipi === 'TASERON'
+                ? resolveTaseronPersonelGorev({ firmaAdi: nextFirmaAdi, firmaTipi: 'TASERON' })
+                : matchedPersonel.gorev,
+            onayDurumu: matchedPersonel.onayDurumu,
+          });
+          await saveDocument('personeller', patched);
+          setPersoneller?.((prev) => prev.map((p) => (p.id === patched.id ? patched : p)));
+          matchedPersonel = patched;
+        }
+      }
+
+      const finalFirmaTipi: 'ANA_FIRMA' | 'TASERON' = placementFirmaTipi;
+
+      await assignKampResident({
+        roomId: activeRoomId,
         personelIsim,
         personelId,
-        odaId: selectedRoomId,
-        girisTarihi: new Date().toISOString().slice(0, 10),
-        durum: 'AKTIF',
-        calistigiFirma: resolvedFirma
-      };
+        calistigiFirma: resolvedFirma || undefined,
+        firmaTipi: finalFirmaTipi,
+        kampOdalari,
+        kampKayitlari,
+      });
 
-      // Save registration
-      await saveDocument('kampKayitlari', newReg);
       if (addNotification) {
-        addNotification(`${personelIsim} (${resolvedFirma}) adlı personel ${targetRoom.odaNo} nolu odaya yerleştirildi.`);
+        addNotification(`${personelIsim} (${resolvedFirma}) ${targetRoom.odaNo} nolu odaya yerleştirildi.`);
       }
 
-      // Update Room status
-      const updatedOccupancyCount = currentOccupants.length + 1;
-      let newRoomStatus: 'BOŞ' | 'DOLU' | 'KISMEN DOLU' = 'KISMEN DOLU';
-      if (updatedOccupancyCount >= targetRoom.kapasite) {
-        newRoomStatus = 'DOLU';
-      }
-
-      const updatedRoom: KampOdasi = {
-        ...targetRoom,
-        durum: newRoomStatus
-      };
-
-      await saveDocument('kampOdalari', updatedRoom);
-
-      // Reset
       setSelectedPersonelId('');
       setManualPersonelIsim('');
+      setPlacementTcNo('');
+      setPlacementTelefonNo('');
       setSelectedFirma('');
       setManualFirma('');
-      showStatus('success', `${personelIsim} (${resolvedFirma}) başarıyla ${targetRoom.odaNo} no'lu odaya yerleştirildi.`);
+      setPlacementModalRoom(null);
+      const dbNote = createdPersonel
+        ? ' (yeni personel yönetici onayına düştü — yoklamaya işlenmez)'
+        : '';
+      showStatus('success', `${personelIsim} başarıyla ${targetRoom.odaNo} no'lu odaya yerleştirildi.${dbNote}`);
     } catch (err) {
       console.error(err);
-      showStatus('error', 'Yerleşim yapılırken hata oluştu!');
+      showStatus('error', err instanceof Error ? err.message : 'Yerleşim yapılırken hata oluştu!');
     } finally {
       setLoadingPlacement(false);
     }
   };
 
+  const sendCikisTalebiForKampTahliye = async (
+    reg: KampKaydi,
+    odaNo?: string,
+    opts?: { cikisTarihi?: string; cikisNedeni?: string }
+  ) => {
+    // Ana firma personeli kamp tahliyesinde ASLA işten çıkarılmaz / çıkış talebi gitmez
+    if (isAnaFirmaKampKaydi(reg)) {
+      throw new Error('ANA_FIRMA_ISTEN_CIKIS_YASAK');
+    }
+    const p = personeller.find((x) => x.id === reg.personelId);
+    if (p && !isTaseronPersonel(p)) {
+      throw new Error('ANA_FIRMA_ISTEN_CIKIS_YASAK');
+    }
+    const todayStr = new Date().toISOString().slice(0, 10);
+    await submitPersonelCikisTalebi({
+      personelId: reg.personelId || p?.id,
+      personelIsim: reg.personelIsim || `${p?.ad || ''} ${p?.soyad || ''}`.trim(),
+      personelGorev: p?.gorev || '',
+      personelMaas: p?.netMaas ?? p?.maas ?? 0,
+      cikisTarihi: opts?.cikisTarihi || todayStr,
+      cikisNedeni:
+        opts?.cikisNedeni ||
+        `Kamp tahliyesi${odaNo ? ` · Oda ${odaNo}` : ''} — taşeron personel; işten çıkış onayı bekleniyor.`,
+      gonderen: currentUser?.email || 'kampci',
+      kaynak: 'KAMPCI_TAHLIYE',
+      hedefYoneticiRole: 'YÖNETİCİ',
+    });
+  };
+
   const handleCheckOut = async (reg: KampKaydi) => {
-    if (!window.confirm(`${reg.personelIsim} isimli personeli odadan çıkarmak (Check-out) istediğinize emin misiniz?`)) return;
+    const anaFirma = isAnaFirmaKampKaydi(reg);
+    const choice = resolveKampTahliyeChoice(reg.personelIsim, anaFirma);
+    if (choice.mode === 'cancelled') return;
 
     try {
-      // Find room
-      const targetRoom = kampOdalari.find(r => r.id === reg.odaId || r.id === (reg as any).roomId);
-      
-      const updatedReg: KampKaydi = {
-        ...reg,
-        durum: 'PASIF',
-        cikisTarihi: new Date().toISOString().slice(0, 10)
-      };
+      const targetRoom = kampOdalari.find((r) => r.id === reg.odaId || r.id === reg.roomId);
+      const roomNo = targetRoom ? targetRoom.odaNo : 'oda';
 
-      await saveDocument('kampKayitlari', updatedReg);
-      if (addNotification) {
-        const roomNo = targetRoom ? targetRoom.odaNo : 'oda';
-        addNotification(`${reg.personelIsim} isimli personel ${roomNo} nolu odadan çıkış yaptı.`);
-      }
-
-      if (targetRoom) {
-        const remainingOccupants = kampKayitlari.filter(
-          k => (k.odaId === targetRoom.id || (k as any).roomId === targetRoom.id) && k.durum === 'AKTIF' && k.id !== reg.id
-        );
-
-        let newRoomStatus: 'BOŞ' | 'DOLU' | 'KISMEN DOLU' = 'KISMEN DOLU';
-        if (remainingOccupants.length === 0) {
-          newRoomStatus = 'BOŞ';
+      if (choice.mode === 'oda') {
+        await evictKampResident(reg, kampOdalari, kampKayitlari);
+        if (addNotification) {
+          addNotification(`${reg.personelIsim} ${roomNo} nolu odadan tahliye edildi (işten çıkış yok).`);
         }
-
-        const updatedRoom: KampOdasi = {
-          ...targetRoom,
-          durum: newRoomStatus
-        };
-
-        await saveDocument('kampOdalari', updatedRoom);
+        showStatus('success', `${reg.personelIsim} odadan tahliye edildi.`);
+        return;
       }
 
-      showStatus('success', `${reg.personelIsim} çıkış işlemi tamamlandı.`);
+      await sendCikisTalebiForKampTahliye(reg, targetRoom?.odaNo, {
+        cikisTarihi: choice.cikisTarihi,
+        cikisNedeni: buildKampIstenCikisNedeni({
+          odaNo: targetRoom?.odaNo,
+          kaynak: 'KAMPCI_TAHLIYE',
+          aciklama: choice.cikisNedeni,
+        }),
+      });
+      if (addNotification) {
+        addNotification(
+          `${reg.personelIsim} için işten çıkış talebi yönetime gönderildi (${choice.cikisTarihi}). Oda tahliyesi yönetici onayında yapılır.`
+        );
+      }
+      showStatus(
+        'success',
+        `${reg.personelIsim} — işten çıkış talebi gönderildi. Yönetici onayı bekleniyor; personel odada aktif kalır.`
+      );
     } catch (err) {
+      if (String(err).includes('ANA_FIRMA_ISTEN_CIKIS_YASAK')) {
+        showStatus('info', `${reg.personelIsim} ana firma personeli — işten çıkış talebi gönderilemez.`);
+        return;
+      }
       console.error(err);
-      showStatus('error', 'Çıkış işlemi başarısız.');
+      showStatus('error', 'Tahliye / çıkış talebi işlemi başarısız!');
     }
   };
 
@@ -378,7 +1285,13 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
       return;
     }
 
-    if (!window.confirm(`${targetRoom.odaNo} numaralı odadaki TÜM personelleri (${occupants.length} kişi) tahliye etmek istediğinize emin misiniz?`)) return;
+    if (
+      !window.confirm(
+        `${targetRoom.odaNo} numaralı odadaki TÜM personeller (${occupants.length} kişi) odadan tahliye edilsin mi?\n\nBu işlem yalnızca kamp odası çıkışıdır; işten çıkış talebi gönderilmez.`
+      )
+    ) {
+      return;
+    }
 
     try {
       const todayStr = new Date().toISOString().slice(0, 10);
@@ -386,21 +1299,21 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
         const updatedReg: KampKaydi = {
           ...reg,
           durum: 'PASIF',
-          cikisTarihi: todayStr
+          cikisTarihi: todayStr,
         };
         await saveDocument('kampKayitlari', updatedReg);
       }
       if (addNotification) {
-        addNotification(`${targetRoom.odaNo} nolu odadaki tüm personeller (${occupants.length} kişi) tahliye edildi.`);
+        addNotification(`${targetRoom.odaNo} nolu oda tahliye edildi (${occupants.length} kişi).`);
       }
 
       const updatedRoom: KampOdasi = {
         ...targetRoom,
-        durum: 'BOŞ'
+        durum: 'BOŞ',
       };
       await saveDocument('kampOdalari', updatedRoom);
 
-      showStatus('success', `${targetRoom.odaNo} numaralı odadaki tüm personeller tahliye edildi.`);
+      showStatus('success', `${targetRoom.odaNo} tahliye edildi. İşten çıkış için personel bazında talep gönderin.`);
     } catch (err) {
       console.error(err);
       showStatus('error', 'Oda tahliye edilirken hata oluştu.');
@@ -408,9 +1321,9 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
   };
 
   const handleSelectRoomForPlacement = (roomId: string) => {
-    setSelectedRoomId(roomId);
-    setActiveSubTab('placement');
-    showStatus('success', 'Oda seçildi. Şimdi personeli seçerek kampa yerleştirebilirsiniz.');
+    const room = kampOdalari.find((r) => r.id === roomId);
+    if (!room) return;
+    openPlacementModalForRoom(room);
   };
 
   // ─────────────────────────────────────────────────────────────
@@ -437,6 +1350,7 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
         id: sayimId,
         tarih: new Date().toISOString().slice(0, 10),
         sayimYapan: currentUser?.email || 'kampci_amiri',
+        kaydeden: currentUser?.email || 'kampci_amiri',
         kalemler: list,
         durum: 'ONAY BEKLİYOR',
         onaylayanIdariIsler: null,
@@ -464,38 +1378,132 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
   // ─────────────────────────────────────────────────────────────
   // 🧹 ACTIONS: DAILY ROUTINE ACTIVITIES (GÜNLÜK FAALİYET)
   // ─────────────────────────────────────────────────────────────
+  const syncKampMesaiFromFaaliyet = async (
+    tarih: string,
+    mesaiMap: Record<string, number> | undefined
+  ) => {
+    const cleaned = Object.fromEntries(
+      Object.entries(mesaiMap || {})
+        .map(([pid, h]) => [pid, normalizeMesaiHours(Number(h))])
+        .filter(([, h]) => Number(h) > 0)
+    ) as Record<string, number>;
+    if (Object.keys(cleaned).length === 0) return;
+    if (!saveYoklamalarNow && !setYoklamalar) {
+      showStatus('error', 'Mesai yoklamaya yazılamadı: kayıt fonksiyonu yok.');
+      return;
+    }
+
+    const gonderen = currentUser?.email || 'KAMP_MOBIL';
+    const draft = applySahaMesaiToYoklama(yoklamalar, tarih, cleaned, gonderen, 'add');
+    const dk = normalizeDateKey(tarih);
+    const [y, m, d] = dk.split('-').map(Number);
+    const sparse: AylikYoklamaMap = {};
+    for (const pid of Object.keys(cleaned)) {
+      const cell = getYoklamaDay(draft[pid], y, m, d);
+      if (!cell) continue;
+      sparse[pid] = setYoklamaDay({}, y, m, d, cell) as any;
+    }
+    if (Object.keys(sparse).length === 0) return;
+
+    if (saveYoklamalarNow) {
+      await saveYoklamalarNow(sparse, 'kamp');
+    } else if (setYoklamalar) {
+      setYoklamalar(draft);
+    }
+  };
+
   const handleSaveActivity = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!faaliyetAciklama.trim()) {
       showStatus('error', 'Lütfen faaliyet açıklamasını doldurun!');
       return;
     }
+    
+    if (faaliyetGrubu === 'MESAI') {
+      const hasMesai = Object.values(personelMesaiSaatleri).some(h => Number(h) > 0);
+      if (!hasMesai) {
+        showStatus('error', 'Mesai Faaliyeti için en az bir personele mesai saati girmelisiniz!');
+        return;
+      }
+    }
 
     setLoadingFaaliyet(true);
     try {
       const actId = `act_${Date.now()}`;
+      const bugunTarih = todayDateKey();
+
+      const mesaiMap =
+        faaliyetGrubu === 'MESAI'
+          ? (Object.fromEntries(
+              Object.entries(personelMesaiSaatleri)
+                .map(([pid, h]) => [pid, normalizeMesaiHours(Number(h))])
+                .filter(([, h]) => Number(h) > 0)
+            ) as Record<string, number>)
+          : undefined;
+
+      let aktifPersonelListesi: string[] = [];
+      if (faaliyetGrubu === 'MESAI') {
+        aktifPersonelListesi = Object.keys(mesaiMap || {});
+      } else {
+        // NORMAL: yalnızca yoklamada Geldi olan kampçılar (düz işçi / usta / formen / yerleşim yok)
+        aktifPersonelListesi = resolveGeldiRolPersonelIds(
+          personeller,
+          yoklamalar,
+          bugunTarih,
+          'KAMPCI',
+          { ensureEmail: currentUser?.email }
+        );
+      }
+
+      const persistedFoto = faaliyetFoto
+        ? await ensureKampFaaliyetFotoPersisted(actId, faaliyetFoto)
+        : null;
+
       const actData = {
         id: actId,
-        tarih: new Date().toISOString().slice(0, 10),
-        kaydeden: currentUser?.email || 'kamp_sorumlusu',
+        tarih: bugunTarih,
+        kaydedenKampci: currentUser?.email || 'kamp_sorumlusu',
         faaliyetTipi,
+        faaliyetGrubu,
+        personelMesaiSaatleri: mesaiMap,
+        mesaiYoklamayaIslendi: false,
+        aktifPersonelListesi,
+        personelId: aktifPersonelListesi[0],
         yerleskeAdi: faaliyetYerleske,
         aciklama: faaliyetAciklama.trim(),
-        fotoUrl: faaliyetFoto || null,
+        fotoUrl: persistedFoto || null,
         durum: 'ONAY BEKLİYOR',
         onaylayanIdariIsler: null,
         onaylayanMuhasebe: null
       };
 
       await saveDocument('kampGunlukFaaliyetleri', actData);
+      
+      if (faaliyetGrubu === 'MESAI') {
+        await syncKampMesaiFromFaaliyet(bugunTarih, mesaiMap);
+        try {
+          await updateDoc(doc(db, 'kampGunlukFaaliyetleri', actId), { mesaiYoklamayaIslendi: true });
+        } catch {
+          /* onay anında tekrar yazılabilir */
+        }
+      }
+
       if (addNotification) {
-        addNotification(`Kamp günlük faaliyet raporu (${faaliyetTipi}) sisteme girildi.`);
+        addNotification(
+          `Kamp günlük faaliyet (${faaliyetTipi}) kaydedildi · ${aktifPersonelListesi.length} personel bağlandı.`
+        );
       }
 
       // Reset
       setFaaliyetAciklama('');
       setFaaliyetFoto(null);
-      showStatus('success', 'Günlük faaliyet başarıyla kaydedildi, Onay Havuzuna iletildi!');
+      setPersonelMesaiSaatleri({});
+      showStatus(
+        'success',
+        faaliyetGrubu === 'MESAI'
+          ? `Mesai faaliyeti kaydedildi. Saatler yoklama ve puantaja yazıldı (${aktifPersonelListesi.length} personel).`
+          : `Günlük faaliyet kaydedildi (${aktifPersonelListesi.length} personel). Onay havuzuna iletildi.`
+      );
     } catch (err) {
       console.error(err);
       showStatus('error', 'Günlük faaliyet kaydedilirken hata oluştu.');
@@ -504,15 +1512,556 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
     }
   };
 
-  // Filtered personnel list for DB selection
+  const handleSubmitKampGirisTalebi = async () => {
+    const firmaTipiEarly = girisFirmaTipi;
+    if (!yeniAd.trim() || !yeniSoyad.trim() || (firmaTipiEarly !== 'TASERON' && !yeniGorev.trim())) {
+      showStatus('error', 'Ad, soyad ve görev alanlarını doldurunuz.');
+      return;
+    }
+    if (!validateTC(yeniTcNo)) {
+      showStatus('error', 'Geçerli 11 haneli TC zorunludur. Önce TC SORGU deneyin.');
+      return;
+    }
+    if (phoneMatchKey(yeniTelefonNo).length < 10) {
+      showStatus('error', 'Geçerli telefon numarası zorunludur. Önce TEL NO SORGU deneyin.');
+      return;
+    }
+    if (!yeniKimlikFoto) {
+      showStatus('error', 'Kimlik fotoğrafı zorunludur.');
+      return;
+    }
+    const firmaTipi = girisFirmaTipi;
+    let firmaAdi =
+      firmaTipi === 'ANA_FIRMA'
+        ? CANONICAL_ANA_FIRMA_ADI
+        : (girisFirmaType === 'DB' ? girisSelectedFirma : girisManualFirma).trim();
+    if (firmaTipi === 'TASERON' && !firmaAdi) {
+      showStatus('error', 'Taşeron personel için firma seçin veya yazın.');
+      return;
+    }
+    if (firmaTipi === 'TASERON' && firmaAdi) {
+      const cari = await requestOrResolveTaseronFirma(firmaAdi);
+      if (!cari) return;
+      firmaAdi = cari.unvan;
+      setGirisFirmaType('DB');
+      setGirisSelectedFirma(cari.unvan);
+      setGirisManualFirma('');
+    }
+    const kayitGorev =
+      firmaTipi === 'TASERON'
+        ? resolveTaseronPersonelGorev({ firmaAdi, firmaTipi: 'TASERON' })
+        : yeniGorev.trim();
+    try {
+      const requestID = `GIRIS-KAMP-${Date.now()}`;
+      const email = currentUser?.email || 'kampci';
+      let createdPersonelNote = '';
+
+      // İsim + TC / TC / tel / isim eşleşirse mevcut kaydı kullan; fazladan personel açma
+      const fullName = `${yeniAd.trim()} ${yeniSoyad.trim()}`;
+      const resolved = await resolveOrCreateKampPersonel(
+        fullName,
+        firmaAdi,
+        firmaTipi,
+        yeniTcNo,
+        yeniTelefonNo
+      );
+      if (resolved.created) {
+        const created = resolved.personel;
+        const patched = withTaseronPersonelGorev({
+          ...created,
+          gorev: kayitGorev,
+          ad: yeniAd.trim().toLocaleUpperCase('tr-TR'),
+          soyad: yeniSoyad.trim().toLocaleUpperCase('tr-TR'),
+          firmaTipi,
+          firmaAdi,
+        });
+        if (
+          patched.gorev !== created.gorev ||
+          patched.ad !== created.ad ||
+          patched.soyad !== created.soyad
+        ) {
+          await saveDocument('personeller', patched);
+          setPersoneller?.((prev) =>
+            prev.some((p) => p.id === patched.id)
+              ? prev.map((p) => (p.id === patched.id ? patched : p))
+              : [...prev, patched]
+          );
+        } else {
+          setPersoneller?.((prev) => (prev.some((p) => p.id === created.id) ? prev : [...prev, created]));
+        }
+        createdPersonelNote = ' · personel kaydı oluşturuldu';
+      } else {
+        const patched = withTaseronPersonelGorev({
+          ...resolved.personel,
+          ad: yeniAd.trim().toLocaleUpperCase('tr-TR') || resolved.personel.ad,
+          soyad: yeniSoyad.trim().toLocaleUpperCase('tr-TR') || resolved.personel.soyad,
+          telefonNo: yeniTelefonNo.trim() || resolved.personel.telefonNo,
+          firmaTipi,
+          firmaAdi,
+          gorev: kayitGorev,
+          departman: firmaTipi === 'TASERON' ? TASERON_PERSONEL_DEPARTMAN : resolved.personel.departman || 'SAHA',
+          onayDurumu: resolved.personel.onayDurumu || 'ONAY BEKLİYOR',
+        });
+        await saveDocument('personeller', patched);
+        setPersoneller?.((prev) =>
+          prev.some((p) => p.id === patched.id)
+            ? prev.map((p) => (p.id === patched.id ? patched : p))
+            : [...prev, patched]
+        );
+        createdPersonelNote = ' · mevcut personel birleştirildi / güncellendi';
+      }
+
+      await setDoc(doc(db, 'personelGirisTalepleri', requestID), {
+        ad: yeniAd.trim(),
+        soyad: yeniSoyad.trim(),
+        gorev: kayitGorev,
+        tcNo: digitsOnly(yeniTcNo),
+        telefonNo: yeniTelefonNo.trim(),
+        firmaTipi,
+        firmaAdi,
+        personelId: resolved.personel.id,
+        kimlikFotoUrl: yeniKimlikFoto,
+        durum: 'BEKLEMEDE',
+        tarih: new Date().toISOString(),
+        gonderenFormen: email,
+        gonderenKampci: email,
+        kaynakPanel: 'KAMPÇI',
+      });
+      setSonGirisTalebi({ id: requestID, ad: yeniAd.trim(), soyad: yeniSoyad.trim(), gorev: kayitGorev });
+      setYeniAd('');
+      setYeniSoyad('');
+      setYeniGorev('');
+      setYeniTcNo('');
+      setYeniTelefonNo('');
+      setGirisSelectedFirma('');
+      setGirisManualFirma('');
+      setGirisFirmaTipi('ANA_FIRMA');
+      setYeniKimlikFoto(null);
+      showStatus('success', `Giriş talebi oluşturuldu${createdPersonelNote} — yönetim onay havuzuna iletildi.`);
+    } catch (err) {
+      console.error(err);
+      showStatus('error', err instanceof Error ? err.message : 'Giriş talebi kaydedilemedi.');
+    }
+  };
+
+  const handleSendKampGunlukAkis = async () => {
+    const today = new Date().toISOString().slice(0, 10);
+    const email = currentUser?.email?.trim().toLowerCase() || 'kampci';
+    if (!window.confirm(`${today} kamp günlük akış raporunu yönetime göndermek istiyor musunuz?`)) return;
+    setSendingKampAkis(true);
+    try {
+      const ozetMetin = buildKampciGunlukOzet({
+        tarih: today,
+        email,
+        yerlesimCount: kampKayitlari.filter((k) => k.girisTarihi?.startsWith(today)).length,
+        sayimCount: depoSavimlari.filter((s) => s.tarih === today).length,
+        faaliyetCount: gunlukFaaliyetler.filter((f) => f.tarih === today).length,
+      });
+      await saveDocument('mobilGunlukAkisRaporlari', {
+        id: `kamp_akis_${today}_${email.replace(/[@.]/g, '-')}`,
+        tip: 'KAMPÇI',
+        tarih: today,
+        gonderenEmail: email,
+        ozetMetin,
+        kampIslemSayisi:
+          kampKayitlari.filter((k) => k.girisTarihi?.startsWith(today)).length +
+          depoSavimlari.filter((s) => s.tarih === today).length +
+          gunlukFaaliyetler.filter((f) => f.tarih === today).length,
+        durum: 'ONAY BEKLİYOR',
+        olusturulma: new Date().toISOString(),
+      });
+      showStatus('success', 'Kamp günlük akış raporu yönetim onayına gönderildi!');
+    } catch (err) {
+      console.error(err);
+      showStatus('error', 'Rapor gönderilemedi.');
+    } finally {
+      setSendingKampAkis(false);
+    }
+  };
+
+  // Filtered personnel list for DB selection — seçili firmaya göre
+  const resolvedPlacementFirmaAdi = useMemo(() => {
+    if (placementFirmaTipi === 'ANA_FIRMA') return CANONICAL_ANA_FIRMA_ADI;
+    return (firmaType === 'DB' ? selectedFirma : manualFirma).trim();
+  }, [placementFirmaTipi, firmaType, selectedFirma, manualFirma]);
+
   const filteredPersonel = personeller.filter(p => {
     const statusLower = String(p.durum || '').toLowerCase();
     const isPasif = statusLower === 'pasif' || p.durum === false || statusLower === 'false';
     if (isPasif) return false;
+
+    if (placementFirmaTipi === 'ANA_FIRMA') {
+      if (isTaseronPersonel(p)) return false;
+    } else {
+      if (!isTaseronPersonel(p) && p.firmaTipi !== 'TASERON') return false;
+      if (resolvedPlacementFirmaAdi && !firmaEslesir(p.firmaAdi || '', resolvedPlacementFirmaAdi)) {
+        return false;
+      }
+    }
+
     const nameStr = `${p.ad || ''} ${p.soyad || ''}`.toLowerCase();
     const queryStr = searchPersonelQuery.toLowerCase();
-    return nameStr.includes(queryStr) || (p.gorev || '').toLowerCase().includes(queryStr);
+    if (!queryStr) return true;
+    return (
+      nameStr.includes(queryStr) ||
+      (p.gorev || '').toLowerCase().includes(queryStr) ||
+      (p.tcNo || '').toLowerCase().includes(queryStr) ||
+      digitsOnly(p.telefonNo || '').includes(digitsOnly(queryStr)) ||
+      (p.firmaAdi || '').toLowerCase().includes(queryStr)
+    );
   });
+
+  const mesaiPersonelListesi = useMemo(() => {
+    const dk = todayDateKey();
+    const [y, m, d] = dk.split('-').map(Number);
+    const base = personeller.filter((p) => {
+      if (isTaseronPersonel(p) || isIdariPersonel(p) || isGorevsizPersonel(p)) return false;
+      if (isSoforGorev(p.gorev) || isOperatorGorev(p.gorev)) return false;
+      if (!isKampciYoklamaKapsami(p.gorev)) return false;
+      const day = getYoklamaDay(yoklamalar[p.id], y, m, d);
+      return day?.durum === 'Geldi';
+    });
+    const q = mesaiPersonelSearch.trim().toLowerCase();
+    if (!q) return base;
+    return base.filter((p) => {
+      const name = `${p.ad || ''} ${p.soyad || ''}`.toLowerCase();
+      return (
+        name.includes(q) ||
+        (p.gorev || '').toLowerCase().includes(q) ||
+        (p.tcNo || '').includes(q) ||
+        (p.firmaAdi || '').toLowerCase().includes(q)
+      );
+    });
+  }, [personeller, yoklamalar, mesaiPersonelSearch]);
+
+  const filteredRoomsWithOccupants = useMemo(() => {
+    const q = searchRoomQuery.trim().toLowerCase();
+    return kampOdalari.filter((room) => {
+      if (!q) return true;
+      const roomHit =
+        (room.yerleskeAdi || '').toLowerCase().includes(q) ||
+        (room.kogusNo || '').toLowerCase().includes(q) ||
+        (room.odaNo || '').toLowerCase().includes(q);
+      if (roomHit) return true;
+      return kampKayitlari.some(
+        (k) =>
+          (k.odaId === room.id || k.roomId === room.id) &&
+          k.durum === 'AKTIF' &&
+          (k.personelIsim || '').toLowerCase().includes(q)
+      );
+    });
+  }, [kampOdalari, kampKayitlari, searchRoomQuery]);
+
+  const renderYeniFirmaYardim = (
+    manualValue: string,
+    onPick: (unvan: string) => void
+  ) => {
+    const q = manualValue.trim();
+    const benzer = q.length >= 2 ? findSimilarTaseronCariler(q, cariKartlar) : [];
+    const evalr = q.length >= 3 ? evaluateKampFirmaOnerisi(q, cariKartlar, pendingFirmaTalepleri) : null;
+    return (
+      <div className="space-y-1.5">
+        <p className="text-[9px] text-amber-800 leading-relaxed">
+          Yeni firma hemen açılmaz; yönetici onayına gider. Yazım hatası / çift kayıt olmasın diye kayıtlıya benziyorsa aşağıdan seçin.
+        </p>
+        {evalr?.kind === 'existing' && (
+          <button
+            type="button"
+            onClick={() => onPick(evalr.cari.unvan)}
+            className="w-full text-left text-[10px] font-bold bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-lg px-2.5 py-1.5"
+          >
+            Kayıtlı firma bulundu: {evalr.cari.unvan} — bunu kullan
+          </button>
+        )}
+        {evalr?.kind === 'pending' && (
+          <p className="text-[9px] font-bold text-amber-900 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1.5">
+            “{evalr.talep.onerilenUnvan}” zaten onay bekliyor.
+          </p>
+        )}
+        {evalr?.kind === 'invalid' && q.length >= 3 && (
+          <p className="text-[9px] font-bold text-rose-700">{evalr.message}</p>
+        )}
+        {benzer.length > 0 && evalr?.kind !== 'existing' && (
+          <div className="flex flex-wrap gap-1">
+            {benzer.map((c) => (
+              <button
+                key={c.id}
+                type="button"
+                onClick={() => onPick(c.unvan)}
+                className="text-[9px] font-bold px-2 py-1 rounded-lg border border-slate-200 bg-white text-slate-700 hover:border-amber-400"
+              >
+                {c.unvan}
+              </button>
+            ))}
+          </div>
+        )}
+        {pendingFirmaTalepleri.length > 0 && (
+          <p className="text-[9px] text-slate-500">
+            Onay bekleyen: {pendingFirmaTalepleri.map((t) => t.onerilenUnvan).join(', ')}
+          </p>
+        )}
+      </div>
+    );
+  };
+
+  const renderPlacementPersonForm = () => (
+    <>
+      <div className="space-y-1.5">
+        <label className="text-[9px] font-extrabold text-slate-500 uppercase tracking-wider block">Giriş Türü</label>
+        <div className="grid grid-cols-2 gap-2 bg-slate-50 p-1.5 rounded-xl border border-slate-200">
+          <button
+            type="button"
+            onClick={() => setPlacementType('DB')}
+            className={`py-1.5 rounded-lg text-[10px] font-bold text-center transition ${
+              placementType === 'DB' ? 'bg-slate-800 text-white' : 'text-slate-500 hover:text-slate-800'
+            }`}
+          >
+            Kayıtlı Personel
+          </button>
+          <button
+            type="button"
+            onClick={() => setPlacementType('MANUAL')}
+            className={`py-1.5 rounded-lg text-[10px] font-bold text-center transition ${
+              placementType === 'MANUAL' ? 'bg-slate-800 text-white' : 'text-slate-500 hover:text-slate-800'
+            }`}
+          >
+            Yeni Personel Kaydı
+          </button>
+        </div>
+      </div>
+
+      <div className="border-t border-slate-850 pt-3 space-y-3">
+        <span className="text-[10px] font-black text-slate-600 uppercase tracking-widest block">ADIM 1: Firma Bilgisi</span>
+
+        <div className="grid grid-cols-2 gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              setPlacementFirmaTipi('ANA_FIRMA');
+              setSelectedPersonelId('');
+              setSelectedFirma('');
+              setManualFirma('');
+            }}
+            className={`py-1.5 rounded-lg text-[10px] font-bold ${placementFirmaTipi === 'ANA_FIRMA' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600'}`}
+          >
+            Ana Firma
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setPlacementFirmaTipi('TASERON');
+              setSelectedPersonelId('');
+            }}
+            className={`py-1.5 rounded-lg text-[10px] font-bold ${placementFirmaTipi === 'TASERON' ? 'bg-amber-600 text-white' : 'bg-slate-100 text-slate-600'}`}
+          >
+            Taşeron
+          </button>
+        </div>
+
+        {placementFirmaTipi === 'ANA_FIRMA' ? (
+          <div className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-[11px] font-bold text-slate-700">
+            {CANONICAL_ANA_FIRMA_ADI}
+          </div>
+        ) : (
+          <>
+            <div className="grid grid-cols-2 gap-2 bg-slate-50 p-1 rounded-lg border border-slate-200/60">
+              <button
+                type="button"
+                onClick={() => setFirmaType('DB')}
+                className={`py-1 rounded-md text-[9px] font-bold text-center transition ${
+                  firmaType === 'DB' ? 'bg-slate-800 text-white' : 'text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                Kayıtlı Firmalar
+              </button>
+              <button
+                type="button"
+                onClick={() => setFirmaType('MANUAL')}
+                className={`py-1 rounded-md text-[9px] font-bold text-center transition ${
+                  firmaType === 'MANUAL' ? 'bg-slate-800 text-white' : 'text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                Yeni Firma Yaz (onaya gider)
+              </button>
+            </div>
+
+            {firmaType === 'DB' ? (
+              <div className="space-y-1.5 animate-in fade-in duration-100">
+                <label className="text-[9px] font-extrabold text-slate-500 uppercase tracking-wider block">Kayıtlı Firmalardan Seçin *</label>
+                <select
+                  required={firmaType === 'DB'}
+                  value={selectedFirma}
+                  onChange={(e) => {
+                    setSelectedFirma(e.target.value);
+                    setSelectedPersonelId('');
+                  }}
+                  className="w-full bg-slate-50 border border-slate-200 text-xs font-bold text-slate-800 rounded-xl p-3 outline-none"
+                >
+                  <option value="">-- Taşeron / Firma Seçin --</option>
+                  {taseronCariler.map((c) => (
+                    <option key={c.id} value={c.unvan}>{c.unvan}</option>
+                  ))}
+                  {cariKartlar.filter((c) => c.kartTipi !== 'TASERON' && c.durum === 'AKTIF').map((c) => (
+                    <option key={c.id} value={c.unvan}>{c.unvan}</option>
+                  ))}
+                </select>
+              </div>
+            ) : (
+              <div className="space-y-1.5 animate-in fade-in duration-100">
+                <label className="text-[9px] font-extrabold text-slate-500 uppercase tracking-wider block">Firma Adını Yazın *</label>
+                <input
+                  type="text"
+                  required={firmaType === 'MANUAL'}
+                  placeholder="Örn: Özdemir Hafriyat Ltd. Şti."
+                  value={manualFirma}
+                  onChange={(e) => {
+                    setManualFirma(e.target.value);
+                    setSelectedPersonelId('');
+                  }}
+                  className="w-full bg-slate-50 border border-slate-200 text-xs text-slate-800 p-3 rounded-xl outline-none"
+                />
+                {renderYeniFirmaYardim(manualFirma, (unvan) => {
+                  setFirmaType('DB');
+                  setSelectedFirma(unvan);
+                  setManualFirma('');
+                  setSelectedPersonelId('');
+                })}
+              </div>
+            )}
+          </>
+        )}
+      </div>
+
+      <div className="border-t border-slate-850 pt-3 space-y-3">
+        <span className="text-[10px] font-black text-slate-600 uppercase tracking-widest block">ADIM 2: TC / Tel Sorgu</span>
+        <div className="space-y-2">
+          <div className="flex gap-2">
+            <input
+              type="text"
+              inputMode="numeric"
+              maxLength={11}
+              placeholder="TC Kimlik No"
+              value={placementTcNo}
+              onChange={(e) => setPlacementTcNo(e.target.value.replace(/\D/g, '').slice(0, 11))}
+              className="flex-1 bg-slate-50 border border-slate-200 text-xs text-slate-800 p-2.5 rounded-xl outline-none"
+            />
+            <button
+              type="button"
+              onClick={runPlacementTcSorgu}
+              className="shrink-0 px-3 py-2.5 rounded-xl bg-sky-700 hover:bg-sky-800 text-white text-[10px] font-black tracking-wide"
+            >
+              TC SORGU
+            </button>
+          </div>
+          <div className="flex gap-2">
+            <input
+              type="tel"
+              placeholder="Telefon No"
+              value={placementTelefonNo}
+              onChange={(e) => setPlacementTelefonNo(e.target.value)}
+              className="flex-1 bg-slate-50 border border-slate-200 text-xs text-slate-800 p-2.5 rounded-xl outline-none"
+            />
+            <button
+              type="button"
+              onClick={runPlacementTelSorgu}
+              className="shrink-0 px-3 py-2.5 rounded-xl bg-teal-700 hover:bg-teal-800 text-white text-[10px] font-black tracking-wide"
+            >
+              TEL NO SORGU
+            </button>
+          </div>
+          <p className="text-[9px] text-slate-500 leading-relaxed">
+            Kayıtlı personel varsa sorgu ile bulunur ve firması otomatik seçilir. Yoksa yeni kayıt için ad soyad + TC + telefon girin; personel seçili firmaya kaydedilir.
+          </p>
+        </div>
+      </div>
+
+      <div className="border-t border-slate-850 pt-3 space-y-3">
+        <span className="text-[10px] font-black text-slate-600 uppercase tracking-widest block">ADIM 3: Personel Bilgisi</span>
+
+        {placementType === 'DB' ? (
+          <div className="space-y-3 animate-in fade-in duration-100">
+            <div className="space-y-1.5">
+              <label className="text-[9px] font-extrabold text-slate-500 uppercase tracking-wider block">
+                {placementFirmaTipi === 'ANA_FIRMA'
+                  ? `${CANONICAL_ANA_FIRMA_ADI} Personelleri`
+                  : resolvedPlacementFirmaAdi
+                    ? `${resolvedPlacementFirmaAdi} Personelleri`
+                    : 'Önce taşeron firma seçin'}
+              </label>
+              <div className="relative">
+                <Search size={14} className="absolute left-3 top-3 text-slate-500" />
+                <input
+                  type="text"
+                  placeholder="Ad, TC, telefon veya görev ara..."
+                  value={searchPersonelQuery}
+                  onChange={(e) => setSearchPersonelQuery(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 text-xs text-slate-800 pl-9 pr-3 py-2.5 rounded-xl outline-none"
+                />
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-[9px] font-extrabold text-slate-500 uppercase tracking-wider block">
+                Firmaya Ait Personel Listesi ({filteredPersonel.length}) *
+              </label>
+              <select
+                required={placementType === 'DB'}
+                value={selectedPersonelId}
+                onChange={(e) => {
+                  const pid = e.target.value;
+                  setSelectedPersonelId(pid);
+                  const matched = personeller.find((p) => p.id === pid);
+                  if (matched) {
+                    setPlacementTcNo(digitsOnly(matched.tcNo || ''));
+                    setPlacementTelefonNo(String(matched.telefonNo || '').trim());
+                    applyPersonelFirmaMatch(matched);
+                  }
+                }}
+                className="w-full bg-slate-50 border border-slate-200 text-xs font-bold text-slate-800 rounded-xl p-3 outline-none"
+              >
+                <option value="">-- Personel Seçin --</option>
+                {filteredPersonel.slice(0, 50).map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.ad} {p.soyad} ({p.gorev || '-'}){p.firmaAdi ? ` · ${p.firmaAdi}` : ''}
+                  </option>
+                ))}
+              </select>
+              {filteredPersonel.length > 50 && (
+                <span className="text-[9px] text-slate-500 italic block mt-1">+ {filteredPersonel.length - 50} personel daha — arama ile daraltın.</span>
+              )}
+              {placementFirmaTipi === 'TASERON' && !resolvedPlacementFirmaAdi && (
+                <span className="text-[9px] text-amber-600 font-bold block mt-1">Firma seçilmeden tüm taşeron personeller listelenir.</span>
+              )}
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-1.5 animate-in fade-in duration-100">
+            <label className="text-[9px] font-extrabold text-slate-500 uppercase tracking-wider block">Personel Adı Soyadı *</label>
+            <input
+              type="text"
+              required={placementType === 'MANUAL'}
+              placeholder="Örn: Ahmet Yılmaz"
+              value={manualPersonelIsim}
+              onChange={(e) => setManualPersonelIsim(e.target.value)}
+              className="w-full bg-slate-50 border border-slate-200 text-xs text-slate-800 p-3 rounded-xl outline-none"
+            />
+            <p className="text-[9px] text-slate-500">
+              Bu kişi seçili firmaya ({resolvedPlacementFirmaAdi || '—'}) personel olarak kaydedilir.
+            </p>
+          </div>
+        )}
+      </div>
+
+      <button
+        type="submit"
+        disabled={loadingPlacement}
+        className="w-full bg-slate-900 hover:bg-slate-900 disabled:bg-slate-900 text-white font-bold text-xs py-3 rounded-xl transition cursor-pointer flex items-center justify-center space-x-2 shadow-lg shadow-slate-500/10"
+      >
+        {loadingPlacement ? <RefreshCw size={13} className="animate-spin" /> : <UserPlus size={14} />}
+        <span>Odaya Yerleştir ve Kaydet</span>
+      </button>
+    </>
+  );
 
   const content = (
     <>
@@ -521,10 +2070,10 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 border-b border-slate-200 pb-5">
         <div>
           <div className="flex items-center space-x-2">
-            <span className="p-1.5 bg-blue-600/10 rounded-lg text-blue-500">
+            <span className="p-1.5 bg-slate-900/10 rounded-lg text-slate-600">
               <Tent size={20} />
             </span>
-            <span className="text-[10px] font-bold text-blue-400 tracking-wider uppercase">Lojman &amp; Kamp İşlemleri</span>
+            <span className="text-[10px] font-bold text-slate-600 tracking-wider uppercase">Lojman &amp; Kamp İşlemleri</span>
           </div>
           <h1 className="text-xl md:text-2xl font-black text-slate-800 mt-1">⛺ KAMP AMİRLİĞİ MOBİL PANELİ</h1>
           <p className="text-[11px] text-slate-500 mt-0.5">Oda açılışı, personel yerleşimleri, depo sayımları ve günlük kamp faaliyet raporları</p>
@@ -549,11 +2098,47 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
 
       {/* 🔔 Real-time status toast inside screen */}
       {statusMessage && (
-        <div className={`p-4 rounded-xl border flex items-center space-x-3 shadow-lg max-w-xl animate-bounce ${
-          statusMessage.type === 'success' ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' : 'bg-rose-500/10 border-rose-500/30 text-rose-400'
+        <div className={`p-4 rounded-xl border flex items-center space-x-3 shadow-lg max-w-xl ${
+          statusMessage.type === 'success'
+            ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-600'
+            : statusMessage.type === 'info'
+              ? 'bg-slate-500/10 border-slate-800/30 text-slate-800'
+              : 'bg-rose-500/10 border-rose-500/30 text-rose-600'
         }`}>
-          <CheckCircle size={16} />
+          {statusMessage.type === 'info' ? (
+            <RefreshCw size={16} className="animate-spin shrink-0" />
+          ) : (
+            <CheckCircle size={16} className="shrink-0" />
+          )}
           <span className="text-xs font-bold">{statusMessage.text}</span>
+        </div>
+      )}
+
+      {vidanjorAlert && (
+        <div className="bg-amber-50 border border-amber-300 rounded-2xl p-3 flex items-start gap-2 max-w-2xl shadow-sm">
+          <AlertTriangle className="text-amber-600 shrink-0 mt-0.5" size={16} />
+          <div className="flex-1 min-w-0">
+            <p className="text-[10px] font-black uppercase text-amber-800 tracking-wider">Vidanjör Giriş Uyarısı</p>
+            <p className="text-xs text-amber-900 mt-0.5">{vidanjorAlert}</p>
+            <button
+              type="button"
+              onClick={() => {
+                setActiveSubTab('vidanjor');
+                setVidanjorAlert(null);
+              }}
+              className="mt-2 text-[10px] font-black uppercase tracking-wide text-indigo-700 hover:underline cursor-pointer"
+            >
+              Vidanjör fiş sekmesine git →
+            </button>
+          </div>
+          <button
+            type="button"
+            onClick={() => setVidanjorAlert(null)}
+            className="text-amber-700 cursor-pointer"
+            aria-label="Uyarıyı kapat"
+          >
+            <X size={14} />
+          </button>
         </div>
       )}
 
@@ -563,7 +2148,7 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
           onClick={() => setActiveSubTab('placement')}
           className={`px-4 py-2.5 rounded-xl font-bold text-xs transition flex items-center space-x-2 border cursor-pointer ${
             activeSubTab === 'placement' 
-              ? 'bg-blue-650 border-blue-600 text-white shadow-md shadow-blue-500/10' 
+              ? 'bg-slate-900 border-slate-800 text-white shadow-md shadow-slate-500/10' 
               : 'bg-white border-slate-200/80 text-slate-500 hover:bg-slate-50'
           }`}
         >
@@ -572,10 +2157,46 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
         </button>
 
         <button
+          onClick={() => setActiveSubTab('personel_giris')}
+          className={`px-4 py-2.5 rounded-xl font-bold text-xs transition flex items-center space-x-2 border cursor-pointer ${
+            activeSubTab === 'personel_giris'
+              ? 'bg-emerald-600 border-emerald-500 text-white shadow-md shadow-emerald-500/20'
+              : 'bg-white border-slate-200/80 text-slate-500 hover:bg-slate-50'
+          }`}
+        >
+          <DoorOpen size={14} />
+          <span>🚪 Girişe Yolla</span>
+        </button>
+
+        <button
+          onClick={() => setActiveSubTab('taseron_sayim')}
+          className={`px-4 py-2.5 rounded-xl font-bold text-xs transition flex items-center space-x-2 border cursor-pointer ${
+            activeSubTab === 'taseron_sayim'
+              ? 'bg-amber-600 border-amber-500 text-white shadow-md shadow-amber-500/20'
+              : 'bg-white border-slate-200/80 text-slate-500 hover:bg-slate-50'
+          }`}
+        >
+          <Building2 size={14} />
+          <span>📋 Taşeron Sayım</span>
+        </button>
+
+        <button
+          onClick={() => setActiveSubTab('firma_listesi')}
+          className={`px-4 py-2.5 rounded-xl font-bold text-xs transition flex items-center space-x-2 border cursor-pointer ${
+            activeSubTab === 'firma_listesi'
+              ? 'bg-teal-600 border-teal-500 text-white shadow-md shadow-teal-500/20'
+              : 'bg-white border-slate-200/80 text-slate-500 hover:bg-slate-50'
+          }`}
+        >
+          <Building2 size={14} />
+          <span>🏢 Firma &amp; Oda Dağılımı</span>
+        </button>
+
+        <button
           onClick={() => setActiveSubTab('rooms')}
           className={`px-4 py-2.5 rounded-xl font-bold text-xs transition flex items-center space-x-2 border cursor-pointer ${
             activeSubTab === 'rooms' 
-              ? 'bg-blue-650 border-blue-600 text-white shadow-md shadow-blue-500/10' 
+              ? 'bg-slate-900 border-slate-800 text-white shadow-md shadow-slate-500/10' 
               : 'bg-white border-slate-200/80 text-slate-500 hover:bg-slate-50'
           }`}
         >
@@ -587,7 +2208,7 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
           onClick={() => setActiveSubTab('warehouse')}
           className={`px-4 py-2.5 rounded-xl font-bold text-xs transition flex items-center space-x-2 border cursor-pointer ${
             activeSubTab === 'warehouse' 
-              ? 'bg-blue-650 border-blue-600 text-white shadow-md shadow-blue-500/10' 
+              ? 'bg-slate-900 border-slate-800 text-white shadow-md shadow-slate-500/10' 
               : 'bg-white border-slate-200/80 text-slate-500 hover:bg-slate-50'
           }`}
         >
@@ -599,12 +2220,72 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
           onClick={() => setActiveSubTab('activities')}
           className={`px-4 py-2.5 rounded-xl font-bold text-xs transition flex items-center space-x-2 border cursor-pointer ${
             activeSubTab === 'activities' 
-              ? 'bg-blue-650 border-blue-600 text-white shadow-md shadow-blue-500/10' 
+              ? 'bg-slate-900 border-slate-800 text-white shadow-md shadow-slate-500/10' 
               : 'bg-white border-slate-200/80 text-slate-500 hover:bg-slate-50'
           }`}
         >
           <ClipboardList size={14} />
           <span>🧹 Günlük Faaliyetler</span>
+        </button>
+
+        <button
+          onClick={() => setActiveSubTab('yoklama')}
+          className={`px-4 py-2.5 rounded-xl font-bold text-xs transition flex items-center space-x-2 border cursor-pointer ${
+            activeSubTab === 'yoklama'
+              ? 'bg-slate-900 border-slate-800 text-white shadow-md shadow-slate-500/10'
+              : 'bg-white border-slate-200/80 text-slate-500 hover:bg-slate-50'
+          }`}
+        >
+          <ClipboardList size={14} />
+          <span>📝 Günlük Yoklama</span>
+        </button>
+
+        <button
+          onClick={() => setActiveSubTab('aylik_puantaj')}
+          className={`px-4 py-2.5 rounded-xl font-bold text-xs transition flex items-center space-x-2 border cursor-pointer ${
+            activeSubTab === 'aylik_puantaj'
+              ? 'bg-amber-500 border-amber-400 text-slate-950 shadow-md shadow-amber-500/20'
+              : 'bg-white border-slate-200/80 text-slate-500 hover:bg-slate-50'
+          }`}
+        >
+          <Calendar size={14} />
+          <span>📊 Aylık Puantaj</span>
+        </button>
+
+        <button
+          onClick={() => setActiveSubTab('haftalik_yoklama')}
+          className={`px-4 py-2.5 rounded-xl font-bold text-xs transition flex items-center space-x-2 border cursor-pointer ${
+            activeSubTab === 'haftalik_yoklama'
+              ? 'bg-violet-600 border-violet-500 text-white shadow-md shadow-violet-500/20'
+              : 'bg-white border-slate-200/80 text-slate-500 hover:bg-slate-50'
+          }`}
+        >
+          <Calendar size={14} />
+          <span>📅 Haftalık Yoklama</span>
+        </button>
+
+        <button
+          onClick={() => setActiveSubTab('vidanjor')}
+          className={`px-4 py-2.5 rounded-xl font-bold text-xs transition flex items-center space-x-2 border cursor-pointer ${
+            activeSubTab === 'vidanjor'
+              ? 'bg-indigo-600 border-indigo-500 text-white shadow-md shadow-indigo-500/20'
+              : 'bg-white border-slate-200/80 text-slate-500 hover:bg-slate-50'
+          }`}
+        >
+          <Truck size={14} />
+          <span>🚛 Vidanjör</span>
+        </button>
+
+        <button
+          onClick={() => setActiveSubTab('gunluk_akis')}
+          className={`px-4 py-2.5 rounded-xl font-bold text-xs transition flex items-center space-x-2 border cursor-pointer ${
+            activeSubTab === 'gunluk_akis'
+              ? 'bg-amber-500 border-amber-400 text-slate-950 shadow-md shadow-amber-500/20'
+              : 'bg-white border-slate-200/80 text-slate-500 hover:bg-slate-50'
+          }`}
+        >
+          <Sparkles size={14} />
+          <span>📋 Günlük Akış</span>
         </button>
       </div>
 
@@ -617,191 +2298,80 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
           {/* Check-In Form (Left Panel) */}
           <div className="lg:col-span-1 bg-white border border-slate-200 p-5 rounded-2xl shadow-sm space-y-4">
             <div>
-              <span className="font-extrabold text-[10px] text-blue-400 uppercase tracking-wider">Lojmana Personel Yerleştir</span>
-              <h3 className="font-bold text-sm text-white mt-0.5">🔑 Check-In Giriş İşlemi</h3>
+              <span className="font-extrabold text-[10px] text-slate-600 uppercase tracking-wider">Lojmana Personel Yerleştir</span>
+              <h3 className="font-bold text-sm text-slate-800 mt-0.5">🔑 Check-In Giriş İşlemi</h3>
             </div>
 
+            {kampKayitlari.filter((k) => k.durum === 'AKTIF').length === 0 &&
+              kampKayitlari.some((k) => k.durum === 'PASIF') && (
+              <div className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-2.5 space-y-2">
+                <p className="text-[10px] font-bold text-amber-950 leading-snug">
+                  Aktif yerleşim görünmüyor. Kayıtlar silinmedi; PASIF’e alınmış olabilir.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => void handleRestoreYerlesim()}
+                  className="w-full bg-amber-600 hover:bg-amber-700 text-white text-[10px] font-black uppercase tracking-wide px-3 py-2 rounded-lg cursor-pointer"
+                >
+                  Yerleşimleri geri yükle
+                </button>
+              </div>
+            )}
+
             <form onSubmit={handlePlacementSubmit} className="space-y-4">
-              {/* Target Room Selection */}
+              {/* Target Room Selection — yerleşke → kat → oda */}
               <div className="space-y-1.5">
                 <label className="text-[9px] font-extrabold text-slate-500 uppercase tracking-wider block">Yerleşim Yapılacak Oda *</label>
-                <select
-                  required
-                  value={selectedRoomId}
-                  onChange={(e) => setSelectedRoomId(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 text-xs font-bold text-white rounded-xl p-3 outline-none"
-                >
-                  <option value="">-- Oda Seçiniz --</option>
-                  {kampOdalari.map(r => {
-                    const currentCount = kampKayitlari.filter(k => (k.odaId === r.id || k.roomId === r.id) && k.durum === 'AKTIF').length;
-                    return (
-                      <option key={r.id} value={r.id}>
-                        {r.yerleskeAdi} - {r.kogusNo} - Oda: {r.odaNo} ({currentCount}/{r.kapasite} Yatak)
-                      </option>
-                    );
-                  })}
-                </select>
-              </div>
-
-              {/* Source Type Toggle */}
-              <div className="space-y-1.5">
-                <label className="text-[9px] font-extrabold text-slate-500 uppercase tracking-wider block">Giriş Türü</label>
-                <div className="grid grid-cols-2 gap-2 bg-slate-50 p-1.5 rounded-xl border border-slate-200">
-                  <button
-                    type="button"
-                    onClick={() => setPlacementType('DB')}
-                    className={`py-1.5 rounded-lg text-[10px] font-bold text-center transition ${
-                      placementType === 'DB' ? 'bg-slate-800 text-white' : 'text-slate-500 hover:text-white'
-                    }`}
+                <div className="grid grid-cols-1 gap-1.5">
+                  <select
+                    value={placementYerleskeId}
+                    onChange={(e) => {
+                      setPlacementYerleskeId(e.target.value);
+                      setPlacementKatId('');
+                      setSelectedRoomId('');
+                    }}
+                    className="w-full bg-slate-50 border border-slate-200 text-[10px] font-bold text-slate-800 rounded-lg px-2.5 py-2 outline-none"
                   >
-                    Kayıtlı Personel
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setPlacementType('MANUAL')}
-                    className={`py-1.5 rounded-lg text-[10px] font-bold text-center transition ${
-                      placementType === 'MANUAL' ? 'bg-slate-800 text-white' : 'text-slate-500 hover:text-white'
-                    }`}
+                    <option value="">1. Yerleşke seçin</option>
+                    {placementYerleskeOptions.map(y => (
+                      <option key={y.id} value={y.id}>{y.ad}</option>
+                    ))}
+                  </select>
+                  <select
+                    value={placementKatId}
+                    disabled={!placementYerleskeId}
+                    onChange={(e) => {
+                      setPlacementKatId(e.target.value);
+                      setSelectedRoomId('');
+                    }}
+                    className="w-full bg-slate-50 border border-slate-200 text-[10px] font-bold text-slate-800 rounded-lg px-2.5 py-2 outline-none disabled:opacity-50"
                   >
-                    Elle Giriş (Misafir/Taşeron)
-                  </button>
+                    <option value="">2. Kat seçin</option>
+                    {placementKatOptions.map(k => (
+                      <option key={k.id} value={k.id}>{k.ad}</option>
+                    ))}
+                  </select>
+                  <select
+                    required
+                    value={selectedRoomId}
+                    disabled={!placementKatId}
+                    onChange={(e) => setSelectedRoomId(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 text-[10px] font-bold text-slate-800 rounded-lg px-2.5 py-2 outline-none disabled:opacity-50"
+                  >
+                    <option value="">3. Oda seçin</option>
+                    {placementOdaOptions.map(r => {
+                      const currentCount = kampKayitlari.filter(k => (k.odaId === r.id || k.roomId === r.id) && k.durum === 'AKTIF').length;
+                      return (
+                        <option key={r.id} value={r.id}>
+                          Oda {r.odaNo} ({currentCount}/{r.kapasite} yatak)
+                        </option>
+                      );
+                    })}
+                  </select>
                 </div>
               </div>
 
-              {/* STAGE 1: PERSONEL SEÇ VEYA İSİM GİR */}
-              <div className="border-t border-slate-850 pt-3 space-y-3">
-                <span className="text-[10px] font-black text-blue-400 uppercase tracking-widest block">ADIM 1: Personel Bilgisi</span>
-                
-                {placementType === 'DB' ? (
-                  <div className="space-y-3 animate-in fade-in duration-100">
-                    <div className="space-y-1.5">
-                      <label className="text-[9px] font-extrabold text-slate-500 uppercase tracking-wider block">Personel Filtrele / Ara</label>
-                      <div className="relative">
-                        <Search size={14} className="absolute left-3 top-3 text-slate-500" />
-                        <input
-                          type="text"
-                          placeholder="Personel adı veya görevi..."
-                          value={searchPersonelQuery}
-                          onChange={(e) => setSearchPersonelQuery(e.target.value)}
-                          className="w-full bg-slate-50 border border-slate-200 text-xs text-white pl-9 pr-3 py-2.5 rounded-xl outline-none"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="space-y-1.5">
-                      <label className="text-[9px] font-extrabold text-slate-500 uppercase tracking-wider block">Kayıtlı Personel Listesinden Seçin *</label>
-                      <select
-                        required={placementType === 'DB'}
-                        value={selectedPersonelId}
-                        onChange={(e) => {
-                          const pid = e.target.value;
-                          setSelectedPersonelId(pid);
-                          const matched = personeller.find(p => p.id === pid);
-                          if (matched) {
-                            if (matched.calistigiFirma) {
-                              setFirmaType('MANUAL');
-                              setManualFirma(matched.calistigiFirma);
-                            } else if (matched.firma) {
-                              setFirmaType('MANUAL');
-                              setManualFirma(matched.firma);
-                            }
-                          }
-                        }}
-                        className="w-full bg-slate-50 border border-slate-200 text-xs font-bold text-white rounded-xl p-3 outline-none"
-                      >
-                        <option value="">-- Personel Seçin --</option>
-                        {filteredPersonel.slice(0, 30).map(p => (
-                          <option key={p.id} value={p.id}>
-                            {p.ad} {p.soyad} ({p.gorev})
-                          </option>
-                        ))}
-                      </select>
-                      {filteredPersonel.length > 30 && (
-                        <span className="text-[9px] text-slate-500 italic block mt-1">+ {filteredPersonel.length - 30} personel daha filtrelendi. Kelime arayarak daraltın.</span>
-                      )}
-                    </div>
-                  </div>
-                ) : (
-                  <div className="space-y-1.5 animate-in fade-in duration-100">
-                    <label className="text-[9px] font-extrabold text-slate-500 uppercase tracking-wider block">Personel Adı Soyadı *</label>
-                    <input
-                      type="text"
-                      required={placementType === 'MANUAL'}
-                      placeholder="Örn: Ahmet Yılmaz"
-                      value={manualPersonelIsim}
-                      onChange={(e) => setManualPersonelIsim(e.target.value)}
-                      className="w-full bg-slate-50 border border-slate-200 text-xs text-white p-3 rounded-xl outline-none"
-                    />
-                  </div>
-                )}
-              </div>
-
-              {/* STAGE 2: FİRMA SEÇ VEYA İSMİNİ YAZ */}
-              <div className="border-t border-slate-850 pt-3 space-y-3">
-                <span className="text-[10px] font-black text-blue-400 uppercase tracking-widest block">ADIM 2: Firma Bilgisi</span>
-                
-                <div className="grid grid-cols-2 gap-2 bg-slate-50 p-1 rounded-lg border border-slate-200/60">
-                  <button
-                    type="button"
-                    onClick={() => setFirmaType('DB')}
-                    className={`py-1 rounded-md text-[9px] font-bold text-center transition ${
-                      firmaType === 'DB' ? 'bg-slate-800 text-white' : 'text-slate-500 hover:text-white'
-                    }`}
-                  >
-                    Kayıtlı Firmalar
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setFirmaType('MANUAL')}
-                    className={`py-1 rounded-md text-[9px] font-bold text-center transition ${
-                      firmaType === 'MANUAL' ? 'bg-slate-800 text-white' : 'text-slate-500 hover:text-white'
-                    }`}
-                  >
-                    Yeni Firma Yaz
-                  </button>
-                </div>
-
-                {firmaType === 'DB' ? (
-                  <div className="space-y-1.5 animate-in fade-in duration-100">
-                    <label className="text-[9px] font-extrabold text-slate-500 uppercase tracking-wider block">Kayıtlı Firmalardan Seçin *</label>
-                    <select
-                      required={firmaType === 'DB'}
-                      value={selectedFirma}
-                      onChange={(e) => setSelectedFirma(e.target.value)}
-                      className="w-full bg-slate-50 border border-slate-200 text-xs font-bold text-white rounded-xl p-3 outline-none"
-                    >
-                      <option value="">-- Firma Seçin --</option>
-                      <option value="Özdemir Hafriyat A.Ş.">Özdemir Hafriyat A.Ş.</option>
-                      <option value="Yıldız İnşaat ve Altyapı">Yıldız İnşaat ve Altyapı</option>
-                      <option value="Aras Elektrik Mekanik">Aras Elektrik Mekanik</option>
-                      <option value="Merkez Beton A.Ş.">Merkez Beton A.Ş.</option>
-                      <option value="Doğu Mühendislik Grubu">Doğu Mühendislik Grubu</option>
-                    </select>
-                  </div>
-                ) : (
-                  <div className="space-y-1.5 animate-in fade-in duration-100">
-                    <label className="text-[9px] font-extrabold text-slate-500 uppercase tracking-wider block">Firma Adını Yazın *</label>
-                    <input
-                      type="text"
-                      required={firmaType === 'MANUAL'}
-                      placeholder="Örn: Özdemir Hafriyat Ltd. Şti."
-                      value={manualFirma}
-                      onChange={(e) => setManualFirma(e.target.value)}
-                      className="w-full bg-slate-50 border border-slate-200 text-xs text-white p-3 rounded-xl outline-none"
-                    />
-                  </div>
-                )}
-              </div>
-
-              {/* Submit Button */}
-              <button
-                type="submit"
-                disabled={loadingPlacement}
-                className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-800/40 text-white font-bold text-xs py-3 rounded-xl transition cursor-pointer flex items-center justify-center space-x-2 shadow-lg shadow-blue-500/10"
-              >
-                {loadingPlacement ? <RefreshCw size={13} className="animate-spin" /> : <UserPlus size={14} />}
-                <span>Check-In Yerleşimini Kaydet</span>
-              </button>
+              {renderPlacementPersonForm()}
             </form>
           </div>
 
@@ -809,33 +2379,45 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
           <div className="lg:col-span-2 bg-white border border-slate-200 p-5 rounded-2xl shadow-sm space-y-4">
             <div className="flex flex-col sm:flex-row justify-between sm:items-center border-b border-slate-200 pb-3 gap-2">
               <div>
-                <span className="font-extrabold text-[10px] text-blue-400 uppercase tracking-wider">Mevcut Kamp Odaları &amp; Doluluk Durumu</span>
-                <h3 className="font-bold text-sm text-white mt-0.5">🏡 Lojman Odaları Listesi</h3>
+                <span className="font-extrabold text-[10px] text-slate-600 uppercase tracking-wider">Mevcut Kamp Odaları &amp; Doluluk Durumu</span>
+                <h3 className="font-bold text-sm text-slate-800 mt-0.5">🏡 Lojman Odaları Listesi</h3>
               </div>
               <div className="relative">
                 <Search size={12} className="absolute left-2.5 top-2.5 text-slate-500" />
                 <input
                   type="text"
-                  placeholder="Blok veya oda ara..."
+                  placeholder="Oda veya personel ara..."
                   value={searchRoomQuery}
                   onChange={(e) => setSearchRoomQuery(e.target.value)}
-                  className="bg-slate-50 border border-slate-200 text-[10px] text-white pl-7 pr-2.5 py-1.5 rounded-lg outline-none w-44"
+                  className="bg-slate-50 border border-slate-200 text-[10px] text-slate-800 pl-7 pr-2.5 py-1.5 rounded-lg outline-none w-52"
                 />
               </div>
+              <button
+                type="button"
+                onClick={handleReloadKamp}
+                className="bg-slate-100 hover:bg-slate-200 text-slate-700 text-[10px] font-bold px-3 py-1.5 rounded-lg transition cursor-pointer flex items-center gap-1"
+              >
+                <RefreshCw size={11} /> Yenile
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleRestoreYerlesim()}
+                className="bg-amber-100 hover:bg-amber-200 text-amber-900 text-[10px] font-bold px-3 py-1.5 rounded-lg transition cursor-pointer flex items-center gap-1"
+                title="Yanlışlıkla PASIF’e alınan yerleşimleri odalara geri alır"
+              >
+                <DoorOpen size={11} /> Yerleşim Geri Yükle
+              </button>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {kampOdalari.filter(room => {
-                const q = searchRoomQuery.toLowerCase();
-                return (
-                  (room.yerleskeAdi || '').toLowerCase().includes(q) ||
-                  (room.kogusNo || '').toLowerCase().includes(q) ||
-                  (room.odaNo || '').toLowerCase().includes(q)
-                );
-              }).map(room => {
+              {filteredRoomsWithOccupants.map(room => {
+                const q = searchRoomQuery.trim().toLowerCase();
                 const occupants = kampKayitlari.filter(
                   k => (k.odaId === room.id || k.roomId === room.id) && k.durum === 'AKTIF'
                 );
+                const highlightedOccupants = q
+                  ? occupants.filter((o) => (o.personelIsim || '').toLowerCase().includes(q))
+                  : [];
 
                 return (
                   <div key={room.id} className="bg-slate-50 border border-slate-200 p-4 rounded-xl flex flex-col justify-between space-y-3">
@@ -844,7 +2426,7 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
                         <div className="flex justify-between items-start">
                           <div>
                             <span className="font-mono text-[10px] text-slate-500 block">{room.yerleskeAdi}</span>
-                            <span className="font-black text-xs text-white block mt-0.5">{room.kogusNo} / Oda {room.odaNo}</span>
+                            <span className="font-black text-xs text-slate-800 block mt-0.5">{room.kogusNo} / Oda {room.odaNo}</span>
                           </div>
                           <span className={`text-[8px] font-bold px-2 py-0.5 rounded-full border ${
                             room.durum === 'BOŞ' 
@@ -867,21 +2449,38 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
                             <p className="text-[10px] text-slate-500 italic">Odada kalan kimse bulunmuyor.</p>
                           ) : (
                             <div className="space-y-1">
-                              {occupants.map(occ => (
-                                <div key={occ.id} className="flex justify-between items-center bg-white p-1.5 rounded-lg border border-slate-850">
+                              {occupants.map(occ => {
+                                const nameHit =
+                                  q.length > 0 &&
+                                  (occ.personelIsim || '').toLowerCase().includes(q);
+                                return (
+                                <div
+                                  key={occ.id}
+                                  className={`flex justify-between items-center p-1.5 rounded-lg border ${
+                                    nameHit
+                                      ? 'bg-amber-50 border-amber-300'
+                                      : 'bg-white border-slate-200'
+                                  }`}
+                                >
                                   <div className="flex items-center space-x-1.5">
-                                    <div className="w-1.5 h-1.5 rounded-full bg-blue-500"></div>
+                                    <div className={`w-1.5 h-1.5 rounded-full ${nameHit ? 'bg-amber-500' : 'bg-slate-500'}`}></div>
                                     <span className="text-[10px] font-bold text-slate-700">{occ.personelIsim}</span>
                                   </div>
                                   <button
                                     onClick={() => handleCheckOut(occ)}
                                     className="text-[9px] font-bold text-rose-400 hover:text-rose-350 cursor-pointer p-0.5 hover:bg-rose-500/10 rounded transition"
-                                    title="Odadan Çıkar"
+                                    title="Odadan tahliye veya işten çıkış talebi"
                                   >
-                                    Çıkış Yap
+                                    Tahliye Et
                                   </button>
                                 </div>
-                              ))}
+                              );
+                              })}
+                              {highlightedOccupants.length > 0 && (
+                                <p className="text-[8px] font-bold text-amber-700 pt-0.5">
+                                  {highlightedOccupants.length} eşleşen personel
+                                </p>
+                              )}
                             </div>
                           )}
                         </div>
@@ -891,7 +2490,7 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
                       <div className="pt-2.5 border-t border-slate-200/60 flex items-center justify-between gap-2 mt-auto">
                         <button
                           onClick={() => handleSelectRoomForPlacement(room.id)}
-                          className="flex-grow bg-blue-600/15 hover:bg-blue-600 text-blue-400 hover:text-white border border-blue-500/20 hover:border-blue-600 rounded-lg py-1.5 text-[9px] font-black uppercase tracking-wider cursor-pointer transition text-center"
+                          className="flex-grow bg-slate-900/15 hover:bg-slate-900 text-slate-600 hover:text-white border border-slate-800/20 hover:border-slate-800 rounded-lg py-1.5 text-[9px] font-black uppercase tracking-wider cursor-pointer transition text-center"
                         >
                           Odaya Yerleştir
                         </button>
@@ -903,6 +2502,12 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
                             Tahliye Et
                           </button>
                         )}
+                        <button
+                          onClick={() => handleUpdateRoom(room)}
+                          className="bg-indigo-500/15 hover:bg-indigo-600 text-indigo-500 hover:text-white border border-indigo-500/20 hover:border-indigo-600 rounded-lg py-1.5 px-2.5 text-[9px] font-black uppercase tracking-wider cursor-pointer transition text-center"
+                        >
+                          Oda Güncelle
+                        </button>
                       </div>
 
                     </div>
@@ -922,180 +2527,184 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
           {/* Create Room Form */}
           <div className="lg:col-span-1 bg-white border border-slate-200 p-5 rounded-2xl shadow-sm space-y-4">
             <div>
-              <span className="font-extrabold text-[10px] text-blue-400 uppercase tracking-wider">Yeni Kamp Lojman Odası Ekle</span>
-              <h3 className="font-bold text-sm text-white mt-0.5">🏢 Oda / Koğuş Tanımla</h3>
+              <span className="font-extrabold text-[10px] text-slate-800 uppercase tracking-wider">Kamp Yapısı Kurulumu</span>
+              <h3 className="font-bold text-sm text-slate-800 mt-0.5">Yerleşke → Kat → Oda</h3>
+              <p className="text-[10px] text-slate-500 mt-1">Kamp Yönetimi ile senkron; sıfırdan kendi yapınızı kurun.</p>
             </div>
 
-            <form onSubmit={handleCreateRoom} className="space-y-4">
-              <div className="space-y-1.5">
-                <label className="text-[9px] font-extrabold text-slate-500 uppercase tracking-wider block">Yerleşke Adı *</label>
-                <select
-                  required
-                  value={yerleskeAdi}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    setYerleskeAdi(val);
-                    if (val === 'CUSTOM') {
-                      setShowCustomYerleske(true);
-                    } else {
-                      setShowCustomYerleske(false);
-                    }
-                  }}
-                  className="w-full bg-slate-50 border border-slate-200 text-xs font-bold text-white rounded-xl p-3 outline-none"
+            <div className="flex gap-1 text-[9px] font-bold">
+              {[1, 2, 3].map(step => (
+                <button
+                  key={step}
+                  type="button"
+                  onClick={() => setSetupStep(step as 1 | 2 | 3)}
+                  className={`flex-1 py-1.5 rounded-lg border ${setupStep === step ? 'bg-slate-900 text-white border-slate-800' : 'bg-slate-50 text-slate-600 border-slate-200'}`}
                 >
-                  <option value="Merkez Konteyner Kampı">Merkez Konteyner Kampı</option>
-                  <option value="Kuzey Lojman Sahası">Kuzey Lojman Sahası</option>
-                  <option value="Güney Teknik Kampı">Güney Teknik Kampı</option>
-                  <option value="CUSTOM">➕ Yeni Yerleşke Ekle...</option>
-                </select>
-                {showCustomYerleske && (
+                  {step}. {step === 1 ? 'Yerleşke' : step === 2 ? 'Kat' : 'Oda'}
+                </button>
+              ))}
+            </div>
+
+            {setupStep === 1 && (
+              <form onSubmit={handleCreateYerleske} className="space-y-3">
+                {yerleskeler.length > 0 && (
+                  <div className="space-y-1">
+                    <label className="text-[9px] font-bold text-slate-500 uppercase">Mevcut Yerleşkeler</label>
+                    <select
+                      value={selectedYerleskeId}
+                      onChange={(e) => { setSelectedYerleskeId(e.target.value); setSetupStep(2); }}
+                      className="w-full bg-slate-50 border border-slate-200 text-xs font-semibold text-slate-800 rounded-xl p-3"
+                    >
+                      {yerleskeler.map(y => (
+                        <option key={y.id} value={y.id}>{y.ad}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+                <div className="space-y-1">
+                  <label className="text-[9px] font-bold text-slate-500 uppercase">Yeni Yerleşke Adı *</label>
                   <input
                     type="text"
-                    required
-                    placeholder="Yeni Yerleşke Adını Yazınız"
-                    value={customYerleskeAdi}
-                    onChange={(e) => setCustomYerleskeAdi(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 text-xs text-white p-3 rounded-xl outline-none mt-1.5 animate-in slide-in-from-top-1 duration-150"
+                    value={newYerleskeAd}
+                    onChange={(e) => setNewYerleskeAd(e.target.value)}
+                    placeholder="Örn: Şantiye Merkez Kampı"
+                    className="w-full bg-slate-50 border border-slate-200 text-xs text-slate-800 p-3 rounded-xl"
                   />
+                </div>
+                    <button type="submit" disabled={loadingYapı} className="w-full bg-slate-900 hover:bg-slate-900 text-white font-bold text-xs py-3 rounded-xl cursor-pointer">
+                      {loadingYapı ? 'Kaydediliyor...' : '1. Yerleşkeyi Oluştur ve Kaydet'}
+                </button>
+              </form>
+            )}
+
+            {setupStep === 2 && (
+              <form onSubmit={handleCreateKat} className="space-y-3">
+                {!selectedYerleske ? (
+                  <p className="text-xs text-amber-700 bg-amber-50 border border-amber-100 p-3 rounded-xl">Önce 1. adımda yerleşke oluşturun.</p>
+                ) : (
+                  <>
+                    <p className="text-xs font-bold text-slate-700">Yerleşke: {selectedYerleske.ad}</p>
+                    {yerleskeKatlari.length > 0 && (
+                      <select
+                        value={selectedKatId}
+                        onChange={(e) => { setSelectedKatId(e.target.value); setSetupStep(3); }}
+                        className="w-full bg-slate-50 border border-slate-200 text-xs p-3 rounded-xl text-slate-800"
+                      >
+                        {yerleskeKatlari.map(k => (
+                          <option key={k.id} value={k.id}>{k.ad}</option>
+                        ))}
+                      </select>
+                    )}
+                    <input
+                      type="text"
+                      value={newKatAd}
+                      onChange={(e) => setNewKatAd(e.target.value)}
+                      placeholder="Kat / blok adı (Örn: A Blok Zemin)"
+                      className="w-full bg-slate-50 border border-slate-200 text-xs text-slate-800 p-3 rounded-xl"
+                    />
+                    <button type="submit" disabled={loadingYapı} className="w-full bg-slate-900 hover:bg-slate-900 text-white font-bold text-xs py-3 rounded-xl cursor-pointer">
+                      {loadingYapı ? 'Kaydediliyor...' : '2. Kat Ekle ve Kaydet'}
+                    </button>
+                  </>
                 )}
-              </div>
+              </form>
+            )}
 
-              <div className="space-y-1.5">
-                <label className="text-[9px] font-extrabold text-slate-500 uppercase tracking-wider block">Kat / Blok Tanımı *</label>
-                <select
-                  required
-                  value={kogusNo}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    setKogusNo(val);
-                    if (val === 'CUSTOM') {
-                      setShowCustomKogus(true);
-                    } else {
-                      setShowCustomKogus(false);
-                    }
-                  }}
-                  className="w-full bg-slate-50 border border-slate-200 text-xs font-bold text-white rounded-xl p-3 outline-none"
-                >
-                  <option value="A Blok (Zemin Kat)">A Blok (Zemin Kat)</option>
-                  <option value="A Blok (1. Kat)">A Blok (1. Kat)</option>
-                  <option value="A Blok (2. Kat)">A Blok (2. Kat)</option>
-                  <option value="B Blok (Zemin Kat)">B Blok (Zemin Kat)</option>
-                  <option value="B Blok (1. Kat)">B Blok (1. Kat)</option>
-                  <option value="C Blok (Lojman)">C Blok (Lojman)</option>
-                  <option value="CUSTOM">➕ Yeni Kat / Blok Ekle...</option>
-                </select>
-                {showCustomKogus && (
-                  <input
-                    type="text"
-                    required
-                    placeholder="Yeni Kat / Blok Tanımını Yazınız"
-                    value={customKogusNo}
-                    onChange={(e) => setCustomKogusNo(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 text-xs text-white p-3 rounded-xl outline-none mt-1.5 animate-in slide-in-from-top-1 duration-150"
-                  />
+            {setupStep === 3 && (
+              <form onSubmit={handleCreateRoom} className="space-y-3">
+                {!selectedYerleske || !selectedKat ? (
+                  <p className="text-xs text-amber-700 bg-amber-50 border border-amber-100 p-3 rounded-xl">Önce yerleşke ve kat tanımlayın.</p>
+                ) : (
+                  <>
+                    <p className="text-xs text-slate-600">
+                      <span className="font-bold">{selectedYerleske.ad}</span> / <span className="font-bold">{selectedKat.ad}</span>
+                    </p>
+                    <input
+                      type="text"
+                      required
+                      placeholder="Oda no (Örn: 104)"
+                      value={odaNo}
+                      onChange={(e) => setOdaNo(e.target.value)}
+                      className="w-full bg-slate-50 border border-slate-200 text-xs text-slate-800 p-3 rounded-xl"
+                    />
+                    <input
+                      type="number"
+                      required
+                      min={1}
+                      max={20}
+                      value={kapasite}
+                      onChange={(e) => setKapasite(Number(e.target.value))}
+                      className="w-full bg-slate-50 border border-slate-200 text-xs text-slate-800 p-3 rounded-xl"
+                    />
+                    <select
+                      value={firmaTipi}
+                      onChange={(e) => setFirmaTipi(e.target.value as 'ANA_FIRMA' | 'TASERON')}
+                      className="w-full bg-slate-50 border border-slate-200 text-xs text-slate-800 p-3 rounded-xl"
+                    >
+                      <option value="ANA_FIRMA">Ana Firma</option>
+                      <option value="TASERON">Taşeron</option>
+                    </select>
+                    <button type="submit" disabled={loadingRoom} className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs py-3 rounded-xl cursor-pointer flex items-center justify-center gap-2">
+                      {loadingRoom ? <RefreshCw size={13} className="animate-spin" /> : <Plus size={14} />}
+                      3. Odayı Aç & Kaydet
+                    </button>
+                  </>
                 )}
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="text-[9px] font-extrabold text-slate-500 uppercase tracking-wider block">Oda Numarası *</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="Örn: 104"
-                  value={odaNo}
-                  onChange={(e) => setOdaNo(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 text-xs text-white p-3 rounded-xl outline-none"
-                />
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="text-[9px] font-extrabold text-slate-500 uppercase tracking-wider block">Kapasite (Yatak Sayısı) *</label>
-                <input
-                  type="number"
-                  required
-                  min={1}
-                  max={20}
-                  value={kapasite}
-                  onChange={(e) => setKapasite(Number(e.target.value))}
-                  className="w-full bg-slate-50 border border-slate-200 text-xs text-white p-3 rounded-xl outline-none"
-                />
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="text-[9px] font-extrabold text-slate-500 uppercase tracking-wider block">Atanan Firma Türü *</label>
-                <select
-                  required
-                  value={firmaTipi}
-                  onChange={(e) => setFirmaTipi(e.target.value as any)}
-                  className="w-full bg-slate-50 border border-slate-200 text-xs font-bold text-white rounded-xl p-3 outline-none"
-                >
-                  <option value="ANA_FIRMA">Kibritçi İnşaat (Ana Firma)</option>
-                  <option value="TASERON">Alt Yüklenici / Taşeron</option>
-                </select>
-              </div>
-
-              <button
-                type="submit"
-                disabled={loadingRoom}
-                className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs py-3 rounded-xl transition cursor-pointer flex items-center justify-center space-x-2 shadow-lg shadow-emerald-500/10"
-              >
-                {loadingRoom ? <RefreshCw size={13} className="animate-spin" /> : <Plus size={14} />}
-                <span>Odayı Aç &amp; Kaydet</span>
-              </button>
-            </form>
+              </form>
+            )}
           </div>
 
           {/* Rooms Table List */}
           <div className="lg:col-span-2 bg-white border border-slate-200 p-5 rounded-2xl shadow-sm space-y-4">
-            <div>
-              <span className="font-extrabold text-[10px] text-blue-400 uppercase tracking-wider">Şantiye Kamp Altyapısı</span>
-              <h3 className="font-bold text-sm text-white mt-0.5">📋 Tanımlı Odaların Listesi</h3>
+            <div className="flex items-center justify-between gap-2">
+              <div>
+              <span className="font-extrabold text-[10px] text-slate-600 uppercase tracking-wider">Şantiye Kamp Altyapısı</span>
+              <h3 className="font-bold text-sm text-slate-800 mt-0.5">📋 Tanımlı Odaların Listesi</h3>
+              </div>
+              <button
+                type="button"
+                onClick={handleReloadKamp}
+                className="bg-slate-100 hover:bg-slate-200 text-slate-700 text-[10px] font-bold px-3 py-1.5 rounded-lg transition cursor-pointer flex items-center gap-1"
+              >
+                <RefreshCw size={11} /> Yenile
+              </button>
             </div>
 
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs text-slate-300 border-collapse">
-                <thead>
-                  <tr className="border-b border-slate-200 text-slate-500 font-extrabold text-[10px] uppercase tracking-wider">
-                    <th className="pb-3">Yerleşke</th>
-                    <th className="pb-3">Blok / Kat</th>
-                    <th className="pb-3">Oda No</th>
-                    <th className="pb-3">Kapasite</th>
-                    <th className="pb-3">Firma Tipi</th>
-                    <th className="pb-3 text-right">Eylemler</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {kampOdalari.map(r => (
-                    <tr key={r.id} className="border-b border-slate-200/50 hover:bg-slate-900/30 transition">
-                      <td className="py-3 font-mono text-slate-500">{r.yerleskeAdi}</td>
-                      <td className="py-3 font-bold text-white">{r.kogusNo}</td>
-                      <td className="py-3 font-bold text-amber-400">{r.odaNo}</td>
-                      <td className="py-3 font-bold font-mono">{r.kapasite} Yatak</td>
-                      <td className="py-3 text-[10px]">
-                        <span className={`px-2 py-0.5 rounded font-bold border ${
-                          r.firmaTipi === 'ANA_FIRMA' ? 'bg-blue-500/10 border-blue-500/20 text-blue-400' : 'bg-purple-500/10 border-purple-500/20 text-purple-400'
-                        }`}>
-                          {r.firmaTipi === 'ANA_FIRMA' ? 'Ana Firma' : 'Taşeron'}
-                        </span>
-                      </td>
-                      <td className="py-3 text-right">
-                        <button
-                          onClick={() => handleDeleteRoom(r.id, r.odaNo)}
-                          className="p-1.5 text-rose-400 hover:bg-rose-500/10 rounded transition cursor-pointer"
-                          title="Sil"
-                        >
-                          <Trash2 size={13} />
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                  {kampOdalari.length === 0 && (
-                    <tr>
-                      <td colSpan={6} className="text-center py-8 text-slate-500 italic">Kayıtlı kamp odası bulunmuyor.</td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+              {kampOdalari.map((r) => (
+                <div key={r.id} className="border border-slate-200 rounded-xl p-3 bg-slate-50/60 space-y-2">
+                  <p className="text-[10px] font-bold text-slate-500">{r.yerleskeAdi} / {r.kogusNo}</p>
+                  <p className="text-xs font-black text-slate-800">Oda: {r.odaNo}</p>
+                  <p className="text-[10px] font-semibold text-slate-600">{r.kapasite} yatak</p>
+                  <span className={`inline-block px-2 py-0.5 rounded font-bold border text-[10px] ${
+                    r.firmaTipi === 'ANA_FIRMA' ? 'bg-slate-50 border-slate-200 text-slate-800' : 'bg-purple-50 border-purple-200 text-purple-700'
+                  }`}>
+                    {r.firmaTipi === 'ANA_FIRMA' ? 'Ana Firma' : 'Taşeron'}
+                  </span>
+                  <div className="pt-1 flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => handleUpdateRoom(r)}
+                      className="flex-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-[10px] font-bold py-1.5 rounded-lg transition cursor-pointer"
+                    >
+                      Oda Güncelle
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteRoom(r.id, r.odaNo)}
+                      className="bg-rose-50 hover:bg-rose-100 text-rose-700 text-[10px] font-bold px-2.5 rounded-lg transition cursor-pointer"
+                      title="Sil"
+                    >
+                      Sil
+                    </button>
+                  </div>
+                </div>
+              ))}
+              {kampOdalari.length === 0 && (
+                <div className="col-span-full text-center py-8 text-slate-500 italic border border-dashed rounded-xl bg-slate-50">
+                  Kayıtlı kamp odası bulunmuyor.
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -1109,8 +2718,8 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
           {/* New Audit Form */}
           <div className="lg:col-span-1 bg-white border border-slate-200 p-5 rounded-2xl shadow-sm space-y-4">
             <div>
-              <span className="font-extrabold text-[10px] text-blue-400 uppercase tracking-wider">Aylık / Haftalık Kamp Depo Sayımı</span>
-              <h3 className="font-bold text-sm text-white mt-0.5">📦 Yeni Depo Sayımı Gir</h3>
+              <span className="font-extrabold text-[10px] text-slate-600 uppercase tracking-wider">Aylık / Haftalık Kamp Depo Sayımı</span>
+              <h3 className="font-bold text-sm text-slate-800 mt-0.5">📦 Yeni Depo Sayımı Gir</h3>
             </div>
 
             <form onSubmit={handleSaveAudit} className="space-y-4">
@@ -1140,7 +2749,7 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
                   placeholder="Sayım hakkında eklemek istediğiniz bir durum var mı?"
                   value={sayimNotlar}
                   onChange={(e) => setSayimNotlar(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 text-xs text-white p-2.5 rounded-xl outline-none h-16 resize-none"
+                  className="w-full bg-slate-50 border border-slate-200 text-xs text-slate-800 p-2.5 rounded-xl outline-none h-16 resize-none"
                 />
               </div>
 
@@ -1158,8 +2767,8 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
           {/* Past Audits List */}
           <div className="lg:col-span-2 bg-white border border-slate-200 p-5 rounded-2xl shadow-sm space-y-4">
             <div>
-              <span className="font-extrabold text-[10px] text-blue-400 uppercase tracking-wider">Kayıtlı Depo Sayım Arşivi</span>
-              <h3 className="font-bold text-sm text-white mt-0.5">📋 Sayım Kayıtları ve Onay Durumları</h3>
+              <span className="font-extrabold text-[10px] text-slate-600 uppercase tracking-wider">Kayıtlı Depo Sayım Arşivi</span>
+              <h3 className="font-bold text-sm text-slate-800 mt-0.5">📋 Sayım Kayıtları ve Onay Durumları</h3>
             </div>
 
             <div className="space-y-4">
@@ -1172,7 +2781,7 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
                     <div className="flex justify-between items-start border-b border-slate-200/60 pb-2">
                       <div>
                         <span className="text-[10px] text-slate-500 font-mono font-bold block">{sayim.tarih}</span>
-                        <span className="text-xs font-bold text-white block mt-0.5">Sorumlu: {sayim.sayimYapan}</span>
+                        <span className="text-xs font-bold text-slate-800 block mt-0.5">Sorumlu: {sayim.sayimYapan}</span>
                       </div>
                       
                       <div className="text-right">
@@ -1236,18 +2845,40 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
           {/* New Activity Form */}
           <div className="lg:col-span-1 bg-white border border-slate-200 p-5 rounded-2xl shadow-sm space-y-4">
             <div>
-              <span className="font-extrabold text-[10px] text-blue-400 uppercase tracking-wider">Günlük Rutin &amp; İş Bildirimi</span>
-              <h3 className="font-bold text-sm text-white mt-0.5">🧹 Yeni Faaliyet Raporu</h3>
+              <span className="font-extrabold text-[10px] text-slate-600 uppercase tracking-wider">Günlük Rutin &amp; İş Bildirimi</span>
+              <h3 className="font-bold text-sm text-slate-800 mt-0.5">🧹 Yeni Faaliyet Raporu</h3>
             </div>
 
             <form onSubmit={handleSaveActivity} className="space-y-4">
+              {/* FAALİYET GRUBU TOGGLE */}
+              <div className="flex bg-slate-100 p-1 rounded-xl">
+                <button
+                  type="button"
+                  onClick={() => setFaaliyetGrubu('NORMAL')}
+                  className={`flex-1 py-2 text-[10px] font-black uppercase tracking-wider rounded-lg transition-colors ${
+                    faaliyetGrubu === 'NORMAL' ? 'bg-slate-900 text-white shadow' : 'text-slate-500 hover:bg-slate-200'
+                  }`}
+                >
+                  Normal Faaliyet
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFaaliyetGrubu('MESAI')}
+                  className={`flex-1 py-2 text-[10px] font-black uppercase tracking-wider rounded-lg transition-colors ${
+                    faaliyetGrubu === 'MESAI' ? 'bg-amber-500 text-slate-900 shadow' : 'text-slate-500 hover:bg-slate-200'
+                  }`}
+                >
+                  Mesai Faaliyeti
+                </button>
+              </div>
+
               <div className="space-y-1.5">
                 <label className="text-[9px] font-extrabold text-slate-500 uppercase tracking-wider block">Faaliyet Kategorisi *</label>
                 <select
                   required
                   value={faaliyetTipi}
                   onChange={(e) => setFaaliyetTipi(e.target.value as any)}
-                  className="w-full bg-slate-50 border border-slate-200 text-xs font-bold text-white rounded-xl p-3 outline-none"
+                  className="w-full bg-slate-50 border border-slate-200 text-xs font-bold text-slate-800 rounded-xl p-3 outline-none"
                 >
                   <option value="TEMİZLİK">🧹 TEMİZLİK (Koğuş, Banyo, Çamaşır)</option>
                   <option value="YEMEK">🍲 YEMEK (Yemekhane, Aşevi)</option>
@@ -1257,18 +2888,89 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
                 </select>
               </div>
 
+              {faaliyetGrubu === 'MESAI' && (
+                <div className="space-y-1.5 bg-amber-50/40 border border-amber-200 p-3 rounded-xl">
+                  <label className="text-[9px] font-extrabold text-amber-800 uppercase tracking-wider block">İlgili Personeller & Mesai Saati *</label>
+                  <p className="text-[8px] text-amber-700/70 leading-tight mb-2">
+                    Yalnızca bugün Yoklama sekmesinde Geldi işaretlediğiniz kamp personeli listelenir.
+                    Girdiğiniz saat yoklama ve puantaja mesai olarak yazılır.
+                  </p>
+                  <div className="relative mb-2">
+                    <Search size={12} className="absolute left-2.5 top-2.5 text-amber-700/60" />
+                    <input
+                      type="text"
+                      value={mesaiPersonelSearch}
+                      onChange={(e) => setMesaiPersonelSearch(e.target.value)}
+                      placeholder="Personel adı, TC, görev veya firma ara..."
+                      className="w-full bg-white border border-amber-200 text-[10px] text-slate-800 pl-7 pr-2.5 py-2 rounded-lg outline-none focus:border-amber-400"
+                    />
+                  </div>
+                  
+                  <div className="max-h-48 overflow-y-auto space-y-1 pr-1 custom-scrollbar">
+                    {mesaiPersonelListesi.length === 0 ? (
+                      <div className="text-[9px] text-slate-400 italic p-2 text-center">
+                        {mesaiPersonelSearch.trim()
+                          ? 'Aramaya uygun personel yok.'
+                          : 'Bugün Geldi yoklaması yok. Önce Yoklama sekmesinden yoklama kaydedin.'}
+                      </div>
+                    ) : (
+                      mesaiPersonelListesi.map(p => {
+                        const hrs = personelMesaiSaatleri[p.id];
+                        const hasHrs = Number(hrs) > 0;
+                        return (
+                          <div key={p.id} className={`flex items-center justify-between gap-2 border rounded-lg px-2 py-1.5 transition-colors ${hasHrs ? 'bg-amber-100 border-amber-300' : 'bg-white border-slate-200 hover:bg-slate-50'}`}>
+                            <div className="flex flex-col min-w-0">
+                              <span className="text-[9px] font-bold text-slate-800 truncate">{p.ad} {p.soyad}</span>
+                              <span className="text-[7px] font-semibold text-slate-500 truncate">{p.gorev || 'Kamp'} • Geldi</span>
+                            </div>
+                            <div className="flex items-center gap-1 shrink-0">
+                              <input
+                                type="number"
+                                min={0}
+                                max={14}
+                                step={0.5}
+                                placeholder="—"
+                                value={mesaiInputDisplayValue(hrs)}
+                                onChange={(e) =>
+                                  setPersonelMesaiSaatleri((prev) =>
+                                    setMesaiHoursInMap(prev, p.id, e.target.value)
+                                  )
+                                }
+                                className="w-14 text-center bg-white border border-slate-300 rounded-lg py-1 text-[9px] font-mono font-bold"
+                              />
+                              <span className="text-[8px] text-slate-500 font-bold">sa</span>
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                  {mesaiPersonelSearch.trim() && (
+                    <p className="text-[8px] font-bold text-amber-800 pt-1">
+                      {mesaiPersonelListesi.length} personel listeleniyor
+                    </p>
+                  )}
+                </div>
+              )}
+
               <div className="space-y-1.5">
                 <label className="text-[9px] font-extrabold text-slate-500 uppercase tracking-wider block">Kamp Yerleşkesi *</label>
-                <select
-                  required
-                  value={faaliyetYerleske}
-                  onChange={(e) => setFaaliyetYerleske(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 text-xs font-bold text-white rounded-xl p-3 outline-none"
-                >
-                  <option value="Merkez Konteyner Kampı">Merkez Konteyner Kampı</option>
-                  <option value="Kuzey Lojman Sahası">Kuzey Lojman Sahası</option>
-                  <option value="Güney Teknik Kampı">Güney Teknik Kampı</option>
-                </select>
+                {yerleskeler.length === 0 ? (
+                  <p className="text-xs text-amber-700 bg-amber-50 border border-amber-100 p-3 rounded-xl">
+                    Önce &quot;Odalar&quot; sekmesinden yerleşke tanımlayın.
+                  </p>
+                ) : (
+                  <select
+                    required
+                    value={faaliyetYerleske}
+                    onChange={(e) => setFaaliyetYerleske(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 text-xs font-bold text-slate-800 rounded-xl p-3 outline-none"
+                  >
+                    {yerleskeler.map(y => (
+                      <option key={y.id} value={y.ad}>{y.ad}</option>
+                    ))}
+                  </select>
+                )}
               </div>
 
               <div className="space-y-1.5">
@@ -1278,7 +2980,7 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
                   placeholder="Yapılan rutin işlerin ayrıntısını yazınız..."
                   value={faaliyetAciklama}
                   onChange={(e) => setFaaliyetAciklama(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 text-xs text-white p-3 rounded-xl outline-none h-24 resize-none"
+                  className="w-full bg-slate-50 border border-slate-200 text-xs text-slate-800 p-3 rounded-xl outline-none h-24 resize-none"
                 />
               </div>
 
@@ -1330,7 +3032,7 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
               <button
                 type="submit"
                 disabled={loadingFaaliyet}
-                className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs py-3 rounded-xl transition cursor-pointer flex items-center justify-center space-x-2 shadow-lg shadow-blue-500/10"
+                className="w-full bg-slate-900 hover:bg-slate-900 text-white font-bold text-xs py-3 rounded-xl transition cursor-pointer flex items-center justify-center space-x-2 shadow-lg shadow-slate-500/10"
               >
                 {loadingFaaliyet ? <RefreshCw size={13} className="animate-spin" /> : <CheckCircle size={14} />}
                 <span>Faaliyeti Kaydet &amp; Onaya Gönder</span>
@@ -1341,8 +3043,8 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
           {/* Activity List */}
           <div className="lg:col-span-2 bg-white border border-slate-200 p-5 rounded-2xl shadow-sm space-y-4">
             <div>
-              <span className="font-extrabold text-[10px] text-blue-400 uppercase tracking-wider">Günlük Kamp Faaliyetleri</span>
-              <h3 className="font-bold text-sm text-white mt-0.5">📋 Son Raporlanan Aktiviteler</h3>
+              <span className="font-extrabold text-[10px] text-slate-600 uppercase tracking-wider">Günlük Kamp Faaliyetleri</span>
+              <h3 className="font-bold text-sm text-slate-800 mt-0.5">📋 Son Raporlanan Aktiviteler</h3>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1356,7 +3058,7 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
                       <div className="flex justify-between items-start">
                         <div>
                           <span className={`text-[8px] font-black px-1.5 py-0.5 rounded border ${
-                            act.faaliyetTipi === 'TEMİZLİK' ? 'bg-blue-500/10 border-blue-500/20 text-blue-400' :
+                            act.faaliyetTipi === 'TEMİZLİK' ? 'bg-slate-500/10 border-slate-800/20 text-slate-600' :
                             act.faaliyetTipi === 'YEMEK' ? 'bg-amber-500/10 border-amber-500/20 text-amber-400' :
                             act.faaliyetTipi === 'GÜVENLİK' ? 'bg-red-500/10 border-red-500/20 text-red-400' :
                             act.faaliyetTipi === 'BAKIM' ? 'bg-purple-500/10 border-purple-500/20 text-purple-400' :
@@ -1393,8 +3095,25 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
                         {act.aciklama}
                       </p>
 
+                      {act.faaliyetGrubu === 'MESAI' && act.personelMesaiSaatleri && (
+                        <div className="mt-2 space-y-1 bg-amber-50/50 p-2 rounded-lg border border-amber-100">
+                          <span className="text-[8px] font-black text-amber-700 uppercase">Girilen Mesailer:</span>
+                          <div className="flex flex-wrap gap-1">
+                            {Object.entries(act.personelMesaiSaatleri).map(([pid, hrs]) => {
+                              const p = personeller.find(x => x.id === pid);
+                              if (!p || !hrs) return null;
+                              return (
+                                <span key={pid} className="text-[9px] bg-white border border-amber-200 text-amber-800 px-1.5 py-0.5 rounded shadow-sm">
+                                  {p.ad} {p.soyad}: <strong>{hrs as number}sa</strong>
+                                </span>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+
                       {act.fotoUrl && (
-                        <div className="border border-slate-200 rounded bg-white p-1 max-h-24 overflow-hidden flex items-center justify-center">
+                        <div className="border border-slate-200 rounded bg-white p-1 max-h-24 overflow-hidden flex items-center justify-center mt-2">
                           <img src={act.fotoUrl} alt="Activity" className="max-h-20 object-contain rounded" />
                         </div>
                       )}
@@ -1407,6 +3126,427 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
                 <div className="col-span-2 text-center p-12 text-slate-500 italic">Günlük faaliyet raporu bulunmamaktadır.</div>
               )}
             </div>
+          </div>
+        </div>
+      )}
+
+      {activeSubTab === 'personel_giris' && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div className="bg-white border border-slate-200 p-5 rounded-2xl shadow-sm space-y-4">
+            <div>
+              <span className="font-extrabold text-[10px] text-emerald-500 uppercase tracking-wider">Personel İşe Giriş</span>
+              <h3 className="font-bold text-sm text-slate-800 mt-0.5">🚪 Girişe Yolla</h3>
+            </div>
+            <p className="text-xs text-slate-500 leading-relaxed">
+              Kamp alanına gelen personelin TC / telefon sorgu yapın, firmasını seçin ve kimlik fotoğrafıyla kaydedin.
+              Kayıt ilgili firmaya personel olarak işlenir; talep ayrıca onay havuzuna gider.
+            </p>
+
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setGirisFirmaTipi('ANA_FIRMA')}
+                className={`py-1.5 rounded-lg text-[10px] font-bold ${girisFirmaTipi === 'ANA_FIRMA' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600'}`}
+              >
+                Ana Firma
+              </button>
+              <button
+                type="button"
+                onClick={() => setGirisFirmaTipi('TASERON')}
+                className={`py-1.5 rounded-lg text-[10px] font-bold ${girisFirmaTipi === 'TASERON' ? 'bg-amber-600 text-white' : 'bg-slate-100 text-slate-600'}`}
+              >
+                Taşeron
+              </button>
+            </div>
+            {girisFirmaTipi === 'ANA_FIRMA' ? (
+              <div className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-[11px] font-bold text-slate-700">
+                {CANONICAL_ANA_FIRMA_ADI}
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <div className="grid grid-cols-2 gap-2">
+                  <button type="button" onClick={() => setGirisFirmaType('DB')} className={`py-1 rounded-md text-[9px] font-bold ${girisFirmaType === 'DB' ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-600'}`}>Kayıtlı Firma</button>
+                  <button type="button" onClick={() => setGirisFirmaType('MANUAL')} className={`py-1 rounded-md text-[9px] font-bold ${girisFirmaType === 'MANUAL' ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-600'}`}>Yeni Firma (onaya gider)</button>
+                </div>
+                {girisFirmaType === 'DB' ? (
+                  <select value={girisSelectedFirma} onChange={(e) => setGirisSelectedFirma(e.target.value)} className="w-full bg-slate-50 border border-slate-200 text-xs font-bold text-slate-800 rounded-xl p-3 outline-none">
+                    <option value="">-- Taşeron Seçin --</option>
+                    {taseronCariler.map((c) => (
+                      <option key={c.id} value={c.unvan}>{c.unvan}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <>
+                  <input value={girisManualFirma} onChange={(e) => setGirisManualFirma(e.target.value)} placeholder="Firma adı — yönetici onayına gider" className="w-full bg-slate-50 border border-slate-200 text-xs text-slate-800 p-3 rounded-xl outline-none" />
+                  {renderYeniFirmaYardim(girisManualFirma, (unvan) => {
+                    setGirisFirmaType('DB');
+                    setGirisSelectedFirma(unvan);
+                    setGirisManualFirma('');
+                  })}
+                  </>
+                )}
+              </div>
+            )}
+
+            <div className="space-y-2">
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  maxLength={11}
+                  placeholder="TC Kimlik No"
+                  value={yeniTcNo}
+                  onChange={(e) => setYeniTcNo(e.target.value.replace(/\D/g, '').slice(0, 11))}
+                  className="flex-1 bg-slate-50 border border-slate-200 text-xs text-slate-800 p-2.5 rounded-xl outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    const found = findPersonelByTc(yeniTcNo);
+                    if (!validateTC(yeniTcNo)) {
+                      showStatus('error', 'TC SORGU için 11 haneli TC girin.');
+                      return;
+                    }
+                    if (!found) {
+                      showStatus('info', 'Bu TC ile kayıt bulunamadı — yeni personel olarak kaydedilecek.');
+                      return;
+                    }
+                    setYeniAd(found.ad || '');
+                    setYeniSoyad(found.soyad || '');
+                    setYeniGorev(found.gorev || '');
+                    setYeniTelefonNo(found.telefonNo || '');
+                    if (isTaseronPersonel(found)) {
+                      setGirisFirmaTipi('TASERON');
+                      setGirisSelectedFirma(found.firmaAdi || '');
+                      setGirisFirmaType('DB');
+                    } else {
+                      setGirisFirmaTipi('ANA_FIRMA');
+                    }
+                    showStatus('success', `${found.ad} ${found.soyad} bulundu.`);
+                  }}
+                  className="shrink-0 px-3 py-2.5 rounded-xl bg-sky-700 text-white text-[10px] font-black"
+                >
+                  TC SORGU
+                </button>
+              </div>
+              <div className="flex gap-2">
+                <input
+                  type="tel"
+                  placeholder="Telefon No"
+                  value={yeniTelefonNo}
+                  onChange={(e) => setYeniTelefonNo(e.target.value)}
+                  className="flex-1 bg-slate-50 border border-slate-200 text-xs text-slate-800 p-2.5 rounded-xl outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (phoneMatchKey(yeniTelefonNo).length < 10) {
+                      showStatus('error', 'TEL NO SORGU için en az 10 hane girin.');
+                      return;
+                    }
+                    const found = findPersonelByTel(yeniTelefonNo);
+                    if (!found) {
+                      showStatus('info', 'Bu telefon ile kayıt bulunamadı — yeni personel olarak kaydedilecek.');
+                      return;
+                    }
+                    setYeniAd(found.ad || '');
+                    setYeniSoyad(found.soyad || '');
+                    setYeniGorev(found.gorev || '');
+                    setYeniTcNo(digitsOnly(found.tcNo || ''));
+                    if (isTaseronPersonel(found)) {
+                      setGirisFirmaTipi('TASERON');
+                      setGirisSelectedFirma(found.firmaAdi || '');
+                      setGirisFirmaType('DB');
+                    } else {
+                      setGirisFirmaTipi('ANA_FIRMA');
+                    }
+                    showStatus('success', `${found.ad} ${found.soyad} bulundu.`);
+                  }}
+                  className="shrink-0 px-3 py-2.5 rounded-xl bg-teal-700 text-white text-[10px] font-black"
+                >
+                  TEL NO SORGU
+                </button>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-[9px] font-extrabold text-slate-500 uppercase block mb-1">Ad</label>
+                <input value={yeniAd} onChange={(e) => setYeniAd(e.target.value)} className="w-full bg-slate-50 border border-slate-200 text-xs font-bold text-slate-800 rounded-xl p-3 outline-none" placeholder="Ad" />
+              </div>
+              <div>
+                <label className="text-[9px] font-extrabold text-slate-500 uppercase block mb-1">Soyad</label>
+                <input value={yeniSoyad} onChange={(e) => setYeniSoyad(e.target.value)} className="w-full bg-slate-50 border border-slate-200 text-xs font-bold text-slate-800 rounded-xl p-3 outline-none" placeholder="Soyad" />
+              </div>
+            </div>
+            <div>
+              <label className="text-[9px] font-extrabold text-slate-500 uppercase block mb-1">Görev / Branş</label>
+              <input value={yeniGorev} onChange={(e) => setYeniGorev(e.target.value)} className="w-full bg-slate-50 border border-slate-200 text-xs font-bold text-slate-800 rounded-xl p-3 outline-none" placeholder="Örn: Kamp Görevlisi, Aşçı" />
+            </div>
+            <div>
+              <label className="text-[9px] font-extrabold text-slate-500 uppercase block mb-1">Kimlik Fotoğrafı</label>
+              <div className="flex gap-3">
+                <label className="bg-slate-50 border-2 border-dashed border-slate-300 rounded-xl p-4 flex flex-col items-center justify-center cursor-pointer w-24 h-20 shrink-0 text-slate-500">
+                  <Camera size={20} />
+                  <span className="text-[8px] font-bold mt-1">Çek</span>
+                  <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    const r = new FileReader();
+                    r.onload = async (ev) => {
+                      if (ev.target?.result) setYeniKimlikFoto(await compressImage(ev.target.result as string));
+                    };
+                    r.readAsDataURL(file);
+                  }} />
+                </label>
+                <div className="flex-1 border border-slate-200 rounded-xl bg-slate-50 h-20 overflow-hidden flex items-center justify-center">
+                  {yeniKimlikFoto ? (
+                    <img src={yeniKimlikFoto} alt="Kimlik" className="w-full h-full object-cover" />
+                  ) : (
+                    <span className="text-[10px] text-slate-400 italic">Fotoğraf yok</span>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <button type="button" onClick={handleSubmitKampGirisTalebi} className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs py-3 rounded-xl cursor-pointer flex items-center justify-center gap-2">
+              <UserPlus size={14} />
+              GİRİŞİNİ YAP VE GÖNDER
+            </button>
+
+            {sonGirisTalebi && (
+              <div className="bg-emerald-50 border border-emerald-200 p-4 rounded-xl space-y-3">
+                <p className="text-xs text-emerald-800 font-bold">✅ Kayıt oluşturuldu — WhatsApp ile yönetime iletebilirsiniz</p>
+                <a
+                  href={buildWhatsAppUrl(
+                    `*KİBRİTÇİ ERP - KAMP PERSONEL İŞE GİRİŞ*\n*Ad Soyad:* ${sonGirisTalebi.ad} ${sonGirisTalebi.soyad}\n*Görev:* ${sonGirisTalebi.gorev}\n*Tarih:* ${new Date().toLocaleDateString('tr-TR')}\n*Gönderen Kampçı:* ${currentUser?.email || '-'}\n*Kayıt Linki:* ${window.location.origin}/?view_giris=${sonGirisTalebi.id}`
+                  )}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={async () => {
+                    try {
+                      await setDoc(doc(db, 'personelGirisTalepleri', sonGirisTalebi.id), { durum: 'WP_GÖNDERİLDİ' }, { merge: true });
+                    } catch (e) { console.warn(e); }
+                  }}
+                  className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs py-2.5 rounded-xl flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <MessageSquare size={14} />
+                  WhatsApp&apos;tan Gönder
+                </a>
+              </div>
+            )}
+          </div>
+
+          <div className="bg-white border border-slate-200 p-5 rounded-2xl shadow-sm space-y-3">
+            <h3 className="font-bold text-sm text-slate-800">📋 Giriş Talepleri Takibi</h3>
+            {girisTalepleriList.length === 0 ? (
+              <p className="text-xs text-slate-400 italic py-8 text-center">Henüz giriş talebi yok.</p>
+            ) : (
+              <div className="space-y-2 max-h-[480px] overflow-y-auto">
+                {girisTalepleriList.map((item) => (
+                  <div key={item.id} className="border border-slate-100 rounded-xl p-3 bg-slate-50">
+                    <div className="flex justify-between items-start gap-2">
+                      <div>
+                        <span className="font-bold text-sm text-slate-800">{item.ad} {item.soyad}</span>
+                        <span className="text-[10px] text-slate-500 block">{item.gorev}</span>
+                      </div>
+                      <span className={`text-[8px] font-bold px-2 py-0.5 rounded-full ${
+                        item.durum === 'ONAYLANDI' ? 'bg-emerald-100 text-emerald-800' :
+                        item.durum === 'WP_GÖNDERİLDİ' ? 'bg-slate-100 text-slate-800' :
+                        'bg-amber-100 text-amber-800'
+                      }`}>{item.durum || 'BEKLEMEDE'}</span>
+                    </div>
+                    {item.durum === 'ONAYLANDI' && (
+                      <a
+                        href={buildWhatsAppUrl(
+                          `*KİBRİTÇİ - GİRİŞ İZNİ ONAYLANDI*\n👤 ${item.ad} ${item.soyad}\n💼 ${item.gorev}\n✅ Kapı/güvenliğe bildirin.\n${window.location.origin}/?view_giris=${item.id}`
+                        )}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="mt-2 inline-flex text-[10px] font-bold text-emerald-700 hover:underline"
+                      >
+                        Kapıya WhatsApp ile bildir →
+                      </a>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {activeSubTab === 'taseron_sayim' && (
+        <KampTaseronSayimTab
+          personeller={personeller}
+          setPersoneller={setPersoneller}
+          cariKartlar={cariKartlar}
+          currentUser={currentUser}
+          addNotification={addNotification}
+          showStatus={showStatus}
+          yoklamalar={yoklamalar}
+          setYoklamalar={setYoklamalar}
+          saveYoklamalarNow={saveYoklamalarNow}
+        />
+      )}
+
+      {activeSubTab === 'firma_listesi' && (
+        <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm flex-1 flex flex-col min-h-[500px]">
+          <KampFirmaGroupedView
+            kampKayitlari={kampKayitlari}
+            personeller={personeller}
+            kampOdalari={kampOdalari}
+            onSelectOda={(odaId) => {
+              const room = kampOdalari.find((r) => r.id === odaId);
+              if (room) {
+                if (room.yerleskeId) setPlacementYerleskeId(room.yerleskeId);
+                if (room.katId) setPlacementKatId(room.katId);
+                setSelectedRoomId(room.id);
+                setActiveSubTab('placement');
+              }
+            }}
+          />
+        </div>
+      )}
+
+      {activeSubTab === 'haftalik_yoklama' && setYoklamalar && (
+        <KampHaftalikYoklamaTab
+          kampOdalari={kampOdalari}
+          kampKayitlari={kampKayitlari}
+          yoklamalar={yoklamalar}
+          setYoklamalar={setYoklamalar}
+          personeller={personeller}
+          currentUser={currentUser}
+          addNotification={addNotification}
+        />
+      )}
+
+      {activeSubTab === 'yoklama' && setYoklamalar && saveYoklamalarNow && (
+        <KampGunlukYoklamaTab
+          personeller={personeller}
+          yoklamalar={yoklamalar}
+          setYoklamalar={setYoklamalar}
+          saveYoklamalarNow={saveYoklamalarNow}
+          currentUser={currentUser}
+          addNotification={addNotification}
+        />
+      )}
+
+      {activeSubTab === 'aylik_puantaj' && setYoklamalar && saveYoklamalarNow && (
+        <AylikPuantajMobilPanel
+          personeller={personeller}
+          filterPersonel={filterKampciPersonel}
+          yoklamalar={yoklamalar}
+          setYoklamalar={setYoklamalar}
+          saveYoklamalarNow={saveYoklamalarNow}
+          currentUser={currentUser}
+          gonderenFallback="kampci"
+          storageKey="aylik_puantaj_last_kampci"
+          title="KAMPÇI AYLIK YOKLAMA / MESAİ"
+          onStatus={showKampYoklamaStatus}
+        />
+      )}
+
+      {activeSubTab === 'vidanjor' && (
+        <KampVidanjorTab
+          cariKartlar={cariKartlar}
+          faturalar={faturalar}
+          setFaturalar={setFaturalar}
+          irsaliyeler={irsaliyeler}
+          setIrsaliyeler={setIrsaliyeler}
+          setCariIslemGecmisi={setCariIslemGecmisi}
+          currentUser={currentUser}
+          addNotification={addNotification}
+          showStatus={showStatus}
+        />
+      )}
+
+      {activeSubTab === 'gunluk_akis' && (
+        <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm space-y-5">
+          <div className="flex items-center gap-3 border-b border-slate-100 pb-4">
+            <div className="p-2 bg-amber-100 rounded-xl">
+              <Sparkles className="text-amber-600" size={22} />
+            </div>
+            <div>
+              <h3 className="font-bold text-slate-800">Günlük Akış Raporu</h3>
+              <p className="text-xs text-slate-500">Bugünkü yerleşim, depo sayımı ve faaliyet kayıtlarının özeti</p>
+            </div>
+          </div>
+
+          {(() => {
+            const today = new Date().toISOString().slice(0, 10);
+            const yerlesimToday = kampKayitlari.filter((k) => k.girisTarihi?.startsWith(today));
+            const sayimToday = depoSavimlari.filter((s) => s.tarih === today);
+            const faaliyetToday = gunlukFaaliyetler.filter((f) => f.tarih === today);
+            return (
+              <>
+                <ul className="text-sm text-slate-700 space-y-2 bg-slate-50 rounded-xl p-4">
+                  <li>📅 Tarih: <strong>{today.split('-').reverse().join('.')}</strong></li>
+                  <li>👤 Kampçı: <strong>{currentUser?.email || '—'}</strong></li>
+                  <li>🏕️ Yerleşim işlemi: <strong>{yerlesimToday.length}</strong></li>
+                  <li>📦 Depo sayım kaydı: <strong>{sayimToday.length}</strong></li>
+                  <li>🧹 Günlük faaliyet: <strong>{faaliyetToday.length}</strong></li>
+                </ul>
+
+                <pre className="text-xs whitespace-pre-wrap bg-slate-900 text-slate-100 rounded-xl p-4 font-mono leading-relaxed">
+                  {buildKampciGunlukOzet({
+                    tarih: today,
+                    email: currentUser?.email || 'kampci',
+                    yerlesimCount: yerlesimToday.length,
+                    sayimCount: sayimToday.length,
+                    faaliyetCount: faaliyetToday.length,
+                  })}
+                </pre>
+
+                <button
+                  type="button"
+                  onClick={handleSendKampGunlukAkis}
+                  disabled={sendingKampAkis}
+                  className="w-full py-3.5 rounded-xl font-bold text-sm bg-amber-500 hover:bg-amber-400 text-slate-950 disabled:opacity-50 transition cursor-pointer flex items-center justify-center gap-2"
+                >
+                  {sendingKampAkis ? (
+                    <>
+                      <RefreshCw size={16} className="animate-spin" />
+                      Gönderiliyor…
+                    </>
+                  ) : (
+                    <>
+                      <ShieldCheck size={16} />
+                      Gün Sonu Raporunu Yönetime Gönder
+                    </>
+                  )}
+                </button>
+              </>
+            );
+          })()}
+        </div>
+      )}
+
+      {placementModalRoom && (
+        <div className="fixed inset-0 z-[120] flex items-end sm:items-center justify-center bg-slate-950/70 p-3 sm:p-6">
+          <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl border border-slate-200 max-h-[92vh] overflow-y-auto">
+            <div className="sticky top-0 bg-white border-b border-slate-200 px-4 py-3 flex items-start justify-between gap-3">
+              <div>
+                <span className="text-[9px] font-extrabold text-slate-600 uppercase tracking-wider block">Odaya Personel Yerleştir</span>
+                <h3 className="font-black text-sm text-slate-900 mt-0.5">
+                  {placementModalRoom.yerleskeAdi} · {placementModalRoom.kogusNo} / Oda {placementModalRoom.odaNo}
+                </h3>
+                <p className="text-[10px] text-slate-500 mt-1">
+                  DB, taşeron veya elle giriş — firmaya göre otomatik eşleştirilir.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={closePlacementModal}
+                className="text-slate-400 hover:text-slate-700 font-bold text-lg leading-none px-2"
+                aria-label="Kapat"
+              >
+                ×
+              </button>
+            </div>
+            <form onSubmit={handlePlacementSubmit} className="p-4 space-y-4">
+              {renderPlacementPersonForm()}
+            </form>
           </div>
         </div>
       )}
@@ -1437,7 +3577,7 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
               <span className="text-[10px] font-black tracking-wider text-slate-500 uppercase">📱 Mobil Sürüm</span>
               <button 
                 onClick={() => setViewMode('web')}
-                className="text-[9px] bg-blue-600/20 border border-blue-500/30 text-blue-400 px-2.5 py-1 rounded-lg font-bold hover:bg-blue-500/30 transition cursor-pointer"
+                className="text-[9px] bg-slate-900/20 border border-slate-800/30 text-slate-600 px-2.5 py-1 rounded-lg font-bold hover:bg-slate-500/30 transition cursor-pointer"
               >
                 💻 Web Sürüme Geç
               </button>
@@ -1456,7 +3596,7 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
       {/* View switcher control at the top of Web view */}
       <div className="flex items-center justify-between bg-white border border-slate-200 rounded-xl p-3.5 shadow-md">
         <div className="flex items-center space-x-2">
-          <span className="p-1.5 bg-blue-600/10 rounded-lg text-blue-500">
+          <span className="p-1.5 bg-slate-900/10 rounded-lg text-slate-600">
             <Tent size={18} />
           </span>
           <span className="text-xs font-bold text-slate-600">Görünüm Sürümü:</span>
@@ -1464,7 +3604,7 @@ export const KampciScreen: React.FC<KampciScreenProps> = ({
         </div>
         <button
           onClick={() => setViewMode('mobile')}
-          className="text-xs bg-blue-650 hover:bg-blue-600 text-white font-bold px-3 py-1.5 rounded-xl cursor-pointer transition shadow-md shadow-blue-500/10"
+          className="text-xs bg-slate-900 hover:bg-slate-900 text-white font-bold px-3 py-1.5 rounded-xl cursor-pointer transition shadow-md shadow-slate-500/10"
         >
           📱 Mobil Sürüm Test Et
         </button>

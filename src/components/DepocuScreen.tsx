@@ -6,6 +6,7 @@ import {
 import { db, saveDocument } from '../lib/firebase';
 import { collection, onSnapshot, doc, updateDoc, setDoc, getDocs, deleteDoc } from 'firebase/firestore';
 import { StokKart, Personel, SatinAlmaTalebi } from '../types/erp';
+import { KibritciLogo } from './KibritciLogo';
 
 interface DepocuScreenProps {
   stokKartlar: StokKart[];
@@ -425,27 +426,25 @@ export const DepocuScreen: React.FC<DepocuScreenProps> = ({
       <div className="bg-slate-100 border-b border-slate-200 p-2.5 px-6 flex justify-between items-center text-xs text-slate-600 shrink-0 print:hidden">
         <div className="flex items-center space-x-2">
           <span className="text-[10px] font-black uppercase text-slate-400">Görünüm:</span>
-          <span className="text-[10px] bg-white text-blue-600 font-bold px-2 py-0.5 rounded-lg border border-slate-200 uppercase">
+          <span className="text-[10px] bg-white text-slate-800 font-bold px-2 py-0.5 rounded-lg border border-slate-200 uppercase">
             {viewMode === 'mobile' ? '📱 MOBİL' : '💻 GENİŞ EKRAN'}
           </span>
         </div>
         <button
           onClick={() => setViewMode(viewMode === 'web' ? 'mobile' : 'web')}
-          className="bg-blue-600 hover:bg-blue-700 text-white text-[10px] font-bold px-3 py-1.5 rounded-lg transition cursor-pointer"
+          className="bg-slate-900 hover:bg-slate-900 text-white text-[10px] font-bold px-3 py-1.5 rounded-lg transition cursor-pointer"
         >
           {viewMode === 'web' ? '📱 MOBİL GÖRÜNÜME GEÇ' : '💻 GENİŞ EKRANA GEÇ'}
         </button>
       </div>
       
       {/* 📦 Header */}
-      <header className="bg-gradient-to-r from-blue-700 to-indigo-800 p-4 sticky top-0 z-40 flex items-center justify-between select-none shadow-md shrink-0 text-white">
+      <header className="bg-gradient-to-r from-slate-100 to-indigo-800 p-4 sticky top-0 z-40 flex items-center justify-between select-none shadow-md shrink-0 text-white">
         <div className="flex items-center space-x-2.5">
-          <div className="w-9 h-9 bg-white/10 rounded-xl flex items-center justify-center text-white border border-white/10">
-            <Package size={18} />
-          </div>
+          <KibritciLogo size="sm" className="h-8" />
           <div>
-            <h1 className="text-xs font-black tracking-widest text-white uppercase leading-none">KİBRİTÇİ DEPO SORUMLUSU</h1>
-            <p className="text-[10px] text-blue-100 font-mono mt-0.5 uppercase tracking-wider font-semibold">MOBİL SAYIM &amp; ZİMMET PANELİ</p>
+            <h1 className="text-xs font-black tracking-widest text-white uppercase leading-none">DEPO SORUMLUSU</h1>
+            <p className="text-[10px] text-slate-100 font-mono mt-0.5 uppercase tracking-wider font-semibold">MOBİL SAYIM &amp; ZİMMET PANELİ</p>
           </div>
         </div>
 
@@ -474,7 +473,7 @@ export const DepocuScreen: React.FC<DepocuScreenProps> = ({
         <button
           onClick={() => setActiveSubTab('stocks')}
           className={`flex-1 py-2 rounded-lg text-[10px] font-bold uppercase tracking-wider text-center transition cursor-pointer ${
-            activeSubTab === 'stocks' ? 'bg-blue-600 text-white shadow-xs' : 'text-slate-500 hover:bg-slate-100 hover:text-slate-800'
+            activeSubTab === 'stocks' ? 'bg-slate-900 text-white shadow-xs' : 'text-slate-500 hover:bg-slate-100 hover:text-slate-800'
           }`}
         >
           STOKLAR
@@ -482,7 +481,7 @@ export const DepocuScreen: React.FC<DepocuScreenProps> = ({
         <button
           onClick={() => setActiveSubTab('counting')}
           className={`flex-1 py-2 rounded-lg text-[10px] font-bold uppercase tracking-wider text-center transition cursor-pointer ${
-            activeSubTab === 'counting' ? 'bg-blue-600 text-white shadow-xs' : 'text-slate-500 hover:bg-slate-100 hover:text-slate-800'
+            activeSubTab === 'counting' ? 'bg-slate-900 text-white shadow-xs' : 'text-slate-500 hover:bg-slate-100 hover:text-slate-800'
           }`}
         >
           SAYIM YAP
@@ -490,7 +489,7 @@ export const DepocuScreen: React.FC<DepocuScreenProps> = ({
         <button
           onClick={() => setActiveSubTab('assignment')}
           className={`flex-1 py-2 rounded-lg text-[10px] font-bold uppercase tracking-wider text-center transition cursor-pointer ${
-            activeSubTab === 'assignment' ? 'bg-blue-600 text-white shadow-xs' : 'text-slate-500 hover:bg-slate-100 hover:text-slate-800'
+            activeSubTab === 'assignment' ? 'bg-slate-900 text-white shadow-xs' : 'text-slate-500 hover:bg-slate-100 hover:text-slate-800'
           }`}
         >
           ZİMMET/TAHSİS
@@ -498,7 +497,7 @@ export const DepocuScreen: React.FC<DepocuScreenProps> = ({
         <button
           onClick={() => setActiveSubTab('history')}
           className={`flex-1 py-2 rounded-lg text-[10px] font-bold uppercase tracking-wider text-center transition cursor-pointer ${
-            activeSubTab === 'history' ? 'bg-blue-600 text-white shadow-xs' : 'text-slate-500 hover:bg-slate-100 hover:text-slate-800'
+            activeSubTab === 'history' ? 'bg-slate-900 text-white shadow-xs' : 'text-slate-500 hover:bg-slate-100 hover:text-slate-800'
           }`}
         >
           ARŞİV
@@ -530,7 +529,7 @@ export const DepocuScreen: React.FC<DepocuScreenProps> = ({
                 </button>
                 <button
                   onClick={() => setShowCreateForm(!showCreateForm)}
-                  className="bg-blue-600 hover:bg-blue-700 text-white text-[10px] font-bold px-3 py-1.5 rounded-xl transition flex items-center space-x-1 shadow-sm cursor-pointer"
+                  className="bg-slate-900 hover:bg-slate-900 text-white text-[10px] font-bold px-3 py-1.5 rounded-xl transition flex items-center space-x-1 shadow-sm cursor-pointer"
                 >
                   {showCreateForm ? <X size={12} /> : <Plus size={12} />}
                   <span>{showCreateForm ? 'Kapat' : 'Stok Kartı Oluştur'}</span>
@@ -592,7 +591,7 @@ export const DepocuScreen: React.FC<DepocuScreenProps> = ({
                       required
                       value={createStokKodu}
                       onChange={(e) => setCreateStokKodu(e.target.value)}
-                      className="w-full rounded-xl border border-slate-300 px-3 py-1.5 text-xs text-slate-800 font-mono focus:ring-2 focus:ring-blue-500/20"
+                      className="w-full rounded-xl border border-slate-300 px-3 py-1.5 text-xs text-slate-800 font-mono focus:ring-2 focus:ring-slate-900 focus:border-slate-900/20"
                     />
                   </div>
 
@@ -604,7 +603,7 @@ export const DepocuScreen: React.FC<DepocuScreenProps> = ({
                       required
                       value={createStokAdi}
                       onChange={(e) => setCreateStokAdi(e.target.value)}
-                      className="w-full rounded-xl border border-slate-300 px-3 py-1.5 text-xs text-slate-800 focus:ring-2 focus:ring-blue-500/20"
+                      className="w-full rounded-xl border border-slate-300 px-3 py-1.5 text-xs text-slate-800 focus:ring-2 focus:ring-slate-900 focus:border-slate-900/20"
                     />
                   </div>
 
@@ -613,7 +612,7 @@ export const DepocuScreen: React.FC<DepocuScreenProps> = ({
                     <select
                       value={createKategori}
                       onChange={(e) => setCreateKategori(e.target.value)}
-                      className="w-full rounded-xl border border-slate-300 px-3 py-1.5 text-xs text-slate-700 focus:ring-2 focus:ring-blue-500/20"
+                      className="w-full rounded-xl border border-slate-300 px-3 py-1.5 text-xs text-slate-700 focus:ring-2 focus:ring-slate-900 focus:border-slate-900/20"
                     >
                       <option value="İnşaat Malzemesi">İnşaat Malzemesi</option>
                       <option value="İş Güvenliği (İSG)">İş Güvenliği (İSG)</option>
@@ -628,7 +627,7 @@ export const DepocuScreen: React.FC<DepocuScreenProps> = ({
                     <select
                       value={createBirim}
                       onChange={(e) => setCreateBirim(e.target.value)}
-                      className="w-full rounded-xl border border-slate-300 px-3 py-1.5 text-xs text-slate-700 focus:ring-2 focus:ring-blue-500/20"
+                      className="w-full rounded-xl border border-slate-300 px-3 py-1.5 text-xs text-slate-700 focus:ring-2 focus:ring-slate-900 focus:border-slate-900/20"
                     >
                       <option value="Adet">Adet</option>
                       <option value="Kg">Kg</option>
@@ -645,7 +644,7 @@ export const DepocuScreen: React.FC<DepocuScreenProps> = ({
                       placeholder="Örn: 150"
                       value={createMiktar}
                       onChange={(e) => setCreateMiktar(e.target.value)}
-                      className="w-full rounded-xl border border-slate-300 px-3 py-1.5 text-xs text-slate-800 font-mono focus:ring-2 focus:ring-blue-500/20"
+                      className="w-full rounded-xl border border-slate-300 px-3 py-1.5 text-xs text-slate-800 font-mono focus:ring-2 focus:ring-slate-900 focus:border-slate-900/20"
                     />
                   </div>
 
@@ -656,7 +655,7 @@ export const DepocuScreen: React.FC<DepocuScreenProps> = ({
                       placeholder="Örn: 5"
                       value={createKritikSeviye}
                       onChange={(e) => setCreateKritikSeviye(e.target.value)}
-                      className="w-full rounded-xl border border-slate-300 px-3 py-1.5 text-xs text-slate-800 font-mono focus:ring-2 focus:ring-blue-500/20"
+                      className="w-full rounded-xl border border-slate-300 px-3 py-1.5 text-xs text-slate-800 font-mono focus:ring-2 focus:ring-slate-900 focus:border-slate-900/20"
                     />
                   </div>
                 </div>
@@ -671,7 +670,7 @@ export const DepocuScreen: React.FC<DepocuScreenProps> = ({
                   </button>
                   <button
                     type="submit"
-                    className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-1.5 px-4 rounded-xl text-xs transition cursor-pointer"
+                    className="bg-slate-900 hover:bg-slate-900 text-white font-bold py-1.5 px-4 rounded-xl text-xs transition cursor-pointer"
                   >
                     Stok Kartını Kaydet
                   </button>
@@ -687,7 +686,7 @@ export const DepocuScreen: React.FC<DepocuScreenProps> = ({
                 placeholder="Malzeme adı veya stok kodu ara..."
                 value={searchStockQuery}
                 onChange={(e) => setSearchStockQuery(e.target.value)}
-                className="w-full bg-white border border-slate-300 text-xs text-slate-800 pl-9 pr-3 py-2.5 rounded-xl focus:ring-2 focus:ring-blue-500/25 outline-none"
+                className="w-full bg-white border border-slate-300 text-xs text-slate-800 pl-9 pr-3 py-2.5 rounded-xl focus:ring-2 focus:ring-slate-900 focus:border-slate-900/25 outline-none"
               />
             </div>
 
@@ -697,7 +696,7 @@ export const DepocuScreen: React.FC<DepocuScreenProps> = ({
                 <p className="text-xs text-slate-500 text-center py-6 italic">Aranan kriterde stok kartı bulunamadı.</p>
               ) : (
                 filteredStocks.map(stock => (
-                  <div key={stock.id} className="bg-white border border-slate-200 p-3.5 rounded-2xl flex justify-between items-center hover:border-blue-300 transition shadow-3xs">
+                  <div key={stock.id} className="bg-white border border-slate-200 p-3.5 rounded-2xl flex justify-between items-center hover:border-slate-200 transition shadow-3xs">
                     <div>
                       <span className="text-[8px] font-mono font-black text-slate-400 uppercase tracking-wider block">
                         {stock.kategori} | {stock.stokKodu}
@@ -783,7 +782,7 @@ export const DepocuScreen: React.FC<DepocuScreenProps> = ({
                             required
                             value={sayimMiktarlari[stock.id] ?? ''}
                             onChange={(e) => handleQuantityChange(stock.id, e.target.value)}
-                            className="w-16 bg-white border border-slate-300 rounded-xl p-1.5 text-xs text-right text-blue-600 font-bold font-mono focus:ring-2 focus:ring-blue-500/10 outline-none"
+                            className="w-16 bg-white border border-slate-300 rounded-xl p-1.5 text-xs text-right text-slate-800 font-bold font-mono focus:ring-2 focus:ring-slate-900 focus:border-slate-900/10 outline-none"
                             placeholder="Sayı"
                           />
                         </div>
@@ -798,14 +797,14 @@ export const DepocuScreen: React.FC<DepocuScreenProps> = ({
                     placeholder="Örn: Hafta sonu sayımı, faturası gelmeyen 2 kalem stok fazlası var..."
                     value={sayimNot}
                     onChange={(e) => setSayimNot(e.target.value)}
-                    className="w-full bg-white border border-slate-300 text-xs text-slate-800 p-2.5 px-3 rounded-2xl outline-none h-14 resize-none focus:ring-2 focus:ring-blue-500/10"
+                    className="w-full bg-white border border-slate-300 text-xs text-slate-800 p-2.5 px-3 rounded-2xl outline-none h-14 resize-none focus:ring-2 focus:ring-slate-900 focus:border-slate-900/10"
                   />
                 </div>
 
                 <button
                   type="submit"
                   disabled={loadingSayim}
-                  className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-800/40 text-white font-bold text-xs py-3 rounded-2xl transition cursor-pointer flex items-center justify-center space-x-2 shadow-sm"
+                  className="w-full bg-slate-900 hover:bg-slate-900 disabled:bg-slate-900 text-white font-bold text-xs py-3 rounded-2xl transition cursor-pointer flex items-center justify-center space-x-2 shadow-sm"
                 >
                   {loadingSayim ? <RefreshCw size={13} className="animate-spin" /> : <Check size={14} />}
                   <span>HAFTALIK SAYIMI ONAYA GÖNDER</span>
@@ -846,7 +845,7 @@ export const DepocuScreen: React.FC<DepocuScreenProps> = ({
           <div className="space-y-4">
             <div className="bg-white p-4 border border-slate-200 rounded-3xl space-y-3.5 shadow-sm animate-in fade-in duration-200">
               <div>
-                <span className="font-extrabold text-[9px] text-blue-600 uppercase tracking-wider block">PERSONEL MALZEME ZİMMETLEME</span>
+                <span className="font-extrabold text-[9px] text-slate-800 uppercase tracking-wider block">PERSONEL MALZEME ZİMMETLEME</span>
                 <p className="text-[10px] text-slate-500 mt-0.5">Depo stok kartlarındaki malzemeleri aktif personelin üzerine zimmetleyin.</p>
               </div>
 
@@ -859,7 +858,7 @@ export const DepocuScreen: React.FC<DepocuScreenProps> = ({
                     required
                     value={selectedStockId}
                     onChange={(e) => setSelectedStockId(e.target.value)}
-                    className="w-full bg-white border border-slate-300 text-xs text-slate-800 p-2.5 rounded-xl outline-none focus:ring-2 focus:ring-blue-500/10"
+                    className="w-full bg-white border border-slate-300 text-xs text-slate-800 p-2.5 rounded-xl outline-none focus:ring-2 focus:ring-slate-900 focus:border-slate-900/10"
                   >
                     <option value="">-- Malzeme Seçin --</option>
                     {stokKartlar.filter(s => s.durum !== 'ONAY BEKLİYOR').map(s => (
@@ -880,14 +879,14 @@ export const DepocuScreen: React.FC<DepocuScreenProps> = ({
                       placeholder="Personel veya firma adı ara..."
                       value={searchPersonelQuery}
                       onChange={(e) => setSearchPersonelQuery(e.target.value)}
-                      className="w-full bg-white border border-slate-300 text-[10px] text-slate-800 pl-8 pr-3 py-1.5 rounded-xl outline-none focus:ring-2 focus:ring-blue-500/10"
+                      className="w-full bg-white border border-slate-300 text-[10px] text-slate-800 pl-8 pr-3 py-1.5 rounded-xl outline-none focus:ring-2 focus:ring-slate-900 focus:border-slate-900/10"
                     />
                   </div>
                   <select
                     required
                     value={selectedPersonelId}
                     onChange={(e) => setSelectedPersonelId(e.target.value)}
-                    className="w-full bg-white border border-slate-300 text-xs text-slate-800 p-2.5 rounded-xl outline-none focus:ring-2 focus:ring-blue-500/10"
+                    className="w-full bg-white border border-slate-300 text-xs text-slate-800 p-2.5 rounded-xl outline-none focus:ring-2 focus:ring-slate-900 focus:border-slate-900/10"
                   >
                     <option value="">-- Personel Seçin --</option>
                     {filteredPersonel.slice(0, 15).map(p => (
@@ -909,7 +908,7 @@ export const DepocuScreen: React.FC<DepocuScreenProps> = ({
                       placeholder="Adet"
                       value={zimmetMiktar}
                       onChange={(e) => setZimmetMiktar(e.target.value === '' ? '' : Number(e.target.value))}
-                      className="w-full bg-white border border-slate-300 text-xs text-slate-800 p-2.5 rounded-xl outline-none focus:ring-2 focus:ring-blue-500/10"
+                      className="w-full bg-white border border-slate-300 text-xs text-slate-800 p-2.5 rounded-xl outline-none focus:ring-2 focus:ring-slate-900 focus:border-slate-900/10"
                     />
                   </div>
 
@@ -920,7 +919,7 @@ export const DepocuScreen: React.FC<DepocuScreenProps> = ({
                       placeholder="Örn: Baret + Maske seti"
                       value={zimmetAciklama}
                       onChange={(e) => setZimmetAciklama(e.target.value)}
-                      className="w-full bg-white border border-slate-300 text-xs text-slate-800 p-2.5 rounded-xl outline-none focus:ring-2 focus:ring-blue-500/10"
+                      className="w-full bg-white border border-slate-300 text-xs text-slate-800 p-2.5 rounded-xl outline-none focus:ring-2 focus:ring-slate-900 focus:border-slate-900/10"
                     />
                   </div>
                 </div>
@@ -928,7 +927,7 @@ export const DepocuScreen: React.FC<DepocuScreenProps> = ({
                 <button
                   type="submit"
                   disabled={loadingZimmet}
-                  className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-800/40 text-white font-bold text-xs py-3 rounded-xl transition cursor-pointer flex items-center justify-center space-x-2 shadow-sm"
+                  className="w-full bg-slate-900 hover:bg-slate-900 disabled:bg-slate-900 text-white font-bold text-xs py-3 rounded-xl transition cursor-pointer flex items-center justify-center space-x-2 shadow-sm"
                 >
                   {loadingZimmet ? <RefreshCw size={13} className="animate-spin" /> : <UserCheck size={14} />}
                   <span>ZİMMETI PERSONELE TAHSİS ET</span>
@@ -967,7 +966,7 @@ export const DepocuScreen: React.FC<DepocuScreenProps> = ({
                       {z.durum === 'ZİMMETLİ' && (
                         <button
                           onClick={() => handleReturnZimmet(z)}
-                          className="bg-white hover:bg-blue-50 border border-blue-200 text-blue-600 font-bold text-[9px] px-2.5 py-1.5 rounded-xl transition cursor-pointer"
+                          className="bg-white hover:bg-slate-50 border border-slate-200 text-slate-800 font-bold text-[9px] px-2.5 py-1.5 rounded-xl transition cursor-pointer"
                         >
                           İade Al
                         </button>
@@ -989,7 +988,7 @@ export const DepocuScreen: React.FC<DepocuScreenProps> = ({
                   sayimGecmisi.map(say => (
                     <div key={say.id} className="bg-slate-50 p-2.5 rounded-2xl border border-slate-200 space-y-2 text-xs">
                       <div className="flex justify-between items-center">
-                        <span className="bg-blue-50 text-blue-700 border border-blue-100 text-[8px] font-black px-1.5 py-0.5 rounded uppercase font-mono">
+                        <span className="bg-slate-50 text-slate-800 border border-slate-200 text-[8px] font-black px-1.5 py-0.5 rounded uppercase font-mono">
                           Hafta {say.haftaNo || '1'} Sayımı
                         </span>
                         <span className="text-[9px] font-mono text-slate-400">{say.tarih}</span>

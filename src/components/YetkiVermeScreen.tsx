@@ -4,6 +4,8 @@ import {
   Settings, CheckSquare, Square, RefreshCw, HelpCircle
 } from 'lucide-react';
 import { Kullanici } from './AdminPanelScreen';
+import { PORTAL_PAGES, sanitizeKisitliSayfalar } from '../lib/yetkiUtils';
+import { saveKullanici } from '../lib/kullaniciUtils';
 
 interface YetkiVermeScreenProps {
   kullanicilar: Kullanici[];
@@ -12,35 +14,7 @@ interface YetkiVermeScreenProps {
   addNotification?: (mesaj: string) => void;
 }
 
-const ALL_PAGES = [
-  { key: "ana_sayfa", label: "Ana Sayfa Dashboard", group: "BAŞLANGIÇ" },
-  
-  { key: "personel", label: "Personel Yönetimi", group: "PERSONEL" },
-  { key: "yoklama", label: "Yoklama ve Puantaj", group: "PERSONEL" },
-  { key: "maas", label: "Maaş Hesaplama", group: "PERSONEL" },
-  { key: "personel_izin", label: "Personel İzin Formu", group: "PERSONEL" },
-  
-  { key: "kasa", label: "Haftalık Kasa", group: "FİNANS & ENVANTER" },
-  { key: "satin_alma", label: "Satın Alma Talep", group: "FİNANS & ENVANTER" },
-  { key: "cari_stok", label: "Cari ve Stok Kartları", group: "FİNANS & ENVANTER" },
-  { key: "evrak_aktarimi", label: "AI Belge Aktarımı", group: "FİNANS & ENVANTER" },
-  
-  { key: "arac", label: "Araç ve Demirbaş", group: "İDARİ İŞLER & SAHA" },
-  { key: "kamp", label: "Kamp Yönetimi", group: "İDARİ İŞLER & SAHA" },
-  { key: "saha", label: "Daily Saha Faaliyetleri", group: "İDARİ İŞLER & SAHA" },
-  { key: "tutanak", label: "Hazır Tutanaklar", group: "İDARİ İŞLER & SAHA" },
-  { key: "formen_ekrani", label: "Formen Mobil Paneli", group: "İDARİ İŞLER & SAHA" },
-  { key: "guvenlik_ekrani", label: "Güvenlik & Kapı Kontrol", group: "İDARİ İŞLER & SAHA" },
-  { key: "kampci_ekrani", label: "Kampçı Mobil Paneli", group: "İDARİ İŞLER & SAHA" },
-  { key: "lojistik_ekrani", label: "Şöför Mobil Paneli", group: "İDARİ İŞLER & SAHA" },
-  { key: "depocu_ekrani", label: "Depocu Mobil Paneli", group: "İDARİ İŞLER & SAHA" },
-  
-  { key: "sohbet", label: "Sohbet & Haberleşme", group: "RAPOR VE İLETİŞİM" },
-  { key: "eposta", label: "E-Posta Merkezi", group: "RAPOR VE İLETİŞİM" },
-  { key: "onay_islemleri", label: "Onay Havuzu & İmzalar", group: "RAPOR VE İLETİŞİM" },
-  
-  { key: "admin", label: "Üyelik & Admin Paneli", group: "ADMİNİSTRATOR" }
-];
+const ALL_PAGES = PORTAL_PAGES;
 
 export const YetkiVermeScreen: React.FC<YetkiVermeScreenProps> = ({
   kullanicilar,
@@ -104,15 +78,18 @@ export const YetkiVermeScreen: React.FC<YetkiVermeScreenProps> = ({
     setSuccessMsg(null);
 
     // Calculate restricted pages: pages that are NOT in allowedPageKeys
-    const restricted = ALL_PAGES.filter(p => !allowedPageKeys.includes(p.key)).map(p => p.key);
+    const restricted = sanitizeKisitliSayfalar(
+      selectedUser.yetki,
+      ALL_PAGES.filter(p => !allowedPageKeys.includes(p.key)).map(p => p.key)
+    );
 
     try {
+      const updatedUser = { ...selectedUser, kisitliSayfalar: restricted };
+      await saveKullanici(updatedUser);
+
       setKullanicilar(prev => prev.map(u => {
-        if (u.id === selectedUserId) {
-          return {
-            ...u,
-            kisitliSayfalar: restricted
-          };
+        if (u.email?.toLowerCase() === selectedUser.email.toLowerCase()) {
+          return { ...u, kisitliSayfalar: restricted };
         }
         return u;
       }));
@@ -227,6 +204,11 @@ export const YetkiVermeScreen: React.FC<YetkiVermeScreenProps> = ({
                           </span>
                         )}
                       </div>
+                      {user.sonGorulmeTarihi && (
+                        <span className={`text-[8px] font-semibold block mt-1 ${isSelected ? 'text-emerald-300' : 'text-emerald-600'}`}>
+                          Son Görülme: {new Date(user.sonGorulmeTarihi).toLocaleString('tr-TR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                        </span>
+                      )}
                     </div>
                     <span className="text-base select-none shrink-0 opacity-80">🪪</span>
                   </button>
@@ -257,11 +239,18 @@ export const YetkiVermeScreen: React.FC<YetkiVermeScreenProps> = ({
               <div className="p-4 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center shrink-0">
                 <div className="min-w-0">
                   <span className="text-[9px] text-slate-400 font-bold uppercase tracking-wider block">YETKİ DETAYLARI:</span>
-                  <div className="flex items-baseline space-x-1.5">
-                    <h3 className="text-sm font-black text-slate-800 truncate">
-                      {selectedUser?.ad ? `${selectedUser.ad} ${selectedUser.soyad}` : selectedUser?.email.split('@')[0].toUpperCase()}
-                    </h3>
-                    <span className="text-[10px] text-slate-500 font-mono">({selectedUser?.email})</span>
+                  <div className="flex flex-col">
+                    <div className="flex items-baseline space-x-1.5">
+                      <h3 className="text-sm font-black text-slate-800 truncate">
+                        {selectedUser?.ad ? `${selectedUser.ad} ${selectedUser.soyad}` : selectedUser?.email.split('@')[0].toUpperCase()}
+                      </h3>
+                      <span className="text-[10px] text-slate-500 font-mono">({selectedUser?.email})</span>
+                    </div>
+                    {selectedUser?.sonGorulmeTarihi && (
+                      <span className="text-[9px] text-emerald-600 font-bold mt-0.5">
+                        Son Görülme: {new Date(selectedUser.sonGorulmeTarihi).toLocaleString('tr-TR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                    )}
                   </div>
                 </div>
 

@@ -4,13 +4,15 @@
  * @param maxWidth The maximum width of the output image.
  * @param maxHeight The maximum height of the output image.
  * @param quality The compression quality (0.0 to 1.0).
+ * @param timeoutMs Image decode/canvas zaman aşımı — asılırsa orijinal döner.
  * @returns A Promise resolving to the compressed base64 data URL.
  */
 export function compressImage(
   base64Str: string,
   maxWidth = 800,
   maxHeight = 800,
-  quality = 0.7
+  quality = 0.7,
+  timeoutMs = 5000
 ): Promise<string> {
   return new Promise((resolve) => {
     // If the base64 string is already very small (e.g., < 100KB), return it immediately to save time
@@ -18,6 +20,19 @@ export function compressImage(
       resolve(base64Str);
       return;
     }
+
+    let settled = false;
+    const finish = (value: string) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(value);
+    };
+
+    const timer = setTimeout(() => {
+      // Image.onload hiç gelmezse gönderim sonsuza asılıyordu
+      finish(base64Str);
+    }, Math.max(1000, timeoutMs));
 
     const img = new Image();
     img.onload = () => {
@@ -37,43 +52,39 @@ export function compressImage(
         }
       }
 
-      const canvas = document.createElement("canvas");
+      const canvas = document.createElement('canvas');
       canvas.width = width;
       canvas.height = height;
 
-      const ctx = canvas.getContext("2d");
+      const ctx = canvas.getContext('2d');
       if (!ctx) {
-        resolve(base64Str); // Fallback to original if canvas context is not available
+        finish(base64Str);
         return;
       }
 
-      // Draw the image onto the canvas
       ctx.drawImage(img, 0, 0, width, height);
 
-      // We convert any loaded image type to image/jpeg for powerful compression
-      let format = "image/jpeg";
-      if (base64Str.includes("data:image/webp")) {
-        format = "image/webp";
+      let format = 'image/jpeg';
+      if (base64Str.includes('data:image/webp')) {
+        format = 'image/webp';
       }
 
       try {
         const compressedBase64 = canvas.toDataURL(format, quality);
-        
-        // Ensure the compressed result is actually smaller, otherwise use original
-        if (compressedBase64.length < base64Str.length) {
-          resolve(compressedBase64);
-        } else {
-          resolve(base64Str);
-        }
-      } catch (e) {
-        resolve(base64Str); // Fallback on canvas error
+        finish(compressedBase64.length < base64Str.length ? compressedBase64 : base64Str);
+      } catch {
+        finish(base64Str);
       }
     };
 
     img.onerror = () => {
-      resolve(base64Str); // Fallback on image load error
+      finish(base64Str);
     };
 
-    img.src = base64Str;
+    try {
+      img.src = base64Str;
+    } catch {
+      finish(base64Str);
+    }
   });
 }
