@@ -162,7 +162,7 @@ import { installReportEmailGlobalBridge } from './lib/reportEmail';
 import { CANONICAL_ANA_FIRMA_ADI, isKibritciCompany, normalizeTurkishName } from './lib/yoklamaUtils';
 import { findPersonelMatches, pickBestPersonelMatch } from './lib/personelMatchUtils';
 import { suppressPersonelTcsFromDeleted } from './lib/personelSeedSuppress';
-import { isActivePortalDurum } from './lib/roleClaims';
+import { isActivePortalDurum, isFounderEmail } from './lib/roleClaims';
 import {
   buildSaIrsaliyeFormPrefill,
   type SaIrsaliyeFormPrefill,
@@ -588,6 +588,12 @@ function App() {
             isMock?: boolean;
           };
           const isMockSession = parsed.isMock === true;
+          if (isMockSession) {
+            localStorage.removeItem('kibritci_portal_session');
+            setCurrentUser(null);
+            setAuthLoading(false);
+            return;
+          }
 
           // E-posta oturumu: Firebase Auth geri yüklenmeden DB bootstrap başlamasın
           if (!user && !isMockSession) {
@@ -1790,51 +1796,8 @@ function App() {
     };
   }, [dbStatus, currentUser]);
 
-  // Auto online signup sync and administrator check
-  useEffect(() => {
-    if (authLoading || !currentUser || !currentUser.email) return;
-    const emailLower = currentUser.email.toLowerCase();
-    
-    // Check if user is in DB list of accounts
-    const exists = !!findKullaniciByEmail(kullanicilar, emailLower);
-    if (!exists && (dbStatus === 'synced' || dbStatus === 'offline')) {
-      const newKullanici: Kullanici = {
-        id: emailLower,
-        email: currentUser.email,
-        yetki: guessRoleFromEmail(emailLower) as any,
-        durum: 'AKTİF',
-        kayitTarihi: new Date().toISOString().split('T')[0]
-      };
-      
-      if (dbStatus === 'synced') {
-        // CRITICAL FIX: Make sure the document doesn't actually exist in Firestore
-        // before overwriting it with a MİSAFİR payload, in case `kullanicilar` array failed to load.
-        getDoc(doc(db, 'kullanicilar', emailLower)).then(snap => {
-          if (!snap.exists()) {
-            saveKullanici(newKullanici).catch(console.error);
-            setKullanicilar(prev => {
-              if (prev.some(u => u.email.toLowerCase() === emailLower)) return prev;
-              return dedupeKullanicilarByEmail([...prev, newKullanici]);
-            });
-          } else {
-            // User exists in Firestore but not in local state (network issue or timeout)
-            // Bring them into state safely
-            setKullanicilar(prev => {
-              if (prev.some(u => u.email.toLowerCase() === emailLower)) return prev;
-              return dedupeKullanicilarByEmail([...prev, snap.data() as Kullanici]);
-            });
-          }
-        }).catch(err => {
-          console.warn('Otomatik kayıt kontrolü başarısız:', err);
-        });
-      } else {
-        setKullanicilar(prev => {
-          if (prev.some(u => u.email.toLowerCase() === emailLower)) return prev;
-          return [...prev, newKullanici];
-        });
-      }
-    }
-  }, [currentUser, kullanicilar, authLoading, dbStatus]);
+  // Auto online signup sync and administrator check — kaldırıldı:
+  // Silinen / kayıtsız hesaplar girişte otomatik AKTİF oluşturulmaz.
 
   // İlk girişte mobil saha rolünü ana paneline yönlendir (sekme değişiminde tekrar etme)
   useEffect(() => {
@@ -3767,29 +3730,38 @@ function App() {
             const currentEmail = currentUser?.email?.toLowerCase();
             const privileged = currentEmail === 'sametatak9@gmail.com' || currentEmail === SECONDARY_ADMIN_EMAIL;
             const hasActiveMobileRole = isMobileRole(matchedYetki) && isActivePortalDurum(matchedUser?.durum);
+            const missingAccount = !matchedUser && !isFounderEmail(currentEmail);
             const isBlocked =
-              !privileged &&
-              !hasActiveMobileRole &&
-              (matchedUser?.durum === 'KISITLI' ||
-                matchedUser?.durum === 'ONAY BEKLİYOR' ||
-                matchedYetki === 'MİSAFİR');
+              missingAccount ||
+              (!privileged &&
+                !hasActiveMobileRole &&
+                (matchedUser?.durum === 'KISITLI' ||
+                  matchedUser?.durum === 'ONAY BEKLİYOR' ||
+                  matchedYetki === 'MİSAFİR'));
             if (isBlocked) {
               const pending = matchedUser?.durum === 'ONAY BEKLİYOR';
               const isGuest = matchedYetki === 'MİSAFİR';
               return (
                 <div className="absolute inset-0 bg-slate-950/95 flex flex-col items-center justify-center p-8 z-50 select-none text-white animate-fade-in">
                   <div className="text-center space-y-5 max-w-md bg-slate-900 border border-amber-500/30 p-8 rounded-3xl shadow-2xl">
-                    <span className="text-5xl block animate-bounce">{isGuest ? '⏳' : pending ? '⌛' : '🚫'}</span>
+                    <span className="text-5xl block animate-bounce">{missingAccount ? '🚫' : isGuest ? '⏳' : pending ? '⌛' : '🚫'}</span>
                     <h1 className="text-sm font-black tracking-widest text-amber-500 uppercase">
-                      {isGuest ? 'MİSAFİR HESABI - YETKİLENDİRME BEKLENİYOR' : pending ? 'ÜYELİK ONAYI BEKLENİYOR!' : 'YETKİNİZ SÜRESİZ KISITLANMIŞTIR!'}
+                      {missingAccount
+                        ? 'HESAP BULUNAMADI VEYA SİLİNMİŞ'
+                        : isGuest
+                          ? 'MİSAFİR HESABI - YETKİLENDİRME BEKLENİYOR'
+                          : pending
+                            ? 'ÜYELİK ONAYI BEKLENİYOR!'
+                            : 'YETKİNİZ SÜRESİZ KISITLANMIŞTIR!'}
                     </h1>
                     <p className="text-xs text-slate-400 leading-relaxed">
-                      {isGuest
-                        ? `Sayın yetkili, ${currentUser?.email} hesabınız başarıyla oluşturulmuştur. Ancak sisteme erişim yetkiniz henüz şantiye yöneticisi tarafından onaylanmamıştır. Rolünüz: MİSAFİR.`
-                        : pending 
-                          ? `Sayın yetkili, ${currentUser?.email} hesabınız başarıyla oluşturulmuştur. Ancak sisteme erişiminiz henüz şantiye yöneticisi tarafından onaylanmamıştır.`
-                          : `Sistem güvenlik politikaları gereği dondurulan ${currentUser?.email} hesabı ile hiçbir işlem yürütülemez.`
-                      }
+                      {missingAccount
+                        ? `${currentUser?.email} için aktif ERP hesabı yok. Hesap silinmiş olabilir veya henüz onaylanmamış olabilir.`
+                        : isGuest
+                          ? `Sayın yetkili, ${currentUser?.email} hesabınız başarıyla oluşturulmuştur. Ancak sisteme erişim yetkiniz henüz şantiye yöneticisi tarafından onaylanmamıştır. Rolünüz: MİSAFİR.`
+                          : pending
+                            ? `Sayın yetkili, ${currentUser?.email} hesabınız başarıyla oluşturulmuştur. Ancak sisteme erişiminiz henüz şantiye yöneticisi tarafından onaylanmamıştır.`
+                            : `Sistem güvenlik politikaları gereği dondurulan ${currentUser?.email} hesabı ile hiçbir işlem yürütülemez.`}
                       <br />
                       <br />
                       Lütfen şirket yöneticisi (<strong className="text-amber-400 font-bold">sametatak9@gmail.com</strong>) ile iletişime geçiniz.

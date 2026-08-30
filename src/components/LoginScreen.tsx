@@ -7,11 +7,11 @@ import {
 import { 
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
-  signInAnonymously,
+  signOut,
   sendPasswordResetEmail,
 } from 'firebase/auth';
 import { doc, getDoc, setDoc, collection, getDocs, query, where, limit } from 'firebase/firestore';
-import { saveKullanici, saveKullaniciForSignup } from '../lib/kullaniciUtils';
+import { saveKullanici, saveKullaniciForSignup, assertPortalAccountAllowed, isKullaniciSilindi } from '../lib/kullaniciUtils';
 import {
   buildBekleyenFromSignup,
   isFirestoreWriteFailure,
@@ -64,27 +64,21 @@ async function completeEmailLogin(
   } catch (signErr: unknown) {
     const code = (signErr as { code?: string })?.code;
     if (code === 'auth/user-not-found' || code === 'auth/invalid-credential' || code === 'auth/wrong-password') {
-      try {
-        cred = await withAuthTimeout(
-          createUserWithEmailAndPassword(auth, emailLower, passTrim),
-          15000
-        );
-      } catch (createErr: any) {
-        if (createErr.code === 'auth/email-already-in-use') {
-          // The user actually exists in Auth, which means they just typed the wrong password.
-          throw new Error('E-posta veya şifre hatalı. Lütfen kontrol edip tekrar deneyin.');
-        }
-        throw createErr;
-      }
-    } else {
-      throw signErr;
+      throw new Error('E-posta veya şifre hatalı. Kayıtlı değilseniz önce üyelik oluşturun.');
     }
+    throw signErr;
+  }
+
+  try {
+    await assertPortalAccountAllowed(emailLower);
+  } catch (portalErr) {
+    await signOut(auth).catch(() => undefined);
+    throw portalErr;
   }
 
   await syncAuthClaimsFromServer(emailLower).catch((err) => {
     console.warn('Claim sync atlandı (giriş devam ediyor):', err);
   });
-  // Claim sonrası token'ı zorla yenile (syncAuthClaimsFromServer zaten getIdToken(true) çağırır)
   try {
     await auth.currentUser?.getIdToken(true);
   } catch {
@@ -185,7 +179,6 @@ async function getRegistrationState(
 }
 
 async function resolveSignupAuthUid(emailLower: string, passTrim: string): Promise<string> {
-  let uid = `u_${Date.now()}`;
   try {
     const cred = await withAuthTimeout(
       createUserWithEmailAndPassword(auth, emailLower, passTrim),
@@ -194,25 +187,14 @@ async function resolveSignupAuthUid(emailLower: string, passTrim: string): Promi
     return cred.user.uid;
   } catch (authErr: any) {
     if (authErr?.code === 'auth/email-already-in-use') {
-      try {
-        const cred = await withAuthTimeout(
-          signInWithEmailAndPassword(auth, emailLower, passTrim),
-          8000
-        );
-        return cred.user.uid;
-      } catch {
-        console.warn('Mevcut Auth hesabına giriş yapılamadı, yedek oturum deneniyor');
-      }
-    } else {
-      console.warn('Firebase Auth kayıt atlandı:', authErr?.code || authErr?.message);
+      const cred = await withAuthTimeout(
+        signInWithEmailAndPassword(auth, emailLower, passTrim),
+        8000
+      );
+      await assertPortalAccountAllowed(emailLower);
+      return cred.user.uid;
     }
-  }
-
-  try {
-    const anon = await withAuthTimeout(signInAnonymously(auth), 4000);
-    return anon.user.uid;
-  } catch {
-    return uid;
+    throw authErr;
   }
 }
 
@@ -403,6 +385,11 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
 
         let registrationState: 'none' | 'complete' | 'partial' = 'none';
         try {
+          if (await isKullaniciSilindi(emailLower)) {
+            setErrorMsg('Bu e-posta daha önce sistemden silinmiş. Yeniden erişim için yönetici ile iletişime geçin.');
+            setLoading(false);
+            return;
+          }
           registrationState = await getRegistrationState(emailLower);
           if (registrationState === 'complete') {
             setErrorMsg('Bu e-posta adresi zaten kayıtlı. Giriş yapmayı deneyin.');
@@ -587,33 +574,11 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
     setLoading(true);
     setErrorMsg(null);
     try {
-      const demoEmail = 'santiye@kibritci.com';
-      const demoPass = 'kibritci2026';
-      
-      // Attempt to sign in
-      try {
-        const res = await signInWithEmailAndPassword(auth, demoEmail, demoPass);
-        onLoginSuccess(res.user);
-      } catch (err: any) {
-        // If not found, create it as the default demo user
-        if (err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
-          const res = await createUserWithEmailAndPassword(auth, demoEmail, demoPass);
-          onLoginSuccess(res.user);
-        } else {
-          throw err;
-        }
-      }
-    } catch (err: any) {
-      // Offline fallback — anonim ERP yazamaz; kullanıcıyı uyar
+      await completeFounderLogin('santiye@kibritci.com', 'kibritci2026', onLoginSuccess);
+    } catch (err: unknown) {
       setErrorMsg(
-        'Demo girişi başarısız. E-posta/şifre ile giriş yapın. Anonim oturum kayıt yapamaz.'
+        err instanceof Error ? err.message : 'Demo girişi başarısız. E-posta/şifre ile giriş yapın.'
       );
-      try {
-        const res = await signInAnonymously(auth);
-        onLoginSuccess(res.user);
-      } catch (nestedErr) {
-        onLoginSuccess({ email: 'demo@kibritci.com', displayName: 'Demo Kullanıcı', uid: 'test-user-id' });
-      }
     } finally {
       setLoading(false);
     }
@@ -690,27 +655,6 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
                   * Bu işlemi yaptıktan sonra sayfa yenileyip normal giriş yapabilirsiniz.
                 </p>
               </div>
-            </div>
-
-            <div className="border-t border-amber-500/20 pt-2.5">
-              <button
-                type="button"
-                onClick={() => {
-                  const targetEmail = email || 'sametatak9@gmail.com';
-                  const fakeUser = {
-                    uid: `local_user_${Date.now()}`,
-                    email: targetEmail,
-                    displayName: targetEmail === 'sametatak9@gmail.com' ? 'Samet Atak (Yönetici)' : 'Şantiye Yetkilisi (Local)'
-                  };
-                  setInfoMsg('Bulut yetkilendirmesi atlandı! Yerel (Çevrimdışı) modda giriş yapılıyor...');
-                  setTimeout(() => {
-                    onLoginSuccess(fakeUser);
-                  }, 1200);
-                }}
-                className="w-full bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 active:scale-[0.98] text-slate-950 font-black py-2.5 rounded-xl cursor-pointer transition shadow-lg text-[11px] leading-relaxed block text-center"
-              >
-                ⚡ ENGELİ GEÇ: YEREL MODEL & ÇEVRİMDIŞI SİMÜLASYON İLE GİRİŞ YAP
-              </button>
             </div>
           </div>
         )}

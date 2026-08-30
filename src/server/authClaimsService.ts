@@ -181,3 +181,26 @@ export async function preparePasswordReset(email: string): Promise<{ prepared: b
 
   return { prepared: true, created: true };
 }
+
+/** Admin silme: Firebase Auth + silinen kullanıcı kaydı */
+export async function deletePortalAuthUser(email: string): Promise<void> {
+  const admin = getFirebaseAdmin();
+  const emailKey = email.trim().toLowerCase();
+  if (!emailKey) throw new Error('E-posta zorunlu');
+
+  try {
+    const existing = await admin.auth().getUserByEmail(emailKey);
+    await admin.auth().deleteUser(existing.uid);
+  } catch (err: unknown) {
+    const code = (err as { code?: string })?.code;
+    if (code !== 'auth/user-not-found') throw err;
+  }
+
+  await admin.firestore().collection('silinenKullanicilar').doc(emailKey).set(
+    {
+      email: emailKey,
+      silinmeTarihi: new Date().toISOString(),
+    },
+    { merge: true }
+  );
+}

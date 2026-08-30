@@ -1,5 +1,6 @@
-import { doc, setDoc, writeBatch } from 'firebase/firestore';
+import { doc, getDoc, setDoc, writeBatch } from 'firebase/firestore';
 import {
+  auth,
   db,
   fetchCollection,
   saveSignupDocuments,
@@ -11,6 +12,7 @@ import {
   normalizeYetki,
 } from './yetkiUtils';
 import { loadYetkiSablonlari } from './yetkiSablonUtils';
+import { isFounderEmail } from './roleClaims';
 
 async function withTimeout<T>(promise: Promise<T>, ms = 20000): Promise<T> {
   let timeoutId: ReturnType<typeof setTimeout>;
@@ -49,6 +51,51 @@ export interface KullaniciLike {
 /** Firestore belge kimliği = e-posta (tek kaynak, çift kayıt önlenir) */
 export function kullaniciDocId(email: string): string {
   return email.trim().toLowerCase();
+}
+
+export const SILINEN_KULLANICI_COLLECTION = 'silinenKullanicilar';
+
+export async function isKullaniciSilindi(email: string): Promise<boolean> {
+  const emailKey = kullaniciDocId(email);
+  if (!emailKey) return false;
+  const snap = await withTimeout(getDoc(doc(db, SILINEN_KULLANICI_COLLECTION, emailKey)), 8000);
+  return snap.exists();
+}
+
+/** Giriş sonrası: silinen veya ERP kaydı olmayan hesapları reddet */
+export async function assertPortalAccountAllowed(email: string): Promise<void> {
+  const emailKey = kullaniciDocId(email);
+  if (!emailKey) throw new Error('Geçersiz e-posta');
+  if (isFounderEmail(emailKey)) return;
+
+  const [deletedSnap, userSnap] = await Promise.all([
+    withTimeout(getDoc(doc(db, SILINEN_KULLANICI_COLLECTION, emailKey)), 8000),
+    withTimeout(getDoc(doc(db, 'kullanicilar', emailKey)), 8000),
+  ]);
+
+  if (deletedSnap.exists()) {
+    throw new Error('Bu hesap sistemden silinmiştir. Yeniden erişim için yönetici ile iletişime geçin.');
+  }
+  if (!userSnap.exists()) {
+    throw new Error('Bu e-posta için ERP hesabı bulunamadı. Önce üyelik oluşturun veya yönetici onayı bekleyin.');
+  }
+}
+
+async function deletePortalAuthUserViaApi(emailKey: string): Promise<void> {
+  const token = await auth.currentUser?.getIdToken();
+  if (!token) return;
+  const res = await fetch('/api/auth/admin/delete-user', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ email: emailKey }),
+  });
+  if (!res.ok) {
+    const data = (await res.json().catch(() => ({}))) as { error?: string };
+    console.warn('Firebase Auth silme atlandı:', data.error || res.status);
+  }
 }
 
 function stripInternalFields(user: KullaniciLike): Record<string, unknown> {
@@ -282,6 +329,18 @@ export async function deleteKullaniciByEmail(email: string): Promise<void> {
     (u) => u.email?.trim().toLowerCase() === emailKey || u.id === emailKey
   );
 
+  await withTimeout(
+    setDoc(
+      doc(db, SILINEN_KULLANICI_COLLECTION, emailKey),
+      cleanUndefined({
+        email: emailKey,
+        silinmeTarihi: new Date().toISOString(),
+      }),
+      { merge: true }
+    ),
+    25000
+  );
+
   const batch = writeBatch(db);
   for (const t of targets) {
     batch.delete(doc(db, 'kullanicilar', t.id));
@@ -289,4 +348,10 @@ export async function deleteKullaniciByEmail(email: string): Promise<void> {
   batch.delete(doc(db, 'portalKullanicilar', emailKey));
   batch.delete(doc(db, 'bekleyenUyelikler', emailKey));
   await withTimeout(batch.commit(), 25000);
+
+  try {
+    await deletePortalAuthUserViaApi(emailKey);
+  } catch (err) {
+    console.warn('Firebase Auth kullanıcı silme isteği başarısız:', err);
+  }
 }

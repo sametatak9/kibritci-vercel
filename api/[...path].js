@@ -795,6 +795,25 @@ async function preparePasswordReset(email) {
   }
   return { prepared: true, created: true };
 }
+async function deletePortalAuthUser(email) {
+  const admin2 = getFirebaseAdmin();
+  const emailKey = email.trim().toLowerCase();
+  if (!emailKey) throw new Error("E-posta zorunlu");
+  try {
+    const existing = await admin2.auth().getUserByEmail(emailKey);
+    await admin2.auth().deleteUser(existing.uid);
+  } catch (err) {
+    const code = err?.code;
+    if (code !== "auth/user-not-found") throw err;
+  }
+  await admin2.firestore().collection("silinenKullanicilar").doc(emailKey).set(
+    {
+      email: emailKey,
+      silinmeTarihi: (/* @__PURE__ */ new Date()).toISOString()
+    },
+    { merge: true }
+  );
+}
 
 // src/server/registerApiRoutes.ts
 function registerApiRoutes(app2) {
@@ -1116,6 +1135,30 @@ function registerApiRoutes(app2) {
       return res.json({ success: true, ...result });
     } catch (err) {
       const message = err instanceof Error ? err.message : "\u015Eifre s\u0131f\u0131rlama haz\u0131rl\u0131\u011F\u0131 ba\u015Far\u0131s\u0131z";
+      return res.status(500).json({ error: message });
+    }
+  });
+  app2.post("/api/auth/admin/delete-user", async (req, res) => {
+    if (!isFirebaseAdminConfigured()) {
+      return res.status(503).json({ error: "Firebase Admin yap\u0131land\u0131r\u0131lmam\u0131\u015F" });
+    }
+    try {
+      const idToken = await readBearerToken(req);
+      if (!idToken) return res.status(401).json({ error: "Authorization Bearer token gerekli" });
+      const decoded = await verifyIdToken(idToken);
+      if (!callerIsYonetici(decoded)) {
+        return res.status(403).json({ error: "Yaln\u0131zca y\xF6netici kullan\u0131c\u0131 silebilir" });
+      }
+      const email = String(req.body?.email || "").trim().toLowerCase();
+      if (!email) return res.status(400).json({ error: "email zorunlu" });
+      const callerEmail = String(decoded.email || "").trim().toLowerCase();
+      if (email === callerEmail) {
+        return res.status(400).json({ error: "Kendi hesab\u0131n\u0131z\u0131 bu u\xE7 noktadan silemezsiniz" });
+      }
+      await deletePortalAuthUser(email);
+      return res.json({ success: true });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Kullan\u0131c\u0131 silme ba\u015Far\u0131s\u0131z";
       return res.status(500).json({ error: message });
     }
   });

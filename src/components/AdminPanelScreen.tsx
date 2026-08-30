@@ -516,7 +516,7 @@ export const AdminPanelScreen: React.FC<AdminPanelScreenProps> = ({
       try {
         await deleteKullaniciByEmail(email);
         setKullanicilar(prev => prev.filter(u => u.email?.toLowerCase() !== email.toLowerCase()));
-        alert("Kullanıcı kaydı Firebase'den kalıcı olarak silindi.");
+        alert("Kullanıcı kaydı, giriş hesabı ve silinen hesap listesi kalıcı olarak kaldırıldı.");
         if (addNotification) {
           addNotification(`${email} kullanıcısı admin tarafından sistemden silindi.`);
         }

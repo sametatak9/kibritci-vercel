@@ -133,6 +133,12 @@ service cloud.firestore {
       allow write: if isYonetici() || legacyUnclaimedEmailUser() || isFounderEmail();
     }
 
+    match /silinenKullanicilar/{email} {
+      allow read: if isSignedIn()
+        && (request.auth.token.email == email || isYonetici() || isFounderEmail());
+      allow write: if isYonetici() || isFounderEmail();
+    }
+
     match /yetkiSablonlari/{docId} {
       allow read: if canUseErp();
       allow write: if isYonetici() || isFounderEmail();

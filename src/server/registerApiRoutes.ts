@@ -11,6 +11,7 @@ import { getFirebaseAdmin, isFirebaseAdminConfigured } from './firebaseAdmin';
 import {
   bootstrapFounderAccount,
   callerIsYonetici,
+  deletePortalAuthUser,
   preparePasswordReset,
   syncClaimsForEmail,
   verifyIdToken,
@@ -399,6 +400,34 @@ app.post('/api/auth/prepare-password-reset', async (req, res) => {
     return res.json({ success: true, ...result });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Şifre sıfırlama hazırlığı başarısız';
+    return res.status(500).json({ error: message });
+  }
+});
+
+app.post('/api/auth/admin/delete-user', async (req, res) => {
+  if (!isFirebaseAdminConfigured()) {
+    return res.status(503).json({ error: 'Firebase Admin yapılandırılmamış' });
+  }
+  try {
+    const idToken = await readBearerToken(req);
+    if (!idToken) return res.status(401).json({ error: 'Authorization Bearer token gerekli' });
+    const decoded = await verifyIdToken(idToken);
+    if (!callerIsYonetici(decoded)) {
+      return res.status(403).json({ error: 'Yalnızca yönetici kullanıcı silebilir' });
+    }
+
+    const email = String(req.body?.email || '').trim().toLowerCase();
+    if (!email) return res.status(400).json({ error: 'email zorunlu' });
+
+    const callerEmail = String(decoded.email || '').trim().toLowerCase();
+    if (email === callerEmail) {
+      return res.status(400).json({ error: 'Kendi hesabınızı bu uç noktadan silemezsiniz' });
+    }
+
+    await deletePortalAuthUser(email);
+    return res.json({ success: true });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Kullanıcı silme başarısız';
     return res.status(500).json({ error: message });
   }
 });
