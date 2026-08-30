@@ -16,6 +16,12 @@ interface YetkiVermeScreenProps {
 
 const ALL_PAGES = PORTAL_PAGES;
 
+const PRIVILEGED_EMAILS = new Set(['sametatak9@gmail.com', 'mudur@gmail.com']);
+
+function isPrivilegedEmail(email?: string): boolean {
+  return PRIVILEGED_EMAILS.has((email || '').toLowerCase());
+}
+
 export const YetkiVermeScreen: React.FC<YetkiVermeScreenProps> = ({
   kullanicilar,
   setKullanicilar,
@@ -40,10 +46,16 @@ export const YetkiVermeScreen: React.FC<YetkiVermeScreenProps> = ({
     // If user's kisitliSayfalar is undefined, all pages are allowed.
     const restricted = user.kisitliSayfalar || [];
     const allowed = ALL_PAGES.filter(p => !restricted.includes(p.key)).map(p => p.key);
+    if (isPrivilegedEmail(user.email) && !allowed.includes('yetki_verme')) {
+      allowed.push('yetki_verme');
+    }
     setAllowedPageKeys(allowed);
   };
 
   const handleTogglePage = (pageKey: string) => {
+    if (pageKey === 'yetki_verme' && isPrivilegedEmail(selectedUser?.email)) {
+      return;
+    }
     setAllowedPageKeys(prev => {
       if (prev.includes(pageKey)) {
         return prev.filter(key => key !== pageKey);
@@ -59,8 +71,11 @@ export const YetkiVermeScreen: React.FC<YetkiVermeScreenProps> = ({
     
     setAllowedPageKeys(prev => {
       if (allActive) {
-        // Remove all group keys
-        return prev.filter(k => !groupKeys.includes(k));
+        return prev.filter((k) => {
+          if (!groupKeys.includes(k)) return true;
+          if (k === 'yetki_verme' && isPrivilegedEmail(selectedUser?.email)) return true;
+          return false;
+        });
       } else {
         // Add all group keys (avoiding duplicates)
         const next = [...prev];
@@ -81,7 +96,7 @@ export const YetkiVermeScreen: React.FC<YetkiVermeScreenProps> = ({
     const restricted = sanitizeKisitliSayfalar(
       selectedUser.yetki,
       ALL_PAGES.filter(p => !allowedPageKeys.includes(p.key)).map(p => p.key)
-    );
+    ).filter((key) => !(key === 'yetki_verme' && isPrivilegedEmail(selectedUser.email)));
 
     try {
       const updatedUser = { ...selectedUser, kisitliSayfalar: restricted };
@@ -311,12 +326,13 @@ export const YetkiVermeScreen: React.FC<YetkiVermeScreenProps> = ({
                         <div className="p-3 bg-white divide-y divide-slate-100">
                           {groupPages.map(page => {
                             const isAllowed = allowedPageKeys.includes(page.key);
+                            const isLocked = page.key === 'yetki_verme' && isPrivilegedEmail(selectedUser?.email);
                             return (
                               <button
                                 key={page.key}
                                 type="button"
                                 onClick={() => handleTogglePage(page.key)}
-                                className="w-full flex items-center space-x-2.5 py-2.5 px-2 text-left hover:bg-slate-50 transition cursor-pointer text-xs font-semibold text-slate-705"
+                                className={`w-full flex items-center space-x-2.5 py-2.5 px-2 text-left hover:bg-slate-50 transition text-xs font-semibold text-slate-705 ${isLocked ? 'cursor-default opacity-80' : 'cursor-pointer'}`}
                               >
                                 <span className={isAllowed ? 'text-emerald-600' : 'text-slate-400'}>
                                   {isAllowed ? <CheckSquare size={16} className="stroke-[2.5]" /> : <Square size={16} />}
@@ -325,7 +341,9 @@ export const YetkiVermeScreen: React.FC<YetkiVermeScreenProps> = ({
                                   <span className={`block font-bold text-xs ${isAllowed ? 'text-slate-800' : 'text-slate-405 line-through'}`}>
                                     {page.label}
                                   </span>
-                                  <span className="text-[9px] text-slate-400 font-mono block">Sekme Kodu: {page.key}</span>
+                                  <span className="text-[9px] text-slate-400 font-mono block">
+                                    {isLocked ? 'Kurucu hesabında kilitli — kapatılamaz' : `Sekme Kodu: ${page.key}`}
+                                  </span>
                                 </div>
                               </button>
                             );

@@ -3256,9 +3256,10 @@ function App() {
   /** Şöför Mobil: yalnızca ŞÖFÖR/LOJİSTİK yetkisi (yönetici önizleme) */
   const isAllowedLojistik = isSoforYetki(userYetki) || isYonetici;
   const isAllowedDepocu = userYetki === 'DEPOCU' || isYonetici;
-  const isTabRestricted = isPrivilegedAdmin
-    ? false
-    : isTabRestrictedForUser(activeTab, userYetki, matchedU?.kisitliSayfalar);
+  const isTabRestricted =
+    isPrivilegedAdmin && activeTab === 'yetki_verme'
+      ? false
+      : isTabRestrictedForUser(activeTab, userYetki, matchedU?.kisitliSayfalar);
 
   const renderAccessDenied = () => (
     <div className="absolute inset-0 bg-slate-950/95 flex flex-col items-center justify-center p-8 z-50 select-none text-white">
@@ -3660,7 +3661,7 @@ function App() {
           userYetki={userYetki}
           isOpen={isSidebarOpen}
           onClose={() => setIsSidebarOpen(false)}
-          kisitliSayfalar={isPrivilegedAdmin ? [] : sanitizeKisitliSayfalar(userYetki, matchedU?.kisitliSayfalar)}
+          kisitliSayfalar={sanitizeKisitliSayfalar(userYetki, matchedU?.kisitliSayfalar)}
           onToggleMobileMode={() => {
             // Tam ERP kabuğu (sidebar + Yoklama/Faaliyet/Saha); istatistik kabuğu sekmeleri yutmasın
             setIsMobileMode(true);

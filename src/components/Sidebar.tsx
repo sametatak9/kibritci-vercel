@@ -144,6 +144,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
           return roleAllowedTabs.includes(item.key as typeof roleAllowedTabs[number]);
         }
 
+        if (item.key === 'yetki_verme') {
+          return isPrivilegedAdmin;
+        }
+
         if (kisitliSayfalar && kisitliSayfalar.includes(item.key)) {
           // İdari İşler: üyelik onay + onay havuzu kısıt listesinde olsa bile görünür
           if (!(isIdariIsler && (item.key === 'admin' || item.key === 'onay_islemleri'))) {
@@ -153,10 +157,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
         if (item.key === 'admin') {
           return canSeeUyelikAdmin;
-        }
-
-        if (item.key === 'yetki_verme') {
-          return isPrivilegedAdmin;
         }
 
         if (item.key === 'formen_ekrani') {
