@@ -54,6 +54,10 @@ function normalizeClaimRole(yetki) {
     TESISATCI: "TES\u0130SAT\xC7I",
     TES\u0130SATCI: "TES\u0130SAT\xC7I",
     MERMERCI: "MERMERC\u0130",
+    GOTURU: "G\xD6T\xDCR\xDC",
+    G\u00D6TURU: "G\xD6T\xDCR\xDC",
+    SERAMIK: "G\xD6T\xDCR\xDC",
+    SERAM\u0130K: "G\xD6T\xDCR\xDC",
     OPERATOR: "OPERAT\xD6R",
     OPERAT\u00D6R: "OPERAT\xD6R"
   };
@@ -186,15 +190,16 @@ var init_yetkiUtils = __esm({
   "src/lib/yetkiUtils.ts"() {
     MOBILE_ROLE_ALLOWED_TABS = {
       // Formen günlük planı yönetirken ana sayfadaki genel özeti de görebilir.
-      FORMEN: ["ana_sayfa", "formen_ekrani", "faaliyet_personel", "rapor_programlama", "personel"],
-      G\u00DCVENL\u0130K: ["guvenlik_ekrani"],
-      KAMP\u00C7I: ["kampci_ekrani"],
-      TES\u0130SAT\u00C7I: ["tesisatci_ekrani"],
-      MERMERC\u0130: ["mermerci_ekrani"],
-      LOJ\u0130ST\u0130K: ["lojistik_ekrani"],
-      OPERAT\u00D6R: ["operator"],
-      DEPOCU: ["depocu_ekrani"],
-      ANAHTARCI: ["imalat_terminali"]
+      FORMEN: ["ana_sayfa", "formen_ekrani", "faaliyet_personel", "proje_ilerleme", "rapor_programlama", "personel", "siparis_formu"],
+      G\u00DCVENL\u0130K: ["guvenlik_ekrani", "siparis_formu"],
+      KAMP\u00C7I: ["kampci_ekrani", "siparis_formu"],
+      TES\u0130SAT\u00C7I: ["tesisatci_ekrani", "siparis_formu"],
+      MERMERC\u0130: ["mermerci_ekrani", "siparis_formu"],
+      G\u00D6T\u00DCR\u00DC: ["seramik_ekrani", "siparis_formu"],
+      LOJ\u0130ST\u0130K: ["lojistik_ekrani", "siparis_formu"],
+      OPERAT\u00D6R: ["operator", "siparis_formu"],
+      DEPOCU: ["depocu_ekrani", "siparis_formu"],
+      ANAHTARCI: ["siparis_formu"]
     };
     MOBILE_ROLE_HOME_TAB = Object.fromEntries(
       Object.entries(MOBILE_ROLE_ALLOWED_TABS).map(([role, tabs]) => [role, tabs[0]])
@@ -806,7 +811,7 @@ function registerApiRoutes(app2) {
     return `po_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 14)}${Math.random().toString(36).slice(2, 10)}`;
   }
   function buildPublicShareUrl(req, token) {
-    const host = req.get?.("x-forwarded-host") || req.get?.("host") || req.headers.host || "kibritci-erp.onrender.com";
+    const host = req.get?.("x-forwarded-host") || req.get?.("host") || req.headers.host || "kibritci-web.onrender.com";
     const proto = (req.get?.("x-forwarded-proto") || req.protocol || "https").split(",")[0].trim() || "https";
     return `${proto}://${host}/?view_po=${encodeURIComponent(token)}`;
   }
@@ -868,13 +873,115 @@ function registerApiRoutes(app2) {
       return res.status(500).json({ error: message });
     }
   });
+  const SAHA_SIPARIS_COLLECTION = "sahaSiparisleri";
+  app2.get("/api/public/siparis-katalog", async (_req, res) => {
+    if (!isFirebaseAdminConfigured()) {
+      return res.json({ stoklar: [], tedarikciler: [] });
+    }
+    try {
+      const admin2 = getFirebaseAdmin();
+      const [stokSnap, cariSnap] = await Promise.all([
+        admin2.firestore().collection("stokKartlar").limit(800).get(),
+        admin2.firestore().collection("cariKartlar").limit(400).get()
+      ]);
+      const stoklar = stokSnap.docs.map((d) => {
+        const x = d.data();
+        return {
+          id: d.id,
+          stokKodu: String(x.stokKodu || ""),
+          stokAdi: String(x.stokAdi || ""),
+          birim: String(x.birim || "ADET"),
+          kategori: String(x.kategori || ""),
+          durum: String(x.durum || ""),
+          arsivde: Boolean(x.arsivde)
+        };
+      }).filter((s) => s.stokAdi && s.durum !== "PASIF" && !s.arsivde).map(({ durum: _d, arsivde: _a, ...rest }) => rest).sort((a, b) => a.stokAdi.localeCompare(b.stokAdi, "tr")).slice(0, 500);
+      const tedarikciler = cariSnap.docs.map((d) => {
+        const x = d.data();
+        return {
+          id: d.id,
+          unvan: String(x.unvan || ""),
+          kartTipi: String(x.kartTipi || ""),
+          durum: String(x.durum || "")
+        };
+      }).filter(
+        (c) => c.unvan && c.durum !== "PASIF" && (c.kartTipi === "TEDARIKCI" || c.kartTipi === "SATICI" || !c.kartTipi)
+      ).map(({ kartTipi: _k, durum: _d, ...rest }) => rest).sort((a, b) => a.unvan.localeCompare(b.unvan, "tr")).slice(0, 200);
+      return res.json({ stoklar, tedarikciler });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Katalog okunamad\u0131";
+      return res.status(500).json({ error: message });
+    }
+  });
+  app2.post("/api/public/saha-siparis", async (req, res) => {
+    if (!isFirebaseAdminConfigured()) {
+      return res.status(503).json({ error: "Firebase Admin yap\u0131land\u0131r\u0131lmam\u0131\u015F" });
+    }
+    try {
+      const body = req.body || {};
+      const personelAdSoyad = String(body.personelAdSoyad || "").trim();
+      const kullanilacakYer = String(body.kullanilacakYer || "").trim();
+      const kalemlerIn = Array.isArray(body.kalemler) ? body.kalemler : [];
+      const kalemler = kalemlerIn.map((k, i) => ({
+        id: String(k.id || `sipk_${Date.now()}_${i}`),
+        urunAdi: String(k.urunAdi || "").trim(),
+        miktar: Number(k.miktar) || 0,
+        birim: String(k.birim || "ADET"),
+        marka: String(k.marka || ""),
+        kullanilacakYer: String(k.kullanilacakYer || kullanilacakYer),
+        aciklama: String(k.aciklama || ""),
+        stokKartId: String(k.stokKartId || "")
+      })).filter((k) => k.urunAdi && k.miktar > 0);
+      if (personelAdSoyad.length < 3) {
+        return res.status(400).json({ error: "Personel ad\u0131 soyad\u0131 zorunlu" });
+      }
+      if (kullanilacakYer.length < 3) {
+        return res.status(400).json({ error: "Kullan\u0131lacak yer zorunlu" });
+      }
+      if (kalemler.length === 0) {
+        return res.status(400).json({ error: "En az bir malzeme kalemi gerekli" });
+      }
+      if (kalemler.length > 40) {
+        return res.status(400).json({ error: "En fazla 40 kalem" });
+      }
+      const tarih = String(body.tarih || (/* @__PURE__ */ new Date()).toISOString().slice(0, 10)).slice(0, 10);
+      const now = (/* @__PURE__ */ new Date()).toISOString();
+      const id = String(body.id || `sip_${Date.now()}`).slice(0, 64);
+      const siparisNo = String(
+        body.siparisNo || `SP-${tarih.replace(/-/g, "")}-${Date.now().toString(36).slice(-4).toUpperCase()}`
+      );
+      const payload = {
+        id,
+        siparisNo,
+        tarih,
+        personelAdSoyad: personelAdSoyad.slice(0, 80),
+        personelGorev: String(body.personelGorev || "").slice(0, 80),
+        telefon: String(body.telefon || "").slice(0, 40),
+        kullanilacakYer: kullanilacakYer.slice(0, 400),
+        cariFirma: String(body.cariFirma || "").slice(0, 160),
+        cariKartId: String(body.cariKartId || ""),
+        aciklama: String(body.aciklama || "").slice(0, 500),
+        kalemler,
+        durum: "ONAY_BEKLIYOR",
+        kaynak: "SIPARIS_FORMU",
+        olusturanEmail: "siparis-link@kibritci.com",
+        olusturulma: now
+      };
+      const admin2 = getFirebaseAdmin();
+      await admin2.firestore().collection(SAHA_SIPARIS_COLLECTION).doc(id).set(payload);
+      return res.json({ success: true, siparis: payload });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Sipari\u015F kaydedilemedi";
+      return res.status(500).json({ error: message });
+    }
+  });
   const PUBLIC_KASA_RAPOR_COLLECTION = "publicKasaRaporPaylasimlari";
   const KASA_RAPOR_STORAGE_BUCKET = "kibritci-erp.firebasestorage.app";
   function makeKasaRaporShareToken() {
     return `kr_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 14)}${Math.random().toString(36).slice(2, 10)}`;
   }
   function buildKasaRaporViewUrl(req, token) {
-    const host = req.get?.("x-forwarded-host") || req.get?.("host") || req.headers.host || "kibritci-erp.onrender.com";
+    const host = req.get?.("x-forwarded-host") || req.get?.("host") || req.headers.host || "kibritci-web.onrender.com";
     const proto = (req.get?.("x-forwarded-proto") || req.protocol || "https").split(",")[0].trim() || "https";
     return `${proto}://${host}/?view_kasa_rapor=${encodeURIComponent(token)}`;
   }
@@ -1218,7 +1325,7 @@ function registerApiRoutes(app2) {
         message: "Gemini API ba\u011Flant\u0131s\u0131 \xE7al\u0131\u015F\u0131yor."
       });
     }
-    return res.status(503).json({
+    return res.status(200).json({
       success: false,
       keyFormat: result.keyInfo.format,
       keyPreview: result.keyInfo.preview,
