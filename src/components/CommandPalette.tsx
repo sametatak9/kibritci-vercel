@@ -31,6 +31,7 @@ const ROUTES = [
   { key: 'irsaliye_giris', label: 'İrsaliye Girişi', icon: FileText },
   { key: 't_cetveli', label: 'T Cetveli', icon: BookOpen },
   { key: 'fatura_giris', label: 'Fatura Girişi', icon: FileText },
+  { key: 'evrak_baglama', label: 'Evrak Bağlama', icon: FileText },
   { key: 'cari_stok', label: 'Cari ve Stok Kartları', icon: Wallet },
   { key: 'kasa', label: 'Kasa', icon: Wallet },
   { key: 'kamp', label: 'Kamp Yönetimi', icon: Tent },

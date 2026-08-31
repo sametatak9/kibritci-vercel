@@ -1,8 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { 
-  Truck, ClipboardList, Plus, Trash2, Edit3, ArrowRight, 
-  Upload, Printer, Download, Sparkles, FileText, CheckCircle2, Search, BookOpen
-} from 'lucide-react';
+import { Search, BookOpen } from 'lucide-react';
 import { Irsaliye, IrsaliyeItem, SatinAlmaTalebi, CariKart, StokKart, Fatura, EvrakBaglantiGrubu, CariKartIslem, StokKartIslem } from '../types/erp';
 import { compressImage } from '../lib/imageCompress';
 import { fetchApiJson } from '../lib/apiClient';
@@ -20,17 +17,9 @@ import {
   linkIrsaliyeKalemler,
   resolveCariKartId,
 } from '../lib/evrakCariStokSync';
-import {
-  assertSameCariIrsaliyeler,
-  buildFaturaFromIrsaliyeler,
-  findFaturalarForIrsaliye,
-  linkIrsaliyelerToFatura,
-  unlinkIrsaliyeFromFatura,
-  type SaIrsaliyeFormPrefill,
-} from '../lib/evrakDonusum';
+import { type SaIrsaliyeFormPrefill } from '../lib/evrakDonusum';
 import { findStokMatch } from '../lib/evrakBatchImportUtils';
 import { listFaturasizIrsaliyeler } from '../lib/operasyonUyarilari';
-import { openEvrakZincirRaporu } from '../lib/evrakZincirRapor';
 import { resolveIrsaliyeProvenance } from '../lib/evrakProvenance';
 import {
   irsaliyeNoChainSortKey,
@@ -39,7 +28,6 @@ import {
   resolveMicirMalzemeTipiFromIrsaliye,
 } from '../lib/micirUtils';
 import { EvrakPageShell, EvrakSectionHeader } from './evrakUi/EvrakScreenChrome';
-import { EvrakIslemMenu } from './evrakUi/EvrakIslemMenu';
 import { openEvrakTarama } from './evrakUi/EvrakTaramaOnizleme';
 import {
   MuhasebeAiButton,
@@ -77,9 +65,6 @@ export const IrsaliyeGirisScreen: React.FC<IrsaliyeGirisScreenProps> = ({
   irsaliyeler,
   setIrsaliyeler,
   faturalar = [],
-  setFaturalar,
-  evrakBaglantiGruplari,
-  setEvrakBaglantiGruplari,
   satinAlmaTalepleri,
   cariKartlar,
   setCariKartlar,
@@ -104,7 +89,6 @@ export const IrsaliyeGirisScreen: React.FC<IrsaliyeGirisScreenProps> = ({
   const [irSignedAttachmentUrl, setIrSignedAttachmentUrl] = useState<string | null>(null);
   const [editingIrId, setEditingIrId] = useState<string | null>(null);
   const [linkedSaId, setLinkedSaId] = useState<string | null>(null);
-  const [selectedIrIds, setSelectedIrIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     if (!prefillFromSa) return;
@@ -412,122 +396,6 @@ export const IrsaliyeGirisScreen: React.FC<IrsaliyeGirisScreenProps> = ({
     alert(
       `İrsaliye kaydedildi.\nCari: ${cariResolved.matched ? 'bağlı' : 'kart önerildi'}\nStok eşleşmesi: ${stokLink.linked}/${stokLink.total}`
     );
-  };
-
-  const handleConvertIrsaliyeToFatura = (ir: Irsaliye) => {
-    handleBagIrsaliyelerToFatura([ir]);
-  };
-
-  const handleBagIrsaliyelerToFatura = (list: Irsaliye[]) => {
-    if (!setFaturalar) {
-      alert('Fatura kaydı için sistem bağlantısı yok.');
-      return;
-    }
-    const withKalem = list.filter((ir) => (ir.kalemler || []).length > 0);
-    if (!withKalem.length) {
-      alert('Seçili irsaliyelerde kalem yok; faturaya bağlanamaz.');
-      return;
-    }
-    const sameCari = assertSameCariIrsaliyeler(withKalem);
-    if (!sameCari.ok) {
-      alert(sameCari.message);
-      return;
-    }
-
-    const { fatura, alreadyExists, warning } = buildFaturaFromIrsaliyeler(withKalem, {
-      faturalar,
-      cariKartlar,
-      stokKartlar,
-    });
-
-    const nos = withKalem.map((ir) => ir.irsaliyeNo).join(', ');
-    if (alreadyExists.length > 0) {
-      const ok = window.confirm(
-        `${warning || 'Bu irsaliye(ler) için fatura bağı zaten var.'}\n\nMevcut: ${alreadyExists
-          .map((x) => x.faturaNo)
-          .join(', ')}\n\nYine de yeni taslak fatura oluşturulsun mu?\n(Evraklar kilitlenmez; bağ sonradan düzeltilebilir.)`
-      );
-      if (!ok) return;
-    } else if (
-      !window.confirm(
-        `${withKalem.length} irsaliye taslak faturaya bağlansın mı?\n\n${nos}\n\nNot: Birim fiyatlar 0 gelebilir; Fatura sekmesinde düzenleyin.\nEvraklar kilitlenmez.`
-      )
-    ) {
-      return;
-    }
-
-    setFaturalar((prev) => [fatura, ...prev]);
-    setIrsaliyeler((prev) => linkIrsaliyelerToFatura(prev, fatura));
-
-    if (fatura.cariKartId) {
-      appendCariIslemOnce(
-        setCariIslemGecmisi,
-        buildCariEvrakHistory({
-          cariKartId: fatura.cariKartId,
-          islemTipi: 'FATURA',
-          islemId: fatura.id,
-          islemBaslik: 'İrsaliyeden Taslak Fatura',
-          islemDetay: `${nos} → ${fatura.faturaNo} · ${fatura.cariUnvan}`,
-          tarih: fatura.tarih,
-          belgeNo: fatura.faturaNo,
-          tutar: fatura.genelToplam,
-        })
-      );
-    }
-
-    setSelectedIrIds(new Set());
-    if (addNotification) {
-      addNotification(`${withKalem.length} irsaliye → taslak fatura ${fatura.faturaNo} bağlandı.`);
-    }
-    const openRapor = window.confirm(
-      `Taslak fatura bağlandı.\nNo: ${fatura.faturaNo}\n${withKalem.length} irsaliye faturaya bağlandı${
-        fatura.saId ? `\nSipariş: ${fatura.saId}` : ''
-      }\n\nFatura sekmesinden fiyatları düzenleyebilirsiniz.\n\nDönüşüm zincir raporunu açmak ister misiniz?`
-    );
-    if (openRapor) {
-      const sa = fatura.saId
-        ? satinAlmaTalepleri.find((s) => s.saId === fatura.saId)
-        : undefined;
-      openEvrakZincirRaporu({
-        sa,
-        irsaliyeler: linkIrsaliyelerToFatura(irsaliyeler, fatura),
-        faturalar: [fatura, ...faturalar],
-        focusIrsaliyeIds: withKalem.map((ir) => ir.id),
-      });
-    }
-  };
-
-  const handleUnlinkIrsaliyeFatura = (ir: Irsaliye) => {
-    const linked = findFaturalarForIrsaliye(ir, faturalar);
-    if (!linked.length && !ir.faturaNo) {
-      alert('Bu irsaliyede fatura bağı yok.');
-      return;
-    }
-    if (
-      !window.confirm(
-        `"${ir.irsaliyeNo}" irsaliyesinin fatura bağı kaldırılsın mı?\n\nMevcut: ${
-          ir.faturaNo || linked.map((f) => f.faturaNo).join(', ')
-        }\n\nİrsaliye silinmez; yalnızca bağ temizlenir.`
-      )
-    ) {
-      return;
-    }
-    const faturaRef = linked[0] || ({ faturaNo: ir.faturaNo || '', bagliIrsaliyeler: [ir.id] } as Fatura);
-    setIrsaliyeler((prev) => unlinkIrsaliyeFromFatura(prev, faturaRef, ir.id));
-    if (setFaturalar && linked.length) {
-      setFaturalar((prev) =>
-        prev.map((ft) => {
-          if (!linked.some((l) => l.id === ft.id)) return ft;
-          return {
-            ...ft,
-            bagliIrsaliyeler: (ft.bagliIrsaliyeler || []).filter(
-              (id) => id !== ir.id && id !== ir.irsaliyeNo
-            ),
-          };
-        })
-      );
-    }
-    if (addNotification) addNotification(`${ir.irsaliyeNo} fatura bağı kaldırıldı.`);
   };
 
   const handlePreviewIrsaliyePdf = (ir: Irsaliye) => {
@@ -916,28 +784,6 @@ export const IrsaliyeGirisScreen: React.FC<IrsaliyeGirisScreenProps> = ({
               <div className="flex items-center justify-between gap-2 flex-wrap">
                 <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wide">İrsaliye Evrak Arşivi</h4>
                 <div className="flex items-center gap-2 flex-wrap">
-                  {selectedIrIds.size > 0 && (
-                    <>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          handleBagIrsaliyelerToFatura(
-                            irsaliyeler.filter((ir) => selectedIrIds.has(ir.id))
-                          )
-                        }
-                        className="text-[10px] bg-violet-700 hover:bg-violet-800 text-white px-3 py-1.5 rounded-lg font-bold cursor-pointer"
-                      >
-                        Seçilenleri Faturaya Bağla ({selectedIrIds.size})
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setSelectedIrIds(new Set())}
-                        className="text-[10px] bg-white hover:bg-slate-50 text-slate-600 border border-slate-200 px-3 py-1.5 rounded-lg font-bold cursor-pointer"
-                      >
-                        Seçimi temizle
-                      </button>
-                    </>
-                  )}
                   <ReportEmailButton
                     className="text-[10px] bg-sky-600 hover:bg-sky-700 text-white px-3 py-1.5 rounded-lg font-bold cursor-pointer inline-flex items-center gap-1"
                     payload={() => ({
@@ -997,7 +843,6 @@ export const IrsaliyeGirisScreen: React.FC<IrsaliyeGirisScreenProps> = ({
                 <table className="w-full text-[11px]">
                   <thead className="sticky top-0 z-[1] bg-slate-50/95 backdrop-blur-sm">
                     <tr className="text-left text-slate-600">
-                      <th className="px-2 py-2 w-8"></th>
                       <th className="px-2 py-2">Tarih</th>
                       <th className="px-2 py-2">İrsaliye No</th>
                       <th className="px-2 py-2">Firma</th>
@@ -1011,22 +856,6 @@ export const IrsaliyeGirisScreen: React.FC<IrsaliyeGirisScreenProps> = ({
                       const stokLink = countLinkedStok(ir.kalemler || []);
                       return (
                         <tr key={ir.id} className="border-t border-slate-100 hover:bg-emerald-50/50 transition-colors">
-                          <td className="px-2 py-1.5">
-                            <input
-                              type="checkbox"
-                              checked={selectedIrIds.has(ir.id)}
-                              onChange={() => {
-                                setSelectedIrIds((prev) => {
-                                  const next = new Set(prev);
-                                  if (next.has(ir.id)) next.delete(ir.id);
-                                  else next.add(ir.id);
-                                  return next;
-                                });
-                              }}
-                              className="w-3.5 h-3.5 cursor-pointer"
-                              title="Faturaya bağlamak için seç"
-                            />
-                          </td>
                           <td className="px-2 py-1.5">{ir.tarih || '-'}</td>
                           <td className="px-2 py-1.5 font-semibold">
                             {ir.irsaliyeNo}
@@ -1117,19 +946,6 @@ export const IrsaliyeGirisScreen: React.FC<IrsaliyeGirisScreenProps> = ({
                               >
                                 Aç
                               </button>
-                              <EvrakIslemMenu
-                                items={[
-                                  {
-                                    label: 'Faturaya bağla',
-                                    onClick: () => handleConvertIrsaliyeToFatura(ir),
-                                  },
-                                  {
-                                    label: 'Fatura bağını kaldır',
-                                    hidden: !(ir.faturaNo || findFaturalarForIrsaliye(ir, faturalar).length > 0),
-                                    onClick: () => handleUnlinkIrsaliyeFatura(ir),
-                                  },
-                                ]}
-                              />
                             </div>
                           </td>
                         </tr>

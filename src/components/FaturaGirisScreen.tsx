@@ -20,10 +20,8 @@ import {
 } from '../lib/evrakCariStokSync';
 import { findStokMatch } from '../lib/evrakBatchImportUtils';
 import { syncFaturaIrsaliyeBaglari } from '../lib/evrakDonusum';
-import { openEvrakZincirRaporu } from '../lib/evrakZincirRapor';
 import { resolveFaturaProvenance } from '../lib/evrakProvenance';
 import { EvrakPageShell, EvrakSectionHeader } from './evrakUi/EvrakScreenChrome';
-import { EvrakIslemMenu } from './evrakUi/EvrakIslemMenu';
 import { openEvrakTarama } from './evrakUi/EvrakTaramaOnizleme';
 import {
   MuhasebeAiButton,
@@ -64,8 +62,6 @@ export const FaturaGirisScreen: React.FC<FaturaGirisScreenProps> = ({
   stokKartlar,
   setStokKartlar,
   setCariIslemGecmisi,
-  evrakBaglantiGruplari,
-  setEvrakBaglantiGruplari,
   currentUser,
   addNotification,
 }) => {
@@ -968,24 +964,6 @@ export const FaturaGirisScreen: React.FC<FaturaGirisScreenProps> = ({
                               >
                                 Aç
                               </button>
-                              <EvrakIslemMenu
-                                items={[
-                                  {
-                                    label: 'Evrak karşılaştır',
-                                    onClick: () => {
-                                      const sa = ft.saId
-                                        ? satinAlmaTalepleri.find((s) => s.saId === ft.saId)
-                                        : undefined;
-                                      openEvrakZincirRaporu({
-                                        sa,
-                                        irsaliyeler,
-                                        faturalar,
-                                        focusIrsaliyeIds: ft.bagliIrsaliyeler,
-                                      });
-                                    },
-                                  },
-                                ]}
-                              />
                             </div>
                           </td>
                         </tr>

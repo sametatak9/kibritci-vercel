@@ -27,7 +27,6 @@ import {
   ensureIrsaliyeSaBaglari,
   findIrsaliyelerForSa,
 } from '../lib/evrakDonusum';
-import { openEvrakZincirRaporu } from '../lib/evrakZincirRapor';
 import {
   buildNDeliveryTemplates,
   createIrsaliyelerFromSatinAlma,
@@ -520,26 +519,16 @@ export const SatinAlmaScreen: React.FC<SatinAlmaScreenProps> = ({
       );
     }
     
-    const saForRapor = sa;
     setIrsaliyeModalSa(null);
     setTalepTab('DONUSTURULDU');
     
-    const openRapor = window.confirm(
-      `${yeniIrsaliyeler.length} adet irsaliye oluşturuldu!\n` +
+    window.alert(
+      `${yeniIrsaliyeler.length} adet irsaliye oluşturuldu.\n` +
         `Sipariş: ${sa.saId}\n` +
-        `İlk: ${yeniIrsaliyeler[0].irsaliyeNo}\n` +
-        (yeniIrsaliyeler.length > 1 ? `Son: ${yeniIrsaliyeler[yeniIrsaliyeler.length - 1].irsaliyeNo}\n` : '') +
-        `\nSipariş «Dönüştürüldü» listesine alındı. Dönüşüm zincir raporunu açmak ister misiniz?`
+        `İlk: ${yeniIrsaliyeler[0].irsaliyeNo}` +
+        (yeniIrsaliyeler.length > 1 ? `\nSon: ${yeniIrsaliyeler[yeniIrsaliyeler.length - 1].irsaliyeNo}` : '') +
+        `\n\nBağlama veya karşılaştırma için «Evrak Bağlama» sekmesini kullanın.`
     );
-    
-    if (openRapor) {
-      openEvrakZincirRaporu({
-        sa: saForRapor,
-        irsaliyeler: [...yeniIrsaliyeler, ...irsaliyeler],
-        faturalar,
-        focusIrsaliyeIds: yeniIrsaliyeler.map((ir) => ir.id),
-      });
-    }
   };
 
   const handleSimulateESignature = (sa: SatinAlmaTalebi) => {
@@ -1274,14 +1263,6 @@ ${kalemOzet || '—'}${more}`,
                     <EvrakIslemMenu
                       items={[
                         { label: 'Çoklu irsaliye oluştur', onClick: () => openMultiIrsaliyeModal(sa) },
-                        {
-                          label: 'Evrak karşılaştır',
-                          onClick: () => {
-                            const { irsaliyeler: repaired, repairedIds } = ensureIrsaliyeSaBaglari(sa, irsaliyeler);
-                            if (repairedIds.length && setIrsaliyeler) setIrsaliyeler(repaired);
-                            openEvrakZincirRaporu({ sa, irsaliyeler: repaired, faturalar });
-                          },
-                        },
                         { label: 'PDF önizle', onClick: () => handlePreviewPdf(sa) },
                         { label: emailSendingId === sa.id ? 'E-posta hazırlanıyor…' : 'E-posta gönder', onClick: () => void handleEmailTalep(sa) },
                         {

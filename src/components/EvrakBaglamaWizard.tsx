@@ -50,6 +50,9 @@ export const EvrakBaglamaWizard: React.FC<EvrakBaglamaWizardProps> = ({
 }) => {
   const [step, setStep] = useState<1 | 2>(1);
   const [anchor, setAnchor] = useState<BaglamaAnchor>(anchorHint);
+  useEffect(() => {
+    setAnchor(anchorHint);
+  }, [anchorHint]);
   const [saId, setSaId] = useState(prefillSaId || '');
   const [irIds, setIrIds] = useState<string[]>(prefillIrIds || []);
   const [faturaId, setFaturaId] = useState(prefillFaturaId || '');
@@ -209,9 +212,7 @@ export const EvrakBaglamaWizard: React.FC<EvrakBaglamaWizardProps> = ({
     setFaturaId('');
     setKalemLinks([]);
     onComplete?.();
-    alert(
-      'Bağlama tamamlandı. Evraklar "Bağlı Evraklar" listesine alındı ve YZ Karşılaştır sekmesindeki havuza eklendi.'
-    );
+    alert('Bağlama tamamlandı. Evraklar «Bağlı evraklar» listesine alındı.');
   };
 
   return (
@@ -257,7 +258,7 @@ export const EvrakBaglamaWizard: React.FC<EvrakBaglamaWizardProps> = ({
           <div className="lg:col-span-2 bg-white border border-slate-200 rounded-2xl p-4 space-y-4">
             <p className="text-xs text-slate-600">
               Satın alma, irsaliye ve fatura evraklarını bağımsız seçip eşleştirin. En az iki evrak türü
-              seçilmelidir. YZ karşılaştırma sırası: Satın Alma → İrsaliye → Fatura.
+              seçilmelidir. Karşılaştırma raporu aynı sekmenin «Karşılaştır» altından açılır.
             </p>
 
             <div>

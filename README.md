@@ -32,6 +32,14 @@ Zorunlu değil (istemci `firebase-applet-config.json` ile `kibritci-erp`’ye ba
 
 Akvizyon nöbet kapanışı: her gün 18:00 UTC (21:00 İstanbul) → `GET /api/cron/akvizyon-nobet-kapat`.
 
+## Evrak bağlama
+
+Satın alma, irsaliye ve fatura **oluşturma** sekmeleri yalın tutulur (belge yaz, listele, raporla). Karşılaştırma ve zincir bağlama **Evrak Bağlama** sekmesindedir: SA ↔ irsaliye ↔ fatura esnek seçilir.
+
+## Maaş IBAN listesi
+
+Satır satır IBAN kopyalama yoktur. Maaş Hesaplama ve Maaş Ödeme’de **Tüm liste IBAN kopyala** (Ad Soyad, TC, görev, IBAN) ve antetli / logolu HTML IBAN listesi vardır.
+
 ## Kapı evrakı (Güvenlik)
 
 Ana Firma evrakı genelde **fatura** veya **irsaliye**dir. Güvenlik sekmesinde fotoğraf veya PDF yüklenir; fotoğraftan taranmış PDF otomatik oluşur ve Firebase Storage’a yazılır. Kayıt hem kapı defterinde hem Fatura / İrsaliye sekmelerinde görünür (`Tarama` ile açılır). Taşeron evrakı ayrı akar; yönetici onayı Ana Firma için geçerlidir.

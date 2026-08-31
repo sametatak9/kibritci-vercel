@@ -30,6 +30,7 @@ const SatinAlmaScreen = lazy(() => import('./components/SatinAlmaScreen').then(m
 const IrsaliyeGirisScreen = lazy(() => import('./components/IrsaliyeGirisScreen').then(m => ({ default: m.IrsaliyeGirisScreen })));
 const TCetveliScreen = lazy(() => import('./components/TCetveliScreen').then(m => ({ default: m.TCetveliScreen })));
 const FaturaGirisScreen = lazy(() => import('./components/FaturaGirisScreen').then(m => ({ default: m.FaturaGirisScreen })));
+const EvrakBaglamaScreen = lazy(() => import('./components/EvrakBaglamaScreen').then(m => ({ default: m.EvrakBaglamaScreen })));
 const TaseronKesintiScreen = lazy(() => import('./components/TaseronKesintiScreen').then(m => ({ default: m.TaseronKesintiScreen })));
 const PersonelKartlariScreen = lazy(() => import('./components/PersonelKartlariScreen').then(m => ({ default: m.PersonelKartlariScreen })));
 const KasaScreen = lazy(() => import('./components/KasaScreen').then(m => ({ default: m.KasaScreen })));
@@ -196,7 +197,7 @@ function App() {
   const LAST_TAB_STORAGE_KEY = 'kibritci_last_tab_v1';
   const readLastTab = (): string => {
     try {
-      const removedTabs = new Set(['evrak_baglama', 'yz_karsilastir']);
+      const removedTabs = new Set(['yz_karsilastir']);
       const normalize = (tab: string) =>
         removedTabs.has(tab) || isRetiredPortalTab(tab) ? 'ana_sayfa' : tab;
       const direct = localStorage.getItem(LAST_TAB_STORAGE_KEY);
@@ -326,6 +327,7 @@ function App() {
   const [satinAlmaTalepleri, setSatinAlmaTalepleri] = useState<SatinAlmaTalebi[]>([]);
   const [irsaliyeler, setIrsaliyeler] = useState<Irsaliye[]>([]);
   const [irsaliyeSaPrefill, setIrsaliyeSaPrefill] = useState<SaIrsaliyeFormPrefill | null>(null);
+  const [evrakBaglamaPrefill, setEvrakBaglamaPrefill] = useState<import('./components/EvrakBaglamaScreen').EvrakBaglamaPrefill | null>(null);
   const [faturalar, setFaturalar] = useState<Fatura[]>([]);
   const [evrakBaglantiGruplari, setEvrakBaglantiGruplari] = useState<EvrakBaglantiGrubu[]>([]);
   const [onayliAnalizRaporlari, setOnayliAnalizRaporlari] = useState<OnayliAnalizRaporu[]>([]);
@@ -2932,6 +2934,7 @@ function App() {
     if (has('onay', 'reddedil', 'onaylandı', 'onaylandi', 'imza', 'kapı', 'kapi', 'gate', 'evrak')) return 'onay_islemleri';
     if (has('irsaliye', 'fiş', 'fis')) return 'irsaliye_giris';
     if (has('t cetvel', 't-cetvel', 'cetveli')) return 't_cetveli';
+    if (has('bağla', 'bagla', 'karşılaştır', 'karsilastir', 'zincir')) return 'evrak_baglama';
     if (has('fatura')) return 'fatura_giris';
     if (has('sipariş', 'siparis')) return 'siparis_formu';
     if (has('satın alma', 'satin alma', 'talep', 'po ')) return 'satin_alma';
@@ -3972,6 +3975,25 @@ function App() {
                   setCariIslemGecmisi={setCariIslemGecmisiWithSync}
                   currentUser={currentUser}
                   addNotification={addNotification}
+                />
+              )}
+
+              {activeTab === "evrak_baglama" && (
+                <EvrakBaglamaScreen
+                  satinAlmaTalepleri={satinAlmaTalepleri}
+                  irsaliyeler={irsaliyeler}
+                  faturalar={faturalar}
+                  setIrsaliyeler={setIrsaliyelerWithSync}
+                  setFaturalar={setFaturalarWithSync}
+                  evrakBaglantiGruplari={evrakBaglantiGruplari}
+                  setEvrakBaglantiGruplari={setEvrakBaglantiGruplariWithSync}
+                  prefill={evrakBaglamaPrefill}
+                  onClearPrefill={() => setEvrakBaglamaPrefill(null)}
+                  onNavigateToBaglama={(p) => {
+                    setEvrakBaglamaPrefill(p);
+                    handleTabNavigation('evrak_baglama');
+                  }}
+                  currentUser={currentUser}
                 />
               )}
 

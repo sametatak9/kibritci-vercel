@@ -4,6 +4,7 @@ import { Personel, AylikYoklamaMap, MaaşOdeme } from '../types/erp';
 import { CorporateReportLayout } from './CorporateReportLayout';
 import { buildPersonelListForMonth, getYoklamaDay, isDayActiveForPersonel, iterateMonthYoklama } from '../lib/yoklamaUtils';
 import { resolveStubPersonelFromLegacyId } from '../lib/legacyYoklamaImport';
+import { copyIbanListe, openIbanListeHtml, personelToIbanRow } from '../lib/maasIbanListe';
 
 interface MaasScreenProps {
   personeller: Personel[];
@@ -41,7 +42,6 @@ export const MaasScreen: React.FC<MaasScreenProps> = ({
 }) => {
   const [selectedMonth, setSelectedMonth] = useState(initialMonth ?? (new Date().getMonth() + 1));
   const [selectedYear, setSelectedYear] = useState(initialYear ?? new Date().getFullYear());
-  const [copiedId, setCopiedId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [ibanFilter, setIbanFilter] = useState<IbanFilter>('HEPSI');
   const [bulkCopied, setBulkCopied] = useState(false);
@@ -53,14 +53,6 @@ export const MaasScreen: React.FC<MaasScreenProps> = ({
     () => buildPersonelListForMonth(personeller, yoklamalar, selectedYear, selectedMonth, resolveStubPersonelFromLegacyId),
     [personeller, yoklamalar, selectedYear, selectedMonth]
   );
-
-  const handleCopyIban = (personelId: string, iban: string) => {
-    navigator.clipboard.writeText(iban);
-    setCopiedId(personelId);
-    setTimeout(() => {
-      setCopiedId(null);
-    }, 1200);
-  };
 
   const isDayActiveForEmployee = (emp: Personel, day: number) =>
     isDayActiveForPersonel(emp, selectedYear, selectedMonth, day, yoklamalar[emp.id]);
@@ -157,19 +149,29 @@ export const MaasScreen: React.FC<MaasScreenProps> = ({
     .reduce((sum, r) => sum + r.netPayable, 0);
 
   const handleBulkCopyIbans = () => {
-    const lines = calculatedSalaries
-      .filter((r) => r.hasIban && r.netPayable > 0)
-      .map((r) => {
-        const iban = String(r.personel.ibanNo || '').replace(/\s/g, '');
-        return `${r.personel.ad} ${r.personel.soyad}\t${iban}\t${r.netPayable.toFixed(2)}`;
-      });
-    if (lines.length === 0) {
+    const rows = calculatedSalaries
+      .filter((r) => r.hasIban)
+      .map((r) => personelToIbanRow(r.personel, r.netPayable));
+    if (rows.length === 0) {
       alert('Kopyalanacak IBAN bulunamadı.');
       return;
     }
-    navigator.clipboard.writeText(lines.join('\n'));
+    copyIbanListe(rows, { includeTutar: true });
     setBulkCopied(true);
     setTimeout(() => setBulkCopied(false), 1600);
+  };
+
+  const handleOpenIbanListe = () => {
+    const rows = calculatedSalaries.map((r) => personelToIbanRow(r.personel, r.netPayable));
+    if (rows.length === 0) {
+      alert('Listelenecek personel yok.');
+      return;
+    }
+    openIbanListeHtml(rows, {
+      baslik: 'Personel IBAN Listesi',
+      donem: `${String(selectedMonth).padStart(2, '0')}/${selectedYear}`,
+      includeTutar: true,
+    });
   };
 
   const handleBulkCopyEksikIbanListesi = () => {
@@ -306,10 +308,18 @@ export const MaasScreen: React.FC<MaasScreenProps> = ({
             type="button"
             onClick={handleBulkCopyIbans}
             className="bg-white text-slate-900 hover:bg-emerald-50 font-bold px-3 py-1.5 rounded-lg transition flex items-center gap-1.5 cursor-pointer"
-            title="Ad Soyad + IBAN + Net tutarı panoya kopyala"
+            title="Tüm listedeki Ad Soyad, TC, görev ve IBAN’ları kopyala"
           >
             {bulkCopied ? <Check size={13} className="text-emerald-600" /> : <Copy size={13} />}
-            {bulkCopied ? 'Kopyalandı' : 'Toplu IBAN Kopyala'}
+            {bulkCopied ? 'Liste kopyalandı' : 'Tüm liste IBAN kopyala'}
+          </button>
+          <button
+            type="button"
+            onClick={handleOpenIbanListe}
+            className="bg-emerald-400 hover:bg-emerald-300 text-slate-900 font-bold px-3 py-1.5 rounded-lg transition cursor-pointer"
+            title="Antetli, logolu IBAN listesini yazdır / kaydet"
+          >
+            Antetli IBAN listesi
           </button>
         </div>
       </div>
@@ -488,19 +498,6 @@ export const MaasScreen: React.FC<MaasScreenProps> = ({
                       </p>
                     </div>
                     
-                    {personel.ibanNo && (
-                      <button
-                        onClick={() => handleCopyIban(personel.id, personel.ibanNo)}
-                        className="p-1 px-1.5 hover:bg-slate-100 rounded text-slate-400 hover:text-slate-600 transition cursor-pointer"
-                        title="IBAN Kopyala"
-                      >
-                        {copiedId === personel.id ? (
-                          <Check size={12} className="text-emerald-600 stroke-[3]" />
-                        ) : (
-                          <Copy size={12} />
-                        )}
-                      </button>
-                    )}
                   </div>
 
                   {/* NET PAYABLE AMOUNT & TOGGLE STATUS */}

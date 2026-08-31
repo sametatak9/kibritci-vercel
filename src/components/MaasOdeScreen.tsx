@@ -1,10 +1,11 @@
 import React, { useState, useMemo } from 'react';
-import { Banknote, Search, CircleCheck as CheckCircle, Circle as XCircle, Download, Calendar, User, CreditCard, TriangleAlert as AlertTriangle, ChevronDown, ChevronUp, Trash2 } from 'lucide-react';
+import { Banknote, Search, CircleCheck as CheckCircle, Circle as XCircle, Download, Calendar, User, CreditCard, TriangleAlert as AlertTriangle, ChevronDown, ChevronUp, Trash2, Copy, FileText } from 'lucide-react';
 import { Personel, AylikYoklamaMap, MaaşOdeme, MaasKesinti } from '../types/erp';
 import { iterateMonthYoklama, buildPersonelListForMonth, isDayActiveForPersonel } from '../lib/yoklamaUtils';
 import { resolveStubPersonelFromLegacyId } from '../lib/legacyYoklamaImport';
 import { kibritciLogoHtml } from '../lib/kibritciBrand';
 import { validateTC, validateIBAN } from '../lib/personelOdemeUtils';
+import { copyIbanListe, openIbanListeHtml, personelToIbanRow } from '../lib/maasIbanListe';
 
 interface MaasOdeScreenProps {
   personeller: Personel[];
@@ -37,6 +38,7 @@ export const MaasOdeScreen: React.FC<MaasOdeScreenProps> = ({
   const [kesintiTur, setKesintiTur] = useState<MaasKesinti['tur']>('DIGER');
   const [kesintiAciklama, setKesintiAciklama] = useState('');
   const [kesintiTutar, setKesintiTutar] = useState('');
+  const [ibanCopied, setIbanCopied] = useState(false);
 
   React.useEffect(() => {
     if (typeof initialMonth === 'number') setSelectedAy(initialMonth);
@@ -669,6 +671,52 @@ export const MaasOdeScreen: React.FC<MaasOdeScreenProps> = ({
               </button>
             ))}
           </div>
+          <button
+            type="button"
+            onClick={() => {
+              const kaynak =
+                listeFiltre === 'ODENDI'
+                  ? odenenListesi
+                  : listeFiltre === 'ODENMEDI'
+                    ? odenecekListesi
+                    : filteredPersoneller;
+              const rows = kaynak.map((p) => personelToIbanRow(p, hesaplaMaas(p).net));
+              if (!rows.length) {
+                alert('Listelenecek personel yok.');
+                return;
+              }
+              copyIbanListe(rows, { includeTutar: true });
+              setIbanCopied(true);
+              setTimeout(() => setIbanCopied(false), 1600);
+            }}
+            className="bg-white border border-slate-200 hover:bg-emerald-50 text-slate-800 text-xs font-bold px-4 py-2 rounded-xl transition flex items-center gap-1.5 cursor-pointer"
+          >
+            <Copy size={12} /> {ibanCopied ? 'Liste kopyalandı' : 'Tüm liste IBAN kopyala'}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              const kaynak =
+                listeFiltre === 'ODENDI'
+                  ? odenenListesi
+                  : listeFiltre === 'ODENMEDI'
+                    ? odenecekListesi
+                    : filteredPersoneller;
+              const rows = kaynak.map((p) => personelToIbanRow(p, hesaplaMaas(p).net));
+              if (!rows.length) {
+                alert('Listelenecek personel yok.');
+                return;
+              }
+              openIbanListeHtml(rows, {
+                baslik: 'Maaş Ödeme IBAN Listesi',
+                donem: `${String(selectedAy).padStart(2, '0')}/${selectedYil}`,
+                includeTutar: true,
+              });
+            }}
+            className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-4 py-2 rounded-xl transition flex items-center gap-1.5 cursor-pointer"
+          >
+            <FileText size={12} /> Antetli IBAN listesi
+          </button>
           <button
             type="button"
             onClick={generateOdemelerRaporu}
