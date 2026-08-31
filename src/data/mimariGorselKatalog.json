@@ -1,0 +1,392 @@
+[
+  {
+    "id": "157-46/ORTAK_ALAN/ARN-C1-C2_BLOK-GİRİŞ_HOLÜ.jpg",
+    "parsel": "Parsel Bölge 157-46",
+    "parselKod": "157-46",
+    "kategori": "ORTAK_ALAN",
+    "odaKey": "hol",
+    "baslik": "ARN-C1-C2 BLOK-GİRİŞ HOLÜ",
+    "url": "/mimari-gorseller/157-46/ORTAK_ALAN/ARN-C1-C2_BLOK-GİRİŞ_HOLÜ.jpg",
+    "kaynak": "GİRİŞ HOLÜ - KAT HÖLÜ\\ARN-C1-C2_BLOK-GİRİŞ HOLÜ.jpg"
+  },
+  {
+    "id": "157-46/ORTAK_ALAN/ARN-G-H-I_BLOK_KAT_HOLÜ.jpg",
+    "parsel": "Parsel Bölge 157-46",
+    "parselKod": "157-46",
+    "kategori": "ORTAK_ALAN",
+    "odaKey": "hol",
+    "baslik": "ARN-G-H-I BLOK KAT HOLÜ",
+    "url": "/mimari-gorseller/157-46/ORTAK_ALAN/ARN-G-H-I_BLOK_KAT_HOLÜ.jpg",
+    "kaynak": "GİRİŞ HOLÜ - KAT HÖLÜ\\ARN-G-H-I BLOK KAT HOLÜ.jpg"
+  },
+  {
+    "id": "157-46/ORTAK_ALAN/ARN-GENEL_BLOK-KAPI_GÖRÜNÜŞÜ.jpg",
+    "parsel": "Parsel Bölge 157-46",
+    "parselKod": "157-46",
+    "kategori": "ORTAK_ALAN",
+    "odaKey": "genel",
+    "baslik": "ARN-GENEL BLOK-KAPI GÖRÜNÜŞÜ",
+    "url": "/mimari-gorseller/157-46/ORTAK_ALAN/ARN-GENEL_BLOK-KAPI_GÖRÜNÜŞÜ.jpg",
+    "kaynak": "GİRİŞ HOLÜ - KAT HÖLÜ\\ARN-GENEL BLOK-KAPI GÖRÜNÜŞÜ.jpg"
+  },
+  {
+    "id": "157-46/IC_MEKAN/02-ARNAVUTKÖY_SALON.jpg",
+    "parsel": "Parsel Bölge 157-46",
+    "parselKod": "157-46",
+    "kategori": "IC_MEKAN",
+    "odaKey": "salon",
+    "baslik": "02-ARNAVUTKÖY SALON",
+    "url": "/mimari-gorseller/157-46/IC_MEKAN/02-ARNAVUTKÖY_SALON.jpg",
+    "kaynak": "İÇ MEKAN GÖRSELLERİ\\02-ARNAVUTKÖY SALON.tif"
+  },
+  {
+    "id": "157-46/IC_MEKAN/03-_EBEVEYN_YATAK_ODASI.jpg",
+    "parsel": "Parsel Bölge 157-46",
+    "parselKod": "157-46",
+    "kategori": "IC_MEKAN",
+    "odaKey": "yatak",
+    "baslik": "03- EBEVEYN YATAK ODASI",
+    "url": "/mimari-gorseller/157-46/IC_MEKAN/03-_EBEVEYN_YATAK_ODASI.jpg",
+    "kaynak": "İÇ MEKAN GÖRSELLERİ\\03- EBEVEYN YATAK ODASI.tif"
+  },
+  {
+    "id": "157-46/IC_MEKAN/04-KIZ_ÇOCUK_ODASI.jpg",
+    "parsel": "Parsel Bölge 157-46",
+    "parselKod": "157-46",
+    "kategori": "IC_MEKAN",
+    "odaKey": "yatak",
+    "baslik": "04-KIZ ÇOCUK ODASI",
+    "url": "/mimari-gorseller/157-46/IC_MEKAN/04-KIZ_ÇOCUK_ODASI.jpg",
+    "kaynak": "İÇ MEKAN GÖRSELLERİ\\04-KIZ ÇOCUK ODASI.jpg"
+  },
+  {
+    "id": "157-46/IC_MEKAN/05-ERKEK_ÇOCUK_ODASI.jpg",
+    "parsel": "Parsel Bölge 157-46",
+    "parselKod": "157-46",
+    "kategori": "IC_MEKAN",
+    "odaKey": "yatak",
+    "baslik": "05-ERKEK ÇOCUK ODASI",
+    "url": "/mimari-gorseller/157-46/IC_MEKAN/05-ERKEK_ÇOCUK_ODASI.jpg",
+    "kaynak": "İÇ MEKAN GÖRSELLERİ\\05-ERKEK ÇOCUK ODASI.jpg"
+  },
+  {
+    "id": "157-46/IC_MEKAN/BANYO_1.jpg",
+    "parsel": "Parsel Bölge 157-46",
+    "parselKod": "157-46",
+    "kategori": "IC_MEKAN",
+    "odaKey": "islak",
+    "baslik": "BANYO 1",
+    "url": "/mimari-gorseller/157-46/IC_MEKAN/BANYO_1.jpg",
+    "kaynak": "İÇ MEKAN GÖRSELLERİ\\BANYO 1.jpg"
+  },
+  {
+    "id": "157-46/IC_MEKAN/BANYO_2.jpg",
+    "parsel": "Parsel Bölge 157-46",
+    "parselKod": "157-46",
+    "kategori": "IC_MEKAN",
+    "odaKey": "islak",
+    "baslik": "BANYO 2",
+    "url": "/mimari-gorseller/157-46/IC_MEKAN/BANYO_2.jpg",
+    "kaynak": "İÇ MEKAN GÖRSELLERİ\\BANYO 2 .jpg"
+  },
+  {
+    "id": "157-46/IC_MEKAN/MUTFAK_ALTERNATİF_02_CAMA.jpg",
+    "parsel": "Parsel Bölge 157-46",
+    "parselKod": "157-46",
+    "kategori": "IC_MEKAN",
+    "odaKey": "mutfak",
+    "baslik": "MUTFAK ALTERNATİF 02 CAMA",
+    "url": "/mimari-gorseller/157-46/IC_MEKAN/MUTFAK_ALTERNATİF_02_CAMA.jpg",
+    "kaynak": "İÇ MEKAN GÖRSELLERİ\\MUTFAK ALTERNATİF 02 CAMA.png"
+  },
+  {
+    "id": "157-46/IC_MEKAN/MUTFAK_ALTERNATİF_02_CAMB.jpg",
+    "parsel": "Parsel Bölge 157-46",
+    "parselKod": "157-46",
+    "kategori": "IC_MEKAN",
+    "odaKey": "mutfak",
+    "baslik": "MUTFAK ALTERNATİF 02 CAMB",
+    "url": "/mimari-gorseller/157-46/IC_MEKAN/MUTFAK_ALTERNATİF_02_CAMB.jpg",
+    "kaynak": "İÇ MEKAN GÖRSELLERİ\\MUTFAK ALTERNATİF 02 CAMB.png"
+  },
+  {
+    "id": "157-51/ORTAK_ALAN/KAT_HOLÜ_1.jpg",
+    "parsel": "Parsel Bölge 157-51",
+    "parselKod": "157-51",
+    "kategori": "ORTAK_ALAN",
+    "odaKey": "hol",
+    "baslik": "KAT HOLÜ 1",
+    "url": "/mimari-gorseller/157-51/ORTAK_ALAN/KAT_HOLÜ_1.jpg",
+    "kaynak": "GİRİŞ HOLÜ-KAT HOLÜ\\KAT HOLÜ_1.jpg"
+  },
+  {
+    "id": "157-51/ORTAK_ALAN/RÜZGARLIK.jpg",
+    "parsel": "Parsel Bölge 157-51",
+    "parselKod": "157-51",
+    "kategori": "ORTAK_ALAN",
+    "odaKey": "giris",
+    "baslik": "RÜZGARLIK",
+    "url": "/mimari-gorseller/157-51/ORTAK_ALAN/RÜZGARLIK.jpg",
+    "kaynak": "GİRİŞ HOLÜ-KAT HOLÜ\\RÜZGARLIK.jpg"
+  },
+  {
+    "id": "157-51/IC_MEKAN/Banyo_Render_1.jpg",
+    "parsel": "Parsel Bölge 157-51",
+    "parselKod": "157-51",
+    "kategori": "IC_MEKAN",
+    "odaKey": "islak",
+    "baslik": "Banyo Render 1",
+    "url": "/mimari-gorseller/157-51/IC_MEKAN/Banyo_Render_1.jpg",
+    "kaynak": "İÇ MEKAN GÖRSELLER\\Banyo_Render_1.jpg"
+  },
+  {
+    "id": "157-51/IC_MEKAN/Banyo_Render_2.jpg",
+    "parsel": "Parsel Bölge 157-51",
+    "parselKod": "157-51",
+    "kategori": "IC_MEKAN",
+    "odaKey": "islak",
+    "baslik": "Banyo Render 2",
+    "url": "/mimari-gorseller/157-51/IC_MEKAN/Banyo_Render_2.jpg",
+    "kaynak": "İÇ MEKAN GÖRSELLER\\Banyo_Render_2.jpg"
+  },
+  {
+    "id": "157-51/IC_MEKAN/Koridor_Render.jpg",
+    "parsel": "Parsel Bölge 157-51",
+    "parselKod": "157-51",
+    "kategori": "IC_MEKAN",
+    "odaKey": "hol",
+    "baslik": "Koridor Render",
+    "url": "/mimari-gorseller/157-51/IC_MEKAN/Koridor_Render.jpg",
+    "kaynak": "İÇ MEKAN GÖRSELLER\\Koridor_Render.jpg"
+  },
+  {
+    "id": "157-51/IC_MEKAN/MUTFAK_2.jpg",
+    "parsel": "Parsel Bölge 157-51",
+    "parselKod": "157-51",
+    "kategori": "IC_MEKAN",
+    "odaKey": "mutfak",
+    "baslik": "MUTFAK 2",
+    "url": "/mimari-gorseller/157-51/IC_MEKAN/MUTFAK_2.jpg",
+    "kaynak": "İÇ MEKAN GÖRSELLER\\MUTFAK_2.jpg"
+  },
+  {
+    "id": "157-51/IC_MEKAN/Mutfak_Render_1.jpg",
+    "parsel": "Parsel Bölge 157-51",
+    "parselKod": "157-51",
+    "kategori": "IC_MEKAN",
+    "odaKey": "mutfak",
+    "baslik": "Mutfak Render 1",
+    "url": "/mimari-gorseller/157-51/IC_MEKAN/Mutfak_Render_1.jpg",
+    "kaynak": "İÇ MEKAN GÖRSELLER\\Mutfak_Render_1.jpg"
+  },
+  {
+    "id": "157-51/IC_MEKAN/Oda_1.jpg",
+    "parsel": "Parsel Bölge 157-51",
+    "parselKod": "157-51",
+    "kategori": "IC_MEKAN",
+    "odaKey": "yatak",
+    "baslik": "Oda 1",
+    "url": "/mimari-gorseller/157-51/IC_MEKAN/Oda_1.jpg",
+    "kaynak": "İÇ MEKAN GÖRSELLER\\Oda 1.jpg"
+  },
+  {
+    "id": "157-51/IC_MEKAN/Oda_2_Final.jpg",
+    "parsel": "Parsel Bölge 157-51",
+    "parselKod": "157-51",
+    "kategori": "IC_MEKAN",
+    "odaKey": "yatak",
+    "baslik": "Oda 2 Final",
+    "url": "/mimari-gorseller/157-51/IC_MEKAN/Oda_2_Final.jpg",
+    "kaynak": "İÇ MEKAN GÖRSELLER\\Oda_2_Final.jpg"
+  },
+  {
+    "id": "157-51/IC_MEKAN/Salon_Render_1.jpg",
+    "parsel": "Parsel Bölge 157-51",
+    "parselKod": "157-51",
+    "kategori": "IC_MEKAN",
+    "odaKey": "salon",
+    "baslik": "Salon Render 1",
+    "url": "/mimari-gorseller/157-51/IC_MEKAN/Salon_Render_1.jpg",
+    "kaynak": "İÇ MEKAN GÖRSELLER\\Salon_Render_1.jpg"
+  },
+  {
+    "id": "157-51/IC_MEKAN/Salon_Render_2.jpg",
+    "parsel": "Parsel Bölge 157-51",
+    "parselKod": "157-51",
+    "kategori": "IC_MEKAN",
+    "odaKey": "salon",
+    "baslik": "Salon Render 2",
+    "url": "/mimari-gorseller/157-51/IC_MEKAN/Salon_Render_2.jpg",
+    "kaynak": "İÇ MEKAN GÖRSELLER\\Salon_Render_2.jpg"
+  },
+  {
+    "id": "160-2/ORTAK_ALAN/Enterance_01.jpg",
+    "parsel": "Parsel Bölge 160-2",
+    "parselKod": "160-2",
+    "kategori": "ORTAK_ALAN",
+    "odaKey": "giris",
+    "baslik": "Enterance 01",
+    "url": "/mimari-gorseller/160-2/ORTAK_ALAN/Enterance_01.jpg",
+    "kaynak": "GİRİŞ HOLÜ-KAT HOLÜ\\Enterance 01.jpeg"
+  },
+  {
+    "id": "160-2/ORTAK_ALAN/Enterance_02.jpg",
+    "parsel": "Parsel Bölge 160-2",
+    "parselKod": "160-2",
+    "kategori": "ORTAK_ALAN",
+    "odaKey": "giris",
+    "baslik": "Enterance 02",
+    "url": "/mimari-gorseller/160-2/ORTAK_ALAN/Enterance_02.jpg",
+    "kaynak": "GİRİŞ HOLÜ-KAT HOLÜ\\Enterance 02.jpg"
+  },
+  {
+    "id": "160-2/ORTAK_ALAN/Enterance_03.jpg",
+    "parsel": "Parsel Bölge 160-2",
+    "parselKod": "160-2",
+    "kategori": "ORTAK_ALAN",
+    "odaKey": "giris",
+    "baslik": "Enterance 03",
+    "url": "/mimari-gorseller/160-2/ORTAK_ALAN/Enterance_03.jpg",
+    "kaynak": "GİRİŞ HOLÜ-KAT HOLÜ\\Enterance 03.jpg"
+  },
+  {
+    "id": "160-2/ORTAK_ALAN/Hallway_01.jpg",
+    "parsel": "Parsel Bölge 160-2",
+    "parselKod": "160-2",
+    "kategori": "ORTAK_ALAN",
+    "odaKey": "hol",
+    "baslik": "Hallway 01",
+    "url": "/mimari-gorseller/160-2/ORTAK_ALAN/Hallway_01.jpg",
+    "kaynak": "GİRİŞ HOLÜ-KAT HOLÜ\\Hallway 01.jpg"
+  },
+  {
+    "id": "160-2/ORTAK_ALAN/Hallway_02.jpg",
+    "parsel": "Parsel Bölge 160-2",
+    "parselKod": "160-2",
+    "kategori": "ORTAK_ALAN",
+    "odaKey": "hol",
+    "baslik": "Hallway 02",
+    "url": "/mimari-gorseller/160-2/ORTAK_ALAN/Hallway_02.jpg",
+    "kaynak": "GİRİŞ HOLÜ-KAT HOLÜ\\Hallway 02.jpg"
+  },
+  {
+    "id": "160-2/IC_MEKAN/01.jpg",
+    "parsel": "Parsel Bölge 160-2",
+    "parselKod": "160-2",
+    "kategori": "IC_MEKAN",
+    "odaKey": "genel",
+    "baslik": "01",
+    "url": "/mimari-gorseller/160-2/IC_MEKAN/01.jpg",
+    "kaynak": "İÇ MEKAN\\01.jpg"
+  },
+  {
+    "id": "160-2/IC_MEKAN/02.jpg",
+    "parsel": "Parsel Bölge 160-2",
+    "parselKod": "160-2",
+    "kategori": "IC_MEKAN",
+    "odaKey": "genel",
+    "baslik": "02",
+    "url": "/mimari-gorseller/160-2/IC_MEKAN/02.jpg",
+    "kaynak": "İÇ MEKAN\\02.jpg"
+  },
+  {
+    "id": "160-2/IC_MEKAN/03.jpg",
+    "parsel": "Parsel Bölge 160-2",
+    "parselKod": "160-2",
+    "kategori": "IC_MEKAN",
+    "odaKey": "genel",
+    "baslik": "03",
+    "url": "/mimari-gorseller/160-2/IC_MEKAN/03.jpg",
+    "kaynak": "İÇ MEKAN\\03.jpg"
+  },
+  {
+    "id": "160-2/IC_MEKAN/044.jpg",
+    "parsel": "Parsel Bölge 160-2",
+    "parselKod": "160-2",
+    "kategori": "IC_MEKAN",
+    "odaKey": "genel",
+    "baslik": "044",
+    "url": "/mimari-gorseller/160-2/IC_MEKAN/044.jpg",
+    "kaynak": "İÇ MEKAN\\044.jpg"
+  },
+  {
+    "id": "160-2/IC_MEKAN/055.jpg",
+    "parsel": "Parsel Bölge 160-2",
+    "parselKod": "160-2",
+    "kategori": "IC_MEKAN",
+    "odaKey": "genel",
+    "baslik": "055",
+    "url": "/mimari-gorseller/160-2/IC_MEKAN/055.jpg",
+    "kaynak": "İÇ MEKAN\\055.jpg"
+  },
+  {
+    "id": "160-2/IC_MEKAN/06.jpg",
+    "parsel": "Parsel Bölge 160-2",
+    "parselKod": "160-2",
+    "kategori": "IC_MEKAN",
+    "odaKey": "genel",
+    "baslik": "06",
+    "url": "/mimari-gorseller/160-2/IC_MEKAN/06.jpg",
+    "kaynak": "İÇ MEKAN\\06.jpg"
+  },
+  {
+    "id": "160-2/IC_MEKAN/07.jpg",
+    "parsel": "Parsel Bölge 160-2",
+    "parselKod": "160-2",
+    "kategori": "IC_MEKAN",
+    "odaKey": "genel",
+    "baslik": "07",
+    "url": "/mimari-gorseller/160-2/IC_MEKAN/07.jpg",
+    "kaynak": "İÇ MEKAN\\07.jpg"
+  },
+  {
+    "id": "160-2/IC_MEKAN/08.jpg",
+    "parsel": "Parsel Bölge 160-2",
+    "parselKod": "160-2",
+    "kategori": "IC_MEKAN",
+    "odaKey": "genel",
+    "baslik": "08",
+    "url": "/mimari-gorseller/160-2/IC_MEKAN/08.jpg",
+    "kaynak": "İÇ MEKAN\\08.jpg"
+  },
+  {
+    "id": "160-2/IC_MEKAN/09.jpg",
+    "parsel": "Parsel Bölge 160-2",
+    "parselKod": "160-2",
+    "kategori": "IC_MEKAN",
+    "odaKey": "genel",
+    "baslik": "09",
+    "url": "/mimari-gorseller/160-2/IC_MEKAN/09.jpg",
+    "kaynak": "İÇ MEKAN\\09.jpg"
+  },
+  {
+    "id": "160-2/IC_MEKAN/10.jpg",
+    "parsel": "Parsel Bölge 160-2",
+    "parselKod": "160-2",
+    "kategori": "IC_MEKAN",
+    "odaKey": "genel",
+    "baslik": "10",
+    "url": "/mimari-gorseller/160-2/IC_MEKAN/10.jpg",
+    "kaynak": "İÇ MEKAN\\10.jpg"
+  },
+  {
+    "id": "160-2/IC_MEKAN/122.jpg",
+    "parsel": "Parsel Bölge 160-2",
+    "parselKod": "160-2",
+    "kategori": "IC_MEKAN",
+    "odaKey": "genel",
+    "baslik": "122",
+    "url": "/mimari-gorseller/160-2/IC_MEKAN/122.jpg",
+    "kaynak": "İÇ MEKAN\\122.jpg"
+  },
+  {
+    "id": "160-2/IC_MEKAN/133.jpg",
+    "parsel": "Parsel Bölge 160-2",
+    "parselKod": "160-2",
+    "kategori": "IC_MEKAN",
+    "odaKey": "genel",
+    "baslik": "133",
+    "url": "/mimari-gorseller/160-2/IC_MEKAN/133.jpg",
+    "kaynak": "İÇ MEKAN\\133.jpeg"
+  }
+]

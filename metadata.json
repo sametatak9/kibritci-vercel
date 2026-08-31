@@ -1,0 +1,6 @@
+{
+  "name": "Kibritçi ERP",
+  "description": "Kibritçi İnşaat Şantiye ve Muhasebe Yönetim Sistemi",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

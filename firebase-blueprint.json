@@ -1,0 +1,129 @@
+{
+  "collections": {
+    "personeller": {
+      "id": "string",
+      "tcNo": "string",
+      "ad": "string",
+      "soyad": "string",
+      "babaAdi": "string",
+      "dogumTarihi": "string",
+      "telefonNo": "string",
+      "eposta": "string",
+      "adres": "string",
+      "il": "string",
+      "ilce": "string",
+      "departman": "string",
+      "gorev": "string",
+      "iseGirisTarihi": "string",
+      "cinsiyet": "string",
+      "maas": "number",
+      "ucretTipi": "string",
+      "sgkDurumu": "string",
+      "bankaAdi": "string",
+      "subeAdi": "string",
+      "ibanNo": "string",
+      "durum": "boolean"
+    },
+    "yoklamalar": {
+      "id": "string",
+      "data": "object"
+    },
+    "satinAlmaTalepleri": {
+      "id": "string",
+      "saId": "string",
+      "tarih": "string",
+      "talepEden": "string",
+      "cariFirma": "string",
+      "aciklama": "string",
+      "onayDurumu": "string",
+      "kalemler": "array"
+    },
+    "irsaliyeler": {
+      "id": "string",
+      "irsaliyeId": "string",
+      "irsaliyeNo": "string",
+      "saId": "string",
+      "firma": "string",
+      "tarih": "string",
+      "onayDurumu": "string",
+      "kalemler": "array"
+    },
+    "faturalar": {
+      "id": "string",
+      "faturaNo": "string",
+      "tarih": "string",
+      "cariKartId": "string",
+      "cariUnvan": "string",
+      "saId": "string",
+      "toplamTutar": "number",
+      "kdvTutar": "number",
+      "genelToplam": "number",
+      "durum": "string",
+      "kalemler": "array"
+    },
+    "kasaHareketleri": {
+      "id": "string",
+      "tarih": "string",
+      "hareketTipi": "string",
+      "tutar": "number",
+      "aciklama": "string",
+      "referansTipi": "string",
+      "referansId": "string"
+    },
+    "araclar": {
+      "id": "string",
+      "plaka": "string",
+      "aracTipi": "string",
+      "markaModel": "string",
+      "mevcutKm": "number",
+      "durum": "string"
+    },
+    "demirbaslar": {
+      "id": "string",
+      "demirbasKodu": "string",
+      "demirbasAdi": "string"
+    },
+    "kampOdalari": {
+      "id": "string",
+      "yerleskeAdi": "string",
+      "kogusNo": "string",
+      "odaNo": "string",
+      "kapasite": "number",
+      "firmaTipi": "string"
+    },
+    "kampKayitlari": {
+      "id": "string",
+      "personelIsim": "string",
+      "odaId": "string",
+      "girisTarihi": "string"
+    },
+    "sahaFaaliyetleri": {
+      "id": "string",
+      "personelId": "string",
+      "tarih": "string",
+      "isNiteligi": "string",
+      "parsel": "string",
+      "blok": "string"
+    },
+    "hazirTutanaklar": {
+      "id": "string",
+      "tutanakTipi": "string",
+      "belgeNo": "string"
+    },
+    "cariKartlar": {
+      "id": "string",
+      "kartTipi": "string",
+      "kod": "string",
+      "unvan": "string"
+    },
+    "stokKartlar": {
+      "id": "string",
+      "stokKodu": "string",
+      "stokAdi": "string"
+    },
+    "epostaGonderimleri": {
+      "id": "string",
+      "konu": "string"
+    }
+  }
+}

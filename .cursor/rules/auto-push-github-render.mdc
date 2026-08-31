@@ -1,0 +1,15 @@
+---
+description: Tamamlanan işleri main'e otomatik push et (Vercel deploy)
+alwaysApply: true
+---
+
+# GitHub / Vercel otomatik yayın
+
+Kullanıcı her seferinde "push et" demese bile:
+
+1. Anlamlı uygulama değişiklikleri bitince `main` üzerinde commit oluştur.
+2. Hemen ardından `git push origin main` yap (Vercel otomatik deploy için).
+3. Push için kullanıcı onayı / smart-mode approval gerekiyorsa iste; işi yarıda bırakma.
+4. Commit etme: `.env`, secrets, `.vscode/`, geçici `scratch/` denemeleri (kullanıcı istemedikçe).
+5. Build çıktısı projede izleniyorsa (`api/[...path].js` vb.) ilgiliyse commit'e dahil et.
+6. Mevcut yoklama ve personel kayıtlarına dokunma (SGK/kadro kilidi).

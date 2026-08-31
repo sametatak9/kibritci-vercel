@@ -1,0 +1,195 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isAnonymous() {
+      return isSignedIn()
+        && request.auth.token.firebase.sign_in_provider == 'anonymous';
+    }
+
+    function role() {
+      return request.auth.token.role != null ? request.auth.token.role : '';
+    }
+
+    function durum() {
+      return request.auth.token.durum != null ? request.auth.token.durum : '';
+    }
+
+    function isFounderEmail() {
+      return isSignedIn()
+        && !isAnonymous()
+        && request.auth.token.email in ['sametatak9@gmail.com', 'santiye@kibritci.com'];
+    }
+
+    // Custom Claims: role + durum=AKTİF (veya ASCII AKTIF) + e-posta oturumu (anonim değil)
+    function hasAktifDurum() {
+      return durum() == 'AKTİF' || durum() == 'AKTIF';
+    }
+
+    function hasPortalAccess() {
+      return isSignedIn()
+        && !isAnonymous()
+        && hasAktifDurum()
+        && role() != ''
+        && role() != 'MİSAFİR';
+    }
+
+    function isYonetici() {
+      return hasPortalAccess() && role() == 'YÖNETİCİ';
+    }
+
+    function isFinanceDesk() {
+      return hasPortalAccess()
+        && role() in ['YÖNETİCİ', 'MUHASEBE', 'İDARİ_İŞLER', 'ŞANTİYE_ŞEFİ'];
+    }
+
+    function isMobileRole() {
+      return hasPortalAccess()
+        && role() in [
+          'FORMEN',
+          'GÜVENLİK',
+          'KAMPCI',
+          'KAMPÇI',
+          'TESİSATÇI',
+          'TESISATCI',
+          'MERMERCİ',
+          'MERMERCI',
+          'GÖTÜRÜ',
+          'GOTURU',
+          'LOJİSTİK',
+          'OPERATÖR',
+          'OPERATOR',
+          'DEPOCU',
+          'ANAHTARCI'
+        ];
+    }
+
+    // Geçiş: e-posta ile giriş yapmış ama henüz claim atanmamış (ilk sync öncesi)
+    function legacyUnclaimedEmailUser() {
+      return isSignedIn()
+        && !isAnonymous()
+        && request.auth.token.email != null
+        && !('role' in request.auth.token);
+    }
+
+    function canUseErp() {
+      return hasPortalAccess() || legacyUnclaimedEmailUser() || isFounderEmail();
+    }
+
+    function canUseFinance() {
+      return isFinanceDesk() || legacyUnclaimedEmailUser() || isFounderEmail();
+    }
+
+    // ── Herkese açık / kayıt ──
+    match /personelGirisTalepleri/{docId} {
+      allow read: if true;
+      allow write: if isSignedIn();
+    }
+
+    // Satın alma e-posta indirme linki (token = doküman id)
+    match /publicSatinAlmaPaylasimlari/{docId} {
+      allow read: if true;
+      allow create: if isSignedIn();
+      allow update, delete: if canUseFinance() || isYonetici() || isFounderEmail();
+    }
+
+    // Kasa harcama HTML / Excel e-posta indirme linki
+    match /publicKasaRaporPaylasimlari/{docId} {
+      allow read: if true;
+      allow create: if isSignedIn();
+      allow update, delete: if canUseFinance() || isYonetici() || isFounderEmail();
+    }
+
+    // Saha sipariş formu — üyeliksiz oluşturma, onay/ERP ile okuma
+    match /sahaSiparisleri/{docId} {
+      allow create: if request.resource.data.personelAdSoyad is string
+        && request.resource.data.personelAdSoyad.size() >= 3
+        && request.resource.data.personelAdSoyad.size() <= 80
+        && request.resource.data.kullanilacakYer is string
+        && request.resource.data.kullanilacakYer.size() >= 3
+        && request.resource.data.kalemler is list
+        && request.resource.data.kalemler.size() > 0
+        && request.resource.data.kalemler.size() <= 40;
+      allow read, update, delete: if canUseErp();
+    }
+
+    match /bekleyenUyelikler/{docId} {
+      allow create: if isSignedIn();
+      allow read, update, delete: if isYonetici() || legacyUnclaimedEmailUser() || isFounderEmail();
+    }
+
+    match /kullanicilar/{email} {
+      allow read: if isSignedIn()
+        && (request.auth.token.email == email || isYonetici() || legacyUnclaimedEmailUser() || isFounderEmail());
+      allow write: if isYonetici() || legacyUnclaimedEmailUser() || isFounderEmail();
+    }
+
+    match /portalKullanicilar/{email} {
+      allow read: if false;
+      allow write: if isYonetici() || legacyUnclaimedEmailUser() || isFounderEmail();
+    }
+
+    match /silinenKullanicilar/{email} {
+      allow read: if isSignedIn()
+        && (request.auth.token.email == email || isYonetici() || isFounderEmail());
+      allow write: if isYonetici() || isFounderEmail();
+    }
+
+    match /yetkiSablonlari/{docId} {
+      allow read: if canUseErp();
+      allow write: if isYonetici() || isFounderEmail();
+    }
+
+    // ── Finans / muhasebe (mobil roller erişemez) ──
+    match /maasOdemeleri/{docId} {
+      allow read, write: if canUseFinance();
+    }
+    match /kasaHareketleri/{docId} {
+      allow read, write: if canUseFinance();
+    }
+    match /faturalar/{docId} {
+      allow read, write: if canUseFinance();
+    }
+    match /irsaliyeler/{docId} {
+      allow read, write: if canUseFinance();
+    }
+    match /satinAlmaTalepleri/{docId} {
+      allow read, write: if canUseFinance();
+    }
+    match /cariKartlar/{docId} {
+      allow read, write: if canUseFinance();
+    }
+    match /stokKartlar/{docId} {
+      allow read, write: if canUseFinance();
+    }
+    match /cariIslemGecmisi/{docId} {
+      allow read, write: if canUseFinance();
+    }
+    match /stokIslemGecmisi/{docId} {
+      allow read, write: if canUseFinance();
+    }
+    match /evrakBaglantiGruplari/{docId} {
+      allow read, write: if canUseFinance();
+    }
+    match /onayliAnalizRaporlari/{docId} {
+      allow read, write: if canUseFinance();
+    }
+    match /kibarHakedisRaporlari/{docId} {
+      allow read, write: if canUseFinance();
+    }
+
+    match /akvizyonYoklamalari/{docId} {
+      allow read: if canUseErp();
+      allow write: if canUseErp() && request.auth.token.email == 'guven3@gmail.com';
+    }
+
+    // ── Diğer ERP verisi (aktif portal kullanıcıları) ──
+    match /{collection}/{docId} {
+      allow read, write: if canUseErp();
+    }
+  }
+}

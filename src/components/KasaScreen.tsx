@@ -1,0 +1,1232 @@
+import React, { useMemo, useState, useRef } from 'react';
+import { 
+  Wallet, Calendar, Eye,
+  FileText, AlertCircle,
+  Pencil, Trash2, Image as ImageIcon,
+} from 'lucide-react';
+import { KasaHareketi, KasaOdemeDurumu, Personel, AylikYoklamaMap } from '../types/erp';
+import { ImageLightbox } from './ImageLightbox';
+import {
+  exportArnavutkoyKasaDefterExcel,
+  buildArnavutkoyDefterRows,
+  getArnavutkoyDefterMeta,
+} from '../lib/arnavutkoyKasaDefterExport';
+import { saveDocument } from '../lib/firebase';
+import {
+  ensureKasaFisFotoPersisted,
+  isKasaFisPdfUrl,
+  KASA_FIS_EVRAK_ACCEPT,
+  prepareKasaFisEvrakFromFile,
+} from '../lib/sahaFaaliyetFotoStorage';
+import { todayDateKey } from '../lib/dateKeyUtils';
+import {
+  isSoforKaynakliKasaHareketi,
+  isSoforUzerindenKasaGideri,
+  kasaListeOdemeEtiketi,
+  patchYolHarcamaFromKasaEdit,
+  resolveKasaOdemeDurumu,
+  yolHarcamaIdFromKasaDocId,
+} from '../lib/yolHarcamaUtils';
+import { resolvePersonelUnvan, KASA_ADSIZ_UNVAN } from '../lib/personelUnvanUtils';
+import {
+  dedupeKasaHareketleriForLedger,
+  roundKasaMoney,
+  computeKasaOdemeBazliOzet,
+} from '../lib/kasaLedgerUtils';
+
+type HarcamaKaynagi = 'KASA_HARCAMA' | 'PERSONEL_HARCAMA';
+
+/** Varsayılan: tüm kasa geçmişi (tarih filtresi isteğe bağlı) */
+const KASA_TUM_BASLANGIC = '2020-01-01';
+const KASA_TUM_BITIS = '2099-12-31';
+
+const ODEME_OPTIONS: { id: KasaOdemeDurumu; label: string; short: string; hint: string }[] = [
+  {
+    id: 'BORC',
+    label: 'BORÇ',
+    short: 'Borç',
+    hint: 'Kasaya yazılır — genelde firmaya borç (personel zorunlu değil)',
+  },
+  {
+    id: 'PERSONEL_ODEDI',
+    label: 'PERSONEL ÖDEDİ',
+    short: 'Personel',
+    hint: 'Personel cebinden ödedi (kasa ödemedi)',
+  },
+  {
+    id: 'KASA_ODEDI',
+    label: 'KASA ÖDEDİ',
+    short: 'Kasa',
+    hint: 'Şirket kasasından ödendi',
+  },
+];
+
+function odemeDurumuLabel(d?: KasaOdemeDurumu | null): string {
+  if (d === 'BORC') return 'BORÇ';
+  if (d === 'PERSONEL_ODEDI') return 'PERSONEL ÖDEDİ';
+  if (d === 'KASA_ODEDI') return 'KASA ÖDEDİ';
+  return '';
+}
+
+/** Eski kayıtlardan ödeme durumunu çıkar */
+function resolveOdemeDurumu(kh: KasaHareketi): KasaOdemeDurumu | null {
+  return resolveKasaOdemeDurumu(kh);
+}
+
+function harcamaKaynagiFromOdeme(d: KasaOdemeDurumu): HarcamaKaynagi {
+  return d === 'KASA_ODEDI' ? 'KASA_HARCAMA' : 'PERSONEL_HARCAMA';
+}
+
+/** Yalnızca personel cebinden ödediyse personel zorunlu; BORÇ firmaya da olabilir */
+function personelZorunluMu(d: KasaOdemeDurumu | ''): boolean {
+  return d === 'PERSONEL_ODEDI';
+}
+
+function personelAlanGoster(d: KasaOdemeDurumu | ''): boolean {
+  return d === 'PERSONEL_ODEDI' || d === 'BORC';
+}
+
+function formatKasaSaveError(err: unknown): string {
+  const msg = err instanceof Error ? err.message : String(err);
+  const low = msg.toLowerCase();
+  if (
+    low.includes('failed to fetch dynamically imported module') ||
+    low.includes('importing a module script failed') ||
+    low.includes('error loading dynamically imported module')
+  ) {
+    return 'Sayfa güncellenmiş (eski önbellek). Ctrl+F5 ile yenileyip kaydı tekrar deneyin.';
+  }
+  if (low.includes('permission') || low.includes('oturum yetkisiz')) {
+    return 'Oturum yetkisiz. E-posta ile yeniden giriş yapıp tekrar deneyin.';
+  }
+  return msg || 'Bilinmeyen hata';
+}
+
+interface KasaScreenProps {
+  kasaHareketleri: KasaHareketi[];
+  setKasaHareketleri: React.Dispatch<React.SetStateAction<KasaHareketi[]>>;
+  deleteKasaHareketi?: (id: string) => Promise<void>;
+  personeller?: Personel[];
+  yoklamalar?: AylikYoklamaMap;
+}
+
+function defaultWeekRange(): { start: string; end: string } {
+  return { start: KASA_TUM_BASLANGIC, end: KASA_TUM_BITIS };
+}
+
+export const KasaScreen: React.FC<KasaScreenProps> = ({ 
+  kasaHareketleri, 
+  setKasaHareketleri,
+  deleteKasaHareketi,
+  personeller = [],
+  yoklamalar: _yoklamalar = {},
+}) => {
+  const week0 = defaultWeekRange();
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
+  const [appliedStartDate, setAppliedStartDate] = useState(week0.start);
+  const [appliedEndDate, setAppliedEndDate] = useState(week0.end);
+  const [searchKeyword, setSearchKeyword] = useState("");
+
+  // Form Fields
+  const [newDate, setNewDate] = useState(todayDateKey());
+  const [newType, setNewType] = useState<'GİRİŞ' | 'ÇIKIŞ'>("GİRİŞ");
+  const [newAmount, setNewAmount] = useState("");
+  const [newDesc, setNewDesc] = useState("");
+  const [newRefType, setNewRefType] = useState<'DİĞER' | 'FATURA' | 'İRSALİYE' | 'MAAS' | 'SATIN ALMA'>("DİĞER");
+  const [newRefId, setNewRefId] = useState("");
+  const [newOdemeDurumu, setNewOdemeDurumu] = useState<KasaOdemeDurumu | ''>('');
+  const [newPersonelId, setNewPersonelId] = useState('');
+  const [personelArama, setPersonelArama] = useState('');
+  
+  // File Upload State
+  const [uploadedFileName, setUploadedFileName] = useState<string | null>(null);
+  const [uploadedFileBase64, setUploadedFileBase64] = useState<string | null>(null);
+  const [dragActive, setDragActive] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Selected receipt for preview modal
+  const [selectedReceiptUrl, setSelectedReceiptUrl] = useState<string | null>(null);
+  const [selectedReceiptName, setSelectedReceiptName] = useState<string | null>(null);
+
+  const [exportingArnavutDefter, setExportingArnavutDefter] = useState(false);
+  const [savingKasa, setSavingKasa] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const formPanelRef = useRef<HTMLDivElement>(null);
+
+  // Liste: tüm kayıtlar (isteğe bağlı tarih filtresi) · yeniden → eskiye
+  const filteredHareketler = useMemo(() => {
+    const deduped = dedupeKasaHareketleriForLedger(kasaHareketleri || []);
+    const start = String(appliedStartDate || '').slice(0, 10);
+    const end = String(appliedEndDate || '').slice(0, 10);
+    const tumu = start === KASA_TUM_BASLANGIC && end === KASA_TUM_BITIS;
+    const list = deduped.filter((kh) => {
+      const t = String(kh.tarih || '').slice(0, 10);
+      if (!tumu) {
+        if (start && t < start) return false;
+        if (end && t > end) return false;
+      }
+      if (!searchKeyword.trim()) return true;
+      const kw = searchKeyword.toLowerCase();
+      return (
+        kh.aciklama.toLowerCase().includes(kw) ||
+        kh.referansTipi.toLowerCase().includes(kw) ||
+        (kh.referansId || '').toLowerCase().includes(kw) ||
+        String(kh.surucu || '').toLowerCase().includes(kw) ||
+        String(kh.personelAdi || '').toLowerCase().includes(kw)
+      );
+    });
+    return list.sort((a, b) => {
+      const dc = String(b.tarih).localeCompare(String(a.tarih));
+      if (dc !== 0) return dc;
+      return String(b.id).localeCompare(String(a.id));
+    });
+  }, [kasaHareketleri, appliedStartDate, appliedEndDate, searchKeyword]);
+
+  const totalIn = useMemo(
+    () =>
+      roundKasaMoney(
+        filteredHareketler
+          .filter((k) => k.hareketTipi === 'GİRİŞ')
+          .reduce((s, k) => s + roundKasaMoney(k.tutar), 0)
+      ),
+    [filteredHareketler]
+  );
+  const totalOut = useMemo(
+    () =>
+      roundKasaMoney(
+        filteredHareketler
+          .filter((k) => k.hareketTipi === 'ÇIKIŞ')
+          .reduce((s, k) => s + roundKasaMoney(k.tutar), 0)
+      ),
+    [filteredHareketler]
+  );
+  const kasaHarcamaOut = totalOut;
+
+  /** Excel ~₺905 + program fişleri → gerçek kasa bakiyesi (liste filtresinden bağımsız) */
+  const kasaBakiyesiInfo = useMemo(() => {
+    const built = buildArnavutkoyDefterRows(
+      kasaHareketleri,
+      KASA_TUM_BASLANGIC,
+      KASA_TUM_BITIS
+    );
+    const meta = getArnavutkoyDefterMeta();
+    return {
+      bakiye: built.sonBakiye,
+      excelSon: meta.sonBakiye,
+      excelKalem: built.excelKalem,
+      erpKalem: built.erpKalem,
+    };
+  }, [kasaHareketleri]);
+
+  /** Program kayıtları — Excel seed / LEGACY özet kırılımına girmesin */
+  const programHareketleri = useMemo(
+    () =>
+      (filteredHareketler || []).filter(
+        (kh) =>
+          String(kh.kaynak || '') !== 'LEGACY_XLS' &&
+          !String(kh.id || '').startsWith('kh_legacy_xls_')
+      ),
+    [filteredHareketler]
+  );
+
+  const odemeBazliOzet = useMemo(() => {
+    const programOut = roundKasaMoney(
+      programHareketleri
+        .filter((k) => k.hareketTipi === 'ÇIKIŞ')
+        .reduce((s, k) => s + roundKasaMoney(k.tutar), 0)
+    );
+    return computeKasaOdemeBazliOzet(programHareketleri, personeller, {
+      donemBazAktif: false,
+      totalOut: programOut,
+    });
+  }, [programHareketleri, personeller]);
+
+  /** Negatif bakiyede kasaya olan borç (= |bakiye|) */
+  const kasaBorcTutari = useMemo(() => {
+    const b = roundKasaMoney(kasaBakiyesiInfo.bakiye);
+    return b < 0 ? roundKasaMoney(Math.abs(b)) : 0;
+  }, [kasaBakiyesiInfo.bakiye]);
+
+  const openFisLightbox = (url?: string | null, title?: string) => {
+    const u = String(url || '').trim();
+    if (!u) return;
+    setSelectedReceiptUrl(u);
+    setSelectedReceiptName(title || 'Fiş / Fatura');
+  };
+  const personelSecenekleri = useMemo(() => {
+    const q = personelArama.trim().toLocaleLowerCase('tr-TR');
+    const list = (personeller || [])
+      .filter((p) => {
+        const durum = String(p.durum || '').toLocaleUpperCase('tr-TR');
+        if (durum.includes('ÇIKIŞ') || durum.includes('PASIF') || durum.includes('PASİF')) return false;
+        return true;
+      })
+      .map((p) => ({
+        id: p.id,
+        label: `${p.ad || ''} ${p.soyad || ''}`.trim() || p.tcNo || p.id,
+        gorev: p.gorev || '',
+      }))
+      .sort((a, b) => a.label.localeCompare(b.label, 'tr'));
+    if (!q) return list.slice(0, 200);
+    return list
+      .filter((p) => p.label.toLocaleLowerCase('tr-TR').includes(q) || p.gorev.toLocaleLowerCase('tr-TR').includes(q))
+      .slice(0, 200);
+  }, [personeller, personelArama]);
+
+  const selectedPersonelLabel = useMemo(() => {
+    if (!newPersonelId) return '';
+    const p = (personeller || []).find((x) => x.id === newPersonelId);
+    if (!p) return '';
+    return `${p.ad || ''} ${p.soyad || ''}`.trim() || p.tcNo || p.id;
+  }, [personeller, newPersonelId]);
+
+  // Handle Drag & Drop Events
+  const handleDrag = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.type === "dragenter" || e.type === "dragover") {
+      setDragActive(true);
+    } else if (e.type === "dragleave") {
+      setDragActive(false);
+    }
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragActive(false);
+
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+      void processFile(e.dataTransfer.files[0]);
+    }
+  };
+
+  const processFile = async (file: File) => {
+    try {
+      setUploadedFileName(file.name);
+      const prepared = await prepareKasaFisEvrakFromFile(file);
+      setUploadedFileBase64(prepared);
+    } catch (err) {
+      setUploadedFileName(null);
+      setUploadedFileBase64(null);
+      alert(err instanceof Error ? err.message : 'Evrak yüklenemedi.');
+    }
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.value === "") return;
+    if (e.target.files && e.target.files[0]) {
+      void processFile(e.target.files[0]);
+    }
+  };
+
+  const triggerFileInput = () => {
+    fileInputRef.current?.click();
+  };
+
+  const clearKasaForm = () => {
+    setEditingId(null);
+    setNewDate(todayDateKey());
+    setNewType('GİRİŞ');
+    setNewAmount('');
+    setNewDesc('');
+    setNewRefType('DİĞER');
+    setNewRefId('');
+    setNewOdemeDurumu('');
+    setNewPersonelId('');
+    setPersonelArama('');
+    setUploadedFileName(null);
+    setUploadedFileBase64(null);
+  };
+
+  const loadKasaForEdit = (kh: KasaHareketi) => {
+    setEditingId(kh.id);
+    setNewDate(kh.tarih);
+    setNewType(kh.hareketTipi);
+    setNewAmount(String(kh.tutar ?? ''));
+    setNewDesc(kh.aciklama || '');
+    setNewRefType(kh.referansTipi || 'DİĞER');
+    setNewRefId(kh.referansId || '');
+    const odeme = resolveOdemeDurumu(kh);
+    setNewOdemeDurumu(odeme || (kh.hareketTipi === 'ÇIKIŞ' ? 'KASA_ODEDI' : ''));
+    setNewPersonelId(kh.personelId || '');
+    setPersonelArama(kh.personelAdi || kh.surucu || '');
+    setUploadedFileBase64(null);
+    setUploadedFileName(kh.fisEvrakUrl ? 'Mevcut fiş (değiştirmek için yeni seçin)' : null);
+    formPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
+  const handleDeleteKasaKayit = async (kh: KasaHareketi) => {
+    if (!deleteKasaHareketi) {
+      alert('Silme işlemi yapılandırılmamış.');
+      return;
+    }
+    const soforKaynak = isSoforKaynakliKasaHareketi(kh);
+    const msg = soforKaynak
+      ? `Bu kayıt şoför/onay havuzu kaynağından gelmiş olabilir (${kh.id}).\n\nKasa defterinden kalıcı olarak silinsin mi?\n(Firestore: kasaHareketleri)`
+      : `“${kh.aciklama || kh.id}” kaydı kalıcı olarak silinsin mi?\n(Firestore: kasaHareketleri)`;
+    if (!window.confirm(msg)) return;
+    try {
+      await deleteKasaHareketi(kh.id);
+      if (editingId === kh.id) clearKasaForm();
+    } catch (err) {
+      console.error('[kasa-delete]', err);
+      alert(`Silinemedi: ${formatKasaSaveError(err)}`);
+    }
+  };
+
+  // Safe validation & submit
+  const handleSaveKasaHareketi = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const amountFloat = parseFloat(newAmount) || 0;
+    if (amountFloat <= 0) {
+      alert('Lütfen geçerli bir tutar yazın.');
+      return;
+    }
+    if (!newDesc.trim()) {
+      alert('Lütfen açıklama girin.');
+      return;
+    }
+    if (newType === 'ÇIKIŞ') {
+      if (!newOdemeDurumu) {
+        alert('Çıkış kaydı için ödeme durumu seçin:\n• BORÇ\n• PERSONEL ÖDEDİ\n• KASA ÖDEDİ');
+        return;
+      }
+      if (personelZorunluMu(newOdemeDurumu) && !newPersonelId) {
+        alert('Bu durum için personel seçmeden kayıt yapılamaz.');
+        return;
+      }
+    }
+    if (savingKasa) return;
+
+    setSavingKasa(true);
+    try {
+      const existing = editingId ? kasaHareketleri.find((k) => k.id === editingId) : undefined;
+      const id = editingId || `kh_${Date.now()}`;
+
+      let fisUrl = String(uploadedFileBase64 || '').trim();
+      if (!fisUrl && existing?.fisEvrakUrl) {
+        fisUrl = existing.fisEvrakUrl;
+      }
+      // Yeni çekilen/yüklenen data URL → Storage; mevcut https/storage URL dokunma
+      if (fisUrl.startsWith('data:')) {
+        try {
+          const persisted = await ensureKasaFisFotoPersisted(id, fisUrl);
+          if (persisted) {
+            fisUrl = persisted;
+          } else {
+            const keep = window.confirm(
+              'Fiş evrakı yüklenemedi (çok büyük veya ağ hatası).\nKayıt evraksız devam edilsin mi?'
+            );
+            if (!keep) return;
+            fisUrl = '';
+          }
+        } catch (fotoErr) {
+          console.warn('[kasa] fiş Storage atlandı:', fotoErr);
+          const keep = window.confirm(
+            'Fiş evrakı Storage’a taşınamadı.\nKayıt evraksız devam etsin mi?'
+          );
+          if (!keep) return;
+          fisUrl = '';
+        }
+      }
+
+      const record: KasaHareketi = {
+        ...(existing || {}),
+        id,
+        tarih: newDate,
+        hareketTipi: newType,
+        tutar: amountFloat,
+        aciklama: newDesc.trim(),
+        referansTipi: newRefType,
+        referansId: newRefId || undefined,
+        fisEvrakUrl: fisUrl || undefined,
+        // Düzenlemede onay havuzu senkronu geri almasın
+        ...(editingId ? { kasaManuelKilidi: true } : {}),
+      };
+
+      if (newType === 'ÇIKIŞ' && newOdemeDurumu) {
+        record.odemeDurumu = newOdemeDurumu;
+        record.harcamaKaynagi = harcamaKaynagiFromOdeme(newOdemeDurumu);
+        const raporTip = newOdemeDurumu === 'KASA_ODEDI' ? 'KASA' : 'KENDI';
+        record.masrafTipi = raporTip;
+        if (isSoforKaynakliKasaHareketi(record)) {
+          record.soforKasaHarcamasi = raporTip === 'KASA';
+          record.soforOdemesi = raporTip === 'KENDI';
+        }
+      } else {
+        delete record.odemeDurumu;
+        delete record.harcamaKaynagi;
+      }
+      // PERSONEL ÖDEDİ: zorunlu; BORÇ: isteğe bağlı; KASA ÖDEDİ: yok
+      if (
+        newType === 'ÇIKIŞ' &&
+        (personelZorunluMu(newOdemeDurumu) || (newOdemeDurumu === 'BORC' && newPersonelId))
+      ) {
+        record.personelId = newPersonelId;
+        record.personelAdi = selectedPersonelLabel || undefined;
+      } else {
+        delete record.personelId;
+        delete record.personelAdi;
+      }
+
+      await saveDocument('kasaHareketleri', {
+        ...record,
+        odemeDurumu: record.odemeDurumu ?? null,
+        harcamaKaynagi: record.harcamaKaynagi ?? null,
+        masrafTipi: record.masrafTipi ?? null,
+        soforKasaHarcamasi: record.soforKasaHarcamasi ?? null,
+        soforOdemesi: record.soforOdemesi ?? null,
+        personelId: record.personelId ?? null,
+        personelAdi: record.personelAdi ?? null,
+        kasaManuelKilidi: record.kasaManuelKilidi ?? null,
+      } as KasaHareketi);
+
+      const yolId = editingId ? yolHarcamaIdFromKasaDocId(id) : null;
+      if (yolId) {
+        try {
+          await patchYolHarcamaFromKasaEdit({
+            yolHarcamaId: yolId,
+            tarih: newDate,
+            tutar: amountFloat,
+          });
+        } catch (yolErr) {
+          console.warn('[kasa] yol harcama hizalanamadı:', yolErr);
+        }
+      }
+
+      setKasaHareketleri((prev) => {
+        if (prev.some((x) => x.id === id)) {
+          return prev.map((item) => (item.id === id ? record : item));
+        }
+        return [record, ...prev];
+      });
+
+      // Liste filtresi kaydı gizlemesin
+      if (newDate < appliedStartDate) {
+        setAppliedStartDate(newDate);
+        setStartDate(newDate);
+      }
+      if (newDate > appliedEndDate) {
+        setAppliedEndDate(newDate);
+        setEndDate(newDate);
+      }
+
+      const wasEditing = Boolean(editingId);
+      clearKasaForm();
+      alert(wasEditing ? 'Kasa hareketi güncellendi.' : 'Kasa hareketi kaydedildi.');
+    } catch (err) {
+      console.error('[kasa] kayıt hatası:', err);
+      alert(`Kasa hareketi kaydedilemedi: ${formatKasaSaveError(err)}`);
+    } finally {
+      setSavingKasa(false);
+    }
+  };
+
+  const handleFilterSubmit = () => {
+    setAppliedStartDate(startDate || KASA_TUM_BASLANGIC);
+    setAppliedEndDate(endDate || KASA_TUM_BITIS);
+  };
+
+  const handleShowAllRecords = () => {
+    setStartDate('');
+    setEndDate('');
+    setAppliedStartDate(KASA_TUM_BASLANGIC);
+    setAppliedEndDate(KASA_TUM_BITIS);
+  };
+
+  return (
+    <div className="flex-grow p-2 sm:p-3 min-h-0 lg:h-full flex flex-col font-sans gap-2 select-none bg-[#FFFBF7] overflow-hidden">
+      
+      {/* Kompakt üst bar: başlık + bakıye + mini KPI */}
+      <div className="shrink-0 rounded-xl border border-[#FED7AA] bg-white px-3 py-2 shadow-sm flex flex-wrap items-center gap-2">
+        <div className="flex items-center gap-2 min-w-0 flex-1">
+          <div className="w-8 h-8 rounded-lg bg-[#EA580C] text-white flex items-center justify-center shrink-0">
+            <Wallet size={16} strokeWidth={2.5} />
+          </div>
+          <div className="min-w-0">
+            <h1 className="text-sm font-black tracking-tight text-[#9A3412] leading-tight">
+              Haftalık Kasa
+            </h1>
+            <p className="text-[9px] text-slate-500 font-semibold truncate">
+              Excel ₺{kasaBakiyesiInfo.excelSon.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} + program · yeniden→eskiye
+            </p>
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-1.5 text-[10px] font-mono font-bold">
+          <span className="bg-emerald-50 border border-emerald-200 text-emerald-800 px-2 py-1 rounded-lg">
+            Giriş ₺{totalIn.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
+          </span>
+          <span className="bg-[#FFF7ED] border border-[#FED7AA] text-[#9A3412] px-2 py-1 rounded-lg">
+            Harcama ₺{kasaHarcamaOut.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
+          </span>
+          <span
+            className={`px-2.5 py-1 rounded-lg border-2 text-sm ${
+              kasaBakiyesiInfo.bakiye < 0
+                ? 'bg-rose-600 border-rose-700 text-white'
+                : 'bg-emerald-600 border-emerald-700 text-white'
+            }`}
+            title="Kasa bakiyesi = Excel son bakiye + program fişleri"
+          >
+            KASA BAKİYESİ ₺{kasaBakiyesiInfo.bakiye.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
+          </span>
+        </div>
+      </div>
+
+      {/* Kim ne harcadı — tek satır kompakt */}
+      <div className="shrink-0 rounded-xl border border-[#FED7AA] bg-white px-3 py-2 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-1.5">
+          <h3 className="text-[10px] font-black uppercase tracking-wider text-[#9A3412]">
+            Kim ne harcadı
+          </h3>
+          <div className="flex flex-wrap gap-1 text-[9px] font-mono font-bold">
+            <span className="bg-amber-50 border border-amber-200 text-amber-900 px-1.5 py-0.5 rounded">
+              KASA BORÇ ₺{kasaBorcTutari.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
+            </span>
+            <span className="bg-violet-50 border border-violet-200 text-violet-900 px-1.5 py-0.5 rounded">
+              PERSONEL ₺{odemeBazliOzet.totals.PERSONEL_ODEDI.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
+            </span>
+            <span className="bg-[#FFEDD5] border border-[#FDBA74] text-[#9A3412] px-1.5 py-0.5 rounded">
+              KASA ₺{odemeBazliOzet.totals.KASA_ODEDI.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
+            </span>
+            <span className="bg-rose-50 border border-rose-200 text-rose-800 px-1.5 py-0.5 rounded">
+              TOPLAM ₺{odemeBazliOzet.genelToplam.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
+            </span>
+          </div>
+        </div>
+        {odemeBazliOzet.satirlar.length === 0 ? (
+          <p className="text-[10px] text-slate-400 italic">Program çıkış yok.</p>
+        ) : (
+          <div className="flex flex-wrap gap-1">
+            {odemeBazliOzet.satirlar.map((row) => (
+              <div
+                key={row.key}
+                className={`inline-flex items-center gap-1.5 rounded-lg border px-2 py-1 ${
+                  row.durum === 'KASA_ODEDI'
+                    ? 'bg-[#FFEDD5] text-[#9A3412] border-[#FDBA74]'
+                    : row.durum === 'BORC'
+                      ? 'bg-amber-50 text-amber-950 border-amber-200'
+                      : 'bg-violet-50 text-violet-950 border-violet-200'
+                }`}
+              >
+                <span className="text-[9px] font-black uppercase">{row.label}</span>
+                <span className="text-[8px] opacity-70">{row.kalem}</span>
+                <span className="text-[11px] font-black font-mono">
+                  ₺{row.tutar.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Main split — kalan yükseklik form + defter */}
+      <div className="flex flex-col lg:flex-1 lg:flex-row gap-2 lg:min-h-0 min-h-0 overflow-hidden">
+        
+        {/* Left side Form creator */}
+        <div ref={formPanelRef} className="order-2 lg:order-1 w-full lg:w-[320px] xl:w-[340px] lg:shrink-0 bg-white border border-[#FED7AA] rounded-xl flex flex-col overflow-hidden shadow-sm lg:min-h-0 lg:max-h-full">
+          
+          <div className="px-3 py-2 shrink-0 shadow-sm flex items-center justify-between text-white bg-gradient-to-r from-[#EA580C] to-[#C2410C]">
+            <div className="flex items-center space-x-2">
+              <Wallet size={16} />
+              <h3 className="font-bold text-xs uppercase tracking-widest">
+                {editingId ? 'Kasa Hareketi Düzenle' : 'Yeni Kasa Hareketi'}
+              </h3>
+            </div>
+            {editingId && (
+              <button
+                type="button"
+                onClick={clearKasaForm}
+                className="text-[10px] font-bold px-2 py-1 rounded-lg bg-white/20 hover:bg-white/30 cursor-pointer"
+              >
+                İptal
+              </button>
+            )}
+          </div>
+
+          <form onSubmit={handleSaveKasaHareketi} className="lg:flex-grow overflow-y-auto p-3 space-y-2.5 text-xs max-h-[55vh] lg:max-h-none bg-[#FFFBF7]/50">
+            
+            {/* Tarih Row */}
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold text-slate-500 uppercase flex items-center space-x-1 font-sans">
+                <span>🗓️ Tarih</span>
+              </label>
+              <input 
+                type="date"
+                required
+                value={newDate}
+                onChange={(e) => setNewDate(e.target.value)}
+                className="w-full text-xs font-semibold p-2 bg-slate-50 border border-slate-200 rounded-xl  max-h-10 outline-none"
+              />
+            </div>
+
+            {/* Hareket Tipi Row */}
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold text-slate-500 uppercase flex items-center space-x-1">
+                <span>📊 Hareket Tipi</span>
+              </label>
+              <select 
+                className="w-full text-xs font-bold p-2 bg-slate-55 border border-slate-200 rounded-xl max-h-10 cursor-pointer outline-none"
+                value={newType}
+                onChange={(e) => {
+                  const next = e.target.value as 'GİRİŞ' | 'ÇIKIŞ';
+                  setNewType(next);
+                  if (next === 'GİRİŞ') {
+                    setNewOdemeDurumu('');
+                    setNewPersonelId('');
+                    setPersonelArama('');
+                  } else if (!newOdemeDurumu) {
+                    setNewOdemeDurumu('KASA_ODEDI');
+                  }
+                }}
+              >
+                <option value="GİRİŞ">📈 GİRİŞ</option>
+                <option value="ÇIKIŞ">📉 ÇIKIŞ</option>
+              </select>
+            </div>
+
+            {newType === 'ÇIKIŞ' && (
+              <div className="space-y-2 rounded-xl border border-rose-100 bg-rose-50/40 p-3">
+                <label className="text-[10px] font-bold text-rose-800 uppercase block">
+                  Ödeme Durumu <span className="text-rose-600">*</span>
+                </label>
+                <div className="grid grid-cols-1 gap-1.5">
+                  {ODEME_OPTIONS.map((opt) => (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      onClick={() => {
+                        setNewOdemeDurumu(opt.id);
+                        if (opt.id === 'KASA_ODEDI') {
+                          setNewPersonelId('');
+                          setPersonelArama('');
+                        }
+                      }}
+                      className={`text-left text-[10px] font-black uppercase py-2 px-3 rounded-xl border cursor-pointer transition ${
+                        newOdemeDurumu === opt.id
+                          ? opt.id === 'KASA_ODEDI'
+                            ? 'bg-slate-900 text-white border-slate-900'
+                            : opt.id === 'BORC'
+                              ? 'bg-amber-600 text-white border-amber-600'
+                              : 'bg-violet-700 text-white border-violet-700'
+                          : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                      }`}
+                    >
+                      <span className="block">{opt.label}</span>
+                      <span className={`block text-[9px] font-semibold normal-case tracking-normal mt-0.5 ${
+                        newOdemeDurumu === opt.id ? 'opacity-90' : 'text-slate-500'
+                      }`}>
+                        {opt.hint}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+
+                {personelAlanGoster(newOdemeDurumu) && (
+                  <div className="space-y-1.5 pt-1">
+                    <label className="text-[10px] font-bold text-violet-900 uppercase block">
+                      Personel
+                      {personelZorunluMu(newOdemeDurumu) ? (
+                        <span className="text-rose-600"> *</span>
+                      ) : (
+                        <span className="text-slate-500 font-semibold normal-case"> (isteğe bağlı)</span>
+                      )}
+                    </label>
+                    <input
+                      type="text"
+                      value={personelArama}
+                      onChange={(e) => setPersonelArama(e.target.value)}
+                      placeholder="Ad / soyad ara…"
+                      className="w-full text-xs font-semibold p-2 bg-white border border-violet-200 rounded-xl outline-none"
+                    />
+                    <select
+                      required={personelZorunluMu(newOdemeDurumu)}
+                      value={newPersonelId}
+                      onChange={(e) => setNewPersonelId(e.target.value)}
+                      className="w-full text-xs font-bold p-2 bg-white border border-violet-200 rounded-xl cursor-pointer outline-none"
+                    >
+                      <option value="">
+                        {personelZorunluMu(newOdemeDurumu)
+                          ? 'Personel seçin…'
+                          : 'Personel yok / firma borcu…'}
+                      </option>
+                      {personelSecenekleri.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.label}{p.gorev ? ` · ${p.gorev}` : ''}
+                        </option>
+                      ))}
+                    </select>
+                    {newPersonelId ? (
+                      <p className="text-[10px] text-violet-800 font-semibold">
+                        Seçilen: {selectedPersonelLabel}
+                      </p>
+                    ) : personelZorunluMu(newOdemeDurumu) ? (
+                      <p className="text-[10px] text-rose-700 font-semibold">
+                        Personel seçilmeden kayıt yapılamaz.
+                      </p>
+                    ) : (
+                      <p className="text-[10px] text-slate-500 font-semibold">
+                        Firma borcu için personel seçmeden kaydedebilirsiniz.
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Tutar Row */}
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold text-slate-500 uppercase flex items-center space-x-1">
+                <span>💵 Tutar (₺)</span>
+              </label>
+              <input 
+                type="number"
+                required
+                placeholder="0.00"
+                className="w-full text-xs font-black p-2 bg-slate-50 border border-slate-200 rounded-xl  outline-none"
+                value={newAmount}
+                onChange={(e) => setNewAmount(e.target.value)}
+              />
+            </div>
+
+            {/* Açıklama Row */}
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold text-slate-500 uppercase flex items-center space-x-1">
+                <span>📝 Açıklama</span>
+              </label>
+              <input 
+                type="text"
+                required
+                placeholder="Harcama veya Gelir Açıklaması..."
+                className="w-full text-xs font-semibold p-2 bg-slate-50 border border-slate-200 rounded-xl outline-none "
+                value={newDesc}
+                onChange={(e) => setNewDesc(e.target.value)}
+              />
+            </div>
+
+            
+
+            
+
+            {/* Fiş/Fotoğraf/PDF Dropzone */}
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold text-slate-500 uppercase block font-sans">
+                📷 Fiş / Fatura Evrakı (Foto veya PDF)
+              </label>
+              
+              <div 
+                className={`border-2 border-dashed rounded-xl p-3 flex flex-col items-center justify-center transition text-center relative ${
+                  dragActive ? "border-slate-800 bg-slate-50/50" : "border-slate-200 bg-slate-50 hover:bg-slate-100"
+                }`}
+                onDragEnter={handleDrag}
+                onDragOver={handleDrag}
+                onDragLeave={handleDrag}
+                onDrop={handleDrop}
+              >
+                <input 
+                  type="file"
+                  id="receipt-file-input"
+                  ref={fileInputRef}
+                  onChange={handleFileChange}
+                  accept={KASA_FIS_EVRAK_ACCEPT}
+                  className="hidden"
+                />
+
+                {uploadedFileName ? (
+                  <div className="space-y-2 py-1">
+                    <FileText className="mx-auto text-slate-600 animate-bounce" size={24} />
+                    <div className="text-[10px] font-bold text-slate-700 max-w-[280px] truncate">
+                      {uploadedFileName}
+                    </div>
+                    {uploadedFileBase64 && isKasaFisPdfUrl(uploadedFileBase64) && (
+                      <span className="text-[9px] font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-full">
+                        PDF evrak
+                      </span>
+                    )}
+                    <button 
+                      type="button" 
+                      onClick={() => { setUploadedFileName(null); setUploadedFileBase64(null); }}
+                      className="text-[9px] text-rose-500 hover:underline font-bold cursor-pointer"
+                    >
+                      Evrakı Kaldır
+                    </button>
+                  </div>
+                ) : (
+                  <div className="space-y-2 py-1">
+                    <p className="text-[10px] text-slate-400 font-medium font-sans">Fiş/Fatura yüklenmedi</p>
+                    <button 
+                      type="button"
+                      onClick={triggerFileInput}
+                      className="bg-slate-900 hover:bg-slate-900 text-white font-bold text-[10px] py-1.5 px-3 rounded-lg shadow-sm transition cursor-pointer"
+                    >
+                      📁 Fotoğraf veya PDF Seç
+                    </button>
+                    <p className="text-[9px] text-slate-400 font-sans">
+                      JPG · PNG · WEBP · PDF — veya buraya sürükleyip bırakın
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Submit movement to secure database */}
+            <button 
+              type="submit"
+              disabled={savingKasa}
+              className="w-full text-white font-bold py-2.5 rounded-xl transition shadow-md cursor-pointer text-xs uppercase disabled:opacity-60 disabled:cursor-wait bg-emerald-600 hover:bg-emerald-700"
+            >
+              {savingKasa ? 'Kaydediliyor…' : editingId ? 'Değişiklikleri Kaydet' : 'Hareketi Kaydet'}
+            </button>
+          </form>
+        </div>
+
+        {/* Right side Table history — mobilde üstte + min yükseklik (geçmiş görünür) */}
+        <div className="order-1 lg:order-2 flex-1 min-w-0 min-h-[42vh] lg:min-h-0 bg-white border border-[#e2e8f0] rounded-xl flex flex-col overflow-hidden shadow-sm">
+          
+          {/* Header toolbar exactly matching screenshot style */}
+          <div className="px-5 py-4 border-b border-[#e2e8f0] bg-slate-50/50 flex flex-wrap items-center justify-between gap-3 shrink-0">
+            <div className="flex items-center space-x-2">
+              <h4 className="font-bold text-sm text-slate-800 uppercase tracking-widest">Kasa Hareketleri Defteri</h4>
+            </div>
+            <p className="w-full text-[10px] text-slate-500 leading-snug">
+              Kayıtlar Firestore <span className="font-mono">kasaHareketleri</span> koleksiyonunda saklanır. Düzenle / sil listeden veya soldaki formdan yapılır; şoför fişleri de aynı defterde güncellenebilir.
+            </p>
+
+            <span className="bg-slate-100 text-slate-600 text-[10px] font-bold px-2 py-1 rounded-md shrink-0 font-mono">
+              {filteredHareketler.length} kayıt listelendi
+            </span>
+          </div>
+
+          {/* Filters and search input boxes */}
+          <div className="px-4 sm:px-5 py-3 bg-slate-50 border-b border-slate-100 flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-center justify-between gap-2 sm:gap-3 text-xs shrink-0 select-none">
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="flex items-center bg-white border border-slate-200 rounded-lg px-2 py-1 shadow-2xs space-x-2 flex-1 sm:flex-none min-w-0">
+                <span className="text-slate-400">📅</span>
+                <input 
+                  type="date"
+                  value={startDate}
+                  onChange={(e) => setStartDate(e.target.value)}
+                  className="bg-transparent border-none text-[11px] font-semibold text-slate-700 focus:outline-none w-full min-w-0"
+                />
+              </div>
+              
+              <span className="text-slate-400 font-bold hidden sm:inline">-</span>
+
+              <div className="flex items-center bg-white border border-slate-200 rounded-lg px-2 py-1 shadow-2xs space-x-2 flex-1 sm:flex-none min-w-0">
+                <input 
+                  type="date"
+                  value={endDate}
+                  onChange={(e) => setEndDate(e.target.value)}
+                  className="bg-transparent border-none text-[11px] font-semibold text-slate-700 focus:outline-none w-full min-w-0"
+                />
+              </div>
+
+              <button 
+                onClick={handleFilterSubmit}
+                className="bg-slate-900 hover:bg-slate-900 text-white font-bold text-[11px] py-1.5 px-3 rounded-lg shadow-sm transition cursor-pointer font-sans"
+              >
+                Filtrele
+              </button>
+              <button
+                type="button"
+                onClick={handleShowAllRecords}
+                className="bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 font-bold text-[11px] py-1.5 px-3 rounded-lg shadow-sm transition cursor-pointer font-sans"
+                title="Tarih filtresini kaldır — tüm kayıtları göster"
+              >
+                Tüm kayıtlar
+              </button>
+            </div>
+
+            {/* Real Search Input Box */}
+            <div className="flex items-center bg-white border border-slate-200 rounded-lg px-2 py-1 shadow-2xs space-x-2 w-full sm:w-48">
+              <span className="text-slate-400">🔍</span>
+              <input 
+                type="text"
+                placeholder="Açıklama, ref vb. ara..."
+                value={searchKeyword}
+                onChange={(e) => setSearchKeyword(e.target.value)}
+                className="bg-transparent border-none text-[11px] font-semibold text-slate-700 focus:outline-none w-full"
+              />
+            </div>
+          </div>
+
+          {/* List area — mobilde kaydırılabilir, min yükseklik garantili */}
+          <div className="flex-1 overflow-auto flex flex-col min-w-0 min-h-[240px]">
+            
+            {/* Headers row — masaüstü */}
+            <div className="hidden md:grid grid-cols-5 min-w-[720px] bg-slate-100/80 border-b border-slate-250 text-[10px] font-bold text-slate-500 uppercase tracking-wider py-2 px-4 shadow-3xs shrink-0 select-none">
+              <div>Tarih</div>
+              <div>Tip</div>
+              <div>Tutar</div>
+              <div className="col-span-2">Açıklama &amp; İşlem Barları</div>
+            </div>
+
+            {filteredHareketler.length === 0 ? (
+              <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-slate-400 space-y-2">
+                <AlertCircle className="text-slate-350" size={32} />
+                <p className="text-xs font-semibold font-sans">Bu kriterlerde şantiye kasa kaydı bulunmamaktadır.</p>
+              </div>
+            ) : (
+              <div className="divide-y divide-slate-100 divide-dashed overflow-y-auto">
+                {filteredHareketler.map(kh => {
+                  const sofor = isSoforKaynakliKasaHareketi(kh);
+                  const soforKasa = isSoforUzerindenKasaGideri(kh);
+                  const odeme = resolveOdemeDurumu(kh);
+                  const odemeEtiket = kasaListeOdemeEtiketi(kh, personeller);
+                  const odemeBadgeClass =
+                    odeme === 'PERSONEL_ODEDI'
+                      ? 'bg-violet-100 text-violet-800 border-violet-200'
+                      : odeme === 'BORC'
+                        ? 'bg-amber-100 text-amber-900 border-amber-200'
+                        : odeme === 'KASA_ODEDI'
+                          ? sofor
+                            ? 'bg-sky-100 text-sky-800 border-sky-200'
+                            : 'bg-slate-100 text-slate-700 border-slate-200'
+                          : 'bg-rose-100 text-rose-800 border-rose-200';
+                  return (
+                  <React.Fragment key={kh.id}>
+                  {/* Mobil kart görünümü */}
+                  <div
+                    className={`md:hidden p-3 space-y-2 ${
+                      soforKasa
+                        ? 'bg-sky-50/50'
+                        : sofor
+                          ? 'bg-violet-50/35'
+                          : 'bg-white'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0 space-y-1.5">
+                        <div className="font-mono text-[11px] font-bold text-slate-500 flex items-center gap-1">
+                          <Calendar size={11} className="text-slate-400 shrink-0" />
+                          <span>{kh.tarih}</span>
+                        </div>
+                        <div className="flex flex-wrap gap-1">
+                          <span className={`inline-block py-0.5 px-2 rounded-full text-[10px] font-extrabold ${
+                            kh.hareketTipi === 'GİRİŞ' ? 'bg-emerald-50 text-emerald-700 border border-emerald-100' : 'bg-rose-50 text-rose-700 border border-rose-100'
+                          }`}>
+                            {kh.hareketTipi}
+                          </span>
+                          {kh.hareketTipi === 'ÇIKIŞ' && odeme && (
+                            <span className={`inline-block py-0.5 px-2 rounded-full text-[9px] font-extrabold border ${odemeBadgeClass}`}>
+                              {odemeEtiket}
+                            </span>
+                          )}
+                          {kh.hareketTipi === 'ÇIKIŞ' && !odeme && (
+                            <span className="inline-block py-0.5 px-2 rounded-full text-[9px] font-extrabold bg-rose-100 text-rose-800 border border-rose-200">ÖDEME DURUMU SEÇİN</span>
+                          )}
+                        </div>
+                      </div>
+                      <span className={`font-mono text-sm font-black shrink-0 ${
+                        kh.hareketTipi === 'GİRİŞ' ? 'text-emerald-600' : 'text-rose-600'
+                      }`}>
+                        {kh.hareketTipi === 'GİRİŞ' ? '+' : '-'}₺{Number(kh.tutar || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-800 font-semibold leading-snug break-words">{kh.aciklama || '—'}</p>
+                    <p className="text-[9px] text-slate-500 font-semibold uppercase tracking-wide">
+                      {kh.referansTipi}{kh.referansId ? ` [${kh.referansId}]` : ''}
+                      {kh.personelAdi ? ` · ${kh.personelAdi}` : ''}
+                      {kh.surucu ? ` · ${kh.surucu}` : ''}
+                    </p>
+                    <div className="flex items-center justify-end gap-1 pt-1 border-t border-slate-100">
+                      <button
+                        type="button"
+                        onClick={() => loadKasaForEdit(kh)}
+                        className="inline-flex items-center gap-1 px-2 py-1.5 hover:bg-amber-50 text-amber-800 rounded-lg cursor-pointer text-[10px] font-bold border border-amber-200"
+                        title="Soldaki formda düzenle"
+                      >
+                        <Pencil size={14} />
+                        Düzenle
+                      </button>
+                      {deleteKasaHareketi && (
+                        <button
+                          type="button"
+                          onClick={() => void handleDeleteKasaKayit(kh)}
+                          className="inline-flex items-center gap-1 px-2 py-1.5 hover:bg-rose-50 text-rose-700 rounded-lg cursor-pointer text-[10px] font-bold border border-rose-200"
+                          title="Firestore kaydını sil"
+                        >
+                          <Trash2 size={14} />
+                          Sil
+                        </button>
+                      )}
+                      {kh.fisEvrakUrl && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedReceiptUrl(kh.fisEvrakUrl || null);
+                            setSelectedReceiptName(
+                              `${kh.tarih} · ${kh.fisNo || kh.id.slice(-6)} · ${kh.aciklama || 'Fiş'}`
+                            );
+                          }}
+                          className="inline-flex items-center gap-1 px-2 py-1.5 hover:bg-sky-50 text-slate-600 hover:text-sky-700 rounded-lg cursor-pointer text-[10px] font-bold border border-slate-200"
+                          title={isKasaFisPdfUrl(kh.fisEvrakUrl) ? 'PDF evrakı aç' : 'Fiş görselini aç'}
+                        >
+                          <Eye size={14} />
+                          {isKasaFisPdfUrl(kh.fisEvrakUrl) ? 'PDF Gör' : 'Fiş Gör'}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Masaüstü satır */}
+                  <div 
+                    className={`hidden md:grid grid-cols-5 min-w-[720px] items-center py-2.5 px-4 text-xs transition cursor-default group ${
+                      soforKasa
+                        ? 'bg-sky-50/50 hover:bg-sky-50/80'
+                        : sofor
+                          ? 'bg-violet-50/35 hover:bg-violet-50/60'
+                          : 'hover:bg-amber-500/5'
+                    }`}
+                  >
+                    {/* Tarih Column */}
+                    <div className="font-mono text-[11px] font-bold text-slate-500 flex items-center space-x-1">
+                      <Calendar size={11} className="text-slate-400" />
+                      <span>{kh.tarih}</span>
+                    </div>
+
+                    {/* Tip Column */}
+                    <div className="flex flex-wrap gap-1">
+                      <span className={`inline-block py-0.5 px-2 rounded-full text-[10px] font-extrabold ${
+                        kh.hareketTipi === 'GİRİŞ' ? 'bg-emerald-50 text-emerald-700 border border-emerald-100' : 'bg-rose-50 text-rose-700 border border-rose-100'
+                      }`}>
+                        {kh.hareketTipi}
+                      </span>
+                      {kh.hareketTipi === 'ÇIKIŞ' && odeme && (
+                        <span className={`inline-block py-0.5 px-2 rounded-full text-[9px] font-extrabold border ${odemeBadgeClass}`}>
+                          {odemeEtiket}
+                        </span>
+                      )}
+                      {kh.hareketTipi === 'ÇIKIŞ' && !odeme && (
+                        <span className="inline-block py-0.5 px-2 rounded-full text-[9px] font-extrabold bg-rose-100 text-rose-800 border border-rose-200">
+                          ÖDEME DURUMU SEÇİN
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Tutar Column */}
+                    <div className={`font-mono font-black text-xs ${
+                      kh.hareketTipi === 'GİRİŞ' ? 'text-emerald-700' : 'text-rose-700'
+                    }`}>
+                      {kh.hareketTipi === 'GİRİŞ' ? '+' : '-'}₺{kh.tutar.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
+                    </div>
+
+                    {/* Açıklama & Referans Column details combo span 2 */}
+                    <div className="col-span-2 flex items-center justify-between pr-2 min-w-0">
+                      <div className="truncate pr-4">
+                        <h5 className="font-bold text-slate-800 truncate leading-tight" title={kh.aciklama}>{kh.aciklama}</h5>
+                        <p className="text-[9px] text-[#64748b] font-semibold uppercase tracking-wider mt-0.5 truncate">
+                          {kh.referansTipi} {kh.referansId && `[ No: ${kh.referansId} ]`}
+                          {kh.personelAdi ? ` · Personel: ${kh.personelAdi}` : ''}
+                          {kh.surucu ? ` · ${kh.surucu}` : ''}
+                        </p>
+                      </div>
+
+                      {/* Interactive Visual Action Icons */}
+                      <div className="flex items-center space-x-1 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => loadKasaForEdit(kh)}
+                          className="p-1 px-1.5 bg-amber-50 border border-amber-200 hover:bg-amber-100 text-amber-900 rounded-lg flex items-center space-x-1 transition shadow-xs text-[9px] font-bold cursor-pointer"
+                          title="Soldaki formda düzenle"
+                        >
+                          <Pencil size={10} />
+                          <span>Düzenle</span>
+                        </button>
+                        {deleteKasaHareketi && (
+                          <button
+                            type="button"
+                            onClick={() => void handleDeleteKasaKayit(kh)}
+                            className="p-1 px-1.5 bg-rose-50 border border-rose-200 hover:bg-rose-100 text-rose-800 rounded-lg flex items-center space-x-1 transition shadow-xs text-[9px] font-bold cursor-pointer"
+                            title="Firestore kaydını sil"
+                          >
+                            <Trash2 size={10} />
+                            <span>Sil</span>
+                          </button>
+                        )}
+                        {kh.fisEvrakUrl && (
+                          <button 
+                            onClick={() => {
+                              setSelectedReceiptUrl(kh.fisEvrakUrl || null);
+                              setSelectedReceiptName(
+                                `${kh.tarih} · Fiş ${kh.fisNo || kh.id.slice(-6)} · ${kh.aciklama || '—'}`
+                              );
+                            }}
+                            className="p-1 px-1.5 bg-slate-50 border border-slate-200 hover:bg-slate-100 text-slate-800 rounded-lg flex items-center space-x-1 transition shadow-xs text-[9px] font-bold cursor-pointer"
+                            title={isKasaFisPdfUrl(kh.fisEvrakUrl) ? 'PDF evrakı aç' : 'Fiş görselini aç'}
+                          >
+                            <ImageIcon size={10} />
+                            <span>{isKasaFisPdfUrl(kh.fisEvrakUrl) ? 'PDF Gör' : 'Fiş Gör'}</span>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                  </React.Fragment>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* Tek rapor: Arnavutköy Defter Excel */}
+          <div className="p-3 border-t border-[#FED7AA] bg-[#FFF7ED]/80 flex flex-wrap justify-end gap-2 shrink-0 select-none">
+            <button
+              type="button"
+              disabled={exportingArnavutDefter}
+              onClick={() => {
+                void (async () => {
+                  if (exportingArnavutDefter) return;
+                  setExportingArnavutDefter(true);
+                  try {
+                    const result = await exportArnavutkoyKasaDefterExcel(
+                      kasaHareketleri,
+                      KASA_TUM_BASLANGIC,
+                      KASA_TUM_BITIS,
+                      personeller
+                    );
+                    alert(
+                      `Arnavutköy Kasa Defteri indirildi.\n\nKASA BAKİYESİ: ₺${result.sonBakiye.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}`
+                    );
+                  } catch (err) {
+                    console.error('[arnavut-defter]', err);
+                    alert(
+                      'Arnavutköy defter Excel oluşturulamadı:\n' +
+                        (err instanceof Error ? err.message : String(err))
+                    );
+                  } finally {
+                    setExportingArnavutDefter(false);
+                  }
+                })();
+              }}
+              className="bg-[#1E4E78] hover:bg-[#163a5c] disabled:opacity-60 disabled:cursor-wait border border-[#163a5c] text-white text-[11px] font-bold py-2 px-4 rounded-xl flex items-center space-x-1.5 transition cursor-pointer shadow-sm"
+              title="Gerçek ARNAVUTKÖY KASA YENİ.xls üzerine program kayıtlarını ekler · ÖZET sayfası"
+            >
+              <FileText size={12} />
+              <span>
+                {exportingArnavutDefter ? 'Defter hazırlanıyor…' : 'Arnavutköy Defter Excel'}
+              </span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Fiş büyütme */}
+      {selectedReceiptUrl && (
+        <ImageLightbox
+          url={selectedReceiptUrl}
+          title={`${selectedReceiptName || 'Evrak'} — Fiş / Fatura Görseli`}
+          fileName={`kasa-fis-${(selectedReceiptName || 'evrak').slice(0, 40)}`}
+          onClose={() => {
+            setSelectedReceiptUrl(null);
+            setSelectedReceiptName(null);
+          }}
+        />
+      )}
+
+    </div>
+  );
+};
+export default KasaScreen;
+

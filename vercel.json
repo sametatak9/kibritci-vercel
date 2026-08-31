@@ -1,0 +1,24 @@
+{
+  "framework": null,
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist",
+  "rewrites": [
+    { "source": "/api/((?!health$).*)", "destination": "/api/[...path]" },
+    { "source": "/((?!api/).*)", "destination": "/index.html" }
+  ],
+  "functions": {
+    "api/health.js": {
+      "maxDuration": 10
+    },
+    "api/[...path].js": {
+      "maxDuration": 60,
+      "memory": 1024
+    }
+  },
+  "crons": [
+    {
+      "path": "/api/cron/akvizyon-nobet-kapat",
+      "schedule": "0 18 * * *"
+    }
+  ]
+}
