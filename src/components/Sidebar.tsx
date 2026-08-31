@@ -69,6 +69,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         { key: "faaliyet_personel", label: "Faaliyeti Olan Personeller", icon: Camera },
         { key: "maas", label: "Maaş Hesaplama & Ödeme", icon: CreditCard },
         { key: "personel_izin", label: "Personel İzin Formu", icon: FileText },
+        { key: "grup_kopru", label: "Grup Köprüsü", icon: MessageSquare },
       ]
     },
     {

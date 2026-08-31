@@ -26,6 +26,7 @@ const ROUTES = [
   { key: 'faaliyet_personel', label: 'Faaliyeti Olan Personeller', icon: Camera },
   { key: 'maas', label: 'Maaş Hesaplama', icon: CreditCard },
   { key: 'personel_izin', label: 'Personel İzin Formu', icon: FileText },
+  { key: 'grup_kopru', label: 'Grup Köprüsü', icon: MessageSquare },
   { key: 'satin_alma', label: 'Satın Alma', icon: Package },
   { key: 'siparis_formu', label: 'Sipariş Formu', icon: ClipboardList },
   { key: 'irsaliye_giris', label: 'İrsaliye Girişi', icon: FileText },

@@ -31,6 +31,7 @@ const IrsaliyeGirisScreen = lazy(() => import('./components/IrsaliyeGirisScreen'
 const TCetveliScreen = lazy(() => import('./components/TCetveliScreen').then(m => ({ default: m.TCetveliScreen })));
 const FaturaGirisScreen = lazy(() => import('./components/FaturaGirisScreen').then(m => ({ default: m.FaturaGirisScreen })));
 const EvrakBaglamaScreen = lazy(() => import('./components/EvrakBaglamaScreen').then(m => ({ default: m.EvrakBaglamaScreen })));
+const GrupKopruScreen = lazy(() => import('./components/GrupKopruScreen').then(m => ({ default: m.GrupKopruScreen })));
 const TaseronKesintiScreen = lazy(() => import('./components/TaseronKesintiScreen').then(m => ({ default: m.TaseronKesintiScreen })));
 const PersonelKartlariScreen = lazy(() => import('./components/PersonelKartlariScreen').then(m => ({ default: m.PersonelKartlariScreen })));
 const KasaScreen = lazy(() => import('./components/KasaScreen').then(m => ({ default: m.KasaScreen })));
@@ -2935,6 +2936,7 @@ function App() {
     if (has('irsaliye', 'fiş', 'fis')) return 'irsaliye_giris';
     if (has('t cetvel', 't-cetvel', 'cetveli')) return 't_cetveli';
     if (has('bağla', 'bagla', 'karşılaştır', 'karsilastir', 'zincir')) return 'evrak_baglama';
+    if (has('köprü', 'kopru', 'sgk grup', 'arnavutköy', 'arnavutkoy')) return 'grup_kopru';
     if (has('fatura')) return 'fatura_giris';
     if (has('sipariş', 'siparis')) return 'siparis_formu';
     if (has('satın alma', 'satin alma', 'talep', 'po ')) return 'satin_alma';
@@ -3973,6 +3975,21 @@ function App() {
                   stokKartlar={stokKartlar}
                   setStokKartlar={setStokKartlarWithSync}
                   setCariIslemGecmisi={setCariIslemGecmisiWithSync}
+                  currentUser={currentUser}
+                  addNotification={addNotification}
+                />
+              )}
+
+              {activeTab === "grup_kopru" && (
+                <GrupKopruScreen
+                  personeller={personeller}
+                  setPersoneller={setPersonellerWithSync}
+                  irsaliyeler={irsaliyeler}
+                  faturalar={faturalar}
+                  setIrsaliyeler={setIrsaliyelerWithSync}
+                  setFaturalar={setFaturalarWithSync}
+                  cariKartlar={cariKartlar}
+                  stokKartlar={stokKartlar}
                   currentUser={currentUser}
                   addNotification={addNotification}
                 />

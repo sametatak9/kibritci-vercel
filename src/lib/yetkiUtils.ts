@@ -17,6 +17,7 @@ export const PORTAL_PAGES = [
   { key: "faaliyet_personel", label: "Faaliyeti Olan Personeller", group: "PERSONEL" },
   { key: "maas", label: "Maaş Hesaplama & Ödeme", group: "PERSONEL" },
   { key: "personel_izin", label: "Personel İzin Formu", group: "PERSONEL" },
+  { key: "grup_kopru", label: "Grup Köprüsü", group: "PERSONEL" },
   { key: "kasa", label: "Haftalık Kasa", group: "FİNANS & ENVANTER" },
   { key: "satin_alma", label: "Satın Alma Talep", group: "FİNANS & ENVANTER" },
   { key: "siparis_formu", label: "Sipariş Formu", group: "FİNANS & ENVANTER" },

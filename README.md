@@ -32,6 +32,14 @@ Zorunlu değil (istemci `firebase-applet-config.json` ile `kibritci-erp`’ye ba
 
 Akvizyon nöbet kapanışı: her gün 18:00 UTC (21:00 İstanbul) → `GET /api/cron/akvizyon-nobet-kapat`.
 
+## Grup Köprüsü (SGK + Arnavutköy fatura)
+
+WhatsApp grubunu program dinleyemez (resmi API mevcut gruba bot olarak giremez). Köprü şöyle işler:
+
+1. **SGK giriş:** Kimlik + görev + giriş tarihi forma yazılır, sabit metin gruba atılır, kuyruk kaydı açılır. SGK evrakı gelince buraya bırakılır; grup bildirimi yoksa **Ana Firma kaydı açılmaz**.
+2. **SGK çıkış:** Personel + çıkış tarihi gruba bildirilir. Çıkış evrakı gelince kart pasife alınır.
+3. **Arnavutköy fatura:** Gruptaki fatura buraya bırakılır; firma adına göre açık irsaliyeler önerilir ve bağlanır.
+
 ## Evrak bağlama
 
 Satın alma, irsaliye ve fatura **oluşturma** sekmeleri yalın tutulur (belge yaz, listele, raporla). Karşılaştırma ve zincir bağlama **Evrak Bağlama** sekmesindedir: SA ↔ irsaliye ↔ fatura esnek seçilir.
