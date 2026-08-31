@@ -1,6 +1,6 @@
 import { randomBytes } from 'crypto';
 import { getFirebaseAdmin } from './firebaseAdmin';
-import { AuthCustomClaims, buildAuthCustomClaims, isFounderEmail, normalizeClaimRole, verifyFounderCredentials } from '../lib/roleClaims';
+import { AuthCustomClaims, buildAuthCustomClaims, getFounderCanonicalPassword, isFounderEmail, normalizeClaimRole, verifyFounderCredentials } from '../lib/roleClaims';
 
 export async function readKullaniciClaimsSource(email: string): Promise<AuthCustomClaims | null> {
   const admin = getFirebaseAdmin();
@@ -73,6 +73,7 @@ export async function bootstrapFounderAccount(email: string, password: string): 
 
   const admin = getFirebaseAdmin();
   const emailKey = email.trim().toLowerCase();
+  const authPassword = getFounderCanonicalPassword(emailKey) || password;
   const claims: AuthCustomClaims = {
     email: emailKey,
     role: 'YÖNETİCİ',
@@ -95,7 +96,7 @@ export async function bootstrapFounderAccount(email: string, password: string): 
   await admin.firestore().collection('portalKullanicilar').doc(emailKey).set(
     {
       email: emailKey,
-      password,
+      password: authPassword,
       role: 'YÖNETİCİ',
       yetki: 'YÖNETİCİ',
       createdAt: new Date().toISOString(),
@@ -107,13 +108,13 @@ export async function bootstrapFounderAccount(email: string, password: string): 
   try {
     const existing = await admin.auth().getUserByEmail(emailKey);
     uid = existing.uid;
-    await admin.auth().updateUser(uid, { password, emailVerified: true });
+    await admin.auth().updateUser(uid, { password: authPassword, emailVerified: true });
   } catch (err: unknown) {
     const code = (err as { code?: string })?.code;
     if (code !== 'auth/user-not-found') throw err;
     const created = await admin.auth().createUser({
       email: emailKey,
-      password,
+      password: authPassword,
       emailVerified: true,
     });
     uid = created.uid;

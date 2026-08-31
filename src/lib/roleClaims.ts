@@ -31,8 +31,14 @@ export interface AuthCustomClaims {
 export const FOUNDER_EMAILS = ['sametatak9@gmail.com', 'santiye@kibritci.com'] as const;
 
 const FOUNDER_PASSWORDS: Record<string, string> = {
-  'sametatak9@gmail.com': '117270Sa',
+  'sametatak9@gmail.com': '117270.Sametatak',
   'santiye@kibritci.com': 'kibritci2026',
+};
+
+/** Eski kurucu şifreleri — Auth henüz güncellenmeden giriş kabulü için */
+const FOUNDER_PASSWORD_ALIASES: Record<string, string[]> = {
+  'sametatak9@gmail.com': ['117270.Sametatak', '117270Sa'],
+  'santiye@kibritci.com': ['kibritci2026'],
 };
 
 export function isFounderEmail(email?: string | null): boolean {
@@ -40,8 +46,19 @@ export function isFounderEmail(email?: string | null): boolean {
   return (FOUNDER_EMAILS as readonly string[]).includes(key);
 }
 
+export function getFounderCanonicalPassword(email: string): string | undefined {
+  return FOUNDER_PASSWORDS[email.trim().toLowerCase()];
+}
+
+export function getFounderPasswordAliases(email: string): string[] {
+  const key = email.trim().toLowerCase();
+  return FOUNDER_PASSWORD_ALIASES[key] || (FOUNDER_PASSWORDS[key] ? [FOUNDER_PASSWORDS[key]] : []);
+}
+
 export function verifyFounderCredentials(email: string, password: string): boolean {
   const key = email.trim().toLowerCase();
+  const aliases = FOUNDER_PASSWORD_ALIASES[key];
+  if (aliases) return aliases.includes(password);
   return FOUNDER_PASSWORDS[key] === password;
 }
 

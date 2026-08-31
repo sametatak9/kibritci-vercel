@@ -19,7 +19,12 @@ import {
 } from '../lib/bekleyenUyelik';
 import { Building2, Lock, Mail, Loader2, ArrowRight, CheckCircle2, AlertTriangle, ShieldCheck, User, Fingerprint, PenTool, Check, Trash, Smartphone, KeyRound } from 'lucide-react';
 import { syncAuthClaimsFromServer } from '../lib/authClaimsClient';
-import { isFounderEmail, verifyFounderCredentials } from '../lib/roleClaims';
+import {
+  getFounderCanonicalPassword,
+  getFounderPasswordAliases,
+  isFounderEmail,
+  verifyFounderCredentials,
+} from '../lib/roleClaims';
 import { KibritciLogo } from './KibritciLogo';
 import { guessRoleFromEmail } from '../lib/yetkiUtils';
 
@@ -109,13 +114,29 @@ async function completeFounderLogin(
 ) {
   const hasMasterPassword = verifyFounderCredentials(emailLower, passTrim);
 
-  if (hasMasterPassword) {
-    await bootstrapFounderViaServer(emailLower, passTrim);
+  if (!hasMasterPassword) {
     await completeEmailLogin(emailLower, passTrim, onLoginSuccess);
     return;
   }
 
-  await completeEmailLogin(emailLower, passTrim, onLoginSuccess);
+  try {
+    await bootstrapFounderViaServer(emailLower, passTrim);
+  } catch (bootErr) {
+    console.warn('Kurucu bootstrap atlandı, Auth ile devam:', bootErr);
+  }
+
+  const canonical = getFounderCanonicalPassword(emailLower) || passTrim;
+  const attempts = [...new Set([canonical, passTrim, ...getFounderPasswordAliases(emailLower)])];
+  let lastError: unknown;
+  for (const attempt of attempts) {
+    try {
+      await completeEmailLogin(emailLower, attempt, onLoginSuccess);
+      return;
+    } catch (err) {
+      lastError = err;
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error('Kurucu girişi başarısız');
 }
 
 async function preparePasswordResetViaServer(emailLower: string): Promise<void> {
@@ -512,10 +533,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
 
       } else {
         // --- SIGN IN LOGIC ---
-        const isSamet = emailLower === 'sametatak9@gmail.com' && passTrim === '117270Sa';
-        const isSantiye = emailLower === 'santiye@kibritci.com' && passTrim === 'kibritci2026';
-
-        if (isSamet || isSantiye || isFounderEmail(emailLower)) {
+        if (isFounderEmail(emailLower)) {
           await completeFounderLogin(emailLower, passTrim, onLoginSuccess);
           return;
         }
@@ -551,7 +569,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
       ) {
         if (isFounderEmail(emailLower)) {
           turkishError =
-            'Kurucu şifresi kabul edilmedi. Doğru şifre: 117270Sa (büyük S). Çalışmazsa «Şifremi Unuttum» ile sıfırlayın veya yöneticiye bildirin.';
+            'Kurucu şifresi kabul edilmedi. Güncel şifre 117270.Sametatak olmalı. Çalışmazsa «Şifremi Unuttum» ile sıfırlayın.';
         } else {
           turkishError = 'Hatalı şifre girdiniz.';
         }

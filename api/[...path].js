@@ -33,8 +33,13 @@ function isFounderEmail(email) {
   const key = email?.trim().toLowerCase() || "";
   return FOUNDER_EMAILS.includes(key);
 }
+function getFounderCanonicalPassword(email) {
+  return FOUNDER_PASSWORDS[email.trim().toLowerCase()];
+}
 function verifyFounderCredentials(email, password) {
   const key = email.trim().toLowerCase();
+  const aliases = FOUNDER_PASSWORD_ALIASES[key];
+  if (aliases) return aliases.includes(password);
   return FOUNDER_PASSWORDS[key] === password;
 }
 function normalizeClaimRole(yetki) {
@@ -81,13 +86,17 @@ function buildAuthCustomClaims(input) {
     durum: normalizeClaimDurum(input.durum)
   };
 }
-var FOUNDER_EMAILS, FOUNDER_PASSWORDS;
+var FOUNDER_EMAILS, FOUNDER_PASSWORDS, FOUNDER_PASSWORD_ALIASES;
 var init_roleClaims = __esm({
   "src/lib/roleClaims.ts"() {
     FOUNDER_EMAILS = ["sametatak9@gmail.com", "santiye@kibritci.com"];
     FOUNDER_PASSWORDS = {
-      "sametatak9@gmail.com": "117270Sa",
+      "sametatak9@gmail.com": "117270.Sametatak",
       "santiye@kibritci.com": "kibritci2026"
+    };
+    FOUNDER_PASSWORD_ALIASES = {
+      "sametatak9@gmail.com": ["117270.Sametatak", "117270Sa"],
+      "santiye@kibritci.com": ["kibritci2026"]
     };
   }
 });
@@ -701,6 +710,7 @@ async function bootstrapFounderAccount(email, password) {
   }
   const admin2 = getFirebaseAdmin();
   const emailKey = email.trim().toLowerCase();
+  const authPassword = getFounderCanonicalPassword(emailKey) || password;
   const claims = {
     email: emailKey,
     role: "Y\xD6NET\u0130C\u0130",
@@ -721,7 +731,7 @@ async function bootstrapFounderAccount(email, password) {
   await admin2.firestore().collection("portalKullanicilar").doc(emailKey).set(
     {
       email: emailKey,
-      password,
+      password: authPassword,
       role: "Y\xD6NET\u0130C\u0130",
       yetki: "Y\xD6NET\u0130C\u0130",
       createdAt: (/* @__PURE__ */ new Date()).toISOString()
@@ -732,13 +742,13 @@ async function bootstrapFounderAccount(email, password) {
   try {
     const existing = await admin2.auth().getUserByEmail(emailKey);
     uid = existing.uid;
-    await admin2.auth().updateUser(uid, { password, emailVerified: true });
+    await admin2.auth().updateUser(uid, { password: authPassword, emailVerified: true });
   } catch (err) {
     const code = err?.code;
     if (code !== "auth/user-not-found") throw err;
     const created = await admin2.auth().createUser({
       email: emailKey,
-      password,
+      password: authPassword,
       emailVerified: true
     });
     uid = created.uid;
