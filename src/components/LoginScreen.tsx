@@ -9,6 +9,7 @@ import {
   createUserWithEmailAndPassword,
   signOut,
   sendPasswordResetEmail,
+  updatePassword,
 } from 'firebase/auth';
 import { doc, getDoc, setDoc, collection, getDocs, query, where, limit } from 'firebase/firestore';
 import { saveKullanici, saveKullaniciForSignup, assertPortalAccountAllowed, isKullaniciSilindi } from '../lib/kullaniciUtils';
@@ -131,6 +132,13 @@ async function completeFounderLogin(
   for (const attempt of attempts) {
     try {
       await completeEmailLogin(emailLower, attempt, onLoginSuccess);
+      if (attempt !== canonical && auth.currentUser) {
+        try {
+          await updatePassword(auth.currentUser, canonical);
+        } catch (syncErr) {
+          console.warn('Kurucu Auth şifresi kanonik değere yazılamadı:', syncErr);
+        }
+      }
       return;
     } catch (err) {
       lastError = err;
