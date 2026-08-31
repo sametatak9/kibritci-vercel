@@ -33,15 +33,20 @@ import {
   createIrsaliyelerFromSatinAlma,
   kalanMiktarForSaKalem,
 } from '../lib/satinAlmaIrsaliyeUtils';
-import { EvrakZincirBanner } from './EvrakZincirBanner';
 import {
   EvrakArchivePanel,
   EvrakArchiveSearch,
-  EvrakFormCard,
   EvrakPageShell,
-  EvrakPrimaryButton,
   EvrakSectionHeader,
 } from './evrakUi/EvrakScreenChrome';
+import { EvrakIslemMenu } from './evrakUi/EvrakIslemMenu';
+import {
+  MuhasebeBelgeForm,
+  MuhasebeField,
+  MuhasebeKalemRow,
+  MuhasebeKalemTablosu,
+  muhasebeInputClass,
+} from './evrakUi/MuhasebeBelgeForm';
 
 interface SatinAlmaScreenProps {
   satinAlmaTalepleri: SatinAlmaTalebi[];
@@ -898,168 +903,160 @@ ${kalemOzet || '—'}${more}`,
       .sort((a, b) => String(b.tarih || '').localeCompare(String(a.tarih || ''), 'tr'));
   }, [satinAlmaTalepleri, talepTab, talepTarihFiltre, saSearchKeyword, irsaliyeler]);
 
-  const liveCari = resolveCariKartId(saSupplier, cariKartlar);
-  const liveStok = countLinkedStok(cartItems);
-  const cariBagliCount = satinAlmaTalepleri.filter((t) => Boolean(t.cariKartId)).length;
-
   return (
     <EvrakPageShell>
       <EvrakSectionHeader
         accent="sa"
-        eyebrow="Sipariş evrağı"
+        eyebrow="Satın alma siparişi"
         title="Satın Alma"
-        subtitle="Sipariş oluştur · sevk irsaliyesine dönüştür · cari/stok bağla"
-      />
-      <EvrakZincirBanner
-        aktif="satin_alma"
-        cariBagli={liveCari.matched}
-        cariAdi={saSupplier || undefined}
-        stokLinked={liveStok.linked}
-        stokTotal={liveStok.total}
-        metrics={[
-          { label: 'Bekleyen (sevk yok)', value: tabCounts.mevcut, tone: 'neutral' },
-          {
-            label: 'Dönüştürüldü',
-            value: tabCounts.donusturuldu,
-            tone: tabCounts.donusturuldu > 0 ? 'ok' : 'neutral',
-          },
-          {
-            label: 'Cari bağlı kayıt',
-            value: `${cariBagliCount}/${satinAlmaTalepleri.length || 0}`,
-            tone: cariBagliCount > 0 ? 'ok' : 'warn',
-          },
-        ]}
+        subtitle={`${tabCounts.mevcut} bekleyen · ${tabCounts.donusturuldu} sevk edildi`}
       />
 
-      <div className="flex flex-col lg:flex-row gap-5 flex-1 min-h-0">
-      <EvrakFormCard
-        accent="sa"
-        icon={<ShoppingCart size={18} className="text-amber-300" />}
-        title="Yeni sipariş girişi"
-        subtitle="Tedarikçi, tarih ve malzeme kalemlerini girin"
-        badge={editingSaId ? 'Düzenleme' : 'Yeni'}
-        footer={
-          <EvrakPrimaryButton accent="sa" onClick={handleSavePurchaseOrder}>
-            {editingSaId ? 'Siparişi Güncelle' : 'Siparişi Kaydet'}
-          </EvrakPrimaryButton>
-        }
-      >
-          <div>
-            <label className="text-[10px] font-bold text-slate-500 uppercase">Belge Tarihi *</label>
-            <input
-              type="date"
-              value={saDate}
-              onChange={(e) => setSaDate(e.target.value)}
-              className="w-full text-xs font-semibold mt-1 p-2 bg-slate-50 border border-[#e2e8f0] rounded-lg"
-            />
-          </div>
-          <div>
-            <label className="text-[10px] font-bold text-slate-500 uppercase">Tedarikçi Cari Firma *</label>
-            <input 
-              type="text"
-              list="cari-datalist"
-              placeholder="Örn: ABC İnşaat Ltd."
-              value={saSupplier}
-              onChange={(e) => setSaSupplier(e.target.value)}
-              className="w-full text-xs font-semibold mt-1 p-2 bg-slate-50 border border-[#e2e8f0] rounded-lg"
-            />
-            <datalist id="cari-datalist">
-              {cariKartlar.map(c => (
-                <option key={c.id} value={c.unvan} />
-              ))}
-            </datalist>
-          </div>
-
-          <div className="bg-slate-50 border p-3 rounded-2xl space-y-2">
-            <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest block">📦 Malzeme / Sipariş Kalemleri</span>
-            
-            <div className="grid grid-cols-3 gap-2">
-              <input 
+      <div className="flex flex-col gap-5 flex-1 min-h-0">
+      <MuhasebeBelgeForm
+        variant="siparis"
+        editing={Boolean(editingSaId)}
+        onClear={() => {
+          setEditingSaId(null);
+          setSaSupplier('');
+          setSaNotes('');
+          setCartItems([]);
+          setTempItem({ urunAdi: '', miktar: 0, birim: 'ADET', marka: '', kullanilacakYer: '', aciklama: '' });
+        }}
+        onSave={handleSavePurchaseOrder}
+        saveLabel={editingSaId ? 'Siparişi güncelle' : 'Siparişi kaydet'}
+        fields={
+          <>
+            <MuhasebeField label="Tedarikçi *" span={2}>
+              <input
                 type="text"
-                list="stok-datalist"
-                placeholder="Malzeme Adı"
-                value={tempItem.urunAdi}
-                onChange={(e) => setTempItem(prev => ({ ...prev, urunAdi: e.target.value }))}
-                className="col-span-2 p-1.5 border border-slate-200 bg-white rounded-lg text-[10px]"
+                list="sa-cari-list"
+                placeholder="Cari firma"
+                value={saSupplier}
+                onChange={(e) => setSaSupplier(e.target.value)}
+                className={muhasebeInputClass}
               />
-              <datalist id="stok-datalist">
-                {stokKartlar.map(s => (
-                  <option key={s.id} value={s.stokAdi} />
+              <datalist id="sa-cari-list">
+                {cariKartlar.map((c) => (
+                  <option key={c.id} value={c.unvan} />
                 ))}
               </datalist>
-              <input 
-                type="number"
-                placeholder="Miktar"
-                value={tempItem.miktar || ""}
-                onChange={(e) => setTempItem(prev => ({ ...prev, miktar: Number(e.target.value) }))}
-                className="p-1.5 border border-slate-200 bg-white rounded-lg text-[10px] text-center"
-              />
-            </div>
-
-            <div className="grid grid-cols-3 gap-2">
-              <input 
+            </MuhasebeField>
+            <MuhasebeField label="Sipariş tarihi">
+              <input type="date" value={saDate} onChange={(e) => setSaDate(e.target.value)} className={muhasebeInputClass} />
+            </MuhasebeField>
+            <MuhasebeField label="Açıklama">
+              <input
                 type="text"
-                list="birim-datalist"
-                placeholder="Ölçü Birimi (Örn: ADET)"
-                value={tempItem.birim}
-                onChange={(e) => setTempItem(prev => ({ ...prev, birim: e.target.value as any }))}
-                className="p-1.5 border border-slate-200 bg-white rounded-lg text-[10px]"
+                placeholder="Teslimat veya kargo notu"
+                value={saNotes}
+                onChange={(e) => setSaNotes(e.target.value)}
+                className={muhasebeInputClass}
               />
-              <datalist id="birim-datalist">
-                <option value="ADET" />
-                <option value="TON" />
-                <option value="KG" />
-                <option value="M3" />
-                <option value="TORBA" />
-                <option value="METRE" />
-                <option value="PAKET" />
-              </datalist>
-              <input 
-                type="text"
-                placeholder="Kullanılacak Alan (Opsiyonel)"
-                value={tempItem.kullanilacakYer || ""}
-                onChange={(e) => setTempItem(prev => ({ ...prev, kullanilacakYer: e.target.value }))}
-                className="p-1.5 border border-slate-200 bg-white rounded-lg text-[10px]"
-              />
-              <button
-                type="button"
-                onClick={handleAddToCart}
-                className="bg-slate-900 text-white font-bold text-[10px] rounded-lg hover:bg-slate-950 transition cursor-pointer"
-              >
-                Kalem Ekle
-              </button>
-            </div>
-
-            <div className="space-y-1.5 max-h-32 overflow-y-auto pt-2 border-t text-[11px] font-semibold text-slate-700">
-              {cartItems.map((p) => (
-                <div key={p.id} className="flex justify-between items-center bg-white p-2 rounded-lg border">
-                  <span>{p.urunAdi} {p.kullanilacakYer ? <span className="text-[9px] text-slate-400">({p.kullanilacakYer})</span> : null}</span>
-                  <div className="flex items-center space-x-2">
-                    <span className="font-mono text-slate-900">{p.miktar} {p.birim}</span>
-                    <button
-                      type="button"
-                      onClick={() => setCartItems(prev => prev.filter(x => x.id !== p.id))}
-                      className="text-rose-600 hover:text-rose-800"
-                    >
-                      ×
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div>
-            <label className="text-[10px] font-bold text-slate-500 uppercase">Açıklama / Özel Notlar</label>
-            <textarea 
-              rows={2}
-              placeholder="Sipariş detayları veya kargo notu..."
-              value={saNotes}
-              onChange={(e) => setSaNotes(e.target.value)}
-              className="w-full text-xs mt-1 p-2 bg-slate-50 border border-[#e2e8f0] rounded-lg resize-none"
-            />
-          </div>
-      </EvrakFormCard>
+            </MuhasebeField>
+          </>
+        }
+        itemsTable={
+          <MuhasebeKalemTablosu variant="siparis" onAdd={handleAddToCart} addDisabled={!tempItem.urunAdi || tempItem.miktar <= 0}>
+            {cartItems.map((p) => (
+              <MuhasebeKalemRow key={p.id} onRemove={() => setCartItems((prev) => prev.filter((x) => x.id !== p.id))}>
+                <td className="px-2 py-1">
+                  <input
+                    className={muhasebeInputClass}
+                    value={p.urunAdi}
+                    onChange={(e) =>
+                      setCartItems((prev) => prev.map((x) => (x.id === p.id ? { ...x, urunAdi: e.target.value } : x)))
+                    }
+                  />
+                </td>
+                <td className="px-2 py-1">
+                  <input
+                    type="number"
+                    className={muhasebeInputClass}
+                    value={p.miktar || ''}
+                    onChange={(e) =>
+                      setCartItems((prev) =>
+                        prev.map((x) => (x.id === p.id ? { ...x, miktar: Number(e.target.value) || 0 } : x))
+                      )
+                    }
+                  />
+                </td>
+                <td className="px-2 py-1">
+                  <input
+                    className={muhasebeInputClass}
+                    value={p.birim}
+                    onChange={(e) =>
+                      setCartItems((prev) => prev.map((x) => (x.id === p.id ? { ...x, birim: e.target.value } : x)))
+                    }
+                  />
+                </td>
+                <td className="px-2 py-1">
+                  <input
+                    className={muhasebeInputClass}
+                    placeholder="Şantiye / blok"
+                    value={p.kullanilacakYer || ''}
+                    onChange={(e) =>
+                      setCartItems((prev) =>
+                        prev.map((x) => (x.id === p.id ? { ...x, kullanilacakYer: e.target.value } : x))
+                      )
+                    }
+                  />
+                </td>
+              </MuhasebeKalemRow>
+            ))}
+            <MuhasebeKalemRow>
+              <td className="px-2 py-1">
+                <input
+                  list="sa-stok-list"
+                  className={muhasebeInputClass}
+                  placeholder="Malzeme adı"
+                  value={tempItem.urunAdi}
+                  onChange={(e) => setTempItem((prev) => ({ ...prev, urunAdi: e.target.value }))}
+                  onKeyDown={(e) => e.key === 'Enter' && handleAddToCart()}
+                />
+                <datalist id="sa-stok-list">
+                  {stokKartlar.map((s) => (
+                    <option key={s.id} value={s.stokAdi} />
+                  ))}
+                </datalist>
+              </td>
+              <td className="px-2 py-1">
+                <input
+                  type="number"
+                  className={muhasebeInputClass}
+                  placeholder="0"
+                  value={tempItem.miktar || ''}
+                  onChange={(e) => setTempItem((prev) => ({ ...prev, miktar: Number(e.target.value) }))}
+                />
+              </td>
+              <td className="px-2 py-1">
+                <input
+                  list="sa-birim-list"
+                  className={muhasebeInputClass}
+                  value={tempItem.birim}
+                  onChange={(e) => setTempItem((prev) => ({ ...prev, birim: e.target.value as any }))}
+                />
+                <datalist id="sa-birim-list">
+                  <option value="ADET" />
+                  <option value="TON" />
+                  <option value="KG" />
+                  <option value="M3" />
+                  <option value="TORBA" />
+                  <option value="METRE" />
+                </datalist>
+              </td>
+              <td className="px-2 py-1">
+                <input
+                  className={muhasebeInputClass}
+                  placeholder="Kullanım yeri"
+                  value={tempItem.kullanilacakYer || ''}
+                  onChange={(e) => setTempItem((prev) => ({ ...prev, kullanilacakYer: e.target.value }))}
+                />
+              </td>
+            </MuhasebeKalemRow>
+          </MuhasebeKalemTablosu>
+        }
+      />
 
       <EvrakArchivePanel
         accent="sa"
@@ -1251,183 +1248,75 @@ ${kalemOzet || '—'}${more}`,
                     })}
                   </div>
 
-                  {/* Actions buttons */}
-                  <div className="flex flex-wrap gap-2 pt-1.5 text-[10px]">
+                  <div className="flex flex-wrap gap-2 pt-1.5 text-[10px] items-center">
                     <button
                       type="button"
                       onClick={() => handleConvertSaToIrsaliye(sa)}
-                      className={`px-3 py-1.5 rounded-xl font-bold transition flex items-center gap-1 cursor-pointer border ${
-                        donusturuldu
-                          ? 'bg-violet-100 hover:bg-violet-200 text-violet-900 border-violet-300'
-                          : 'bg-violet-50 hover:bg-violet-100 text-violet-800 border-violet-200'
-                      }`}
-                      title={
-                        donusturuldu
-                          ? 'İrsaliye Giriş formuna geç — sipariş ürünleri doldurulur (ek sevk)'
-                          : 'İrsaliye Giriş formuna geç — sipariş ürünleri otomatik gelir'
-                      }
+                      className="px-3 py-1.5 rounded-lg font-bold cursor-pointer border bg-slate-900 text-white hover:bg-slate-800"
                     >
-                      {donusturuldu
-                        ? `✓ Dönüştürüldü · Form Aç (${linkedIrs.length})`
-                        : '→ İrsaliyeye Dönüştür'}
+                      {donusturuldu ? `İrsaliye aç (${linkedIrs.length})` : 'İrsaliyeye çevir'}
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => openMultiIrsaliyeModal(sa)}
-                      className="bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200 px-3 py-1.5 rounded-xl font-bold transition flex items-center gap-1 cursor-pointer"
-                      title="Her TIR/sevk için ayrı irsaliye üret (çoklu)"
-                    >
-                      İrsaliye(ler) Oluştur
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const { irsaliyeler: repaired, repairedIds } = ensureIrsaliyeSaBaglari(
-                          sa,
-                          irsaliyeler
-                        );
-                        if (repairedIds.length && setIrsaliyeler) {
-                          setIrsaliyeler(repaired);
-                        }
-                        openEvrakZincirRaporu({
-                          sa,
-                          irsaliyeler: repaired,
-                          faturalar,
-                        });
-                      }}
-                      className="bg-violet-50 hover:bg-violet-100 text-violet-900 border border-violet-200 px-3 py-1.5 rounded-xl font-bold transition flex items-center gap-1 cursor-pointer"
-                      title="SA → İrsaliye → Fatura dönüşüm / bağlama raporu"
-                    >
-                      Zincir Raporu
-                    </button>
-                    <button
-                      onClick={() =>
-                        exportSpecificTaleplerToExcel(
-                          [sa],
-                          `SatinAlma_${String(sa.saId).replace(/[^a-zA-Z0-9-_]/g, '_')}.xlsx`
-                        )
-                      }
-                      className="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 px-3 py-1.5 rounded-xl font-bold transition flex items-center gap-1 cursor-pointer"
-                    >
-                      Excel İndir
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handlePreviewPdf(sa)}
-                      className="bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 px-3 py-1.5 rounded-xl font-bold transition flex items-center gap-1 cursor-pointer"
-                    >
-                      <Eye size={13} />
-                      PDF Raporu Önizle
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => void handleEmailTalep(sa)}
-                      disabled={emailSendingId === sa.id}
-                      className="bg-sky-50 hover:bg-sky-100 text-sky-800 border border-sky-200 px-3 py-1.5 rounded-xl font-bold transition flex items-center gap-1 cursor-pointer disabled:opacity-60"
-                      title="Bir veya birden fazla kişiye e-posta ile gönder (indirme linki dahil)"
-                    >
-                      <Send size={13} />
-                      {emailSendingId === sa.id ? 'Link hazırlanıyor…' : 'E-posta ile Gönder'}
-                    </button>
-
                     {!isLocked ? (
-                      <>
-                        <button
-                          onClick={() => handleSimulateESignature(sa)}
-                          className="bg-indigo-650 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-xl font-bold transition flex items-center gap-1 cursor-pointer shadow-xs"
-                        >
-                          <ShieldCheck size={13} />
-                          E-İmzaya Gönder
-                        </button>
-
-                        <label className="cursor-pointer bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-250 px-3 py-1.5 rounded-xl font-bold transition flex items-center gap-1">
-                          <Upload size={13} />
-                          İmzalı Evrak Yükle
-                          <input 
-                            type="file" 
-                            onChange={(e) => handleUploadSignedFile(e, sa.id)} 
-                            className="hidden" 
-                            accept="image/*,application/pdf" 
-                          />
-                        </label>
-
-                        <button
-                          onClick={() => {
-                            setEditingSaId(sa.id);
-                            setSaDate(sa.tarih || new Date().toISOString().split('T')[0]);
-                            setSaSupplier(sa.cariFirma);
-                            setSaNotes(sa.aciklama || "");
-                            setCartItems(sa.kalemler);
-                          }}
-                          className="bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-250 px-3 py-1.5 rounded-xl font-bold transition cursor-pointer"
-                        >
-                          ✏️ Düzenle
-                        </button>
-
-                        <button
-                          onClick={() => {
-                            if (window.confirm("Bu satın alma talebini silmek istediğinize emin misiniz?")) {
-                              setSatinAlmaTalepleri(prev => prev.filter(x => x.id !== sa.id));
-                              alert("Talep silindi.");
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditingSaId(sa.id);
+                          setSaDate(sa.tarih || new Date().toISOString().split('T')[0]);
+                          setSaSupplier(sa.cariFirma);
+                          setSaNotes(sa.aciklama || '');
+                          setCartItems(sa.kalemler);
+                        }}
+                        className="px-3 py-1.5 rounded-lg font-bold cursor-pointer border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                      >
+                        Düzenle
+                      </button>
+                    ) : null}
+                    <EvrakIslemMenu
+                      items={[
+                        { label: 'Çoklu irsaliye oluştur', onClick: () => openMultiIrsaliyeModal(sa) },
+                        {
+                          label: 'Evrak karşılaştır',
+                          onClick: () => {
+                            const { irsaliyeler: repaired, repairedIds } = ensureIrsaliyeSaBaglari(sa, irsaliyeler);
+                            if (repairedIds.length && setIrsaliyeler) setIrsaliyeler(repaired);
+                            openEvrakZincirRaporu({ sa, irsaliyeler: repaired, faturalar });
+                          },
+                        },
+                        { label: 'PDF önizle', onClick: () => handlePreviewPdf(sa) },
+                        { label: emailSendingId === sa.id ? 'E-posta hazırlanıyor…' : 'E-posta gönder', onClick: () => void handleEmailTalep(sa) },
+                        {
+                          label: 'Excel indir',
+                          onClick: () =>
+                            exportSpecificTaleplerToExcel(
+                              [sa],
+                              `SatinAlma_${String(sa.saId).replace(/[^a-zA-Z0-9-_]/g, '_')}.xlsx`
+                            ),
+                        },
+                        { label: 'E-imzaya gönder', hidden: isLocked, onClick: () => handleSimulateESignature(sa) },
+                        { label: sa.arsivde ? 'Arşivden çıkar' : 'Arşive gönder', onClick: () => toggleArsiv(sa.id, !sa.arsivde) },
+                        { label: 'Onaylandı yap', hidden: isLocked, onClick: () => setTalepDurumu(sa.id, 'ONAYLANDI') },
+                        { label: 'Bilinmiyor yap', onClick: () => setTalepDurumu(sa.id, 'BİLİNMİYOR') },
+                        {
+                          label: 'Sil',
+                          hidden: isLocked,
+                          danger: true,
+                          onClick: () => {
+                            if (window.confirm('Bu satın alma talebini silmek istediğinize emin misiniz?')) {
+                              setSatinAlmaTalepleri((prev) => prev.filter((x) => x.id !== sa.id));
                             }
-                          }}
-                          className="bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-250 px-3 py-1.5 rounded-xl font-bold transition cursor-pointer"
-                        >
-                          🗑️ Sil
-                        </button>
-                        {!sa.arsivde ? (
-                          <button
-                            onClick={() => toggleArsiv(sa.id, true)}
-                            className="bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-250 px-3 py-1.5 rounded-xl font-bold transition cursor-pointer"
-                          >
-                            Arşive Gönder
-                          </button>
-                        ) : (
-                          <button
-                            onClick={() => toggleArsiv(sa.id, false)}
-                            className="bg-slate-50 hover:bg-slate-100 text-slate-800 border border-slate-200 px-3 py-1.5 rounded-xl font-bold transition cursor-pointer"
-                          >
-                            Arşivden Çıkar
-                          </button>
-                        )}
-                        <button
-                          onClick={() => setTalepDurumu(sa.id, 'ONAYLANDI')}
-                          className="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 px-3 py-1.5 rounded-xl font-bold transition cursor-pointer"
-                        >
-                          Durumu ONAYLANDI Yap
-                        </button>
-                        <button
-                          onClick={() => setTalepDurumu(sa.id, 'BİLİNMİYOR')}
-                          className="bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 px-3 py-1.5 rounded-xl font-bold transition cursor-pointer"
-                        >
-                          Durumu BİLİNMİYOR Yap
-                        </button>
-                      </>
+                          },
+                        },
+                      ]}
+                    />
+                    {!isLocked ? (
+                      <label className="cursor-pointer text-[10px] font-bold px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50">
+                        İmzalı yükle
+                        <input type="file" onChange={(e) => handleUploadSignedFile(e, sa.id)} className="hidden" accept="image/*,application/pdf" />
+                      </label>
                     ) : (
-                      <div className="flex flex-wrap items-center gap-1.5 text-slate-400 font-mono text-[9px]">
-                        <span>✍️ İmzalayanlar: {sa.eImzalar && sa.eImzalar.length > 0 ? sa.eImzalar.join(', ') : 'Fiziksel Evrak Yüklendi'}</span>
-                        {!sa.arsivde ? (
-                          <button
-                            onClick={() => toggleArsiv(sa.id, true)}
-                            className="bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-250 px-2 py-1 rounded-lg font-bold transition cursor-pointer"
-                          >
-                            Arşive Gönder
-                          </button>
-                        ) : (
-                          <button
-                            onClick={() => toggleArsiv(sa.id, false)}
-                            className="bg-slate-50 hover:bg-slate-100 text-slate-800 border border-slate-200 px-2 py-1 rounded-lg font-bold transition cursor-pointer"
-                          >
-                            Arşivden Çıkar
-                          </button>
-                        )}
-                        <button
-                          onClick={() => setTalepDurumu(sa.id, 'BİLİNMİYOR')}
-                          className="bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 px-2 py-1 rounded-lg font-bold transition cursor-pointer"
-                        >
-                          BİLİNMİYOR Yap
-                        </button>
-                      </div>
+                      <span className="text-slate-400 font-mono text-[9px]">
+                        {sa.eImzalar && sa.eImzalar.length > 0 ? sa.eImzalar.join(', ') : 'İmzalı evrak yüklendi'}
+                      </span>
                     )}
                   </div>
 

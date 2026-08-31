@@ -7,7 +7,6 @@ import { Irsaliye, IrsaliyeItem, SatinAlmaTalebi, CariKart, StokKart, Fatura, Ev
 import { compressImage } from '../lib/imageCompress';
 import { fetchApiJson } from '../lib/apiClient';
 import { fileToAiPayload } from '../lib/aiFileUpload';
-import { EvrakTabBilgi } from './EvrakTabBilgi';
 import { warnIfDuplicateStok } from '../lib/duplicateNameUtils';
 import { kibritciLogoHtml } from '../lib/kibritciBrand';
 import { wrapCorporateReportHtml } from '../lib/corporateReportHtml';
@@ -31,7 +30,6 @@ import {
 } from '../lib/evrakDonusum';
 import { findStokMatch } from '../lib/evrakBatchImportUtils';
 import { listFaturasizIrsaliyeler } from '../lib/operasyonUyarilari';
-import { EvrakZincirBanner } from './EvrakZincirBanner';
 import { openEvrakZincirRaporu } from '../lib/evrakZincirRapor';
 import { resolveIrsaliyeProvenance } from '../lib/evrakProvenance';
 import {
@@ -40,11 +38,17 @@ import {
   micirMalzemeTipiSortKey,
   resolveMicirMalzemeTipiFromIrsaliye,
 } from '../lib/micirUtils';
+import { EvrakPageShell, EvrakSectionHeader } from './evrakUi/EvrakScreenChrome';
+import { EvrakIslemMenu } from './evrakUi/EvrakIslemMenu';
 import {
-  EvrakAiDropzone,
-  EvrakPageShell,
-  EvrakSectionHeader,
-} from './evrakUi/EvrakScreenChrome';
+  MuhasebeAiButton,
+  MuhasebeAttach,
+  MuhasebeBelgeForm,
+  MuhasebeField,
+  MuhasebeKalemRow,
+  MuhasebeKalemTablosu,
+  muhasebeInputClass,
+} from './evrakUi/MuhasebeBelgeForm';
 
 interface IrsaliyeGirisScreenProps {
   irsaliyeler: Irsaliye[];
@@ -664,8 +668,6 @@ export const IrsaliyeGirisScreen: React.FC<IrsaliyeGirisScreenProps> = ({
     openHtmlReportWindow(html, 'İrsaliye Evrak Arşiv Raporu');
   };
 
-  const liveCari = resolveCariKartId(irSupplier, cariKartlar);
-  const liveStok = countLinkedStok(irProducts);
   const faturasizIds = useMemo(() => {
     const ids = new Set(
       listFaturasizIrsaliyeler(irsaliyeler, faturalar, 0).map((x) => x.id)
@@ -715,262 +717,180 @@ export const IrsaliyeGirisScreen: React.FC<IrsaliyeGirisScreenProps> = ({
       .slice(0, 200);
   }, [irsaliyeler, archiveSearch, archiveFilter, faturasizIds]);
 
-  const cariYokCount = irsaliyeler.filter((ir) => !ir.cariKartId).length;
   const faturasizCount = faturasizIds.size;
 
   return (
     <EvrakPageShell>
       <EvrakSectionHeader
         accent="ir"
-        eyebrow="Sevk / hazırlık evrağı"
-        title="İrsaliye Girişi"
-        subtitle="Siparişin fiziksel karşılığı · faturaya dönüştürülür"
-      />
-
-      
-      {/* Sub navigation Tabs */}
-      <div className="bg-white/90 border border-slate-200/80 rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between shadow-sm gap-4 shrink-0 backdrop-blur-sm">
-        <div className="space-y-1">
-          <span className="text-[10px] font-black tracking-widest text-emerald-700 uppercase">Teslimat &amp; Sevkiyat Girişi</span>
-          <h2 className="font-display font-bold text-sm text-slate-900 flex items-center gap-1.5">
-            Şantiye İrsaliye, Makbuz ve Fiş Giriş Paneli
-          </h2>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          {onOpenTCetveli && (
+        eyebrow="Sevk irsaliyesi"
+        title="İrsaliyeler"
+        subtitle={`${irsaliyeler.length} kayıt · ${faturasizCount} faturasız`}
+        action={
+          onOpenTCetveli ? (
             <button
               type="button"
               onClick={onOpenTCetveli}
-              className="px-4 py-2 font-bold rounded-xl text-xs transition cursor-pointer bg-stone-800 text-white shadow-sm inline-flex items-center gap-1.5"
-              title="Kibritçi giriş / çıkış evrak T cetveli"
+              className="px-3 py-2 font-bold rounded-lg text-xs bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 cursor-pointer inline-flex items-center gap-1.5"
             >
               <BookOpen size={13} /> T Cetveli
             </button>
-          )}
-          <button
-            type="button"
-            onClick={() => setEditingIrId(null)}
-            className="px-4 py-2 font-bold rounded-xl text-xs transition cursor-pointer bg-emerald-700 text-white shadow-sm"
-          >
-            İrsaliye Giriş (Manuel / AI)
-          </button>
-        </div>
-      </div>
-
-      <EvrakZincirBanner
-        aktif="irsaliye"
-        cariBagli={liveCari.matched}
-        cariAdi={irSupplier || undefined}
-        stokLinked={liveStok.linked}
-        stokTotal={liveStok.total}
-        metrics={[
-          { label: 'Arşiv kayıt', value: irsaliyeler.length, tone: 'neutral' },
-          {
-            label: 'Cari bağsız',
-            value: cariYokCount,
-            tone: cariYokCount > 0 ? 'warn' : 'ok',
-          },
-          {
-            label: 'Faturasız',
-            value: faturasizCount,
-            tone: faturasizCount > 0 ? 'warn' : 'ok',
-          },
-        ]}
+          ) : undefined
+        }
       />
 
-      <EvrakTabBilgi tab="irsaliye-giris" />
-
-      <div className="flex flex-col lg:flex-row gap-6">
-          {/* Creator Drawer Form */}
-          <div className="w-full lg:w-[440px] bg-white border border-slate-200/90 rounded-2xl p-5 shadow-sm space-y-4 ring-1 ring-black/5">
-            
-            {linkedSaId && (
-              <div className="rounded-xl border border-violet-200 bg-violet-50 px-3 py-2.5 text-[11px] text-violet-900 space-y-0.5">
-                <p className="font-black uppercase tracking-wide text-[10px]">Satın alma siparişinden</p>
-                <p className="font-bold">
-                  PO: <span className="font-mono">{linkedSaId}</span>
+      <div className="flex flex-col gap-5">
+          <MuhasebeBelgeForm
+            variant="irsaliye"
+            editing={Boolean(editingIrId)}
+            onClear={() => {
+              setIrProducts([]);
+              setIrNo('');
+              setIrSupplier('');
+              setIrAttachmentUrl(null);
+              setIrSignedAttachmentUrl(null);
+              setEditingIrId(null);
+              setLinkedSaId(null);
+              setTempProduct({ name: '', qty: 0, unit: 'ADET' });
+            }}
+            onSave={handleSaveIrsaliye}
+            saveLabel={editingIrId ? 'İrsaliyeyi güncelle' : 'İrsaliyeyi kaydet'}
+            ai={
+              <MuhasebeAiButton
+                loading={isIrParsing}
+                error={irParseError}
+                success={irParseSuccess}
+                onFile={processIrsaliyeAi}
+              />
+            }
+            banner={
+              linkedSaId ? (
+                <p className="text-[11px] text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
+                  Satın alma <span className="font-mono font-bold">{linkedSaId}</span> siparişinden dolduruldu.
                 </p>
-                <p className="text-violet-700">
-                  Ürünler sipariş formundan dolduruldu. Kaydedince fiili irsaliye evrakı oluşur ve siparişe bağlanır.
-                </p>
-              </div>
-            )}
-
-            <EvrakAiDropzone
-              accent="ir"
-              title="Yapay zeka irsaliye okuyucu"
-              hint="PDF veya görsel yükleyin; no, firma ve kalemler otomatik dolar."
-              loading={isIrParsing}
-              error={irParseError}
-              success={irParseSuccess}
-              onFile={(f) => processIrsaliyeAi(f)}
-            />
-
-            <div className="space-y-3 text-xs">
-              <div>
-                <label className="text-[10px] font-bold text-slate-500 uppercase">İrsaliye / Fiş No *</label>
-                <input 
-                  type="text"
-                  placeholder="Örn: IRS-2026-0041"
-                  value={irNo}
-                  onChange={(e) => setIrNo(e.target.value)}
-                  className="w-full text-xs font-semibold mt-1 p-2 bg-slate-50 border border-[#e2e8f0] rounded-lg focus:border-[#10b981] outline-none"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-[10px] font-bold text-slate-500 uppercase">Tarih</label>
-                  <input 
-                    type="date"
-                    value={irDate}
-                    onChange={(e) => setIrDate(e.target.value)}
-                    className="w-full text-xs font-semibold mt-1 p-2 bg-slate-50 border border-[#e2e8f0] rounded-lg"
-                  />
-                </div>
-                <div>
-                  <label className="text-[10px] font-bold text-slate-500 uppercase">Satıcı Firma Ünvanı *</label>
-                  <input 
+              ) : null
+            }
+            fields={
+              <>
+                <MuhasebeField label="Cari / satıcı *" span={2}>
+                  <input
                     type="text"
-                    list="cari-datalist"
-                    placeholder="Firma Adı"
+                    list="ir-cari-list"
+                    placeholder="Firma ünvanı"
                     value={irSupplier}
                     onChange={(e) => setIrSupplier(e.target.value)}
-                    className="w-full text-xs font-semibold mt-1 p-2 bg-slate-50 border border-[#e2e8f0] rounded-lg"
+                    className={muhasebeInputClass}
                   />
-                  <datalist id="cari-datalist">
-                    {cariKartlar.map(c => (
+                  <datalist id="ir-cari-list">
+                    {cariKartlar.map((c) => (
                       <option key={c.id} value={c.unvan} />
                     ))}
                   </datalist>
-                </div>
-              </div>
-
-              <p className="text-[10px] text-emerald-700 font-medium bg-emerald-50 border border-emerald-100 rounded-xl p-2.5">
-                İrsaliye kalemlerini girin; belgeyi AI ile okutabilirsiniz.
-              </p>
-
-              {/* Add items */}
-              <div className="bg-slate-550/5 p-3 rounded-2xl border border-slate-100 space-y-2">
-                <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest block">📦 Malzeme Teslimat Kalemleri</span>
-                <div className="grid grid-cols-3 gap-2">
-                  <input 
+                </MuhasebeField>
+                <MuhasebeField label="İrsaliye no *">
+                  <input
                     type="text"
-                    list="stok-datalist"
-                    placeholder="Malzeme Adı"
-                    value={tempProduct.name}
-                    onChange={(e) => {
-                      const name = e.target.value;
-                      const matched = stokKartlar.find(
-                        (s) => s.stokAdi.toLowerCase().trim() === name.toLowerCase().trim()
-                      );
-                      setTempProduct((prev) => ({
-                        ...prev,
-                        name,
-                        unit: matched?.birim || prev.unit,
-                      }));
-                    }}
-                    className="col-span-2 p-1.5 border border-slate-200 rounded-lg text-[10px]"
+                    placeholder="IRS-2026-…"
+                    value={irNo}
+                    onChange={(e) => setIrNo(e.target.value)}
+                    className={muhasebeInputClass}
                   />
-                  <datalist id="stok-datalist">
-                    {stokKartlar.map(s => (
-                      <option key={s.id} value={s.stokAdi} />
-                    ))}
-                  </datalist>
-                  <input 
-                    type="number"
-                    placeholder="Miktar"
-                    value={tempProduct.qty || ""}
-                    onChange={(e) => setTempProduct(prev => ({ ...prev, qty: Number(e.target.value) }))}
-                    className="p-1.5 border border-slate-200 rounded-lg text-[10px] text-center"
-                  />
-                </div>
-                <div className="flex gap-2 justify-between items-center pt-1.5">
-                  <select
-                    value={tempProduct.unit}
-                    onChange={(e) => setTempProduct(prev => ({ ...prev, unit: e.target.value }))}
-                    className="p-1.5 border border-slate-200 rounded-lg text-[10px] flex-1"
-                  >
-                    <option value="ADET">ADET</option>
-                    <option value="TON">TON</option>
-                    <option value="KG">KG</option>
-                    <option value="M3">M3</option>
-                    <option value="TORBA">TORBA</option>
-                  </select>
-                  <button
-                    type="button"
-                    onClick={handleAddProduct}
-                    className="bg-slate-900 text-white font-bold text-[10px] px-3.5 py-1.5 rounded-lg hover:bg-slate-950 transition cursor-pointer"
-                  >
-                    Kalem Ekle
-                  </button>
-                </div>
-
-                {/* Listing added items */}
-                <div className="space-y-1.5 max-h-32 overflow-y-auto pt-2 border-t border-slate-100/60 text-[11px] font-semibold text-slate-700">
-                  {irProducts.map((p, idx) => (
-                    <div key={p.id} className="flex justify-between items-center bg-white p-2 rounded-lg border">
-                      <span>{p.urunAdi}</span>
-                      <div className="flex items-center space-x-2">
-                        <span className="font-mono text-slate-900">{p.miktar} {p.birim}</span>
-                        <button
-                          type="button"
-                          onClick={() => setIrProducts(prev => prev.filter(x => x.id !== p.id))}
-                          className="text-rose-600 hover:text-rose-800"
-                        >
-                          ×
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+                </MuhasebeField>
+                <MuhasebeField label="Sevk tarihi">
+                  <input type="date" value={irDate} onChange={(e) => setIrDate(e.target.value)} className={muhasebeInputClass} />
+                </MuhasebeField>
+              </>
+            }
+            itemsTable={
+              <MuhasebeKalemTablosu variant="irsaliye" onAdd={handleAddProduct} addDisabled={!tempProduct.name || tempProduct.qty <= 0}>
+                {irProducts.map((p) => (
+                  <MuhasebeKalemRow key={p.id} onRemove={() => setIrProducts((prev) => prev.filter((x) => x.id !== p.id))}>
+                    <td className="px-2 py-1">
+                      <input
+                        className={muhasebeInputClass}
+                        value={p.urunAdi}
+                        onChange={(e) =>
+                          setIrProducts((prev) => prev.map((x) => (x.id === p.id ? { ...x, urunAdi: e.target.value } : x)))
+                        }
+                      />
+                    </td>
+                    <td className="px-2 py-1">
+                      <input
+                        type="number"
+                        className={muhasebeInputClass}
+                        value={p.miktar || ''}
+                        onChange={(e) =>
+                          setIrProducts((prev) =>
+                            prev.map((x) => (x.id === p.id ? { ...x, miktar: Number(e.target.value) || 0 } : x))
+                          )
+                        }
+                      />
+                    </td>
+                    <td className="px-2 py-1">
+                      <input
+                        className={muhasebeInputClass}
+                        value={p.birim}
+                        onChange={(e) =>
+                          setIrProducts((prev) => prev.map((x) => (x.id === p.id ? { ...x, birim: e.target.value } : x)))
+                        }
+                      />
+                    </td>
+                  </MuhasebeKalemRow>
+                ))}
+                <MuhasebeKalemRow>
+                  <td className="px-2 py-1">
+                    <input
+                      list="ir-stok-list"
+                      className={muhasebeInputClass}
+                      placeholder="Malzeme adı"
+                      value={tempProduct.name}
+                      onChange={(e) => {
+                        const name = e.target.value;
+                        const matched = stokKartlar.find(
+                          (s) => s.stokAdi.toLowerCase().trim() === name.toLowerCase().trim()
+                        );
+                        setTempProduct((prev) => ({ ...prev, name, unit: matched?.birim || prev.unit }));
+                      }}
+                      onKeyDown={(e) => e.key === 'Enter' && handleAddProduct()}
+                    />
+                    <datalist id="ir-stok-list">
+                      {stokKartlar.map((s) => (
+                        <option key={s.id} value={s.stokAdi} />
+                      ))}
+                    </datalist>
+                  </td>
+                  <td className="px-2 py-1">
+                    <input
+                      type="number"
+                      className={muhasebeInputClass}
+                      placeholder="0"
+                      value={tempProduct.qty || ''}
+                      onChange={(e) => setTempProduct((prev) => ({ ...prev, qty: Number(e.target.value) }))}
+                    />
+                  </td>
+                  <td className="px-2 py-1">
+                    <select
+                      className={muhasebeInputClass}
+                      value={tempProduct.unit}
+                      onChange={(e) => setTempProduct((prev) => ({ ...prev, unit: e.target.value }))}
+                    >
+                      <option value="ADET">ADET</option>
+                      <option value="TON">TON</option>
+                      <option value="KG">KG</option>
+                      <option value="M3">M3</option>
+                      <option value="TORBA">TORBA</option>
+                    </select>
+                  </td>
+                </MuhasebeKalemRow>
+              </MuhasebeKalemTablosu>
+            }
+            attachments={
+              <div className="flex flex-wrap gap-2">
+                <MuhasebeAttach label="Evrak fotoğrafı" loaded={Boolean(irAttachmentUrl)} onFile={handleFileChange} />
+                <MuhasebeAttach label="İmzalı evrak" loaded={Boolean(irSignedAttachmentUrl)} onFile={(e) => handleSignedFileChange(e)} />
               </div>
-
-              {/* File Attachment inputs */}
-              <div className="grid grid-cols-2 gap-3 pt-2">
-                <div className="space-y-1">
-                  <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest block">Evrak Fotoğrafı</span>
-                  <label className="cursor-pointer bg-slate-100 hover:bg-slate-200 p-2.5 rounded-xl border border-slate-200 block text-center font-bold text-[10px]">
-                    {irAttachmentUrl ? "✓ Yüklendi" : "Belge Yükle"}
-                    <input type="file" onChange={handleFileChange} className="hidden" accept="image/*,application/pdf" />
-                  </label>
-                </div>
-                <div className="space-y-1">
-                  <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest block">İmzalı Evrak</span>
-                  <label className="cursor-pointer bg-slate-100 hover:bg-slate-200 p-2.5 rounded-xl border border-slate-200 block text-center font-bold text-[10px]">
-                    {irSignedAttachmentUrl ? "✓ İmzalı Yüklendi" : "İmzalı Belge"}
-                    <input type="file" onChange={(e) => handleSignedFileChange(e)} className="hidden" accept="image/*,application/pdf" />
-                  </label>
-                </div>
-              </div>
-
-            </div>
-
-            <div className="pt-4 border-t flex gap-3">
-              <button
-                type="button"
-                onClick={() => {
-                  setIrProducts([]);
-                  setIrNo("");
-                  setIrSupplier("");
-                  setIrAttachmentUrl(null);
-                  setIrSignedAttachmentUrl(null);
-                  setEditingIrId(null);
-                }}
-                className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-2 rounded-xl text-center cursor-pointer transition text-xs"
-              >
-                Temizle / Vazgeç
-              </button>
-              <button
-                type="button"
-                onClick={handleSaveIrsaliye}
-                className="flex-1 bg-[#10b981] hover:bg-[#059669] text-white font-bold py-2 rounded-xl text-center shadow cursor-pointer transition text-xs"
-              >
-                İrsaliyeyi Kaydet
-              </button>
-            </div>
-
-          </div>
+            }
+          />
 
           <div className="flex-1 space-y-6">
             <div className="bg-white border border-slate-200 rounded-3xl p-5 shadow-sm space-y-3">
@@ -1144,28 +1064,7 @@ export const IrsaliyeGirisScreen: React.FC<IrsaliyeGirisScreenProps> = ({
                               : (ir.kalemler || []).length}
                           </td>
                           <td className="px-2 py-1.5">
-                            <div className="flex flex-wrap gap-1">
-                              <button
-                                type="button"
-                                onClick={() => handleConvertIrsaliyeToFatura(ir)}
-                                className="text-[10px] bg-violet-50 hover:bg-violet-100 text-violet-800 border border-violet-200 rounded px-2 py-1 font-bold cursor-pointer"
-                                title="Taslak faturaya bağla (kilitlenmez)"
-                              >
-                                → Fatura (taslak)
-                                {findFaturalarForIrsaliye(ir, faturalar).length > 0
-                                  ? ` (${findFaturalarForIrsaliye(ir, faturalar).length})`
-                                  : ''}
-                              </button>
-                              {(ir.faturaNo || findFaturalarForIrsaliye(ir, faturalar).length > 0) && (
-                                <button
-                                  type="button"
-                                  onClick={() => handleUnlinkIrsaliyeFatura(ir)}
-                                  className="text-[10px] bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 rounded px-2 py-1 font-bold cursor-pointer"
-                                  title="Fatura bağını kaldır"
-                                >
-                                  Bağ kaldır
-                                </button>
-                              )}
+                            <div className="flex flex-wrap gap-1 items-center">
                               <button
                                 type="button"
                                 onClick={() => {
@@ -1189,6 +1088,19 @@ export const IrsaliyeGirisScreen: React.FC<IrsaliyeGirisScreenProps> = ({
                               >
                                 Aç
                               </button>
+                              <EvrakIslemMenu
+                                items={[
+                                  {
+                                    label: 'Faturaya bağla',
+                                    onClick: () => handleConvertIrsaliyeToFatura(ir),
+                                  },
+                                  {
+                                    label: 'Fatura bağını kaldır',
+                                    hidden: !(ir.faturaNo || findFaturalarForIrsaliye(ir, faturalar).length > 0),
+                                    onClick: () => handleUnlinkIrsaliyeFatura(ir),
+                                  },
+                                ]}
+                              />
                             </div>
                           </td>
                         </tr>

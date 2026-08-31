@@ -8,7 +8,6 @@ import { compressImage } from '../lib/imageCompress';
 import { fetchApiJson } from '../lib/apiClient';
 import { fileToAiPayload } from '../lib/aiFileUpload';
 import { faturaIsLinked } from '../lib/documentLinkUtils';
-import { EvrakTabBilgi } from './EvrakTabBilgi';
 import { kibritciLogoHtml } from '../lib/kibritciBrand';
 import { getReportEmailToolbarHtml, openHtmlReportWindow } from '../lib/reportEmail';
 import { ReportEmailButton } from './ReportEmailButton';
@@ -22,13 +21,19 @@ import {
 import { findStokMatch } from '../lib/evrakBatchImportUtils';
 import { syncFaturaIrsaliyeBaglari } from '../lib/evrakDonusum';
 import { openEvrakZincirRaporu } from '../lib/evrakZincirRapor';
-import { EvrakZincirBanner } from './EvrakZincirBanner';
 import { resolveFaturaProvenance } from '../lib/evrakProvenance';
+import { EvrakPageShell, EvrakSectionHeader } from './evrakUi/EvrakScreenChrome';
+import { EvrakIslemMenu } from './evrakUi/EvrakIslemMenu';
 import {
-  EvrakAiDropzone,
-  EvrakPageShell,
-  EvrakSectionHeader,
-} from './evrakUi/EvrakScreenChrome';
+  MuhasebeAiButton,
+  MuhasebeAttach,
+  MuhasebeBelgeForm,
+  MuhasebeField,
+  MuhasebeKalemRow,
+  MuhasebeKalemTablosu,
+  MuhasebeTotals,
+  muhasebeInputClass,
+} from './evrakUi/MuhasebeBelgeForm';
 
 interface FaturaGirisScreenProps {
   faturalar: Fatura[];
@@ -543,8 +548,6 @@ export const FaturaGirisScreen: React.FC<FaturaGirisScreenProps> = ({
     openHtmlReportWindow(html, 'Fatura Evrak Arşiv Raporu');
   };
 
-  const liveCari = resolveCariKartId(ftSupplier, cariKartlar);
-  const liveStok = countLinkedStok(ftItems);
   const filteredArchive = useMemo(() => {
     const q = searchTerm.trim().toLocaleLowerCase('tr-TR');
     return [...faturalar]
@@ -564,314 +567,251 @@ export const FaturaGirisScreen: React.FC<FaturaGirisScreenProps> = ({
 
   const bagimsizFaturalar = faturalar.filter(ft => !faturaIsLinked(ft));
 
+  const ftAra = ftItems.reduce((s, i) => s + i.miktar * i.birimFiyat, 0);
+  const ftKdv = ftItems.reduce((s, i) => s + i.miktar * i.birimFiyat * (i.kdvOran / 100), 0);
+
+  const clearFaturaForm = () => {
+    setFtItems([]);
+    setFtNo('');
+    setFtSupplier('');
+    setFtAttachmentUrl(null);
+    setFtSignedAttachmentUrl(null);
+    setEditingFtId(null);
+    setEditBagliIrsaliyeIds([]);
+    setAddBagliIrId('');
+    setTempItem({ name: '', qty: 0, unit: 'ADET', price: 0, kdv: 20 });
+  };
+
   return (
     <EvrakPageShell>
       <EvrakSectionHeader
         accent="ft"
-        eyebrow="Mali sonuç evrağı"
-        title="Fatura Girişi"
-        subtitle="İrsaliyenin faturalaşması · cari ve stok bağları"
+        eyebrow="Gider faturası"
+        title="Faturalar"
+        subtitle={`${faturalar.length} kayıt · ${bagimsizFaturalar.length} bağımsız`}
       />
-
-      
-      {/* Navigation tabs */}
-      <div className="bg-white/90 border border-slate-200/80 rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between shadow-sm gap-4 shrink-0 backdrop-blur-sm">
-        <div className="space-y-1">
-          <span className="text-[10px] font-black tracking-widest text-blue-700 uppercase">Fatura · Cari &amp; Finans</span>
-          <h2 className="font-display font-bold text-sm text-slate-900 flex items-center gap-1.5">
-            Şantiye Fatura Kayıt Paneli
-          </h2>
-        </div>
-        <button
-          type="button"
-          onClick={() => setEditingFtId(null)}
-          className="px-4 py-2 font-bold rounded-xl text-xs transition cursor-pointer bg-[#2563eb] text-white shadow-sm"
-        >
-          Fatura Giriş (Manuel / AI)
-        </button>
-      </div>
-
-
-      <EvrakZincirBanner
-        aktif="fatura"
-        cariBagli={liveCari.matched}
-        cariAdi={ftSupplier || undefined}
-        stokLinked={liveStok.linked}
-        stokTotal={liveStok.total}
-        metrics={[
-          { label: 'Arşiv kayıt', value: faturalar.length, tone: 'neutral' },
-          {
-            label: 'Bağımsız fatura',
-            value: bagimsizFaturalar.length,
-            tone: bagimsizFaturalar.length > 0 ? 'warn' : 'ok',
-          },
-        ]}
-      />
-
-      <EvrakTabBilgi tab="fatura-giris" />
 
       {(
-        <div className="flex flex-col lg:flex-row gap-6">
-          
-          {/* Left Form Panel */}
-          <div className="w-full lg:w-[440px] bg-white border border-slate-200/90 rounded-2xl p-5 shadow-sm space-y-4 ring-1 ring-black/5">
-            
-            <EvrakAiDropzone
-              accent="ft"
-              title="Yapay zeka fatura okuyucu"
-              hint="PDF veya görsel yükleyin; no, firma ve kalemler otomatik dolar."
-              loading={isFtParsing}
-              error={ftParseError}
-              success={ftParseSuccess}
-              onFile={(f) => processFaturaAi(f)}
-            />
-
-            <div className="space-y-3 text-xs">
-              <div>
-                <label className="text-[10px] font-bold text-slate-500 uppercase">Fatura No *</label>
-                <input 
-                  type="text"
-                  placeholder="FAT-2026-X88"
-                  value={ftNo}
-                  onChange={(e) => setFtNo(e.target.value)}
-                  className="w-full text-xs font-semibold mt-1 p-2 bg-slate-50 border border-[#e2e8f0] rounded-lg focus:border-[#2563eb] outline-none"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-[10px] font-bold text-slate-500 uppercase">Fatura Tarihi</label>
-                  <input 
-                    type="date"
-                    value={ftDate}
-                    onChange={(e) => setFtDate(e.target.value)}
-                    className="w-full text-xs font-semibold mt-1 p-2 bg-slate-50 border border-[#e2e8f0] rounded-lg"
-                  />
-                </div>
-                <div>
-                  <label className="text-[10px] font-bold text-slate-500 uppercase">Firma / Cari Ünvan *</label>
-                  <input 
+        <div className="flex flex-col gap-5">
+          <MuhasebeBelgeForm
+            variant="fatura"
+            editing={Boolean(editingFtId)}
+            onClear={clearFaturaForm}
+            onSave={handleSaveFatura}
+            saveLabel={editingFtId ? 'Faturayı güncelle' : 'Faturayı kaydet'}
+            ai={
+              <MuhasebeAiButton
+                loading={isFtParsing}
+                error={ftParseError}
+                success={ftParseSuccess}
+                onFile={processFaturaAi}
+              />
+            }
+            fields={
+              <>
+                <MuhasebeField label="Cari / tedarikçi *" span={2}>
+                  <input
                     type="text"
-                    list="cari-datalist"
-                    placeholder="Tedarikçi Adı"
+                    list="ft-cari-list"
+                    placeholder="Firma ünvanı"
                     value={ftSupplier}
                     onChange={(e) => setFtSupplier(e.target.value)}
-                    className="w-full text-xs font-semibold mt-1 p-2 bg-slate-50 border border-[#e2e8f0] rounded-lg"
+                    className={muhasebeInputClass}
                   />
-                  <datalist id="cari-datalist">
-                    {cariKartlar.map(c => (
+                  <datalist id="ft-cari-list">
+                    {cariKartlar.map((c) => (
                       <option key={c.id} value={c.unvan} />
                     ))}
                   </datalist>
-                </div>
-              </div>
-
-              <p className="text-[10px] text-slate-800 bg-slate-50 border border-slate-200 rounded-xl p-2.5">
-                Fatura kalemlerini girin; belge görselini AI ile okutabilirsiniz.
-                {editingFtId
-                  ? ' Düzenleme: bağlı irsaliyeleri aşağıdan ekleyip çıkarabilirsiniz (kilit yok).'
-                  : ''}
-              </p>
-
-              {editingFtId && (
-                <div className="bg-violet-50/60 border border-violet-100 rounded-2xl p-3 space-y-2">
-                  <span className="text-[9px] font-bold text-violet-700 uppercase tracking-widest block">
-                    Bağlı irsaliyeler (düzenlenebilir)
-                  </span>
-                  {editBagliIrsaliyeIds.length === 0 ? (
-                    <p className="text-[10px] text-slate-500">Bağlı irsaliye yok.</p>
-                  ) : (
-                    <div className="flex flex-wrap gap-1.5">
-                      {editBagliIrsaliyeIds.map((id) => {
-                        const ir = irsaliyeler.find((x) => x.id === id || x.irsaliyeNo === id);
-                        const label = ir?.irsaliyeNo || id;
-                        return (
-                          <span
-                            key={id}
-                            className="inline-flex items-center gap-1 text-[10px] font-bold bg-white border border-violet-200 text-violet-900 px-2 py-1 rounded-lg"
-                          >
-                            {label}
-                            <button
-                              type="button"
-                              onClick={() =>
-                                setEditBagliIrsaliyeIds((prev) => prev.filter((x) => x !== id))
-                              }
-                              className="text-rose-600 hover:text-rose-800 cursor-pointer"
-                              title="Bağı kaldır"
-                            >
-                              ×
-                            </button>
-                          </span>
-                        );
-                      })}
-                    </div>
-                  )}
-                  <div className="flex gap-2 items-center">
-                    <select
-                      value={addBagliIrId}
-                      onChange={(e) => setAddBagliIrId(e.target.value)}
-                      className="flex-1 text-[10px] font-semibold p-1.5 bg-white border border-violet-200 rounded-lg"
-                    >
-                      <option value="">İrsaliye ekle…</option>
-                      {irsaliyeler
-                        .filter((ir) => {
-                          if (editBagliIrsaliyeIds.includes(ir.id) || editBagliIrsaliyeIds.includes(ir.irsaliyeNo)) {
-                            return false;
-                          }
-                          if (!ftSupplier) return true;
-                          return (
-                            String(ir.firma || '')
-                              .toLocaleLowerCase('tr-TR')
-                              .includes(ftSupplier.toLocaleLowerCase('tr-TR')) ||
-                            String(ftSupplier || '')
-                              .toLocaleLowerCase('tr-TR')
-                              .includes(String(ir.firma || '').toLocaleLowerCase('tr-TR'))
-                          );
-                        })
-                        .slice(0, 80)
-                        .map((ir) => (
-                          <option key={ir.id} value={ir.id}>
-                            {ir.irsaliyeNo} · {ir.tarih} · {ir.firma}
-                          </option>
-                        ))}
-                    </select>
-                    <button
-                      type="button"
-                      disabled={!addBagliIrId}
-                      onClick={() => {
-                        if (!addBagliIrId) return;
-                        setEditBagliIrsaliyeIds((prev) =>
-                          prev.includes(addBagliIrId) ? prev : [...prev, addBagliIrId]
-                        );
-                        setAddBagliIrId('');
-                      }}
-                      className="text-[10px] font-bold px-2.5 py-1.5 rounded-lg bg-violet-700 text-white cursor-pointer disabled:opacity-40"
-                    >
-                      Ekle
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {/* Add items */}
-              <div className="bg-slate-550/5 p-3 rounded-2xl border border-slate-100 space-y-2">
-                <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest block">💰 Fatura Kalemleri</span>
-                <div className="grid grid-cols-3 gap-2">
-                  <input 
+                </MuhasebeField>
+                <MuhasebeField label="Fatura no *">
+                  <input
                     type="text"
-                    list="stok-datalist"
-                    placeholder="Kalem Adı"
-                    value={tempItem.name}
-                    onChange={(e) => setTempItem(prev => ({ ...prev, name: e.target.value }))}
-                    className="col-span-2 p-1.5 border border-slate-200 rounded-lg text-[10px]"
+                    placeholder="FAT-2026-…"
+                    value={ftNo}
+                    onChange={(e) => setFtNo(e.target.value)}
+                    className={muhasebeInputClass}
                   />
-                  <datalist id="stok-datalist">
-                    {stokKartlar.map(s => (
-                      <option key={s.id} value={s.stokAdi} />
-                    ))}
-                  </datalist>
-                  <input 
-                    type="number"
-                    placeholder="Miktar"
-                    value={tempItem.qty || ""}
-                    onChange={(e) => setTempItem(prev => ({ ...prev, qty: Number(e.target.value) }))}
-                    className="p-1.5 border border-slate-200 rounded-lg text-[10px] text-center"
-                  />
-                </div>
-                <div className="grid grid-cols-3 gap-2">
-                  <input 
-                    type="number"
-                    placeholder="Birim Fiyat"
-                    value={tempItem.price || ""}
-                    onChange={(e) => setTempItem(prev => ({ ...prev, price: Number(e.target.value) }))}
-                    className="p-1.5 border border-slate-200 rounded-lg text-[10px]"
-                  />
-                  <select
-                    value={tempItem.kdv}
-                    onChange={(e) => setTempItem(prev => ({ ...prev, kdv: Number(e.target.value) }))}
-                    className="p-1.5 border border-slate-200 rounded-lg text-[10px]"
-                  >
-                    <option value="20">KDV %20</option>
-                    <option value="10">KDV %10</option>
-                    <option value="1">KDV %1</option>
-                    <option value="0">KDV %0</option>
-                  </select>
-                  <button
-                    type="button"
-                    onClick={handleAddItem}
-                    className="bg-slate-900 text-white font-bold text-[10px] rounded-lg hover:bg-slate-950 transition cursor-pointer"
-                  >
-                    Kalem Ekle
-                  </button>
-                </div>
-
-                {/* List items */}
-                <div className="space-y-1.5 max-h-32 overflow-y-auto pt-2 border-t text-[11px] font-semibold text-slate-700">
-                  {ftItems.map(p => (
-                    <div key={p.id} className="flex justify-between items-center bg-white p-2 rounded-lg border">
-                      <span>{p.urunAdi}</span>
-                      <div className="flex items-center space-x-2">
-                        <span className="font-mono text-slate-900">{p.miktar} x {p.birimFiyat.toLocaleString('tr-TR')} TL</span>
-                        <button
-                          type="button"
-                          onClick={() => setFtItems(prev => prev.filter(x => x.id !== p.id))}
-                          className="text-rose-600 hover:text-rose-800"
-                        >
+                </MuhasebeField>
+                <MuhasebeField label="Düzenleme tarihi">
+                  <input type="date" value={ftDate} onChange={(e) => setFtDate(e.target.value)} className={muhasebeInputClass} />
+                </MuhasebeField>
+              </>
+            }
+            extraFields={
+              editingFtId ? (
+                <div className="flex flex-wrap items-center gap-2 text-[11px]">
+                  <span className="font-bold text-slate-500 uppercase tracking-wide">Bağlı irsaliye</span>
+                  {editBagliIrsaliyeIds.map((id) => {
+                    const ir = irsaliyeler.find((x) => x.id === id || x.irsaliyeNo === id);
+                    return (
+                      <span key={id} className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-100 text-slate-800 font-semibold">
+                        {ir?.irsaliyeNo || id}
+                        <button type="button" className="text-rose-600 cursor-pointer" onClick={() => setEditBagliIrsaliyeIds((p) => p.filter((x) => x !== id))}>
                           ×
                         </button>
-                      </div>
-                    </div>
-                  ))}
+                      </span>
+                    );
+                  })}
+                  <select
+                    value={addBagliIrId}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      if (!v) return;
+                      setEditBagliIrsaliyeIds((prev) => (prev.includes(v) ? prev : [...prev, v]));
+                      setAddBagliIrId('');
+                    }}
+                    className={`${muhasebeInputClass} w-auto min-w-[200px]`}
+                  >
+                    <option value="">İrsaliye ekle…</option>
+                    {irsaliyeler
+                      .filter((ir) => !editBagliIrsaliyeIds.includes(ir.id) && !editBagliIrsaliyeIds.includes(ir.irsaliyeNo))
+                      .slice(0, 80)
+                      .map((ir) => (
+                        <option key={ir.id} value={ir.id}>
+                          {ir.irsaliyeNo} · {ir.firma}
+                        </option>
+                      ))}
+                  </select>
                 </div>
+              ) : null
+            }
+            itemsTable={
+              <MuhasebeKalemTablosu variant="fatura" onAdd={handleAddItem} addDisabled={!tempItem.name || tempItem.qty <= 0}>
+                {ftItems.map((p) => (
+                  <MuhasebeKalemRow key={p.id} onRemove={() => setFtItems((prev) => prev.filter((x) => x.id !== p.id))}>
+                    <td className="px-2 py-1">
+                      <input
+                        className={muhasebeInputClass}
+                        value={p.urunAdi}
+                        onChange={(e) =>
+                          setFtItems((prev) => prev.map((x) => (x.id === p.id ? { ...x, urunAdi: e.target.value } : x)))
+                        }
+                      />
+                    </td>
+                    <td className="px-2 py-1">
+                      <input
+                        type="number"
+                        className={muhasebeInputClass}
+                        value={p.miktar || ''}
+                        onChange={(e) => {
+                          const miktar = Number(e.target.value) || 0;
+                          setFtItems((prev) =>
+                            prev.map((x) => (x.id === p.id ? { ...x, miktar, toplam: miktar * x.birimFiyat } : x))
+                          );
+                        }}
+                      />
+                    </td>
+                    <td className="px-2 py-1">
+                      <input
+                        className={muhasebeInputClass}
+                        value={p.birim}
+                        onChange={(e) =>
+                          setFtItems((prev) => prev.map((x) => (x.id === p.id ? { ...x, birim: e.target.value } : x)))
+                        }
+                      />
+                    </td>
+                    <td className="px-2 py-1">
+                      <input
+                        type="number"
+                        className={muhasebeInputClass}
+                        value={p.birimFiyat || ''}
+                        onChange={(e) => {
+                          const birimFiyat = Number(e.target.value) || 0;
+                          setFtItems((prev) =>
+                            prev.map((x) => (x.id === p.id ? { ...x, birimFiyat, toplam: x.miktar * birimFiyat } : x))
+                          );
+                        }}
+                      />
+                    </td>
+                    <td className="px-2 py-1">
+                      <select
+                        className={muhasebeInputClass}
+                        value={p.kdvOran}
+                        onChange={(e) =>
+                          setFtItems((prev) =>
+                            prev.map((x) => (x.id === p.id ? { ...x, kdvOran: Number(e.target.value) } : x))
+                          )
+                        }
+                      >
+                        <option value={20}>%20</option>
+                        <option value={10}>%10</option>
+                        <option value={1}>%1</option>
+                        <option value={0}>%0</option>
+                      </select>
+                    </td>
+                    <td className="px-2 py-1 text-right font-mono font-semibold">
+                      {(p.miktar * p.birimFiyat).toLocaleString('tr-TR')} TL
+                    </td>
+                  </MuhasebeKalemRow>
+                ))}
+                <MuhasebeKalemRow>
+                  <td className="px-2 py-1">
+                    <input
+                      list="ft-stok-list"
+                      className={muhasebeInputClass}
+                      placeholder="Ürün veya hizmet"
+                      value={tempItem.name}
+                      onChange={(e) => setTempItem((prev) => ({ ...prev, name: e.target.value }))}
+                      onKeyDown={(e) => e.key === 'Enter' && handleAddItem()}
+                    />
+                    <datalist id="ft-stok-list">
+                      {stokKartlar.map((s) => (
+                        <option key={s.id} value={s.stokAdi} />
+                      ))}
+                    </datalist>
+                  </td>
+                  <td className="px-2 py-1">
+                    <input
+                      type="number"
+                      className={muhasebeInputClass}
+                      placeholder="0"
+                      value={tempItem.qty || ''}
+                      onChange={(e) => setTempItem((prev) => ({ ...prev, qty: Number(e.target.value) }))}
+                    />
+                  </td>
+                  <td className="px-2 py-1">
+                    <input
+                      className={muhasebeInputClass}
+                      value={tempItem.unit}
+                      onChange={(e) => setTempItem((prev) => ({ ...prev, unit: e.target.value }))}
+                    />
+                  </td>
+                  <td className="px-2 py-1">
+                    <input
+                      type="number"
+                      className={muhasebeInputClass}
+                      placeholder="0,00"
+                      value={tempItem.price || ''}
+                      onChange={(e) => setTempItem((prev) => ({ ...prev, price: Number(e.target.value) }))}
+                    />
+                  </td>
+                  <td className="px-2 py-1">
+                    <select
+                      className={muhasebeInputClass}
+                      value={tempItem.kdv}
+                      onChange={(e) => setTempItem((prev) => ({ ...prev, kdv: Number(e.target.value) }))}
+                    >
+                      <option value={20}>%20</option>
+                      <option value={10}>%10</option>
+                      <option value={1}>%1</option>
+                      <option value={0}>%0</option>
+                    </select>
+                  </td>
+                  <td className="px-2 py-1 text-right font-mono text-slate-400">
+                    {(tempItem.qty * tempItem.price || 0).toLocaleString('tr-TR')}
+                  </td>
+                </MuhasebeKalemRow>
+              </MuhasebeKalemTablosu>
+            }
+            attachments={
+              <div className="flex flex-wrap gap-2">
+                <MuhasebeAttach label="Fatura belgesi" loaded={Boolean(ftAttachmentUrl)} onFile={handleFileChange} />
+                <MuhasebeAttach label="İmzalı nüsha" loaded={Boolean(ftSignedAttachmentUrl)} onFile={handleSignedFileChange} />
               </div>
-
-              {/* Upload bills */}
-              <div className="grid grid-cols-2 gap-3 pt-2">
-                <div className="space-y-1">
-                  <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest block">Fatura Belgesi</span>
-                  <label className="cursor-pointer bg-slate-100 hover:bg-slate-200 p-2.5 rounded-xl border border-slate-200 block text-center font-bold text-[10px]">
-                    {ftAttachmentUrl ? "✓ Yüklendi" : "Belge Yükle"}
-                    <input type="file" onChange={handleFileChange} className="hidden" accept="image/*,application/pdf" />
-                  </label>
-                </div>
-                <div className="space-y-1">
-                  <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest block">İmzalı Nüsha</span>
-                  <label className="cursor-pointer bg-slate-100 hover:bg-slate-200 p-2.5 rounded-xl border border-slate-200 block text-center font-bold text-[10px]">
-                    {ftSignedAttachmentUrl ? "✓ İmzalı Yüklendi" : "İmzalı Belge"}
-                    <input type="file" onChange={handleSignedFileChange} className="hidden" accept="image/*,application/pdf" />
-                  </label>
-                </div>
-              </div>
-
-            </div>
-
-            <div className="pt-4 border-t flex gap-3">
-              <button
-                type="button"
-                onClick={() => {
-                  setFtItems([]);
-                  setFtNo("");
-                  setFtSupplier("");
-                  setFtAttachmentUrl(null);
-                  setFtSignedAttachmentUrl(null);
-                  setEditingFtId(null);
-                  setEditBagliIrsaliyeIds([]);
-                  setAddBagliIrId('');
-                }}
-                className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-2 rounded-xl text-center cursor-pointer transition text-xs"
-              >
-                Temizle / Vazgeç
-              </button>
-              <button
-                type="button"
-                onClick={handleSaveFatura}
-                className="flex-1 bg-[#2563eb] hover:bg-[#1d4ed8] text-white font-bold py-2 rounded-xl text-center shadow cursor-pointer transition text-xs"
-              >
-                Faturayı Kaydet
-              </button>
-            </div>
-
-          </div>
+            }
+            totals={<MuhasebeTotals araToplam={ftAra} kdv={ftKdv} genel={ftAra + ftKdv} />}
+          />
 
           <div className="flex-1 space-y-6">
             <div className="bg-white border border-slate-200 rounded-3xl p-5 shadow-sm space-y-3">
@@ -974,7 +914,7 @@ export const FaturaGirisScreen: React.FC<FaturaGirisScreenProps> = ({
                           </td>
                           <td className="px-2 py-1.5 text-right font-mono">{Number(ft.genelToplam || 0).toLocaleString('tr-TR')} TL</td>
                           <td className="px-2 py-1.5">
-                            <div className="flex gap-1">
+                            <div className="flex gap-1 items-center">
                               <button
                                 type="button"
                                 onClick={() => {
@@ -994,28 +934,29 @@ export const FaturaGirisScreen: React.FC<FaturaGirisScreenProps> = ({
                               </button>
                               <button
                                 type="button"
-                                onClick={() => {
-                                  const sa = ft.saId
-                                    ? satinAlmaTalepleri.find((s) => s.saId === ft.saId)
-                                    : undefined;
-                                  openEvrakZincirRaporu({
-                                    sa,
-                                    irsaliyeler,
-                                    faturalar,
-                                    focusIrsaliyeIds: ft.bagliIrsaliyeler,
-                                  });
-                                }}
-                                className="text-[10px] bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 rounded px-2 py-1 font-bold cursor-pointer"
-                              >
-                                Zincir
-                              </button>
-                              <button
-                                type="button"
                                 onClick={() => handlePreviewPdf(ft)}
                                 className="text-[10px] bg-slate-50 hover:bg-slate-100 text-slate-800 border border-slate-200 rounded px-2 py-1 font-bold cursor-pointer"
                               >
                                 Aç
                               </button>
+                              <EvrakIslemMenu
+                                items={[
+                                  {
+                                    label: 'Evrak karşılaştır',
+                                    onClick: () => {
+                                      const sa = ft.saId
+                                        ? satinAlmaTalepleri.find((s) => s.saId === ft.saId)
+                                        : undefined;
+                                      openEvrakZincirRaporu({
+                                        sa,
+                                        irsaliyeler,
+                                        faturalar,
+                                        focusIrsaliyeIds: ft.bagliIrsaliyeler,
+                                      });
+                                    },
+                                  },
+                                ]}
+                              />
                             </div>
                           </td>
                         </tr>
