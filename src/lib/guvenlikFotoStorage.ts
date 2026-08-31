@@ -143,14 +143,10 @@ export async function prepareGuvenlikFotoPaketForSave(
     scanPdfUrl: paket.scanPdfUrl,
   };
 
-  // Tarama PDF çok büyükse atla (foto yine kalsın)
-  const scanRaw = String(result.scanPdfUrl || '').trim();
-  if (scanRaw.startsWith('data:') && scanRaw.length > MAX_SLOT_CHARS) {
-    result = { ...result, scanPdfUrl: undefined };
-  }
+  // Tarama PDF data URL büyük olabilir — silinmez; Storage’a uploadGuvenlikFotoPaket yazar.
 
-  // Toplam hâlâ büyükse yalnızca ilk foto kalsın
-  if (sumPaketDataChars(result) > MAX_TOTAL_DATA_CHARS) {
+  // Toplam hâlâ büyükse yalnızca ilk foto kalsın (tarama PDF ayrı tutulur)
+  if (sumPaketDataChars(result, { excludeScanPdf: true }) > MAX_TOTAL_DATA_CHARS) {
     const first =
       result.evrakFotolar[0] ||
       result.kalemFotolar[0] ||
@@ -164,18 +160,33 @@ export async function prepareGuvenlikFotoPaketForSave(
     if (!capped || String(capped.dataUrl || '').length > MAX_SLOT_CHARS) {
       return { evrakFotolar: [], kalemFotolar: [], firmaFotolar: [], faturaFotolar: [] };
     }
-    result = { evrakFotolar: [capped], kalemFotolar: [], firmaFotolar: [], faturaFotolar: [] };
+    result = {
+      evrakFotolar: [capped],
+      kalemFotolar: [],
+      firmaFotolar: [],
+      faturaFotolar: [],
+      scanPdfUrl: result.scanPdfUrl,
+    };
   }
 
-  // Son çare: fotoğrafsız paket (meta kayıt yine gitsin)
-  if (sumPaketDataChars(result) > MAX_TOTAL_DATA_CHARS) {
-    return { evrakFotolar: [], kalemFotolar: [], firmaFotolar: [], faturaFotolar: [] };
+  // Son çare: fotoğrafsız paket (tarama PDF yine gitsin — Storage’a yüklenecek)
+  if (sumPaketDataChars(result, { excludeScanPdf: true }) > MAX_TOTAL_DATA_CHARS) {
+    return {
+      evrakFotolar: [],
+      kalemFotolar: [],
+      firmaFotolar: [],
+      faturaFotolar: [],
+      scanPdfUrl: result.scanPdfUrl,
+    };
   }
 
   return result;
 }
 
-function sumPaketDataChars(paket: GuvenlikFotoPaket): number {
+function sumPaketDataChars(
+  paket: GuvenlikFotoPaket,
+  opts?: { excludeScanPdf?: boolean }
+): number {
   let n = 0;
   for (const s of [
     ...(paket.evrakFotolar || []),
@@ -185,7 +196,7 @@ function sumPaketDataChars(paket: GuvenlikFotoPaket): number {
   ]) {
     n += String(s.dataUrl || '').length;
   }
-  n += String(paket.scanPdfUrl || '').length;
+  if (!opts?.excludeScanPdf) n += String(paket.scanPdfUrl || '').length;
   return n;
 }
 
@@ -315,7 +326,25 @@ export async function prepareGuvenlikEvrakFileForQueue(
   let scanPdfUrl: string | undefined;
   try {
     scanPdfUrl = await convertImageToScanPdfDataUrl(displayBase64);
-    if (scanPdfUrl && scanPdfUrl.length > MAX_SLOT_CHARS) scanPdfUrl = undefined;
+    if (scanPdfUrl && scanPdfUrl.length > MAX_SLOT_CHARS) {
+      try {
+        const uploaded = await uploadGuvenlikFotoSlot(
+          pendingId,
+          {
+            id: `scan_${slotId}`,
+            dataUrl: scanPdfUrl,
+            fileName: `${(file.name || 'tarama').replace(/\.[^.]+$/, '')}.pdf`,
+            fileType: 'application/pdf',
+            metod: 'EVRAK',
+          },
+          { forceStorage: true, timeoutMs: PDF_STORAGE_UPLOAD_TIMEOUT_MS }
+        );
+        const pdfUrl = String(uploaded.dataUrl || '').trim();
+        scanPdfUrl = pdfUrl.startsWith('http') ? pdfUrl : scanPdfUrl;
+      } catch (uploadErr) {
+        console.warn('Tarama PDF Storage yüklemesi ertelendi (gönderimde tekrar denenecek):', uploadErr);
+      }
+    }
   } catch (err) {
     console.warn('Tarama PDF oluşturulamadı:', err);
   }
@@ -329,6 +358,31 @@ export async function prepareGuvenlikEvrakFileForQueue(
   };
 
   return { slot, scanPdfUrl };
+}
+
+export async function persistGuvenlikScanPdf(
+  docId: string,
+  scanPdfUrl?: string
+): Promise<string | undefined> {
+  const raw = String(scanPdfUrl || '').trim();
+  if (!raw) return undefined;
+  if (/^https?:\/\//i.test(raw)) return raw;
+
+  const uploaded = await uploadGuvenlikFotoSlot(
+    docId,
+    {
+      id: `scan_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      dataUrl: raw,
+      fileName: 'tarama.pdf',
+      fileType: 'application/pdf',
+      metod: 'EVRAK',
+    },
+    { forceStorage: true, timeoutMs: PDF_STORAGE_UPLOAD_TIMEOUT_MS }
+  );
+  const url = String(uploaded.dataUrl || '').trim();
+  if (/^https?:\/\//i.test(url)) return url;
+  if (url.startsWith('data:') && url.length <= MAX_SLOT_CHARS) return url;
+  throw new Error('Tarama PDF Storage’a yüklenemedi. Bağlantıyı kontrol edip tekrar deneyin.');
 }
 
 export async function uploadGuvenlikFotoPaket(
@@ -348,7 +402,7 @@ export async function uploadGuvenlikFotoPaket(
     kalemFotolar: await mapSlots(paket.kalemFotolar || []),
     firmaFotolar: await mapSlots(paket.firmaFotolar || []),
     faturaFotolar: await mapSlots(paket.faturaFotolar || []),
-    scanPdfUrl: paket.scanPdfUrl,
+    scanPdfUrl: await persistGuvenlikScanPdf(docId, paket.scanPdfUrl),
   };
 }
 

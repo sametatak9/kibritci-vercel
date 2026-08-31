@@ -32,6 +32,10 @@ Zorunlu değil (istemci `firebase-applet-config.json` ile `kibritci-erp`’ye ba
 
 Akvizyon nöbet kapanışı: her gün 18:00 UTC (21:00 İstanbul) → `GET /api/cron/akvizyon-nobet-kapat`.
 
+## Kapı evrakı (Güvenlik)
+
+Ana Firma evrakı genelde **fatura** veya **irsaliye**dir. Güvenlik sekmesinde fotoğraf veya PDF yüklenir; fotoğraftan taranmış PDF otomatik oluşur ve Firebase Storage’a yazılır. Kayıt hem kapı defterinde hem Fatura / İrsaliye sekmelerinde görünür (`Tarama` ile açılır). Taşeron evrakı ayrı akar; yönetici onayı Ana Firma için geçerlidir.
+
 ## Sağlık
 
 - `GET /api/health` — sunucu ayakta

@@ -21,6 +21,7 @@ import {
   suggestSatinAlmaForKapiEvrak,
   suggestStokFromDb,
   upsertKapiDraftIrsaliye,
+  upsertKapiDraftFatura,
   finalizeKapiIrsaliyeApproval,
 } from '../lib/kapiIrsaliyeUtils';
 import { resolveGuvenlikEvrakProvenance } from '../lib/evrakProvenance';
@@ -31,6 +32,7 @@ import {
   createEmptyUploadKalem,
   hasEvrakFotografi,
   pickPrimaryFotoUrl,
+  pickEvrakDisplayUrl,
   formatEvrakGonderimLabel,
 } from '../lib/guvenlikEvrakFotolar';
 import {
@@ -75,6 +77,7 @@ import {
   GuvenlikKayitDuzenleModal,
 } from './GuvenlikKayitDuzenleModal';
 import { GuvenlikGecmisEvrakListesi } from './GuvenlikGecmisEvrakListesi';
+import { EvrakTaramaOnizleme, openEvrakTarama } from './evrakUi/EvrakTaramaOnizleme';
 import { formatFirestoreWriteError } from '../lib/authWriteGuard';
 import { normalizeDateKey, todayDateKey, formatDateLabelTr } from '../lib/dateKeyUtils';
 import {
@@ -753,6 +756,26 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
               updates.cariOneriler = suggestCariFromDb(updates.firma, cariKartlarLive, 5);
             }
           }
+          try {
+            const { fatura, summary } = await upsertKapiDraftFatura({
+              guvenlikEvrakId: docId,
+              firma: updates.firma || existingFirma,
+              faturaNo: updates.evrakNo || docId,
+              tarih: existing.tarih || new Date().toISOString().split('T')[0],
+              evrakUrl: existing.scanPdfUrl || fotoUrl,
+              kalemler: updates.kalemler || [],
+              toplamTutar: updates.toplamTutar,
+              kdvTutar: updates.kdvTutar,
+              genelToplam: updates.genelToplam,
+              cariKartlar: cariKartlarLive,
+              kaydeden: currentUser?.email || 'nobetci_guvenlik',
+            });
+            updates.faturaId = fatura.id;
+            if (summary.cariKartId) updates.cariKartId = summary.cariKartId;
+            if (summary.cariUnvan) updates.firma = summary.cariUnvan;
+          } catch (draftErr) {
+            console.warn('[kapı] YZ fatura taslağı:', draftErr);
+          }
         } else if (evrakTuru === 'İRSALİYE') {
           updates.evrakNo = existingNo || parsed.irsaliyeNo || '';
           updates.firma = existingFirma || parsed.firma || '';
@@ -799,7 +822,7 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
               firma: firmaForMatch,
               irsaliyeNo: updates.evrakNo || docId,
               tarih: kapiTarih,
-              fotoUrl,
+              fotoUrl: existing.scanPdfUrl || fotoUrl,
               kalemler: updates.kalemler,
               cariKartlar: liveCari,
               stokKartlar: liveStok,
@@ -1153,6 +1176,7 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
           const evrakNo = String(item.evrakNo || '').trim();
           const plaka = String(item.plaka || '').trim();
           const saIdBound = resolvedSaByQueueId.get(item.id) || String(item.saId || '').trim();
+          const evrakGoruntu = lean.scanPdfUrl || item.scanPdfUrl || lean.fotoUrl || '';
 
           const firmaKaynakTipi = item.firmaKaynakTipi === 'TASERON' ? 'TASERON' : 'ANA_FIRMA';
           const isTaseronEvrak = firmaKaynakTipi === 'TASERON';
@@ -1173,7 +1197,7 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
             kalemFotolar: lean.kalemFotolar,
             firmaFotolar: lean.firmaFotolar,
             faturaFotolar: lean.faturaFotolar,
-            scanPdfUrl: lean.scanPdfUrl || item.scanPdfUrl || '',
+            scanPdfUrl: evrakGoruntu,
             kalemler: isTaseronEvrak ? [] : matchedKalemler,
             fileName: primarySlot?.fileName || 'evrak_paketi',
             fileType: primarySlot?.fileType || 'image/jpeg',
@@ -1243,7 +1267,7 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
                 firma: firmaAdi,
                 irsaliyeNo: evrakNo || uniqueId,
                 tarih: islemTarihi,
-                fotoUrl: lean.fotoUrl || '',
+                fotoUrl: evrakGoruntu,
                 kalemler: matchedKalemler,
                 cariKartlar: liveCari,
                 stokKartlar: stokKartlarLive,
@@ -1266,10 +1290,42 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
             }
           }
 
-          if (!isTaseronEvrak && lean.fotoUrl) {
+          // Ana Firma fatura: muhasebe defterine taranmış PDF ile düşer (onay öncesi)
+          if (!isTaseronEvrak && item.evrakTuru === 'FATURA') {
+            try {
+              const { fatura, summary } = await upsertKapiDraftFatura({
+                guvenlikEvrakId: uniqueId,
+                firma: firmaAdi,
+                faturaNo: evrakNo || uniqueId,
+                tarih: islemTarihi,
+                evrakUrl: evrakGoruntu,
+                kalemler: matchedKalemler,
+                cariKartlar: liveCari,
+                kaydeden: currentUser?.email || 'nobetci_guvenlik',
+              });
+              await updateDoc(doc(db, 'guvenlikGelenEvraklar', uniqueId), cleanUndefined({
+                faturaId: fatura.id,
+                matchSummary: {
+                  cariMatched: summary.cariMatched,
+                  cariKartId: summary.cariKartId,
+                  cariUnvan: summary.cariUnvan,
+                  stokLinked: 0,
+                  stokTotal: matchedKalemler.length,
+                  unmatchedKalemler: [],
+                },
+                cariKartId: summary.cariKartId || cariKartId || '',
+                firma: summary.cariUnvan || firmaAdi,
+                donusumKaynagi: 'KAPI_EVRAK',
+              }));
+            } catch (draftErr) {
+              console.warn('[kapı] taslak fatura:', draftErr);
+            }
+          }
+
+          if (!isTaseronEvrak && (lean.fotoUrl || evrakGoruntu)) {
             void triggerBackgroundAiParsing(
               uniqueId,
-              lean.fotoUrl,
+              evrakGoruntu || lean.fotoUrl,
               newEvrak.evrakTuru as string,
               {
                 firmaHint: firmaAdi || undefined,
@@ -1391,7 +1447,7 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
               firma: String(patch.firma || firma),
               irsaliyeNo: String(patch.evrakNo || editingEvrak.id),
               tarih: String(patch.tarih || islemTarihi),
-              fotoUrl: editingEvrak.fotoUrl,
+              fotoUrl: pickEvrakDisplayUrl(editingEvrak) || editingEvrak.fotoUrl,
               kalemler: matched.kalemler,
               cariKartlar: cariKartlarLive,
               stokKartlar: stokKartlarLive,
@@ -1403,6 +1459,29 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
           }
         } catch (draftErr) {
           console.warn('Taslak irsaliye güncellenemedi (evrak yine kaydedilecek):', draftErr);
+        }
+      } else if (editEvrakTuru === 'FATURA' && firma) {
+        try {
+          const { fatura, summary } = await upsertKapiDraftFatura({
+            guvenlikEvrakId: editingEvrak.id,
+            firma,
+            faturaNo: String(patch.evrakNo || editingEvrak.id),
+            tarih: String(patch.tarih || islemTarihi),
+            evrakUrl: pickEvrakDisplayUrl(editingEvrak) || editingEvrak.fotoUrl,
+            kalemler: cleanedKalemler,
+            toplamTutar: Number(editingEvrak.toplamTutar) || 0,
+            kdvTutar: Number(editingEvrak.kdvTutar) || 0,
+            genelToplam: Number(editingEvrak.genelToplam) || 0,
+            cariKartlar: cariKartlarLive,
+            kaydeden: currentUser?.email || 'nobetci_guvenlik',
+          });
+          patch.faturaId = fatura.id;
+          if (summary.cariKartId) {
+            patch.cariKartId = summary.cariKartId;
+            patch.firma = summary.cariUnvan;
+          }
+        } catch (draftErr) {
+          console.warn('Taslak fatura güncellenemedi (evrak yine kaydedilecek):', draftErr);
         }
       } else if (firma && !editCariKartId) {
         const oneri = suggestCariFromDb(firma, cariKartlarLive, 1)[0];
@@ -1470,7 +1549,7 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
             firma: oneri.unvan,
             irsaliyeNo: evrak.evrakNo || evrak.id,
             tarih: evrak.tarih || islemTarihi,
-            fotoUrl: evrak.fotoUrl,
+            fotoUrl: pickEvrakDisplayUrl(evrak) || evrak.fotoUrl,
             kalemler: matched.kalemler,
             cariKartlar: cariKartlarLive,
             stokKartlar: stokKartlarLive,
@@ -3371,9 +3450,9 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
                 </span>
                 <p className="text-[10px] text-slate-600 -mt-2 bg-teal-50 border border-teal-200 rounded-xl px-3 py-2 leading-relaxed">
                   <strong>1. adım:</strong> Evrak <strong>Ana Firma (Kibritçi İnşaat)</strong> mı yoksa{' '}
-                  <strong>Taşeron Firma</strong> mı? Taşeron için taşeron seçimi + evrak cinsi + <strong>tek foto</strong> yeter;
-                  cariye işlenir. Ana Firma için gönderen firma, kalem/kilo, evrak no/tarih ve <strong>tek foto</strong> zorunlu;
-                  tarama PDF otomatik oluşur, yönetici onayına gider.
+                  <strong>Taşeron Firma</strong> mı? Ana Firma evrakı genelde <strong>fatura</strong> veya{' '}
+                  <strong>irsaliye</strong>dir — fotoğraf/PDF yüklenir, taranmış PDF oluşur, Fatura / İrsaliye
+                  sekmelerinde görünür. Taşeron için taşeron seçimi + evrak cinsi + tek foto yeter.
                 </p>
 
                 <div className="flex flex-wrap gap-2">
@@ -3581,8 +3660,9 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
                         ) : (
                           <>
                         <div className="rounded-xl border border-amber-300 bg-amber-50/60 px-3 py-2 text-[9px] text-amber-950 font-semibold leading-relaxed">
-                          <strong>Ana Firma · Kibritçi İnşaat</strong> — Gönderen firma, evrak tarihi/no, kalem/kilo
-                          ve <strong>tek evrak fotoğrafı</strong> zorunlu (tarama PDF otomatik). Yönetici onayına gider.
+                          <strong>Ana Firma · Kibritçi İnşaat</strong> — Tür olarak fatura veya irsaliye seçin.
+                          Gönderen firma, evrak no ve <strong>foto / PDF</strong> zorunlu. Fotoğraftan taranmış PDF
+                          otomatik oluşur; kayıt Fatura veya İrsaliye defterinde görünür, yönetici onayına gider.
                         </div>
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs pr-6">
                           <div className="space-y-1">
@@ -3631,7 +3711,7 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
                             <p className="text-[9px] font-black uppercase tracking-wider text-amber-900">
                               {item.evrakTuru === 'İRSALİYE'
                                 ? 'İrsaliye / taşıma rehberi (zorunlu)'
-                                : 'Fatura rehberi'}
+                                : 'Fatura rehberi — taranmış belge muhasebe defterine düşer'}
                             </p>
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                               <div className="space-y-1">
@@ -3726,11 +3806,13 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
                           )}
                         </div>
 
-                        {item.evrakTuru === 'İRSALİYE' && (
+                        {(item.evrakTuru === 'İRSALİYE' || item.evrakTuru === 'FATURA') && (
                           <div className="space-y-2 rounded-xl border border-indigo-100 bg-white p-3">
                             <div className="flex items-center justify-between gap-2">
                               <p className="text-[9px] font-black uppercase text-indigo-700 tracking-wider">
-                                Gönderilen kalemler · isim + kilo *
+                                {item.evrakTuru === 'FATURA'
+                                  ? 'Fatura kalemleri · isim + miktar'
+                                  : 'Gönderilen kalemler · isim + kilo *'}
                               </p>
                               <button
                                 type="button"
@@ -3963,10 +4045,10 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
                 <div className="flex flex-col md:flex-row md:items-center justify-between border-b pb-2 gap-3">
                   <div>
                     <span className="font-display font-black text-xs text-slate-800 uppercase tracking-widest block">
-                      🗂️ GÖNDERİLEN EVRAK HAREKETLERİ LİSTESİ
+                      🗂️ KAPIDA İŞLENEN EVRAK DEFTERİ
                     </span>
                     <span className="text-[10px] text-slate-400 font-bold block mt-0.5">
-                      Onaylanan, reddedilen veya bekleyen tüm kayıtlar.
+                      Ana Firma fatura / irsaliye taraması burada listelenir. Küçük önizlemeye tıklayınca PDF açılır.
                     </span>
                   </div>
 
@@ -4035,7 +4117,8 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
                     <table className="w-full text-left text-xs border-collapse">
                       <thead>
                         <tr className="bg-slate-50 text-slate-500 font-bold uppercase text-[9px] border-b border-slate-200">
-                          <th className="p-3">Evrak Bilgisi / Dosya</th>
+                          <th className="p-3 w-[72px]">Tarama</th>
+                          <th className="p-3">Evrak / Firma</th>
                           <th className="p-3">Tür</th>
                           <th className="p-3">Açıklama</th>
                           <th className="p-3">Gönderilme</th>
@@ -4059,21 +4142,26 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
                           })
                           .map(e => (
                             <tr key={e.id} className="hover:bg-slate-50/50 transition">
+                              <td className="p-3">
+                                <EvrakTaramaOnizleme
+                                  url={pickEvrakDisplayUrl(e)}
+                                  fileName={e.fileName || e.evrakNo || 'Tarama PDF'}
+                                  compact
+                                />
+                              </td>
                               <td className="p-3 font-medium">
-                                <div className="text-slate-800 font-bold truncate max-w-[180px]">{e.fileName || 'Belge'}</div>
+                                <div className="text-slate-800 font-bold truncate max-w-[180px]">{e.fileName || e.evrakNo || 'Belge'}</div>
+                                <div className="text-[10px] text-slate-700 font-semibold truncate max-w-[180px]">{e.firma || '—'}</div>
                                 <div className="text-[10px] text-indigo-500 font-mono mt-0.5">{e.id}</div>
-                                {pickPrimaryFotoUrl(e) && (
-                                  <a
-                                    href="#"
-                                    onClick={(event) => {
-                                      event.preventDefault();
-                                      openBase64InNewTab(pickPrimaryFotoUrl(e), e.fileName || 'Belge');
-                                    }}
-                                    className="text-[9px] text-indigo-600 hover:underline flex items-center gap-0.5 mt-1"
+                                {pickEvrakDisplayUrl(e) ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => openEvrakTarama(pickEvrakDisplayUrl(e), e.fileName || 'Belge')}
+                                    className="text-[9px] text-indigo-600 hover:underline font-bold mt-1 cursor-pointer"
                                   >
-                                    <span>👁️ Evrakı Görüntüle</span>
-                                  </a>
-                                )}
+                                    Taranmış PDF aç
+                                  </button>
+                                ) : null}
                               </td>
                               <td className="p-3">
                                 <span className={`text-[9px] font-bold px-2 py-0.5 rounded border ${
@@ -4206,6 +4294,36 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
                     </div>
 
                     <form onSubmit={handleUpdateGelenEvrak} className="space-y-4 text-xs">
+                      {pickEvrakDisplayUrl(editingEvrak) ? (
+                        <div className="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 p-2.5">
+                          <EvrakTaramaOnizleme
+                            url={pickEvrakDisplayUrl(editingEvrak)}
+                            fileName={editingEvrak.fileName || editingEvrak.evrakNo || 'Tarama PDF'}
+                          />
+                          <div className="min-w-0">
+                            <p className="text-[10px] font-black uppercase text-slate-600">Yüklenen evrak</p>
+                            <p className="text-[11px] font-bold text-slate-800 truncate">
+                              {editingEvrak.fileName || 'Taranmış PDF'}
+                            </p>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                openEvrakTarama(
+                                  pickEvrakDisplayUrl(editingEvrak),
+                                  editingEvrak.fileName || 'Tarama PDF'
+                                )
+                              }
+                              className="text-[10px] font-bold text-indigo-600 underline cursor-pointer mt-0.5"
+                            >
+                              Taranmış PDF’yi aç
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <p className="text-[10px] font-semibold text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
+                          Bu kayıtta görüntülenecek tarama yok. Yeni evrak paketinden foto/PDF yükleyin.
+                        </p>
+                      )}
                       <div className="space-y-1">
                         <label className="text-[10px] font-bold text-slate-500 uppercase block">Evrak Türü</label>
                         <select
@@ -4264,7 +4382,7 @@ export const GuvenlikScreen: React.FC<GuvenlikScreenProps> = ({
                         </div>
                       </div>
 
-                      {editEvrakTuru === 'İRSALİYE' && (
+                      {(editEvrakTuru === 'İRSALİYE' || editEvrakTuru === 'FATURA') && (
                         <div className="rounded-xl border border-indigo-200 bg-indigo-50/50 p-2.5 space-y-2">
                           <div className="flex items-center justify-between gap-2">
                             <p className="text-[9px] font-black uppercase text-indigo-800 tracking-wider">

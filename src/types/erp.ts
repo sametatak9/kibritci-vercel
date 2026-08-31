@@ -449,8 +449,11 @@ export interface Fatura {
   kalemler: FaturaItem[];
   bagliIrsaliyeler: string[];
   eImzalar?: string[];
-  /** IR_FATURA | SA_DONUSUM | MANUEL_BAGLAMA | ARSIV */
+  /** IR_FATURA | SA_DONUSUM | MANUEL_BAGLAMA | ARSIV | KAPI_EVRAK */
   donusumKaynagi?: string;
+  /** Kapı / güvenlik evrakı */
+  kaynak?: 'KAPI_EVRAK' | string;
+  guvenlikEvrakId?: string;
 }
 
 export type KasaOdemeDurumu = 'BORC' | 'PERSONEL_ODEDI' | 'KASA_ODEDI';

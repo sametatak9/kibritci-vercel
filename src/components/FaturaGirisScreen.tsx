@@ -24,6 +24,7 @@ import { openEvrakZincirRaporu } from '../lib/evrakZincirRapor';
 import { resolveFaturaProvenance } from '../lib/evrakProvenance';
 import { EvrakPageShell, EvrakSectionHeader } from './evrakUi/EvrakScreenChrome';
 import { EvrakIslemMenu } from './evrakUi/EvrakIslemMenu';
+import { openEvrakTarama } from './evrakUi/EvrakTaramaOnizleme';
 import {
   MuhasebeAiButton,
   MuhasebeAttach,
@@ -98,7 +99,7 @@ export const FaturaGirisScreen: React.FC<FaturaGirisScreenProps> = ({
 
   // Filters
   const [searchTerm, setSearchTerm] = useState("");
-  const [archiveFilter, setArchiveFilter] = useState<'ALL' | 'BAGIMSIZ' | 'CARI_YOK'>('ALL');
+  const [archiveFilter, setArchiveFilter] = useState<'ALL' | 'BAGIMSIZ' | 'CARI_YOK' | 'KAPI'>('ALL');
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -555,6 +556,12 @@ export const FaturaGirisScreen: React.FC<FaturaGirisScreenProps> = ({
       .filter((ft) => {
         if (archiveFilter === 'BAGIMSIZ' && faturaIsLinked(ft)) return false;
         if (archiveFilter === 'CARI_YOK' && ft.cariKartId) return false;
+        if (
+          archiveFilter === 'KAPI' &&
+          !(ft.donusumKaynagi === 'KAPI_EVRAK' || ft.kaynak === 'KAPI_EVRAK' || ft.guvenlikEvrakId)
+        ) {
+          return false;
+        }
         if (!q) return true;
         return (
           String(ft.faturaNo || '').toLocaleLowerCase('tr-TR').includes(q) ||
@@ -806,8 +813,20 @@ export const FaturaGirisScreen: React.FC<FaturaGirisScreenProps> = ({
             }
             attachments={
               <div className="flex flex-wrap gap-2">
-                <MuhasebeAttach label="Fatura belgesi" loaded={Boolean(ftAttachmentUrl)} onFile={handleFileChange} />
-                <MuhasebeAttach label="İmzalı nüsha" loaded={Boolean(ftSignedAttachmentUrl)} onFile={handleSignedFileChange} />
+                <MuhasebeAttach
+                  label="Fatura belgesi"
+                  loaded={Boolean(ftAttachmentUrl)}
+                  onFile={handleFileChange}
+                  previewUrl={ftAttachmentUrl}
+                  onPreview={() => openEvrakTarama(ftAttachmentUrl, ftNo || 'Fatura taraması')}
+                />
+                <MuhasebeAttach
+                  label="İmzalı nüsha"
+                  loaded={Boolean(ftSignedAttachmentUrl)}
+                  onFile={handleSignedFileChange}
+                  previewUrl={ftSignedAttachmentUrl}
+                  onPreview={() => openEvrakTarama(ftSignedAttachmentUrl, 'İmzalı fatura')}
+                />
               </div>
             }
             totals={<MuhasebeTotals araToplam={ftAra} kdv={ftKdv} genel={ftAra + ftKdv} />}
@@ -855,6 +874,7 @@ export const FaturaGirisScreen: React.FC<FaturaGirisScreenProps> = ({
                 <div className="flex gap-1">
                   {([
                     ['ALL', 'Tümü'],
+                    ['KAPI', 'Kapı taraması'],
                     ['BAGIMSIZ', 'Bağımsız'],
                     ['CARI_YOK', 'Cari yok'],
                   ] as const).map(([id, label]) => (
@@ -932,6 +952,15 @@ export const FaturaGirisScreen: React.FC<FaturaGirisScreenProps> = ({
                               >
                                 Düzenle
                               </button>
+                              {ft.evrakUrl ? (
+                                <button
+                                  type="button"
+                                  onClick={() => openEvrakTarama(ft.evrakUrl, ft.faturaNo || 'Fatura taraması')}
+                                  className="text-[10px] bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded px-2 py-1 font-bold cursor-pointer"
+                                >
+                                  Tarama
+                                </button>
+                              ) : null}
                               <button
                                 type="button"
                                 onClick={() => handlePreviewPdf(ft)}

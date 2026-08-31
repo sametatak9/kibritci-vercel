@@ -40,6 +40,7 @@ import {
 } from '../lib/micirUtils';
 import { EvrakPageShell, EvrakSectionHeader } from './evrakUi/EvrakScreenChrome';
 import { EvrakIslemMenu } from './evrakUi/EvrakIslemMenu';
+import { openEvrakTarama } from './evrakUi/EvrakTaramaOnizleme';
 import {
   MuhasebeAiButton,
   MuhasebeAttach,
@@ -134,7 +135,7 @@ export const IrsaliyeGirisScreen: React.FC<IrsaliyeGirisScreenProps> = ({
   const [suggestedStokCat, setSuggestedStokCat] = useState("Kaba İnşaat İmalatı");
   const [suggestedStokUnit, setSuggestedStokUnit] = useState("ADET");
   const [archiveSearch, setArchiveSearch] = useState("");
-  const [archiveFilter, setArchiveFilter] = useState<'ALL' | 'CARI_YOK' | 'STOK_EKSIK' | 'FATURASIZ'>('ALL');
+  const [archiveFilter, setArchiveFilter] = useState<'ALL' | 'KAPI' | 'CARI_YOK' | 'STOK_EKSIK' | 'FATURASIZ'>('ALL');
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -679,6 +680,12 @@ export const IrsaliyeGirisScreen: React.FC<IrsaliyeGirisScreenProps> = ({
     const q = archiveSearch.trim().toLocaleLowerCase('tr-TR');
     return [...irsaliyeler]
       .filter((ir) => {
+        if (
+          archiveFilter === 'KAPI' &&
+          !(ir.kaynak === 'KAPI_EVRAK' || ir.guvenlikEvrakId || String(ir.donusumKaynagi || '').startsWith('KAPI'))
+        ) {
+          return false;
+        }
         if (archiveFilter === 'CARI_YOK' && ir.cariKartId) return false;
         if (archiveFilter === 'STOK_EKSIK') {
           const link = countLinkedStok(ir.kalemler || []);
@@ -886,8 +893,20 @@ export const IrsaliyeGirisScreen: React.FC<IrsaliyeGirisScreenProps> = ({
             }
             attachments={
               <div className="flex flex-wrap gap-2">
-                <MuhasebeAttach label="Evrak fotoğrafı" loaded={Boolean(irAttachmentUrl)} onFile={handleFileChange} />
-                <MuhasebeAttach label="İmzalı evrak" loaded={Boolean(irSignedAttachmentUrl)} onFile={(e) => handleSignedFileChange(e)} />
+                <MuhasebeAttach
+                  label="Evrak fotoğrafı"
+                  loaded={Boolean(irAttachmentUrl)}
+                  onFile={handleFileChange}
+                  previewUrl={irAttachmentUrl}
+                  onPreview={() => openEvrakTarama(irAttachmentUrl, irNo || 'İrsaliye taraması')}
+                />
+                <MuhasebeAttach
+                  label="İmzalı evrak"
+                  loaded={Boolean(irSignedAttachmentUrl)}
+                  onFile={(e) => handleSignedFileChange(e)}
+                  previewUrl={irSignedAttachmentUrl}
+                  onPreview={() => openEvrakTarama(irSignedAttachmentUrl, 'İmzalı irsaliye')}
+                />
               </div>
             }
           />
@@ -950,6 +969,7 @@ export const IrsaliyeGirisScreen: React.FC<IrsaliyeGirisScreenProps> = ({
                 <div className="flex gap-1 flex-wrap">
                   {([
                     ['ALL', 'Tümü'],
+                    ['KAPI', 'Kapı taraması'],
                     ['CARI_YOK', 'Cari yok'],
                     ['STOK_EKSIK', 'Stok eksik'],
                     ['FATURASIZ', `Faturasız${faturasizCount > 0 ? ` (${faturasizCount})` : ''}`],
@@ -1081,6 +1101,15 @@ export const IrsaliyeGirisScreen: React.FC<IrsaliyeGirisScreenProps> = ({
                               >
                                 Düzenle
                               </button>
+                              {ir.fisEvrakUrl ? (
+                                <button
+                                  type="button"
+                                  onClick={() => openEvrakTarama(ir.fisEvrakUrl, ir.irsaliyeNo || 'İrsaliye taraması')}
+                                  className="text-[10px] bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded px-2 py-1 font-bold cursor-pointer"
+                                >
+                                  Tarama
+                                </button>
+                              ) : null}
                               <button
                                 type="button"
                                 onClick={() => handlePreviewIrsaliyePdf(ir)}

@@ -161,17 +161,32 @@ export function MuhasebeAttach({
   label,
   loaded,
   onFile,
+  previewUrl,
+  onPreview,
 }: {
   label: string;
   loaded?: boolean;
   onFile: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  previewUrl?: string | null;
+  onPreview?: () => void;
 }) {
   return (
-    <label className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-3 py-2 rounded-lg border border-dashed border-slate-300 bg-slate-50 text-slate-600 hover:bg-white cursor-pointer">
-      <Paperclip className="w-3.5 h-3.5" />
-      {loaded ? `✓ ${label}` : label}
-      <input type="file" accept="image/*,application/pdf" className="hidden" onChange={onFile} />
-    </label>
+    <div className="inline-flex items-center gap-1.5 flex-wrap">
+      <label className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-3 py-2 rounded-lg border border-dashed border-slate-300 bg-slate-50 text-slate-600 hover:bg-white cursor-pointer">
+        <Paperclip className="w-3.5 h-3.5" />
+        {loaded ? `✓ ${label}` : label}
+        <input type="file" accept="image/*,application/pdf" className="hidden" onChange={onFile} />
+      </label>
+      {previewUrl && onPreview ? (
+        <button
+          type="button"
+          onClick={onPreview}
+          className="text-[11px] font-bold text-indigo-700 underline cursor-pointer"
+        >
+          Taramayı aç
+        </button>
+      ) : null}
+    </div>
   );
 }
 

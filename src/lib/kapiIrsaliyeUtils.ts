@@ -2,6 +2,8 @@ import type { Dispatch, SetStateAction } from 'react';
 import {
   CariKart,
   CariKartIslem,
+  Fatura,
+  FaturaItem,
   Irsaliye,
   IrsaliyeItem,
   SatinAlmaTalebi,
@@ -355,6 +357,84 @@ export async function upsertKapiDraftIrsaliye(opts: {
   return {
     irsaliye,
     summary: withSaMatchSummary(summary, saId),
+  };
+}
+
+type KapiFaturaKalemInput = {
+  id?: string;
+  urunAdi?: string;
+  miktar?: number | string;
+  birim?: string;
+  birimFiyat?: number | string;
+  kdvOran?: number | string;
+  toplam?: number | string;
+  stokKartId?: string;
+};
+
+/**
+ * Ana Firma kapı faturası — yönetici onayı öncesi taslak (stok / cari işlem yazılmaz).
+ * Taranmış PDF `evrakUrl` olarak fatura arşivinde görünür.
+ */
+export async function upsertKapiDraftFatura(opts: {
+  guvenlikEvrakId: string;
+  firma: string;
+  faturaNo: string;
+  tarih: string;
+  evrakUrl?: string;
+  kalemler?: KapiFaturaKalemInput[];
+  toplamTutar?: number;
+  kdvTutar?: number;
+  genelToplam?: number;
+  cariKartlar: CariKart[];
+  kaydeden?: string;
+}): Promise<{
+  fatura: Fatura;
+  summary: Pick<KapiMatchSummary, 'cariMatched' | 'cariKartId' | 'cariUnvan'>;
+}> {
+  const cariHit = resolveCariKartId(opts.firma, opts.cariKartlar);
+  const kalemler: FaturaItem[] = (opts.kalemler || [])
+    .map((k, i) => {
+      const miktar = Number(String(k.miktar ?? '').replace(',', '.')) || 0;
+      const birimFiyat = Number(k.birimFiyat) || 0;
+      return {
+        id: k.id || `fk_${i}`,
+        urunAdi: String(k.urunAdi || '').trim(),
+        miktar,
+        birim: String(k.birim || 'Adet').trim() || 'Adet',
+        birimFiyat,
+        kdvOran: Number(k.kdvOran) || 20,
+        toplam: Number(k.toplam) || miktar * birimFiyat,
+        stokKartId: k.stokKartId || undefined,
+      };
+    })
+    .filter((k) => k.urunAdi);
+
+  const fatura: Fatura = {
+    id: opts.guvenlikEvrakId,
+    faturaNo: String(opts.faturaNo || opts.guvenlikEvrakId).trim() || opts.guvenlikEvrakId,
+    tarih: opts.tarih || new Date().toISOString().split('T')[0],
+    cariKartId: cariHit.cariKartId || '',
+    cariUnvan: cariHit.cariUnvan || String(opts.firma || '').trim() || 'Bilinmeyen Firma',
+    toplamTutar: Number(opts.toplamTutar) || 0,
+    kdvTutar: Number(opts.kdvTutar) || 0,
+    genelToplam: Number(opts.genelToplam) || 0,
+    durum: 'KONTROL BEKLEYOR',
+    evrakUrl: opts.evrakUrl || '',
+    kalemler,
+    bagliIrsaliyeler: [],
+    donusumKaynagi: 'KAPI_EVRAK',
+    kaynak: KAPI_EVRAK_KAYNAK,
+    guvenlikEvrakId: opts.guvenlikEvrakId,
+  };
+
+  await saveDocument('faturalar', fatura);
+  return {
+    fatura,
+    summary: {
+      cariMatched: cariHit.matched,
+      cariKartId: cariHit.cariKartId,
+      cariUnvan: cariHit.cariUnvan || fatura.cariUnvan,
+    },
   };
 }
 

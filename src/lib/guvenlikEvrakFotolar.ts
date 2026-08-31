@@ -53,6 +53,16 @@ export function slotDisplayUrl(slot?: Pick<GuvenlikFotoSlot, 'dataUrl'> | null):
   return String(slot?.dataUrl || '').trim();
 }
 
+export function isPdfUrl(url?: string | null): boolean {
+  const u = String(url || '').trim().toLowerCase();
+  if (!u) return false;
+  return (
+    u.startsWith('data:application/pdf') ||
+    u.includes('application/pdf') ||
+    /\.pdf(\?|#|$)/i.test(u)
+  );
+}
+
 export function isLikelyImageUrl(url: string): boolean {
   const u = String(url || '').trim().toLowerCase();
   if (!u) return false;

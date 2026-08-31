@@ -76,7 +76,7 @@ import {
   makineEtiketi,
 } from '../lib/taseronUtils';
 import type { OperatorFaaliyet } from '../types/erp';
-import { pickPrimaryFotoUrl } from '../lib/guvenlikEvrakFotolar';
+import { pickEvrakDisplayUrl, pickPrimaryFotoUrl } from '../lib/guvenlikEvrakFotolar';
 import { toAiParsePayload } from '../lib/guvenlikFotoStorage';
 import { GOTURU_DEFAULT_GOREV, GOTURU_FIRMA_ADI, isGoturuPersonelTalep } from '../lib/goturuPersonelTalep';
 import {
@@ -2645,7 +2645,7 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
           kdvTutar: Number(faturaKdv),
           genelToplam: Number(faturaGenelToplam),
           durum: 'ONAYLANDI',
-          evrakUrl: pickPrimaryFotoUrl(activeGateDoc) || "",
+          evrakUrl: pickEvrakDisplayUrl(activeGateDoc) || pickPrimaryFotoUrl(activeGateDoc) || "",
           kalemler: faturaKalemler.map(x => ({
             urunAdi: x.urunAdi,
             amount: Number(x.miktar),
@@ -2656,6 +2656,9 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
             toplam: Number(x.toplam || 0)
           })),
           bagliIrsaliyeler: [],
+          donusumKaynagi: 'KAPI_EVRAK',
+          kaynak: 'KAPI_EVRAK',
+          guvenlikEvrakId: docId,
           onaylayanYonetici: currentUser?.email || 'Yönetici',
           onayTarihi: new Date().toISOString()
         };
@@ -2702,7 +2705,7 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
           irsaliyeNo,
           firma: rematched.summary.cariUnvan || irsaliyeFirma,
           tarih: irsaliyeTarih,
-          fotoUrl: pickPrimaryFotoUrl(activeGateDoc) || '',
+          fotoUrl: pickEvrakDisplayUrl(activeGateDoc) || pickPrimaryFotoUrl(activeGateDoc) || '',
           kalemler: rematched.kalemler,
           onaylayan: currentUser?.email || 'Yönetici',
           cariKartlar: liveCari,
@@ -2766,7 +2769,7 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
           aciklama: makbuzAciklama || 'Güvenlik kapısı makbuzu',
           hareketTipi: makbuzTip,
           kategori: 'GÜVENLİK_MAKBUZ',
-          evrakUrl: pickPrimaryFotoUrl(activeGateDoc) || "",
+          evrakUrl: pickEvrakDisplayUrl(activeGateDoc) || pickPrimaryFotoUrl(activeGateDoc) || "",
           durum: 'ONAYLANDI',
           kaydeden: activeGateDoc.kaydeden || '',
           onaylayanYonetici: currentUser?.email || 'Yönetici',
@@ -2781,7 +2784,7 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
           saat: new Date().toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' }),
           evrakNo: activeGateDoc.evrakNo || 'GENEL',
           aciklama: genelAciklama || activeGateDoc.aciklama || 'Genel Evrak Teslimi',
-          fotoUrl: pickPrimaryFotoUrl(activeGateDoc) || '',
+          fotoUrl: pickEvrakDisplayUrl(activeGateDoc) || pickPrimaryFotoUrl(activeGateDoc) || '',
           durum: 'ONAYLANDI',
           onayleyen: currentUser?.email || 'Yönetici'
         };

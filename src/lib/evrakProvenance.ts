@@ -96,11 +96,22 @@ export function resolveFaturaProvenance(ft: {
   saId?: string | null;
   bagliIrsaliyeler?: string[] | null;
   donusumKaynagi?: string | null;
+  kaynak?: string | null;
+  guvenlikEvrakId?: string | null;
 }): ProvenanceBadge[] {
   const out: ProvenanceBadge[] = [];
   const saId = String(ft.saId || '').trim();
   const bagli = ft.bagliIrsaliyeler || [];
-  const kaynak = String(ft.donusumKaynagi || '').trim();
+  const kaynak = String(ft.donusumKaynagi || ft.kaynak || '').trim();
+
+  if (kaynak === 'KAPI_EVRAK' || ft.guvenlikEvrakId) {
+    out.push({
+      kind: 'KAPI_EVRAK',
+      label: 'Kapı · fatura',
+      className: `${BADGE_BASE} bg-amber-50 text-amber-900 border-amber-200`,
+      title: 'Güvenlik kapısından taranmış Ana Firma faturası',
+    });
+  }
 
   if (kaynak === 'IR_FATURA' || bagli.length > 0) {
     out.push({
@@ -142,14 +153,49 @@ export function resolveFaturaProvenance(ft: {
 export function resolveGuvenlikEvrakProvenance(e: {
   saId?: string | null;
   irsaliyeId?: string | null;
+  faturaId?: string | null;
   islenenEvrakTuru?: string | null;
   durum?: string | null;
   evrakTuru?: string | null;
+  firmaKaynakTipi?: string | null;
 }): ProvenanceBadge[] {
   const out: ProvenanceBadge[] = [];
   const saId = String(e.saId || '').trim();
   const processed = String(e.islenenEvrakTuru || '').trim();
   const onayli = e.durum === 'ONAYLANDI';
+
+  if (e.firmaKaynakTipi === 'ANA_FIRMA') {
+    out.push({
+      kind: 'KAPI_EVRAK',
+      label: 'Ana Firma',
+      className: `${BADGE_BASE} bg-amber-50 text-amber-900 border-amber-200`,
+      title: 'Kibritçi İnşaat adına kapı evrakı',
+    });
+  } else if (e.firmaKaynakTipi === 'TASERON') {
+    out.push({
+      kind: 'ARSIV',
+      label: 'Taşeron',
+      className: `${BADGE_BASE} bg-teal-50 text-teal-800 border-teal-200`,
+      title: 'Taşeron firma evrakı',
+    });
+  }
+
+  if (!onayli && e.faturaId) {
+    out.push({
+      kind: 'IR_FATURA',
+      label: 'Taslak → Fatura',
+      className: `${BADGE_BASE} bg-fuchsia-50 text-fuchsia-800 border-fuchsia-200`,
+      title: 'Fatura sekmesinde taranmış belgeyle görünür',
+    });
+  }
+  if (!onayli && e.irsaliyeId) {
+    out.push({
+      kind: 'SA_DONUSUM',
+      label: 'Taslak → İrsaliye',
+      className: `${BADGE_BASE} bg-amber-50 text-amber-800 border-amber-200`,
+      title: 'İrsaliye sekmesinde taranmış belgeyle görünür',
+    });
+  }
 
   if (saId) {
     out.push({

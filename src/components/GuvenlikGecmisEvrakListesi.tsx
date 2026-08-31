@@ -1,10 +1,10 @@
 import React, { useMemo, useState } from 'react';
 import { History, Pencil, Search, Trash2 } from 'lucide-react';
 import { formatDateLabelTr, normalizeDateKey, todayDateKey } from '../lib/dateKeyUtils';
-import { formatEvrakGonderimLabel, pickPrimaryFotoUrl } from '../lib/guvenlikEvrakFotolar';
+import { formatEvrakGonderimLabel, pickEvrakDisplayUrl } from '../lib/guvenlikEvrakFotolar';
 import { resolveGuvenlikEvrakProvenance } from '../lib/evrakProvenance';
 import { formatKapiMatchLabel } from '../lib/kapiIrsaliyeUtils';
-import { openBase64InNewTab } from '../lib/fileViewerUtils';
+import { EvrakTaramaOnizleme, openEvrakTarama } from './evrakUi/EvrakTaramaOnizleme';
 
 const PAGE_SIZE = 50;
 
@@ -36,6 +36,7 @@ export const GuvenlikGecmisEvrakListesi: React.FC<Props> = ({
   const bugun = todayDateKey();
   const [q, setQ] = useState('');
   const [typeFilter, setTypeFilter] = useState<'HEPSİ' | 'FATURA' | 'İRSALİYE' | 'MAKBUZ' | 'GENEL_EVRAK'>('HEPSİ');
+  const [kaynakFilter, setKaynakFilter] = useState<'HEPSİ' | 'ANA_FIRMA' | 'TASERON'>('ANA_FIRMA');
   const [statusFilter, setStatusFilter] = useState<'HEPSİ' | 'BEKLEMEDE' | 'ONAYLANDI' | 'REDDEDİLDİ'>('HEPSİ');
   const [fromDate, setFromDate] = useState(shiftDateKey(bugun, -90));
   const [toDate, setToDate] = useState(bugun);
@@ -53,6 +54,7 @@ export const GuvenlikGecmisEvrakListesi: React.FC<Props> = ({
           if (!key && fromDate) return false;
         }
         if (typeFilter !== 'HEPSİ' && e.evrakTuru !== typeFilter) return false;
+        if (kaynakFilter !== 'HEPSİ' && (e.firmaKaynakTipi || 'ANA_FIRMA') !== kaynakFilter) return false;
         if (statusFilter !== 'HEPSİ' && e.durum !== statusFilter) return false;
         if (!query) return true;
         const hay = `${e.fileName || ''} ${e.aciklama || ''} ${e.evrakNo || ''} ${e.firma || ''} ${e.kaydeden || ''} ${e.id || ''}`
@@ -66,7 +68,7 @@ export const GuvenlikGecmisEvrakListesi: React.FC<Props> = ({
         return evrakDateKey(b).localeCompare(evrakDateKey(a));
       });
     return rows;
-  }, [evraklar, q, typeFilter, statusFilter, fromDate, toDate, tumKayitlar]);
+  }, [evraklar, q, typeFilter, kaynakFilter, statusFilter, fromDate, toDate, tumKayitlar]);
 
   const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const safePage = Math.min(page, pageCount - 1);
@@ -82,8 +84,8 @@ export const GuvenlikGecmisEvrakListesi: React.FC<Props> = ({
               Geçmiş Evrak Listesi
             </h2>
             <p className="text-[11px] text-slate-500 mt-1 max-w-xl leading-snug">
-              Kapıdan girilen tüm evraklar burada durur. Satırdan <strong>Düzenle</strong> → bilgileri düzeltip{' '}
-              <strong>Kaydet</strong>, veya <strong>Sil</strong>. Fotoğraf yeniden yazılmaz; kayıt bozulmaz.
+              Ana Firma evrakı (fatura / irsaliye) taranmış PDF ile burada durur. Önizlemeye tıklayınca belge açılır;
+              Fatura ve İrsaliye sekmelerinde de aynı tarama görünür.
             </p>
           </div>
           <span className="text-[10px] font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2.5 py-1.5 rounded-lg">
@@ -156,6 +158,18 @@ export const GuvenlikGecmisEvrakListesi: React.FC<Props> = ({
             <option value="GENEL_EVRAK">Genel evrak</option>
           </select>
           <select
+            value={kaynakFilter}
+            onChange={(e) => {
+              setKaynakFilter(e.target.value as any);
+              setPage(0);
+            }}
+            className="border border-slate-200 py-1.5 px-2 rounded-xl text-xs bg-white font-bold"
+          >
+            <option value="ANA_FIRMA">Ana Firma</option>
+            <option value="TASERON">Taşeron</option>
+            <option value="HEPSİ">Tüm firmalar</option>
+          </select>
+          <select
             value={statusFilter}
             onChange={(e) => {
               setStatusFilter(e.target.value as any);
@@ -174,13 +188,14 @@ export const GuvenlikGecmisEvrakListesi: React.FC<Props> = ({
       <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
         {pageRows.length === 0 ? (
           <div className="text-center py-12 text-[11px] text-slate-400 font-bold">
-            Bu aralığa uyan kapı evrakı yok. Tarihi genişletin veya «Tüm kayıtlar»ı açın.
+            Bu aralığa uyan kapı evrakı yok. Tarihi genişletin, «Tüm firmalar»ı seçin veya «Tüm kayıtlar»ı açın.
           </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs border-collapse">
               <thead>
                 <tr className="bg-slate-50 text-slate-500 font-bold uppercase text-[9px] border-b border-slate-200">
+                  <th className="p-3 w-[80px]">Tarama</th>
                   <th className="p-3">Tarih</th>
                   <th className="p-3">Evrak / Dosya</th>
                   <th className="p-3">Tür</th>
@@ -192,9 +207,15 @@ export const GuvenlikGecmisEvrakListesi: React.FC<Props> = ({
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {pageRows.map((e) => {
-                  const foto = pickPrimaryFotoUrl(e);
+                  const tarama = pickEvrakDisplayUrl(e);
                   return (
                     <tr key={e.id} className="hover:bg-slate-50/70">
+                      <td className="p-3">
+                        <EvrakTaramaOnizleme
+                          url={tarama}
+                          fileName={e.fileName || e.evrakNo || 'Tarama PDF'}
+                        />
+                      </td>
                       <td className="p-3 whitespace-nowrap">
                         <div className="font-bold text-slate-800">{formatDateLabelTr(evrakDateKey(e))}</div>
                         <div className="text-[9px] font-mono text-slate-400 mt-0.5">
@@ -206,15 +227,17 @@ export const GuvenlikGecmisEvrakListesi: React.FC<Props> = ({
                         <div className="text-[9px] text-slate-400 truncate max-w-[180px]" title={e.aciklama}>
                           {e.aciklama || '—'}
                         </div>
-                        {foto ? (
+                        {tarama ? (
                           <button
                             type="button"
-                            onClick={() => openBase64InNewTab(foto, e.fileName || 'Belge')}
+                            onClick={() => openEvrakTarama(tarama, e.fileName || 'Belge')}
                             className="text-[9px] text-indigo-600 hover:underline font-bold mt-0.5 cursor-pointer"
                           >
-                            Evrakı görüntüle
+                            Taranmış PDF aç
                           </button>
-                        ) : null}
+                        ) : (
+                          <span className="text-[9px] text-rose-500 font-semibold mt-0.5 block">Tarama yok</span>
+                        )}
                       </td>
                       <td className="p-3">
                         <span
