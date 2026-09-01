@@ -56,7 +56,7 @@ async function fileToBase64(file: File): Promise<{ base64: string; mime: string;
 
 export const GrupKopruScreen: React.FC<GrupKopruScreenProps> = ({
   personeller,
-  setPersoneller,
+  setPersoneller: _setPersoneller,
   irsaliyeler,
   faturalar,
   setIrsaliyeler,

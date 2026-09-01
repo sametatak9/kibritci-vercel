@@ -36,9 +36,9 @@ Akvizyon nöbet kapanışı: her gün 18:00 UTC (21:00 İstanbul) → `GET /api/
 
 WhatsApp grubunu program dinleyemez (resmi API mevcut gruba bot olarak giremez). Köprü şöyle işler:
 
-1. **SGK giriş:** Kimlik + görev + giriş tarihi forma yazılır, sabit metin gruba atılır, kuyruk kaydı açılır. SGK evrakı gelince buraya bırakılır; grup bildirimi yoksa **Ana Firma kaydı açılmaz**.
-2. **SGK çıkış:** Personel + çıkış tarihi gruba bildirilir. Çıkış evrakı gelince kart pasife alınır.
-3. **Arnavutköy fatura:** Gruptaki fatura buraya bırakılır; firma adına göre açık irsaliyeler önerilir ve bağlanır.
+1. **SGK giriş:** Kimlik + görev (yoklama) + giriş tarihi forma yazılır, sabit metin gruba atılır, `personelGirisTalepleri` kuyruğu açılır. SGK evrakı gelince buraya bırakılır; grup bildirimi yoksa işlem durur. **Personel kartı Grup Köprüsü’nden yazılmaz.** Evrak, talebe bağlanır ve **Onay → Personel oluşturma** kuyruğuna düşer. Tek insan onayı orada `upsertPersonelAvoidDuplicate` ile Ana Firma kaydını açar.
+2. **SGK çıkış:** Personel + çıkış tarihi gruba bildirilir (`personelCikisTalepleri`). Çıkış evrakı talebe bağlanır; kart ancak Onay → Personel giriş-çıkış’ta pasife alınır.
+3. **Arnavutköy fatura:** Gruptaki fatura buraya bırakılır; firma adına göre açık irsaliyeler önerilir ve bağlanır. Fatura eşlemesi personel yazmaz.
 
 ## Evrak bağlama
 
