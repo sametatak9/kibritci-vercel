@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { CheckSquare, Eye, EyeOff, Loader2, Save, Settings, Square } from 'lucide-react';
 import { Kullanici } from './AdminPanelScreen';
-import { PORTAL_PAGES, YETKI_ROLLER, YetkiSablonu, normalizeYetki } from '../lib/yetkiUtils';
+import { PORTAL_PAGES, RESTRICTABLE_PORTAL_PAGES, YETKI_ROLLER, YetkiSablonu, normalizeYetki } from '../lib/yetkiUtils';
 import {
   applySablonToRoleUsers,
   defaultSablonForRole,
@@ -43,14 +43,14 @@ export const AdminYetkiSablonTab: React.FC<AdminYetkiSablonTabProps> = ({
   useEffect(() => {
     const restricted = currentSablon.kisitliSayfalar ?? [];
     const readOnly = currentSablon.saltOkunurSayfalar ?? [];
-    const visible = PORTAL_PAGES.map((p) => p.key).filter((k) => !restricted.includes(k));
+    const visible = RESTRICTABLE_PORTAL_PAGES.map((p) => p.key).filter((k) => !restricted.includes(k));
     const editable = visible.filter((k) => !readOnly.includes(k));
     setVisiblePages(visible);
     setEditablePages(editable);
   }, [currentSablon]);
 
   const groups = useMemo(
-    () => Array.from(new Set(PORTAL_PAGES.map((p) => p.group))),
+    () => Array.from(new Set(RESTRICTABLE_PORTAL_PAGES.map((p) => p.group))),
     []
   );
 
@@ -75,8 +75,8 @@ export const AdminYetkiSablonTab: React.FC<AdminYetkiSablonTabProps> = ({
     setSaving(true);
     try {
       const normalized = normalizeYetki(selectedRole);
-      const allKeys = PORTAL_PAGES.map((p) => p.key);
-      const kisitliSayfalar = allKeys.filter((k) => !visiblePages.includes(k));
+      const allKeys = RESTRICTABLE_PORTAL_PAGES.map((p) => p.key);
+      const kisitliSayfalar = allKeys.filter((k) => k !== 'ana_sayfa' && !visiblePages.includes(k));
       const saltOkunurSayfalar = visiblePages.filter((k) => !editablePages.includes(k));
 
       const sablon: YetkiSablonu = {
@@ -182,7 +182,8 @@ export const AdminYetkiSablonTab: React.FC<AdminYetkiSablonTabProps> = ({
 
       <div className="grid md:grid-cols-2 gap-4">
         {groups.map((groupName) => {
-          const pages = PORTAL_PAGES.filter((p) => p.group === groupName);
+          const pages = RESTRICTABLE_PORTAL_PAGES.filter((p) => p.group === groupName);
+          if (pages.length === 0) return null;
           return (
             <div key={groupName} className="border border-slate-200 rounded-2xl overflow-hidden bg-white">
               <div className="bg-slate-900 text-white px-4 py-2.5 text-[10px] font-black uppercase tracking-wider flex items-center gap-2">

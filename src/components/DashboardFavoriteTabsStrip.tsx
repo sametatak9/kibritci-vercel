@@ -23,6 +23,7 @@ const TAB_META: Record<string, { label: string; icon: React.ElementType }> = {
   satin_alma: { label: 'Satın Alma', icon: ShoppingCart },
   siparis_formu: { label: 'Sipariş Formu', icon: ClipboardList },
   irsaliye_giris: { label: 'İrsaliye', icon: FileText },
+  irsaliye_fatura: { label: 'İrsaliye & Fatura', icon: FileText },
   t_cetveli: { label: 'T Cetveli', icon: BookOpen },
   fatura_giris: { label: 'Fatura', icon: FileText },
   cari_stok: { label: 'Cari / Stok', icon: Wallet },

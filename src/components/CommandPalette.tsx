@@ -29,7 +29,7 @@ const ROUTES = [
   { key: 'grup_kopru', label: 'Grup Köprüsü', icon: MessageSquare },
   { key: 'satin_alma', label: 'Satın Alma', icon: Package },
   { key: 'siparis_formu', label: 'Sipariş Formu', icon: ClipboardList },
-  { key: 'irsaliye_giris', label: 'İrsaliye Girişi', icon: FileText },
+  { key: 'irsaliye_fatura', label: 'İrsaliye & Fatura', icon: FileText },
   { key: 't_cetveli', label: 'T Cetveli', icon: BookOpen },
   { key: 'fatura_giris', label: 'Fatura Girişi', icon: FileText },
   { key: 'evrak_baglama', label: 'Evrak Bağlama', icon: FileText },

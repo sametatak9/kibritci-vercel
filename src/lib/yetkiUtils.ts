@@ -21,7 +21,7 @@ export const PORTAL_PAGES = [
   { key: "kasa", label: "Haftalık Kasa", group: "FİNANS & ENVANTER" },
   { key: "satin_alma", label: "Satın Alma Talep", group: "FİNANS & ENVANTER" },
   { key: "siparis_formu", label: "Sipariş Formu", group: "FİNANS & ENVANTER" },
-  { key: "irsaliye_giris", label: "İrsaliye ve Fiş Girişi", group: "FİNANS & ENVANTER" },
+  { key: "irsaliye_fatura", label: "İrsaliye & Fatura", group: "FİNANS & ENVANTER" },
   { key: "t_cetveli", label: "T Cetveli", group: "FİNANS & ENVANTER" },
   { key: "fatura_giris", label: "Fatura Girişi", group: "FİNANS & ENVANTER" },
   { key: "evrak_baglama", label: "Evrak Bağlama", group: "FİNANS & ENVANTER" },
@@ -50,6 +50,13 @@ export const PORTAL_PAGES = [
 ] as const;
 
 export type PortalPageKey = (typeof PORTAL_PAGES)[number]["key"];
+
+/** Sayfa Yetkilendirme'de kısıtlanamaz — herkes ana sayfayı görür (mobil rol allow-list hariç). */
+export const NEVER_RESTRICT_TABS = ['ana_sayfa'] as const;
+
+export const RESTRICTABLE_PORTAL_PAGES = PORTAL_PAGES.filter(
+  (p) => !(NEVER_RESTRICT_TABS as readonly string[]).includes(p.key)
+);
 
 /** Mobil saha rolleri → erişilebilir panel sekmeleri */
 export const MOBILE_ROLE_ALLOWED_TABS: Record<string, PortalPageKey[]> = {
@@ -183,7 +190,16 @@ export function isTabRestrictedForUser(
   if (isIdariIslerRole(yetki) && (tab === 'admin' || tab === 'onay_islemleri')) {
     return false;
   }
+  if (tab === 'ana_sayfa') return false;
   if (!kisitliSayfalar?.length) return false;
+  if (tab === 'irsaliye_fatura' || tab === 'irsaliye_giris' || tab === 'fatura_giris') {
+    const irBlocked = kisitliSayfalar.includes('irsaliye_giris');
+    const ftBlocked = kisitliSayfalar.includes('fatura_giris');
+    const unifiedBlocked = kisitliSayfalar.includes('irsaliye_fatura');
+    if (tab === 'irsaliye_fatura') return unifiedBlocked || (irBlocked && ftBlocked);
+    if (tab === 'irsaliye_giris') return irBlocked || unifiedBlocked;
+    if (tab === 'fatura_giris') return ftBlocked || unifiedBlocked;
+  }
   return kisitliSayfalar.includes(tab);
 }
 
@@ -193,8 +209,9 @@ export function sanitizeKisitliSayfalar(
   kisitliSayfalar: string[] | undefined
 ): string[] {
   const homeTab = getRoleHomeTab(yetki);
-  if (!homeTab || !kisitliSayfalar?.length) return kisitliSayfalar ?? [];
-  return kisitliSayfalar.filter((k) => k !== homeTab);
+  return (kisitliSayfalar ?? []).filter(
+    (k) => k !== 'ana_sayfa' && (!homeTab || k !== homeTab)
+  );
 }
 
 /** Mobil saha rolleri yalnızca tanımlı panel sekmelerini görür */

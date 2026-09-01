@@ -9,6 +9,7 @@ import {
 } from '../lib/yetkiUtils';
 import { readFavoriteTabs, writeFavoriteTabs } from '../lib/navPreferences';
 import { isRetiredPortalTab } from '../lib/yetkiUtils';
+import { isIrsaliyeFaturaRestricted } from '../lib/irsaliyeFaturaNav';
 
 interface SidebarProps {
   activeTab: string;
@@ -78,7 +79,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         { key: "kasa", label: "Haftalık Kasa", icon: Wallet },
         { key: "satin_alma", label: "Satın Alma Talebi", icon: ShoppingCart },
         { key: "siparis_formu", label: "Sipariş Formu", icon: ClipboardList },
-        { key: "irsaliye_giris", label: "İrsaliye ve Fiş Girişi", icon: Truck },
+        { key: "irsaliye_fatura", label: "İrsaliye & Fatura", icon: FileText },
         { key: "t_cetveli", label: "T Cetveli", icon: BookOpen },
         { key: "fatura_giris", label: "Fatura Girişi", icon: CreditCard },
         { key: "evrak_baglama", label: "Evrak Bağlama", icon: Link2 },
@@ -140,8 +141,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
           if (item.key === 't_cetveli') {
             return (
               roleAllowedTabs.includes('t_cetveli') ||
-              roleAllowedTabs.includes('irsaliye_giris') ||
-              roleAllowedTabs.includes('fatura_giris')
+              roleAllowedTabs.includes('irsaliye_fatura')
+            );
+          }
+          if (item.key === 'irsaliye_fatura') {
+            return (
+              roleAllowedTabs.includes('irsaliye_fatura') ||
+              (roleAllowedTabs as string[]).includes('irsaliye_giris') ||
+              (roleAllowedTabs as string[]).includes('fatura_giris')
             );
           }
           return roleAllowedTabs.includes(item.key as typeof roleAllowedTabs[number]);
@@ -149,6 +156,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
         if (item.key === 'yetki_verme') {
           return isPrivilegedAdmin;
+        }
+
+        if (item.key === 'ana_sayfa') {
+          return true;
+        }
+
+        if (item.key === 'irsaliye_fatura' && isIrsaliyeFaturaRestricted(kisitliSayfalar)) {
+          return false;
         }
 
         if (kisitliSayfalar && kisitliSayfalar.includes(item.key)) {
