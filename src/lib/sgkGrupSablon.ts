@@ -110,25 +110,55 @@ export type BildirimAday = {
   durum?: string;
 };
 
-/** SGK evrakındaki kişi, gruba bildirilmiş kuyruk kaydıyla eşleşmeli. */
+function fullNameOf(x: { ad?: string; soyad?: string; personelIsim?: string }): string {
+  return normalizePersonName(x.ad, x.soyad) || normalizePersonName(x.personelIsim || '');
+}
+
+/** Ad + soyad zorunlu; tek kelime ("ALI") ile eşleşme yok — yanlış kişiye evrak yapışmasını keser. */
+export function namesMatchExact(
+  a: { ad?: string; soyad?: string; personelIsim?: string },
+  b: { ad?: string; soyad?: string; personelIsim?: string }
+): boolean {
+  const na = fullNameOf(a);
+  const nb = fullNameOf(b);
+  if (!na || !nb) return false;
+  if (na.split(' ').filter(Boolean).length < 2) return false;
+  if (nb.split(' ').filter(Boolean).length < 2) return false;
+  return na === nb;
+}
+
+function evrakBekliyorMu(x: BildirimAday): boolean {
+  const d = String(x.durum || '');
+  return d === 'WP_GÖNDERİLDİ' || d === 'GRUP_BILDIRILDI';
+}
+
+function rankBildirim(x: BildirimAday): number {
+  // Önce evrak bekleyen (WP), sonra evrakı gelmiş (BEKLEMEDE). Böylece ikinci evrak yanlışlıkla
+  // zaten onaya düşmüş kaydı ezmez; açık grup bildirimine yapışır.
+  if (evrakBekliyorMu(x)) return 0;
+  if (isPendingPersonelOnayDurum(x.durum)) return 1;
+  return 2;
+}
+
+/** SGK evrakındaki kişi, gruba bildirilmiş kuyruk kaydıyla eşleşmeli. Alt-dize eşleşme yok. */
 export function findSgkGrupBildirimi<T extends BildirimAday>(
   kuyruk: T[],
   opts: { ad?: string; soyad?: string; tcNo?: string; personelIsim?: string }
 ): T | undefined {
+  const pending = kuyruk.filter((x) => isPendingPersonelOnayDurum(x.durum));
+  const pool = pending.length ? pending : kuyruk;
+  const pick = (hits: T[]): T | undefined =>
+    hits.length ? [...hits].sort((a, b) => rankBildirim(a) - rankBildirim(b))[0] : undefined;
+
   const tc = digitsTc(opts.tcNo);
   if (tc.length === 11) {
-    const byTc = kuyruk.find((x) => digitsTc(x.tcNo) === tc);
+    const byTc = pick(pool.filter((x) => digitsTc(x.tcNo) === tc));
     if (byTc) return byTc;
   }
-  const needle = normalizePersonName(
-    opts.ad,
-    opts.soyad
-  ) || normalizePersonName(opts.personelIsim || '');
-  if (!needle) return undefined;
-  return kuyruk.find((x) => {
-    const full = normalizePersonName(x.ad, x.soyad) || normalizePersonName(x.personelIsim || '');
-    return full && (full === needle || full.includes(needle) || needle.includes(full));
-  });
+
+  const needle = fullNameOf(opts);
+  if (!needle || needle.split(' ').filter(Boolean).length < 2) return undefined;
+  return pick(pool.filter((x) => namesMatchExact(x, opts)));
 }
 
 export function isPendingPersonelOnayDurum(durum?: string | null): boolean {
@@ -227,7 +257,39 @@ export function hasSgkEvrak(
 
 /** Grup bildirimi + SGK evrakı tamam; Onay’da tek kontrolle yazılabilir. */
 export function isSgkOnayHazir(item?: SgkTalepKayit | null): boolean {
-  return isSgkGrupTalep(item) && Boolean(item?.grupBildirildi) && hasSgkEvrak(item);
+  return (
+    isSgkGrupTalep(item) &&
+    Boolean(item?.grupBildirildi) &&
+    hasSgkEvrak(item) &&
+    isPendingPersonelOnayDurum(item?.durum)
+  );
+}
+
+/** Kuyruk / Onay rozeti — makine: WP_GÖNDERİLDİ → BEKLEMEDE → ONAYLANDI. */
+export function sgkDurumEtiketi(
+  durum?: string | null,
+  opts?: { sgkTalep?: boolean; kind?: 'giris' | 'cikis' }
+): string {
+  const d = String(durum || '');
+  const sgk = Boolean(opts?.sgkTalep);
+  const cikis = opts?.kind === 'cikis';
+  if (d === 'ONAYLANDI' || d === 'KAYIT_TAMAMLANDI') {
+    return sgk
+      ? cikis
+        ? 'KAYIT TAMAMLANDI (ÇIKIŞ RESMİ)'
+        : 'KAYIT TAMAMLANDI (GİRİŞ YAZILDI)'
+      : cikis
+        ? 'ONAYLANDI'
+        : 'ONAYLANDI (GİRİŞ YAPILDI)';
+  }
+  if (d === 'WP_GÖNDERİLDİ' || d === 'GRUP_BILDIRILDI') {
+    return sgk ? 'WP GÖNDERİLDİ — EVRAK BEKLENİYOR' : 'YÖNETİCİYE WP İLETİLDİ';
+  }
+  if (d === 'REDDEDİLDİ') return cikis ? 'REDDEDİLDİ' : 'REDDEDİLDİ (GİRİŞ ENGELLENDİ)';
+  if (d === 'BEKLEMEDE') {
+    return sgk ? 'BEKLEMEDE — EVRAK GELDİ, ONAY BEKLİYOR' : cikis ? 'BEKLEMEDE' : 'BEKLEMEDE (KAPIDA)';
+  }
+  return d || '—';
 }
 
 /** Ana Firma SGK yolu: grup veya evrak yoksa onay/yazım engeli. */

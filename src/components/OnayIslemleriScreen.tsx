@@ -103,6 +103,7 @@ import {
   isSgkGrupTalep,
   isSgkOnayHazir,
   normalizePersonName,
+  sgkDurumEtiketi,
   sgkEvrakUrlOf,
 } from '../lib/sgkGrupSablon';
 
@@ -1485,6 +1486,7 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
           telefonNo: item.telefonNo,
           firmaAdi: item.firmaAdi,
           firmaTipi,
+          matchMode: isSgkGrupTalep(item) ? 'tc_or_exact' : 'fuzzy',
         }
       );
 
@@ -1541,7 +1543,15 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
         return;
       }
 
-      // 1. Update request status to ONAYLANDI
+      // Ana Firma SGK: önce kart resmileşir (pasif + çıkış tarihi), sonra talep ONAYLANDI.
+      // Formen / kampçı / götürü: mevcut sıra korunur (talep her durumda kapanır).
+      if (isSgkGrupTalep(item) && personelId) {
+        await updateDoc(doc(db, 'personeller', personelId), {
+          durum: false,
+          istenCikisTarihi: cikisTarihi,
+        });
+      }
+
       await updateDoc(doc(db, 'personelCikisTalepleri', item.id), {
         durum: 'ONAYLANDI',
         onaylayanYonetici: currentUser?.email || 'Sistem Yöneticisi',
@@ -1550,8 +1560,7 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
         cikisTarihi,
       });
 
-      // 2. Set actual personnel as inactive and save exit date
-      if (personelId) {
+      if (!isSgkGrupTalep(item) && personelId) {
         await updateDoc(doc(db, 'personeller', personelId), {
           durum: false,
           istenCikisTarihi: cikisTarihi
@@ -4509,6 +4518,13 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
                 />
               )}
 
+              {!isGoturuOnayTab && (
+                <div className="rounded-xl border border-amber-200 bg-amber-50/80 px-3 py-2 text-[11px] text-amber-950 leading-relaxed">
+                  <strong>Ana Firma (Grup Köprüsü):</strong> onay ancak grup bildirimi + SGK evrakı varsa açılır; kadro/çıkış yalnızca bu tek tıkla yazılır.
+                  <strong> Formen / kampçı / götürü:</strong> BEKLEMEDE talep grup bildirimi olmadan onaylanabilir — saha yolu ayrıdır.
+                </div>
+              )}
+
               {/* Subtabs for Personnel Management */}
               <div className="flex space-x-2 border-b border-slate-200 pb-px">
                 <button
@@ -4556,15 +4572,12 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
                         {/* Status Tag */}
                         <div className="flex justify-between items-start">
                           <span className={`px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-wider ${
-                            item.durum === 'ONAYLANDI' ? 'bg-emerald-500/10 text-emerald-700 border border-emerald-500/20' :
-                            item.durum === 'WP_GÖNDERİLDİ' ? 'bg-slate-500/10 text-slate-600 border border-slate-200/20' :
+                            item.durum === 'ONAYLANDI' || item.durum === 'KAYIT_TAMAMLANDI' ? 'bg-emerald-500/10 text-emerald-700 border border-emerald-500/20' :
+                            item.durum === 'WP_GÖNDERİLDİ' || item.durum === 'GRUP_BILDIRILDI' ? 'bg-slate-500/10 text-slate-600 border border-slate-200/20' :
                             item.durum === 'REDDEDİLDİ' ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20' :
                             'bg-amber-500/10 text-amber-700 border border-amber-500/20'
                           }`}>
-                            {item.durum === 'ONAYLANDI' ? 'ONAYLANDI (GİRİŞ YAPILDI)' :
-                             item.durum === 'WP_GÖNDERİLDİ' ? (sgkTalep ? 'SGK GRUBUNA BİLDİRİLDİ' : 'YÖNETİCİYE WP İLETİLDİ') :
-                             item.durum === 'REDDEDİLDİ' ? 'REDDEDİLDİ (GİRİŞ ENGELLENDİ)' :
-                             sgkTalep ? 'BEKLEMEDE (ONAY)' : 'BEKLEMEDE (KAPIDA)'}
+                            {sgkDurumEtiketi(item.durum, { sgkTalep, kind: 'giris' })}
                           </span>
                           <span className="text-[8px] font-mono text-slate-500">{new Date(item.tarih).toLocaleString('tr-TR')}</span>
                         </div>
@@ -4646,8 +4659,8 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
                         {/* Action buttons based on status & role */}
                         <div className="border-t border-slate-100 pt-3 flex flex-wrap gap-2">
                           
-                          {/* 1. WHATSAPP NOTIFICATION SEND (For Muhasebe, İdari İşler, Şantiye Şefi) */}
-                          {isPending && (
+                          {/* 1. WHATSAPP NOTIFICATION SEND — formen/kapı yolu. SGK Ana Firma zaten gruba gitti; bu tuş BEKLEMEDE'yi WP'ye geri çekmesin. */}
+                          {isPending && !sgkTalep && (
                             <button
                               onClick={async () => {
                                 const publicUrl = `${window.location.protocol}//${window.location.host}/?view_giris=${item.id}`;
@@ -4746,7 +4759,7 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
 
                           {isPending && !sgkTalep && (
                             <div className="w-full space-y-2 mt-1.5 bg-rose-50 p-2.5 rounded-2xl border border-slate-200">
-                              <span className="text-[8px] font-bold text-slate-400 block uppercase tracking-wider">🔒 Yönetici Giriş Belgesi Onayı</span>
+                              <span className="text-[8px] font-bold text-slate-400 block uppercase tracking-wider">🔒 Formen / saha yolu — grup bildirimi şart değil</span>
                               
                               {activePdfUploadId === item.id ? (
                                 <div className="space-y-1.5">
@@ -4878,12 +4891,12 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
                           {/* Status Tag */}
                           <div className="flex justify-between items-start">
                             <span className={`px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-wider ${
-                              item.durum === 'ONAYLANDI' ? 'bg-emerald-500/10 text-emerald-700 border border-emerald-500/20' :
-                              item.durum === 'WP_GÖNDERİLDİ' ? 'bg-slate-500/10 text-slate-600 border border-slate-200/20' :
+                              item.durum === 'ONAYLANDI' || item.durum === 'KAYIT_TAMAMLANDI' ? 'bg-emerald-500/10 text-emerald-700 border border-emerald-500/20' :
+                              item.durum === 'WP_GÖNDERİLDİ' || item.durum === 'GRUP_BILDIRILDI' ? 'bg-slate-500/10 text-slate-600 border border-slate-200/20' :
                               item.durum === 'REDDEDİLDİ' ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20' :
                               'bg-amber-500/10 text-amber-700 border border-amber-500/20'
                             }`}>
-                              {item.durum === 'WP_GÖNDERİLDİ' ? 'GRUP BİLDİRİLDİ' : item.durum}
+                              {sgkDurumEtiketi(item.durum, { sgkTalep, kind: 'cikis' })}
                             </span>
                             <span className="text-[8px] font-mono text-slate-500">{new Date(item.tarih).toLocaleString('tr-TR')}</span>
                           </div>

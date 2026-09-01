@@ -221,6 +221,33 @@ export async function loadPersonellerForDedup(local: Personel[] = []): Promise<P
   return Array.from(byId.values());
 }
 
+export function resolvePersonelStrictTcOrExactName(
+  personeller: Personel[],
+  item: {
+    personelId?: string;
+    ad?: string;
+    soyad?: string;
+    tcNo?: string;
+  }
+): Personel | undefined {
+  if (item.personelId) {
+    const byId = personeller.find((p) => p.id === item.personelId);
+    if (byId) return byId;
+  }
+  const tc = digitsOnly(item.tcNo || '');
+  if (tc.length === 11) {
+    const byTc = findPersonelByTcInList(personeller, tc);
+    if (byTc) return byTc;
+  }
+  const needle = normalizePersonelFullName(
+    String(item.ad || '').trim(),
+    String(item.soyad || '').trim()
+  );
+  if (!needle || needle.split(' ').filter(Boolean).length < 2) return undefined;
+  const exact = personeller.filter((p) => normalizePersonelFullName(p.ad, p.soyad) === needle);
+  return exact.length === 1 ? exact[0] : undefined;
+}
+
 /** Yeni personel kaydı açmadan önce birleştirilmiş listede ara; varsa güncelle. */
 export async function upsertPersonelAvoidDuplicate(
   localPersoneller: Personel[],
@@ -231,29 +258,38 @@ export async function upsertPersonelAvoidDuplicate(
     telefonNo?: string;
     firmaAdi?: string;
     firmaTipi?: 'ANA_FIRMA' | 'TASERON';
+    /** SGK Ana Firma: yalnızca TC veya birebir ad-soyad. Formen/kampçı varsayılanı fuzzy. */
+    matchMode?: 'fuzzy' | 'tc_or_exact';
   }
 ): Promise<{ personel: Personel; created: boolean; merged: boolean }> {
   return withDedupLock(async () => {
   const merged = await loadPersonellerForDedup(localPersoneller);
   const existing =
-    resolvePersonelForGirisOnay(merged, {
-      personelId: candidate.id,
-      ad: candidate.ad,
-      soyad: candidate.soyad,
-      tcNo: matchOpts.tcNo ?? candidate.tcNo,
-      telefonNo: matchOpts.telefonNo ?? candidate.telefonNo,
-      firmaAdi: matchOpts.firmaAdi ?? candidate.firmaAdi,
-      firmaTipi: matchOpts.firmaTipi ?? candidate.firmaTipi,
-    }) ||
-    pickBestPersonelMatch(
-      findPersonelMatches(merged, {
-        rawName: matchOpts.rawName || `${candidate.ad} ${candidate.soyad}`.trim(),
-        tcNo: matchOpts.tcNo ?? candidate.tcNo,
-        telefonNo: matchOpts.telefonNo ?? candidate.telefonNo,
-        firmaAdi: matchOpts.firmaAdi ?? candidate.firmaAdi,
-        firmaTipi: matchOpts.firmaTipi ?? (candidate.firmaTipi === 'TASERON' ? 'TASERON' : 'ANA_FIRMA'),
-      })
-    )?.personel;
+    matchOpts.matchMode === 'tc_or_exact'
+      ? resolvePersonelStrictTcOrExactName(merged, {
+          personelId: candidate.id,
+          ad: candidate.ad,
+          soyad: candidate.soyad,
+          tcNo: matchOpts.tcNo ?? candidate.tcNo,
+        })
+      : resolvePersonelForGirisOnay(merged, {
+          personelId: candidate.id,
+          ad: candidate.ad,
+          soyad: candidate.soyad,
+          tcNo: matchOpts.tcNo ?? candidate.tcNo,
+          telefonNo: matchOpts.telefonNo ?? candidate.telefonNo,
+          firmaAdi: matchOpts.firmaAdi ?? candidate.firmaAdi,
+          firmaTipi: matchOpts.firmaTipi ?? candidate.firmaTipi,
+        }) ||
+        pickBestPersonelMatch(
+          findPersonelMatches(merged, {
+            rawName: matchOpts.rawName || `${candidate.ad} ${candidate.soyad}`.trim(),
+            tcNo: matchOpts.tcNo ?? candidate.tcNo,
+            telefonNo: matchOpts.telefonNo ?? candidate.telefonNo,
+            firmaAdi: matchOpts.firmaAdi ?? candidate.firmaAdi,
+            firmaTipi: matchOpts.firmaTipi ?? (candidate.firmaTipi === 'TASERON' ? 'TASERON' : 'ANA_FIRMA'),
+          })
+        )?.personel;
 
   const tc = digitsOnly(matchOpts.tcNo ?? candidate.tcNo);
   if (tc.length === 11) {

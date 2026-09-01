@@ -9,9 +9,13 @@ export type PersonelCikisTalebiPayload = {
   cikisTarihi?: string;
   cikisNedeni: string;
   gonderen: string;
-  /** örn. KAMPCI_TAHLIYE / FORMEN */
+  /** örn. KAMPCI_TAHLIYE / FORMEN / SGK_GRUP */
   kaynak?: string;
   hedefYoneticiRole?: string;
+  tcNo?: string;
+  durum?: string;
+  grupBildirildi?: boolean;
+  firmaTipi?: string;
 };
 
 /** Yönetim onay havuzuna işten çıkış talebi yazar (personelCikisTalepleri). */
@@ -31,10 +35,13 @@ export async function submitPersonelCikisTalebi(
       cikisTarihi,
       cikisNedeni: opts.cikisNedeni,
       hedefYoneticiRole: opts.hedefYoneticiRole || 'YÖNETİCİ',
-      durum: 'BEKLEMEDE',
+      durum: opts.durum || 'BEKLEMEDE',
       tarih: new Date().toISOString(),
       gonderenFormen: opts.gonderen,
       kaynak: opts.kaynak || 'MANUEL',
+      tcNo: opts.tcNo || '',
+      grupBildirildi: opts.grupBildirildi,
+      firmaTipi: opts.firmaTipi,
     })
   );
   return docId;

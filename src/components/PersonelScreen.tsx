@@ -1661,6 +1661,14 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
           </span>
         </div>
 
+        {!isEditMode && formData.firmaTipi !== 'TASERON' && (
+          <div className="mx-5 mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-950 leading-relaxed">
+            <strong>Ana Firma işçi girişi:</strong> resmi yol Grup Köprüsü’dür — önce SGK WhatsApp grubuna kimlik + görev + tarih,
+            sonra evrak, sonra Onay → Personel oluşturma (tek kontrol). Bu ekran mevcut kadroyu düzeltmek, idari kayıt ve
+            taşeron içindir; buradan açılan kart Grup Köprüsü kuyruğunu atlar.
+          </div>
+        )}
+
         {/* Tab switcher for registration method - only shown in Create Mode */}
         { !isEditMode && (
           <div className="flex border-b border-slate-100 bg-white p-3 gap-2 shrink-0">
@@ -1706,6 +1714,7 @@ export const PersonelScreen: React.FC<PersonelScreenProps> = ({
               </h5>
               <p className="text-[10px] leading-relaxed text-slate-600">
                 SGK İşe Giriş Bildirgesi veya banka dekontunu yükleyin; ad, soyad, TC, IBAN ve banka bilgileri otomatik doldurulur.
+                Yeni şantiye işçisi için resmi yol yine Grup Köprüsü’dür — bu okuma formu doldurur, Onay kuyruğuna düşürmez.
               </p>
             </div>
 
