@@ -94,6 +94,17 @@ import {
 import { loadPersonellerForDedup, upsertPersonelAvoidDuplicate, findPersonelMatches, pickBestPersonelMatch, formatPersonelMatchLabel } from '../lib/personelMatchUtils';
 import { applyPersonelDuplicateMerge, planManualPersonelMerge } from '../lib/personelDuplicateMerge';
 import { resolveTaseronPersonelGorev, withTaseronPersonelGorev } from '../lib/taseronUtils';
+import {
+  anaFirmaSgkEngel,
+  buildAnaFirmaPersonelFromSgkTalep,
+  digitsTc,
+  hasSgkEvrak,
+  isPendingPersonelOnayDurum,
+  isSgkGrupTalep,
+  isSgkOnayHazir,
+  normalizePersonName,
+  sgkEvrakUrlOf,
+} from '../lib/sgkGrupSablon';
 
 interface OnayIslemleriScreenProps {
   satinAlmaTalepleri: SatinAlmaTalebi[];
@@ -1381,30 +1392,178 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
     }
   };
 
+  const handleApproveGirisTalep = async (item: any, evrakDataUrl?: string | null) => {
+    const evrakUrl = evrakDataUrl || sgkEvrakUrlOf(item) || item.girisEvrakPdfUrl || '';
+    const sgkItem = {
+      ...item,
+      girisEvrakPdfUrl: evrakUrl || item.girisEvrakPdfUrl,
+      sgkEvrakUrl: evrakUrl || item.sgkEvrakUrl,
+      sgkEvrakGeldi: item.sgkEvrakGeldi || Boolean(evrakUrl),
+    };
+    const sgkEngel = anaFirmaSgkEngel(sgkItem);
+    if (sgkEngel) {
+      alert(sgkEngel);
+      return;
+    }
+    if (!isSgkGrupTalep(item) && !evrakUrl) {
+      alert('Lütfen personelin İşe Giriş Bildirgesi belgesini (PDF/Görsel) yükleyin!');
+      return;
+    }
+    try {
+      const isGoturuKayit = isGoturuPersonelTalep(item);
+      const firmaTipi = item.firmaTipi === 'TASERON' || isGoturuKayit ? 'TASERON' : 'ANA_FIRMA';
+      const firmaAdi = item.firmaAdi || (isGoturuKayit ? GOTURU_FIRMA_ADI : undefined);
+      const resolvedGorev = isGoturuKayit
+        ? (item.gorev || GOTURU_DEFAULT_GOREV)
+        : firmaTipi === 'TASERON'
+          ? resolveTaseronPersonelGorev({ firmaAdi, firmaTipi: 'TASERON' })
+          : item.gorev || 'İŞÇİ';
+
+      const candidate: Personel = isSgkGrupTalep(item)
+        ? buildAnaFirmaPersonelFromSgkTalep(sgkItem, item.personelId || `p_${Date.now()}`)
+        : isGoturuKayit
+          ? ({
+              id: item.personelId || `p_${Date.now()}`,
+              tcNo: item.tcNo || '',
+              ad: item.ad || '',
+              soyad: item.soyad || '',
+              babaAdi: '',
+              dogumTarihi: '',
+              telefonNo: item.telefonNo || '',
+              eposta: '',
+              adres: '',
+              il: '',
+              ilce: '',
+              departman: 'ŞANTİYE',
+              gorev: resolvedGorev,
+              iseGirisTarihi: (item.tarih || new Date().toISOString()).slice(0, 10),
+              cinsiyet: 'Belirtilmedi',
+              maas: 0,
+              ucretTipi: 'Aylık',
+              sgkDurumu: "SGK'lı",
+              bankaAdi: '',
+              subeAdi: '',
+              ibanNo: '',
+              durum: true,
+              firmaTipi,
+              firmaAdi,
+            } as Personel)
+          : withTaseronPersonelGorev({
+              id: item.personelId || `p_${Date.now()}`,
+              tcNo: item.tcNo || '',
+              ad: item.ad || '',
+              soyad: item.soyad || '',
+              babaAdi: '',
+              dogumTarihi: '',
+              telefonNo: item.telefonNo || '',
+              eposta: '',
+              adres: '',
+              il: '',
+              ilce: '',
+              departman: 'ŞANTİYE',
+              gorev: resolvedGorev,
+              iseGirisTarihi: (item.tarih || new Date().toISOString()).slice(0, 10),
+              cinsiyet: 'Belirtilmedi',
+              maas: 0,
+              ucretTipi: 'Aylık',
+              sgkDurumu: "SGK'lı",
+              bankaAdi: '',
+              subeAdi: '',
+              ibanNo: '',
+              durum: true,
+              firmaTipi,
+              firmaAdi,
+            } as Personel);
+
+      const allPersoneller = await loadPersonellerForDedup(personeller || []);
+      const { personel: saved, merged } = await upsertPersonelAvoidDuplicate(
+        allPersoneller,
+        candidate,
+        {
+          rawName: `${item.ad || ''} ${item.soyad || ''}`.trim(),
+          tcNo: item.tcNo || candidate.tcNo,
+          telefonNo: item.telefonNo,
+          firmaAdi: item.firmaAdi,
+          firmaTipi,
+        }
+      );
+
+      setPersoneller?.((prev) =>
+        prev.some((p) => p.id === saved.id)
+          ? prev.map((p) => (p.id === saved.id ? saved : p))
+          : [...prev, saved]
+      );
+
+      await updateDoc(doc(db, 'personelGirisTalepleri', item.id), {
+        durum: 'ONAYLANDI',
+        girisEvrakPdfUrl: evrakUrl || item.girisEvrakPdfUrl || '',
+        personelId: saved.id,
+        onaylayan: currentUser?.email,
+        onayTarihi: new Date().toISOString(),
+      });
+      setActivePdfUploadId(null);
+      setUploadedPdfBase64(null);
+      alert(
+        merged
+          ? 'Personel giriş talebi onaylandı. Mevcut Ana Firma kaydı güncellendi (mükerrer kart açılmadı).'
+          : isSgkGrupTalep(item)
+            ? 'Personel giriş talebi onaylandı. Grup bildirimi ve SGK evrakı kontrol edildi; Ana Firma kadrosu yazıldı.'
+            : 'Personel giriş talebi onaylandı. İşe Giriş Bildirgesi yüklendi ve sahaya bildirildi.'
+      );
+    } catch (err) {
+      console.error(err);
+      alert('Kaydedilemedi, veritabanı bağlantısını kontrol edin.');
+    }
+  };
+
   const handleApproveCikis = async (item: any) => {
+    const sgkEngel = anaFirmaSgkEngel(item);
+    if (sgkEngel) {
+      alert(sgkEngel);
+      return;
+    }
     if (!window.confirm(`${item.personelIsim} için işten çıkış işlemini onaylamak istiyor musunuz?\n\nAktif kamp oda kaydı varsa otomatik tahliye edilir.`)) return;
     try {
+      const cikisTarihi = String(item.sgkCikisTarihi || item.cikisTarihi || new Date().toISOString()).slice(0, 10);
+      const tc = digitsTc(item.tcNo);
+      const isimNeedle = normalizePersonName(item.personelIsim || '');
+      const resolved =
+        personeller.find((p) => p.id && p.id === item.personelId) ||
+        (tc.length === 11
+          ? personeller.find((p) => digitsTc(p.tcNo) === tc)
+          : undefined) ||
+        (isimNeedle
+          ? personeller.find((p) => normalizePersonName(p.ad, p.soyad) === isimNeedle)
+          : undefined);
+      const personelId = resolved?.id || item.personelId;
+      if (isSgkGrupTalep(item) && !personelId) {
+        alert('Personel kartı bulunamadı. Ana Firma çıkışı yazılmadı. TC veya ad soyad eşleşmesini kontrol edin.');
+        return;
+      }
+
       // 1. Update request status to ONAYLANDI
       await updateDoc(doc(db, 'personelCikisTalepleri', item.id), {
         durum: 'ONAYLANDI',
         onaylayanYonetici: currentUser?.email || 'Sistem Yöneticisi',
-        onayTarihi: new Date().toISOString()
+        onayTarihi: new Date().toISOString(),
+        personelId: personelId || item.personelId || '',
+        cikisTarihi,
       });
 
       // 2. Set actual personnel as inactive and save exit date
-      if (item.personelId) {
-        await updateDoc(doc(db, 'personeller', item.personelId), {
+      if (personelId) {
+        await updateDoc(doc(db, 'personeller', personelId), {
           durum: false,
-          istenCikisTarihi: item.cikisTarihi
+          istenCikisTarihi: cikisTarihi
         });
       }
 
       // 3. Local personel state (App effect + anında UI)
-      if (setPersoneller && item.personelId) {
+      if (setPersoneller && personelId) {
         setPersoneller((prev) =>
           prev.map((p) =>
-            p.id === item.personelId
-              ? { ...p, durum: false, istenCikisTarihi: item.cikisTarihi }
+            p.id === personelId
+              ? { ...p, durum: false, istenCikisTarihi: cikisTarihi }
               : p
           )
         );
@@ -1412,12 +1571,12 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
 
       // 4. Kamp çıkışı (aktif oda kaydı varsa)
       let kampNot = '';
-      if (item.personelId || item.personelIsim) {
+      if (personelId || item.personelIsim) {
         try {
           const result = await evictActiveKampResidentsForPersonel({
-            personelId: item.personelId,
+            personelId,
             personelIsim: item.personelIsim,
-            cikisTarihi: item.cikisTarihi || new Date().toISOString().slice(0, 10),
+            cikisTarihi,
             kampOdalari,
             kampKayitlari,
           });
@@ -1809,13 +1968,14 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
   const formenGuncellemeTalepleri = personelGuncellemeTalepleri.filter((p) => !isGoturuPersonelTalep(p));
   const goturuGuncellemeTalepleri = personelGuncellemeTalepleri.filter(isGoturuPersonelTalep);
 
-  const isPendingGirisDurum = (p: any) => p.durum === 'BEKLEMEDE' || p.durum === 'WP_GÖNDERİLDİ';
+  const isPendingGirisDurum = (p: any) => isPendingPersonelOnayDurum(p.durum);
+  const isPendingCikisDurum = (p: any) => isPendingPersonelOnayDurum(p.durum);
   const pendingGirisCount = formenGirisTalepleri.filter(isPendingGirisDurum).length;
-  const pendingCikisCount = formenCikisTalepleri.filter((p) => p.durum === 'BEKLEMEDE').length;
+  const pendingCikisCount = formenCikisTalepleri.filter(isPendingCikisDurum).length;
   const pendingGuncellemeCount = formenGuncellemeTalepleri.filter((p) => p.durum === 'BEKLEMEDE').length;
   const pendingPersonelCount = pendingGirisCount + pendingCikisCount + pendingGuncellemeCount;
   const pendingGoturuGirisCount = goturuGirisTalepleri.filter(isPendingGirisDurum).length;
-  const pendingGoturuCikisCount = goturuCikisTalepleri.filter((p) => p.durum === 'BEKLEMEDE').length;
+  const pendingGoturuCikisCount = goturuCikisTalepleri.filter(isPendingCikisDurum).length;
   const pendingGoturuGuncellemeCount = goturuGuncellemeTalepleri.filter((p) => p.durum === 'BEKLEMEDE').length;
 
   const matchedUserObj = kullanicilar.find(u => u.email?.toLowerCase() === currentUser?.email?.toLowerCase());
@@ -1984,7 +2144,7 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
     { id: 'tesisat_mermer_belgeleri', label: 'Tesisatçı / Mermerci', shortLabel: 'Tesisat/Mermer', count: tesisatMermerCount, icon: FileText },
     { id: 'goturu_belgeleri', label: 'Götürü Onayları', shortLabel: 'Götürü', count: goturuOnayCount, icon: Layers },
     { id: 'operator_belgeleri', label: 'Operatör Belgeleri', shortLabel: 'Operatör', count: operatorOnayCount, icon: HardHat },
-    { id: 'formen_belgeleri', label: 'Formen Belgeleri', shortLabel: 'Formen', count: pendingPersonelCount, icon: UserCheck },
+    { id: 'formen_belgeleri', label: 'Personel oluşturma', shortLabel: 'Personel', count: pendingPersonelCount, icon: UserCheck },
     { id: 'gunluk_loglar', label: 'Günlük Loglar', shortLabel: 'Loglar', count: pendingGunlukAkis.length, icon: FileText },
     { id: 'sofor_talepleri', label: 'Şoför Talepleri', shortLabel: 'Şoför', count: pendingSoforCount, icon: Truck },
     { id: 'depocu_talepleri', label: 'Depocu Talepleri', shortLabel: 'Depo', count: pendingDepocuCount, icon: Package },
@@ -4267,12 +4427,12 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
                   <span className="text-slate-600 font-bold block text-[11px] tracking-widest uppercase">
                     {isGoturuOnayTab
                       ? '🧱 GÖTÜRÜ / SERAMİK ONAY HAVUZU'
-                      : '👷 SAHA KAPISI PERSONEL GİRİŞ TAKİP SİSTEMİ'}
+                      : '👷 PERSONEL OLUŞTURMA / GİRİŞ-ÇIKIŞ ONAYI'}
                   </span>
                   <p className="text-slate-500 leading-relaxed text-[11px]">
                     {isGoturuOnayTab
                       ? 'Götürü / Seramik mobil ekranından gönderilen faaliyetler, işçi giriş talepleri, işten çıkarma ve bilgi değişiklik istekleri buraya düşer. Onaylanmadan personel kartı açılmaz veya güncellenmez.'
-                      : 'Saha formenleri tarafından kapıdan gönderilen yeni personellerin bilgileri, işten çıkış talepleri ve bilgi güncelleme istekleri buraya düşer. Yetkililer talepleri onaylayarak personel veri havuzunu güncel tutabilir.'}
+                      : 'Saha kapısı talepleri ve SGK grubu (Grup Köprüsü) bildirimleri buraya düşer. Ana Firma kadrosu ancak grup bildirimi + SGK evrakı görüldükten sonra, burada tek onayla yazılır. Onaylanmadan personel kartı açılmaz.'}
                   </p>
                 </div>
               </div>
@@ -4357,7 +4517,7 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
                     formenSubTab === 'giris' ? 'border-[#2563EB] text-slate-900 font-black' : 'border-transparent text-slate-500 hover:text-slate-800'
                   }`}
                 >
-                  🚪 İşe Giriş Talepleri ({girisTalepleriForTab.filter(p => p.durum === 'BEKLEMEDE' || p.durum === 'WP_GÖNDERİLDİ').length})
+                  🚪 İşe Giriş Talepleri ({girisTalepleriForTab.filter((p) => isPendingPersonelOnayDurum(p.durum)).length})
                 </button>
                 <button
                   onClick={() => setFormenSubTab('cikis')}
@@ -4365,7 +4525,7 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
                     formenSubTab === 'cikis' ? 'border-[#2563EB] text-slate-900 font-black' : 'border-transparent text-slate-500 hover:text-slate-800'
                   }`}
                 >
-                  🛑 İşten Çıkış Talepleri ({cikisTalepleriForTab.filter(p => p.durum === 'BEKLEMEDE').length})
+                  🛑 İşten Çıkış Talepleri ({cikisTalepleriForTab.filter((p) => isPendingPersonelOnayDurum(p.durum)).length})
                 </button>
                 <button
                   onClick={() => setFormenSubTab('guncelleme')}
@@ -4386,7 +4546,10 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
                   </div>
                 ) : (
                   girisTalepleriForTab.map((item) => {
-                    const isPending = item.durum === 'BEKLEMEDE' || item.durum === 'WP_GÖNDERİLDİ';
+                    const isPending = isPendingPersonelOnayDurum(item.durum);
+                    const sgkTalep = isSgkGrupTalep(item);
+                    const sgkHazir = isSgkOnayHazir(item);
+                    const evrakHref = sgkEvrakUrlOf(item) || item.girisEvrakPdfUrl;
                     return (
                       <div key={item.id} className="bg-white border border-slate-200 rounded-3xl p-4.5 flex flex-col justify-between space-y-3.5 relative overflow-hidden">
                         
@@ -4450,12 +4613,26 @@ export const OnayIslemleriScreen: React.FC<OnayIslemleriScreenProps> = ({
                           </div>
                         </div>
 
+                        {sgkTalep && (
+                          <div className="bg-amber-50 border border-amber-200 rounded-xl p-2.5 space-y-1">
+                            <p className="text-[8px] font-black uppercase tracking-wider text-amber-900">SGK grubu — tek kontrol</p>
+                            <p className={`text-[10px] font-bold ${item.grupBildirildi ? 'text-emerald-800' : 'text-rose-700'}`}>
+                              {item.grupBildirildi ? 'Grup bildirimi var (kimlik + görev + tarih).' : 'Grup bildirimi yok — Ana Firma onayı kapalı.'}
+                            </p>
+                            <p className={`text-[10px] font-bold ${hasSgkEvrak(item) ? 'text-emerald-800' : 'text-rose-700'}`}>
+                              {hasSgkEvrak(item) ? 'SGK evrakı eklendi. Onaylayınca kadro yazılır.' : 'SGK evrakı henüz düşmedi. Grup Köprüsü’nden bildirge bekleniyor.'}
+                            </p>
+                            {item.tcNo ? <p className="text-[10px] text-slate-600 font-mono">TC {item.tcNo}</p> : null}
+                            {item.iseGirisTarihi ? <p className="text-[10px] text-slate-600">SGK giriş tarihi: {String(item.iseGirisTarihi).slice(0, 10)}</p> : null}
+                          </div>
+                        )}
+
                         {/* Documents & Download link */}
-                        {item.girisEvrakPdfUrl && (
+                        {(item.girisEvrakPdfUrl || evrakHref) && (
                           <div className="bg-slate-50/60 p-2 rounded-xl border border-slate-200 flex items-center justify-between text-[10px]">
                             <span className="text-slate-400 font-bold">📄 İşe Giriş Bildirgesi:</span>
                             <a 
-                              href={item.girisEvrakPdfUrl} 
+                              href={evrakHref || item.girisEvrakPdfUrl} 
                               target="_blank" 
                               rel="noreferrer"
                               className="text-amber-700 hover:underline font-black uppercase text-[8px] flex items-center space-x-0.5"

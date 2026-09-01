@@ -2,20 +2,22 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { collection, doc, onSnapshot, setDoc, updateDoc } from 'firebase/firestore';
 import { Copy, Check, MessageCircle, Upload, UserPlus, UserMinus, FileText, Link2 } from 'lucide-react';
 import type { CariKart, Fatura, FaturaItem, Irsaliye, Personel, StokKart } from '../types/erp';
-import { db, saveDocument } from '../lib/firebase';
+import { db, cleanUndefined } from '../lib/firebase';
 import { fetchApiJson } from '../lib/apiClient';
 import { compressImage } from '../lib/imageCompress';
 import { buildWhatsAppUrl } from '../lib/mobilOnayUtils';
 import { submitPersonelCikisTalebi } from '../lib/personelCikisTalebiUtils';
-import { upsertPersonelAvoidDuplicate } from '../lib/personelMatchUtils';
 import { resolveCariKartId } from '../lib/evrakCariStokSync';
 import { linkIrsaliyelerToFatura } from '../lib/evrakDonusum';
 import { findStokMatch } from '../lib/evrakBatchImportUtils';
 import {
   buildSgkCikisWhatsAppText,
   buildSgkGirisWhatsAppText,
+  buildSgkTalepPatchFromParse,
   findSgkGrupBildirimi,
+  hasSgkEvrak,
   isAnaFirmaGirisAcik,
+  isSgkOnayHazir,
   SGK_GRUP_ADI,
 } from '../lib/sgkGrupSablon';
 import { eslesmeNedenLabel, suggestIrsaliyelerForFaturaUnvan } from '../lib/faturaIrsaliyeEslesme';
@@ -86,6 +88,7 @@ export const GrupKopruScreen: React.FC<GrupKopruScreenProps> = ({
   const [ok, setOk] = useState<string | null>(null);
 
   const [sgkPreview, setSgkPreview] = useState<any | null>(null);
+  const [sgkEvrakUrl, setSgkEvrakUrl] = useState<string | null>(null);
   const [sgkKind, setSgkKind] = useState<'giris' | 'cikis'>('giris');
 
   const [ftParsed, setFtParsed] = useState<any | null>(null);
@@ -191,7 +194,7 @@ export const GrupKopruScreen: React.FC<GrupKopruScreenProps> = ({
         grupBildirildi: true,
         gonderenFormen: gonderen,
       });
-      setOk('Kuyruk yazıldı. Sabit metni SGK grubuna atın; evrak gelince bu kayıttan Ana Firma girişi resmileşir.');
+      setOk('Grup bildirimi kuyruğa yazıldı. Sabit metni SGK grubuna atın. Evrak gelince buraya bırakın; kadro ancak Onay → Personel oluşturma’da tek kontrolle açılır.');
       addNotification?.(`${ad} ${soyad} SGK grubuna giriş bildirimi yazıldı.`);
     } catch (e: any) {
       setErr(e.message || 'Bildirim kaydedilemedi.');
@@ -224,7 +227,7 @@ export const GrupKopruScreen: React.FC<GrupKopruScreenProps> = ({
         tcNo: cikisPersonel.tcNo || '',
         grupBildirildi: true,
       });
-      setOk('Çıkış kuyruğa yazıldı. Sabit metni gruba atın; çıkış evrakı gelince resmileşir.');
+      setOk('Çıkış bildirimi kuyruğa yazıldı. Sabit metni gruba atın. Evrak gelince buraya bırakın; çıkış ancak Onay → Personel giriş-çıkış’ta resmileşir.');
       addNotification?.(`${cikisPersonel.ad} ${cikisPersonel.soyad} SGK grubuna çıkış bildirimi yazıldı.`);
     } catch (e: any) {
       setErr(e.message || 'Çıkış bildirimi kaydedilemedi.');
@@ -239,89 +242,61 @@ export const GrupKopruScreen: React.FC<GrupKopruScreenProps> = ({
     setBusy(true);
     setSgkKind(kind);
     try {
-      const { base64, mime } = await fileToBase64(file);
+      const { base64, mime, dataUrl } = await fileToBase64(file);
       const res = await fetchApiJson<{ success: boolean; data?: any; error?: string }>('/api/parse-sgk', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ fileBase64: base64, mimeType: mime }),
       });
       if (!res.success || !res.data) throw new Error(res.error || 'SGK evrakı okunamadı.');
+      setSgkEvrakUrl(dataUrl);
       setSgkPreview(res.data);
       setOk(`Evrak okundu: ${res.data.ad || ''} ${res.data.soyad || ''}`.trim());
     } catch (e: any) {
       setSgkPreview(null);
+      setSgkEvrakUrl(null);
       setErr(e.message || 'SGK evrakı çözümlenemedi.');
     } finally {
       setBusy(false);
     }
   };
 
-  const resmilestirGiris = async () => {
+  const onayaBirakGiris = async () => {
     if (!sgkPreview) return;
     const bildirim = findSgkGrupBildirimi(bekleyenGiris, sgkPreview);
-    if (!isAnaFirmaGirisAcik(bildirim)) {
+    if (!isAnaFirmaGirisAcik(bildirim) || !bildirim?.id) {
       setErr(
         'Bu kimlik SGK grubuna bildirilmemiş. Ana Firma girişi yapılamaz. Önce kimlik, görev ve giriş tarihini gruba atıp kuyruğa yazın.'
       );
       return;
     }
+    if (!sgkEvrakUrl) {
+      setErr('SGK evrakı okunamadı. Bildirgeyi yeniden bırakın.');
+      return;
+    }
     setBusy(true);
     setErr(null);
     try {
-      const candidate: Personel = {
-        id: `p_${Date.now()}`,
-        tcNo: String(sgkPreview.tcNo || bildirim?.tcNo || ''),
-        ad: String(sgkPreview.ad || bildirim?.ad || '').toLocaleUpperCase('tr-TR'),
-        soyad: String(sgkPreview.soyad || bildirim?.soyad || '').toLocaleUpperCase('tr-TR'),
-        babaAdi: sgkPreview.babaAdi || '',
-        dogumTarihi: sgkPreview.dogumTarihi || '',
-        telefonNo: '',
-        eposta: '',
-        adres: sgkPreview.adres || '',
-        il: sgkPreview.il || '',
-        ilce: sgkPreview.ilce || '',
-        departman: 'ŞANTİYE',
-        gorev: String(bildirim?.gorev || sgkPreview.gorev || 'İŞÇİ').toLocaleUpperCase('tr-TR'),
-        nitelik: String(bildirim?.nitelik || '').toLocaleUpperCase('tr-TR') || undefined,
-        iseGirisTarihi: String(sgkPreview.iseGirisTarihi || bildirim?.iseGirisTarihi || girisTarihi).slice(0, 10),
-        cinsiyet: sgkPreview.cinsiyet || 'Belirtilmedi',
-        maas: 0,
-        ucretTipi: 'Aylık',
-        sgkDurumu: "SGK'lı",
-        bankaAdi: sgkPreview.bankaAdi || '',
-        subeAdi: '',
-        ibanNo: sgkPreview.ibanNo || '',
-        durum: true,
-        firmaTipi: 'ANA_FIRMA',
-        kaynak: 'SGK_GRUP',
-        onayDurumu: 'ONAYLANDI',
-        fotografUrl: bildirim?.kimlikFotoUrl,
-        sigortaEvrakUrl: undefined,
-      };
-      const { personel: saved, created } = await upsertPersonelAvoidDuplicate(personeller, candidate, {
-        rawName: `${candidate.ad} ${candidate.soyad}`,
-        tcNo: candidate.tcNo,
-        firmaTipi: 'ANA_FIRMA',
-      });
-      setPersoneller((prev) => (prev.some((p) => p.id === saved.id) ? prev.map((p) => (p.id === saved.id ? saved : p)) : [saved, ...prev]));
-      if (bildirim?.id) {
-        await updateDoc(doc(db, 'personelGirisTalepleri', bildirim.id), {
-          durum: 'KAYIT_TAMAMLANDI',
-          personelId: saved.id,
-          tcNo: saved.tcNo,
-        });
-      }
+      await updateDoc(
+        doc(db, 'personelGirisTalepleri', bildirim.id),
+        cleanUndefined(buildSgkTalepPatchFromParse(sgkPreview, sgkEvrakUrl, 'giris', bildirim))
+      );
       setSgkPreview(null);
-      setOk(`${saved.ad} ${saved.soyad} Ana Firma kadrosuna ${created ? 'alındı' : 'güncellendi'}.`);
-      addNotification?.(`${saved.ad} ${saved.soyad} SGK evrakı ile Ana Firma girişi resmileşti.`);
+      setSgkEvrakUrl(null);
+      setOk(
+        `${sgkPreview.ad || bildirim.ad} ${sgkPreview.soyad || bildirim.soyad} için grup bildirimi + SGK evrakı Onay → Personel oluşturma kuyruğuna düştü. Kadrosu orada tek onayla açılır.`
+      );
+      addNotification?.(
+        `${sgkPreview.ad || bildirim.ad} ${sgkPreview.soyad || bildirim.soyad} SGK evrakı Onay kuyruğuna bırakıldı (personel yazılmadı).`
+      );
     } catch (e: any) {
-      setErr(e.message || 'Kayıt yazılamadı.');
+      setErr(e.message || 'Onay kuyruğuna yazılamadı.');
     } finally {
       setBusy(false);
     }
   };
 
-  const resmilestirCikis = async () => {
+  const onayaBirakCikis = async () => {
     if (!sgkPreview) return;
     const bildirim = findSgkGrupBildirimi(bekleyenCikis, {
       ad: sgkPreview.ad,
@@ -329,33 +304,31 @@ export const GrupKopruScreen: React.FC<GrupKopruScreenProps> = ({
       tcNo: sgkPreview.tcNo,
       personelIsim: `${sgkPreview.ad || ''} ${sgkPreview.soyad || ''}`,
     });
-    if (!bildirim) {
+    if (!bildirim?.id) {
       setErr('Bu kişi için gruba çıkış bildirimi yok. Önce personeli çıkış tarihi ile gruba paylaşın.');
       return;
     }
-    const mevcut =
-      personeller.find((p) => p.id === bildirim.personelId) ||
-      personeller.find((p) => String(p.tcNo || '').replace(/\D/g, '') === String(sgkPreview.tcNo || '').replace(/\D/g, ''));
-    if (!mevcut) {
-      setErr('Personel kartı bulunamadı. Çıkış resmileşmedi.');
+    if (!sgkEvrakUrl) {
+      setErr('SGK çıkış evrakı okunamadı. Bildirgeyi yeniden bırakın.');
       return;
     }
     setBusy(true);
     setErr(null);
     try {
-      const next: Personel = {
-        ...mevcut,
-        durum: false,
-        istenCikisTarihi: String(sgkPreview.iseGirisTarihi || bildirim.cikisTarihi || cikisTarihi).slice(0, 10),
-      };
-      await saveDocument('personeller', next);
-      setPersoneller((prev) => prev.map((p) => (p.id === next.id ? next : p)));
-      await updateDoc(doc(db, 'personelCikisTalepleri', bildirim.id), { durum: 'ONAYLANDI' });
+      await updateDoc(
+        doc(db, 'personelCikisTalepleri', bildirim.id),
+        cleanUndefined(buildSgkTalepPatchFromParse(sgkPreview, sgkEvrakUrl, 'cikis', bildirim))
+      );
       setSgkPreview(null);
-      setOk(`${next.ad} ${next.soyad} çıkışı resmileşti (${next.istenCikisTarihi}).`);
-      addNotification?.(`${next.ad} ${next.soyad} SGK çıkış evrakı ile işten çıkışı resmileşti.`);
+      setSgkEvrakUrl(null);
+      setOk(
+        `${bildirim.personelIsim || `${sgkPreview.ad || ''} ${sgkPreview.soyad || ''}`.trim()} çıkış evrakı Onay → Personel giriş-çıkış kuyruğuna düştü. Çıkış orada tek onayla resmileşir.`
+      );
+      addNotification?.(
+        `${bildirim.personelIsim || 'Personel'} SGK çıkış evrakı Onay kuyruğuna bırakıldı (kart pasife alınmadı).`
+      );
     } catch (e: any) {
-      setErr(e.message || 'Çıkış yazılamadı.');
+      setErr(e.message || 'Onay kuyruğuna yazılamadı.');
     } finally {
       setBusy(false);
     }
@@ -451,12 +424,13 @@ export const GrupKopruScreen: React.FC<GrupKopruScreenProps> = ({
         accent="sa"
         eyebrow="WhatsApp köprüsü"
         title="Grup Köprüsü"
-        subtitle={`${SGK_GRUP_ADI} ve Arnavutköy muhasebe grubu. Gruba gitmeyen Ana Firma giriş/çıkış resmileşmez.`}
+        subtitle={`${SGK_GRUP_ADI} ve Arnavutköy muhasebe grubu. Gruba gitmeyen Ana Firma giriş/çıkış onaya bile düşmez.`}
       />
 
       <div className="rounded-xl border border-amber-200 bg-amber-50/80 px-4 py-3 text-[12px] text-amber-950 leading-relaxed">
         <strong>Kural:</strong> Ana Firma işçi ancak SGK grubuna <em>kimlik + görev + giriş tarihi</em> atıldıktan
-        ve SGK evrakı geldikten sonra kadroya alınır. Çıkış da önce gruba personel + tarih, evrak gelince resmileşir.
+        ve SGK evrakı geldikten sonra Onay → Personel oluşturma kuyruğuna düşer. Kadro buradan yazılmaz;
+        tek insan kontrolü Onay sekmesindedir. Çıkış da aynı: önce gruba personel + tarih, evrak gelince onaya düşer.
         WhatsApp grubunu program dinleyemez; sabit metni siz atarsınız, dönen evrakı buraya bırakırsınız.
       </div>
 
@@ -544,7 +518,8 @@ export const GrupKopruScreen: React.FC<GrupKopruScreenProps> = ({
           </section>
 
           <section className="bg-white border border-slate-200 rounded-2xl p-4 space-y-3">
-            <h3 className="text-sm font-semibold text-slate-900">2 · SGK evrakı gelince resmileştir</h3>
+            <h3 className="text-sm font-semibold text-slate-900">2 · SGK evrakı gelince onaya bırak</h3>
+            <p className="text-[11px] text-slate-500">Personel kartı burada açılmaz. Evrak, mevcut grup bildirimine bağlanır ve Onay kuyruğuna düşer.</p>
             <label className="block text-xs font-bold text-slate-600 cursor-pointer border border-dashed border-slate-300 rounded-xl p-4 text-center hover:bg-slate-50">
               <Upload className="w-4 h-4 mx-auto mb-1" />
               {busy ? 'Okunuyor…' : 'İşe giriş bildirgesi (PDF / foto) bırakın'}
@@ -555,12 +530,12 @@ export const GrupKopruScreen: React.FC<GrupKopruScreenProps> = ({
                 <p className="font-semibold">{sgkPreview.ad} {sgkPreview.soyad} · TC {sgkPreview.tcNo || '—'}</p>
                 <p className="text-slate-500">SGK giriş: {sgkPreview.iseGirisTarihi || '—'}</p>
                 {findSgkGrupBildirimi(bekleyenGiris, sgkPreview) ? (
-                  <p className="text-emerald-700 font-bold">Grup bildirimi bulundu — Ana Firma girişi açılabilir.</p>
+                  <p className="text-emerald-700 font-bold">Grup bildirimi bulundu — Onay kuyruğuna bırakılabilir.</p>
                 ) : (
-                  <p className="text-rose-700 font-bold">Grup bildirimi yok. Ana Firma kaydı engellendi.</p>
+                  <p className="text-rose-700 font-bold">Grup bildirimi yok. Ana Firma işlemi engellendi; onaya da düşmez.</p>
                 )}
-                <button type="button" disabled={busy} onClick={() => void resmilestirGiris()} className="text-xs font-bold px-3 py-2 rounded-lg bg-slate-900 text-white cursor-pointer disabled:opacity-50">
-                  Ana Firma girişini resmileştir
+                <button type="button" disabled={busy} onClick={() => void onayaBirakGiris()} className="text-xs font-bold px-3 py-2 rounded-lg bg-slate-900 text-white cursor-pointer disabled:opacity-50">
+                  Onay → Personel oluşturma’ya bırak
                 </button>
               </div>
             ) : null}
@@ -573,7 +548,10 @@ export const GrupKopruScreen: React.FC<GrupKopruScreenProps> = ({
                   bekleyenGiris.map((t) => (
                     <div key={t.id} className="px-3 py-2 text-[11px] border-b border-slate-50 flex justify-between gap-2">
                       <span className="font-semibold">{t.ad} {t.soyad}</span>
-                      <span className="text-slate-500 truncate">{t.gorev} · {String(t.iseGirisTarihi || '').slice(0, 10)}</span>
+                      <span className="text-slate-500 truncate">
+                        {t.gorev} · {String(t.iseGirisTarihi || '').slice(0, 10)}
+                        {isSgkOnayHazir(t) ? ' · onaya düştü' : hasSgkEvrak(t) ? ' · evrak var' : ' · evrak bekleniyor'}
+                      </span>
                     </div>
                   ))
                 )}
@@ -625,7 +603,8 @@ export const GrupKopruScreen: React.FC<GrupKopruScreenProps> = ({
             </div>
           </section>
           <section className="bg-white border border-slate-200 rounded-2xl p-4 space-y-3">
-            <h3 className="text-sm font-semibold text-slate-900">2 · Çıkış evrakı gelince resmileştir</h3>
+            <h3 className="text-sm font-semibold text-slate-900">2 · Çıkış evrakı gelince onaya bırak</h3>
+            <p className="text-[11px] text-slate-500">Kart burada pasife alınmaz. Evrak, grup bildirimine bağlanır; çıkış Onay’da tek tıkla resmileşir.</p>
             <label className="block text-xs font-bold text-slate-600 cursor-pointer border border-dashed border-slate-300 rounded-xl p-4 text-center hover:bg-slate-50">
               <Upload className="w-4 h-4 mx-auto mb-1" />
               {busy ? 'Okunuyor…' : 'Çıkış bildirgesi (PDF / foto) bırakın'}
@@ -634,8 +613,18 @@ export const GrupKopruScreen: React.FC<GrupKopruScreenProps> = ({
             {sgkPreview && sgkKind === 'cikis' ? (
               <div className="text-xs space-y-2 border border-slate-100 rounded-xl p-3">
                 <p className="font-semibold">{sgkPreview.ad} {sgkPreview.soyad}</p>
-                <button type="button" disabled={busy} onClick={() => void resmilestirCikis()} className="text-xs font-bold px-3 py-2 rounded-lg bg-slate-900 text-white cursor-pointer">
-                  Çıkışı resmileştir
+                {findSgkGrupBildirimi(bekleyenCikis, {
+                  ad: sgkPreview.ad,
+                  soyad: sgkPreview.soyad,
+                  tcNo: sgkPreview.tcNo,
+                  personelIsim: `${sgkPreview.ad || ''} ${sgkPreview.soyad || ''}`,
+                }) ? (
+                  <p className="text-emerald-700 font-bold">Grup bildirimi bulundu — Onay kuyruğuna bırakılabilir.</p>
+                ) : (
+                  <p className="text-rose-700 font-bold">Grup bildirimi yok. Çıkış onaya düşmez.</p>
+                )}
+                <button type="button" disabled={busy} onClick={() => void onayaBirakCikis()} className="text-xs font-bold px-3 py-2 rounded-lg bg-slate-900 text-white cursor-pointer">
+                  Onay → Personel çıkış’a bırak
                 </button>
               </div>
             ) : null}
@@ -646,7 +635,10 @@ export const GrupKopruScreen: React.FC<GrupKopruScreenProps> = ({
                 bekleyenCikis.map((t) => (
                   <div key={t.id} className="px-3 py-2 text-[11px] border-b border-slate-50">
                     <span className="font-semibold">{t.personelIsim}</span>
-                    <span className="text-slate-500"> · {String(t.cikisTarihi || '').slice(0, 10)}</span>
+                    <span className="text-slate-500">
+                      {' '}· {String(t.cikisTarihi || '').slice(0, 10)}
+                      {isSgkOnayHazir(t) ? ' · onaya düştü' : hasSgkEvrak(t) ? ' · evrak var' : ' · evrak bekleniyor'}
+                    </span>
                   </div>
                 ))
               )}
