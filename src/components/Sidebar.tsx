@@ -154,6 +154,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
           return isPrivilegedAdmin;
         }
 
+        if (item.key === 'ana_sayfa') {
+          return true;
+        }
+
         if (item.key === 'irsaliye_fatura' && isIrsaliyeFaturaRestricted(kisitliSayfalar)) {
           return false;
         }

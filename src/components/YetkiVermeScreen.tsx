@@ -4,7 +4,7 @@ import {
   Settings, CheckSquare, Square, RefreshCw, HelpCircle
 } from 'lucide-react';
 import { Kullanici } from './AdminPanelScreen';
-import { PORTAL_PAGES, sanitizeKisitliSayfalar } from '../lib/yetkiUtils';
+import { RESTRICTABLE_PORTAL_PAGES, sanitizeKisitliSayfalar } from '../lib/yetkiUtils';
 import { saveKullanici } from '../lib/kullaniciUtils';
 
 interface YetkiVermeScreenProps {
@@ -14,7 +14,7 @@ interface YetkiVermeScreenProps {
   addNotification?: (mesaj: string) => void;
 }
 
-const ALL_PAGES = PORTAL_PAGES;
+const ALL_PAGES = RESTRICTABLE_PORTAL_PAGES;
 
 const PRIVILEGED_EMAILS = new Set(['sametatak9@gmail.com', 'mudur@gmail.com']);
 
@@ -134,7 +134,9 @@ export const YetkiVermeScreen: React.FC<YetkiVermeScreenProps> = ({
   });
 
   // Group pages by their groups
-  const groups = Array.from(new Set(ALL_PAGES.map(p => p.group)));
+  const groups = Array.from(new Set(ALL_PAGES.map(p => p.group))).filter((g) =>
+    ALL_PAGES.some((p) => p.group === g)
+  );
 
   return (
     <div className="flex-grow p-6 flex flex-col font-sans select-none bg-slate-50 gap-4">
@@ -298,8 +300,8 @@ export const YetkiVermeScreen: React.FC<YetkiVermeScreenProps> = ({
                 <div className="bg-amber-50 border border-amber-200 p-3 rounded-2xl flex items-start space-x-2 text-[10.5px] leading-relaxed text-amber-900">
                   <span className="text-base select-none shrink-0">📌</span>
                   <div>
-                    <strong>Sayfa Erişim Kuralı:</strong> Aşağıdaki listede <strong>kutucuğu işaretli olan</strong> sayfalara personel erişim sağlayabilir. 
-                    Kutucuğu <strong>boşaltılan (işareti kaldırılan)</strong> sayfalar ise personele tamamen kısıtlanır; menüden gizlenir ve doğrudan erişim girişleri engellenir.
+                    <strong>Sayfa Erişim Kuralı:</strong> Aşağıdaki listede <strong>kutucuğu işaretli olan</strong> sayfalara personel erişim sağlayabilir.
+                    Kutucuğu <strong>boşaltılan</strong> sayfalar menüden gizlenir. <strong>Ana Sayfa kısıtlanamaz</strong> — her masaüstü kullanıcı dashboard’u görür.
                   </div>
                 </div>
 

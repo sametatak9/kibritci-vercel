@@ -47,6 +47,13 @@ export const PORTAL_PAGES = [
 
 export type PortalPageKey = (typeof PORTAL_PAGES)[number]["key"];
 
+/** Sayfa Yetkilendirme'de kısıtlanamaz — herkes ana sayfayı görür (mobil rol allow-list hariç). */
+export const NEVER_RESTRICT_TABS = ['ana_sayfa'] as const;
+
+export const RESTRICTABLE_PORTAL_PAGES = PORTAL_PAGES.filter(
+  (p) => !(NEVER_RESTRICT_TABS as readonly string[]).includes(p.key)
+);
+
 /** Mobil saha rolleri → erişilebilir panel sekmeleri */
 export const MOBILE_ROLE_ALLOWED_TABS: Record<string, PortalPageKey[]> = {
   // Formen günlük planı yönetirken ana sayfadaki genel özeti de görebilir.
@@ -179,6 +186,7 @@ export function isTabRestrictedForUser(
   if (isIdariIslerRole(yetki) && (tab === 'admin' || tab === 'onay_islemleri')) {
     return false;
   }
+  if (tab === 'ana_sayfa') return false;
   if (!kisitliSayfalar?.length) return false;
   if (tab === 'irsaliye_fatura' || tab === 'irsaliye_giris' || tab === 'fatura_giris') {
     const irBlocked = kisitliSayfalar.includes('irsaliye_giris');
@@ -197,8 +205,9 @@ export function sanitizeKisitliSayfalar(
   kisitliSayfalar: string[] | undefined
 ): string[] {
   const homeTab = getRoleHomeTab(yetki);
-  if (!homeTab || !kisitliSayfalar?.length) return kisitliSayfalar ?? [];
-  return kisitliSayfalar.filter((k) => k !== homeTab);
+  return (kisitliSayfalar ?? []).filter(
+    (k) => k !== 'ana_sayfa' && (!homeTab || k !== homeTab)
+  );
 }
 
 /** Mobil saha rolleri yalnızca tanımlı panel sekmelerini görür */
