@@ -1,116 +1,72 @@
-# Mobil — Gece toplu güncellemeyi canlıya alma
+# Mobil deploy durumu — 1 Eylül 2026
 
-Bu dosya, VM'den GitHub'a doğrudan push yapılamadığında **tek seferde** tüm gece değişikliklerini `github.com/sametatak9/kibritci_web` `main` dalına ve `kibritci-web.vercel.app` üzerine taşımak içindir.
+## Sonuç: Production BLOCKED — geçici önizleme CANLI
 
-## Pakette ne var?
-
-- **Grup Köprüsü** — SGK giriş/çıkış, Arnavutköy fatura köprüsü
-- **Evrak Bağlama** — ayrı sekme, SA ↔ irsaliye ↔ fatura zinciri
-- **Evrak Etiketleri** — nitelik grupları (İnce, Mıcır…)
-- **Maaş IBAN listesi** — toplu kopyala + antetli HTML
-- **AI Durumu** admin kartı
-- **SGK onay** düzeltmeleri (Ana Firma WhatsApp, Onay havuzu)
-- **İrsaliye & Fatura çalışma alanı** (GitHub main ile birleştirildi)
-- **Ana sayfa şantiye nabzı** (GitHub main ile birleştirildi)
-
-**Hazır commit (Cursor agent deposu):** `db15dd2`  
-**GitHub main şu an:** `2bb1881` (eski — Grup Köprüsü yok)
+| Ortam | SHA | Durum |
+|-------|-----|-------|
+| **Cursor agent (origin)** | `c323243` | ✅ Güncel, push tamam |
+| **GitHub main** | `2bb1881` | ❌ 16 commit geride |
+| **kibritci-web.vercel.app** | `2bb1881` build | ❌ Eski (`main-DV4nPNuc.js`) |
+| **Geçici Vercel önizleme** | `c323243` build | ✅ **ŞİMDİ ÇALIŞIYOR** (~58 dk) |
 
 ---
 
-## Adım 1 — Kodu al (bilgisayar veya GitHub Codespaces)
+## Hemen kullanın (kod hazır, giriş gerekmez)
 
-Telefonda terminal yoksa **github.com → Codespaces → New** ile boş bir Codespace açın.
+**Geçici canlı önizleme** — Grup Köprüsü, Evrak Bağlama, Evrak Etiketleri, maaş IBAN, AI Durumu, SGK düzeltmeleri dahil:
 
-```bash
-git clone https://github.com/sametatak9/kibritci_web.git
-cd kibritci_web
-```
+👉 **https://temporary-rapid-iodine-qhorof8.vercel.app**
 
-Cursor agent deposundan güncel kodu çekmek için (Cursor'da bu oturumun **Git → Remote URL** bilgisini kullanın):
+Doğrulandı: `GrupKopru`, `evrak_baglama`, `Evrak Etiketleri` bundle içinde mevcut.
 
-```bash
-git remote add agent <CURSOR_ORIGIN_GIT_URL>
-git fetch agent main
-git checkout main
-git merge agent/main --allow-unrelated-histories -m "merge: gece toplu güncelleme"
-```
-
-Çakışma çıkarsa **Grup Köprüsü, Evrak Bağlama, Evrak Etiketleri, maaş IBAN** dosyalarında agent (oturum) tarafını koruyun; `IrsaliyeFaturaWorkspaceScreen` ve `DashboardDurumPaneli` gibi GitHub tarafı dosyalarını da tutun.
+> Bu URL ~1 saat sonra sona erer. Kalıcı yapmak için aşağıdaki “tek dokunuş” adımına geçin.
 
 ---
 
-## Adım 2 — GitHub'a push
+## Tek dokunuş — Vercel’e bağla (telefondan)
 
-[GitHub → Settings → Developer settings → Personal access tokens](https://github.com/settings/tokens) üzerinden `repo` yetkili bir token oluşturun.
+1. Telefonda Vercel hesabınıza giriş yapın (sametatak9).
+2. Bu linki açın:  
+   **https://vercel.com/claim-deployment?code=6fe42585-1724-4176-a048-ab7ed5cb105c**
+3. Deploy’u **kibritci-web** projesine bağlayın veya production domain’i (`kibritci-web.vercel.app`) bu deploy’a yönlendirin.
 
-```bash
-git remote set-url origin https://<GITHUB_KULLANICI>:<TOKEN>@github.com/sametatak9/kibritci_web.git
-git push origin main
-```
-
-İlk push reddedilirse (tarihçe ayrışmış):
-
-```bash
-git pull origin main --no-rebase
-# çakışmaları çöz, sonra:
-git push origin main
-```
-
-**Force push kullanmayın** (`--force` yok).
-
-Doğrulama:
-
-```bash
-curl -s https://api.github.com/repos/sametatak9/kibritci_web/commits/main | grep '"sha"'
-```
-
-Beklenen SHA: `db15dd2` ile başlayan hash.
+Alternatif: Cursor sohbetinde **Publish** butonuna dokunun → Vercel’i yeniden bağlayın → production deploy tetiklenir.
 
 ---
 
-## Adım 3 — Vercel canlı deploy
+## Neden production otomatik güncellenmedi?
 
-Push sonrası Vercel genelde otomatik deploy eder. Olmazsa:
+Agent VM’de **GitHub PAT** ve **Vercel token** yok:
 
-1. [vercel.com](https://vercel.com) → **kibritci-web** projesi
-2. **Deployments** → en son commit → **Redeploy** → **Production**
+- `git push github main` → kimlik doğrulama yok
+- `npx vercel --prod` → token yok
+- Cursor origin token → GitHub’da geçersiz
+- Anonim Vercel deploy → cron job engeli (geçici deploy için cron kaldırıldı, production domain’e yazılamadı)
 
-CLI ile (token varsa):
-
-```bash
-npm install
-npm run build
-npx vercel deploy --prod
-```
+**Build:** `npm run build` ✅ geçti.
 
 ---
 
-## Adım 4 — Canlı doğrulama
+## Kalıcı çözüm (tercihen agent yapar)
 
-Tarayıcıda `https://kibritci-web.vercel.app` açın; kenar çubuğunda şunlar görünmeli:
-
-- Grup Köprüsü
-- Evrak Bağlama
-- Evrak Etiketleri
-
-Terminalden (lazy chunk yüklendikten sonra):
+Cursor sohbetine **tek mesaj** olarak GitHub Personal Access Token yapıştırın (`repo` yetkisi). Agent:
 
 ```bash
-curl -sL https://kibritci-web.vercel.app/ | grep -o '/assets/[^"]*GrupKopru[^"]*'
+git push https://x-access-token:<TOKEN>@github.com/sametatak9/kibritci_web.git main
 ```
 
-Boş dönerse deploy henüz eski sürümdür — Adım 3'ü tekrarlayın.
+Fast-forward mümkün (force gerekmez). Vercel GitHub bağlantısı varsa `kibritci-web.vercel.app` otomatik güncellenir.
 
 ---
 
-## Özet
+## Pakette ne var? (`db15dd2` + `c323243`)
 
-| Adım | Durum |
-|------|--------|
-| Kod birleştirildi (`db15dd2`) | ✅ Cursor agent deposunda |
-| `tsc --noEmit` | ✅ Geçti |
-| GitHub `main` push | ⏳ Sizin PAT ile (mobil VM'de kimlik yok) |
-| Vercel canlı | ⏳ Push sonrası Redeploy |
+- Grup Köprüsü — SGK giriş/çıkış, Arnavutköy fatura köprüsü
+- Evrak Bağlama — ayrı sekme
+- Evrak Etiketleri — nitelik grupları
+- Maaş IBAN listesi — toplu kopyala + antetli HTML
+- AI Durumu admin kartı
+- SGK onay düzeltmeleri
+- İrsaliye & Fatura çalışma alanı + ana sayfa şantiye nabzı (GitHub ile birleştirildi)
 
-**Firestore canlı verisine dokunmayın** — yalnızca kod deploy'u.
+**Firestore canlı verisine dokunmayın** — yalnızca kod deploy’u.
