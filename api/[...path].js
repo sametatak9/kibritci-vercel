@@ -194,9 +194,52 @@ var init_yoklamaUtils = __esm({
 });
 
 // src/lib/yetkiUtils.ts
-var MOBILE_ROLE_ALLOWED_TABS, MOBILE_ROLE_HOME_TAB;
+var PORTAL_PAGES, NEVER_RESTRICT_TABS, RESTRICTABLE_PORTAL_PAGES, MOBILE_ROLE_ALLOWED_TABS, MOBILE_ROLE_HOME_TAB;
 var init_yetkiUtils = __esm({
   "src/lib/yetkiUtils.ts"() {
+    PORTAL_PAGES = [
+      { key: "ana_sayfa", label: "Ana Sayfa Dashboard", group: "BA\u015ELANGI\xC7" },
+      { key: "personel", label: "Personel Y\xF6netimi", group: "PERSONEL" },
+      { key: "personel_kartlari", label: "Personel Kart\u0131", group: "PERSONEL" },
+      { key: "yoklama", label: "Yoklama ve Puantaj", group: "PERSONEL" },
+      { key: "faaliyet_personel", label: "Faaliyeti Olan Personeller", group: "PERSONEL" },
+      { key: "maas", label: "Maa\u015F Hesaplama & \xD6deme", group: "PERSONEL" },
+      { key: "personel_izin", label: "Personel \u0130zin Formu", group: "PERSONEL" },
+      { key: "grup_kopru", label: "Grup K\xF6pr\xFCs\xFC", group: "PERSONEL" },
+      { key: "kasa", label: "Haftal\u0131k Kasa", group: "F\u0130NANS & ENVANTER" },
+      { key: "satin_alma", label: "Sat\u0131n Alma Talep", group: "F\u0130NANS & ENVANTER" },
+      { key: "siparis_formu", label: "Sipari\u015F Formu", group: "F\u0130NANS & ENVANTER" },
+      { key: "irsaliye_fatura", label: "\u0130rsaliye & Fatura", group: "F\u0130NANS & ENVANTER" },
+      { key: "t_cetveli", label: "T Cetveli", group: "F\u0130NANS & ENVANTER" },
+      { key: "fatura_giris", label: "Fatura Giri\u015Fi", group: "F\u0130NANS & ENVANTER" },
+      { key: "evrak_baglama", label: "Evrak Ba\u011Flama", group: "F\u0130NANS & ENVANTER" },
+      { key: "evrak_etiketleri", label: "Evrak Etiketleri", group: "F\u0130NANS & ENVANTER" },
+      { key: "taseron_kesinti", label: "Ta\u015Feron Y\xF6netimi", group: "F\u0130NANS & ENVANTER" },
+      { key: "cari_stok", label: "Cari ve Stok Kartlar\u0131", group: "F\u0130NANS & ENVANTER" },
+      { key: "kibar_hakedis", label: "ZER YAPI Hakedi\u015F", group: "F\u0130NANS & ENVANTER" },
+      { key: "operator", label: "Operat\xF6r Faaliyetleri", group: "\u0130\u015E MAK\u0130NES\u0130 & OPERAT\xD6R" },
+      { key: "arac", label: "Ara\xE7 ve Demirba\u015F", group: "\u0130DAR\u0130 \u0130\u015ELER & SAHA" },
+      { key: "kamp", label: "Kamp Y\xF6netimi", group: "\u0130DAR\u0130 \u0130\u015ELER & SAHA" },
+      { key: "saha", label: "Daily Saha Faaliyetleri", group: "\u0130DAR\u0130 \u0130\u015ELER & SAHA" },
+      { key: "proje_ilerleme", label: "Proje \u0130lerlemesi", group: "\u0130DAR\u0130 \u0130\u015ELER & SAHA" },
+      { key: "rapor_programlama", label: "Raporlama & Programlama", group: "\u0130DAR\u0130 \u0130\u015ELER & SAHA" },
+      { key: "tutanak", label: "Haz\u0131r Tutanaklar", group: "\u0130DAR\u0130 \u0130\u015ELER & SAHA" },
+      { key: "formen_ekrani", label: "Formen Mobil Paneli", group: "\u0130DAR\u0130 \u0130\u015ELER & SAHA" },
+      { key: "guvenlik_ekrani", label: "G\xFCvenlik & Kap\u0131 Kontrol", group: "\u0130DAR\u0130 \u0130\u015ELER & SAHA" },
+      { key: "kampci_ekrani", label: "Kamp\xE7\u0131 Mobil Paneli", group: "\u0130DAR\u0130 \u0130\u015ELER & SAHA" },
+      { key: "tesisatci_ekrani", label: "Tesisat\xE7\u0131 Mobil Paneli", group: "\u0130DAR\u0130 \u0130\u015ELER & SAHA" },
+      { key: "mermerci_ekrani", label: "Mermerci Mobil Paneli", group: "\u0130DAR\u0130 \u0130\u015ELER & SAHA" },
+      { key: "seramik_ekrani", label: "G\xF6t\xFCr\xFC / Seramik Mobil Paneli", group: "\u0130DAR\u0130 \u0130\u015ELER & SAHA" },
+      { key: "lojistik_ekrani", label: "\u015E\xF6f\xF6r Mobil Paneli", group: "\u0130DAR\u0130 \u0130\u015ELER & SAHA" },
+      { key: "depocu_ekrani", label: "Depocu Mobil Paneli", group: "\u0130DAR\u0130 \u0130\u015ELER & SAHA" },
+      { key: "onay_islemleri", label: "Onay Havuzu & \u0130mzalar", group: "RAPOR VE \u0130LET\u0130\u015E\u0130M" },
+      { key: "admin", label: "\xDCyelik Onay & \u0130mza", group: "ADM\u0130N\u0130STRATOR" },
+      { key: "yetki_verme", label: "Sayfa Yetkilendirme", group: "ADM\u0130N\u0130STRATOR" }
+    ];
+    NEVER_RESTRICT_TABS = ["ana_sayfa"];
+    RESTRICTABLE_PORTAL_PAGES = PORTAL_PAGES.filter(
+      (p) => !NEVER_RESTRICT_TABS.includes(p.key)
+    );
     MOBILE_ROLE_ALLOWED_TABS = {
       // Formen günlük planı yönetirken ana sayfadaki genel özeti de görebilir.
       FORMEN: ["ana_sayfa", "formen_ekrani", "faaliyet_personel", "proje_ilerleme", "rapor_programlama", "personel", "siparis_formu"],
