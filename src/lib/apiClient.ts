@@ -61,6 +61,31 @@ export async function fetchApiJson<T = unknown>(
   return json as T;
 }
 
+export type GeminiHealthDetails = {
+  success: boolean;
+  message?: string;
+  error?: string;
+  keyFormat?: string;
+  keyPreview?: string;
+  keyHint?: string;
+};
+
+/** Admin paneli — maskelenmiş anahtar önizlemesi + format ipucu (tam anahtar asla dönmez) */
+export async function fetchGeminiHealthDetails(): Promise<GeminiHealthDetails> {
+  try {
+    const data = await fetchApiJson<GeminiHealthDetails>('/api/gemini-health');
+    return {
+      ...data,
+      error: data.error ? formatGeminiAlert(data.error) : undefined,
+    };
+  } catch (err) {
+    return {
+      success: false,
+      error: formatGeminiAlert(err instanceof Error ? err.message : 'Gemini API kontrol edilemedi.'),
+    };
+  }
+}
+
 /** Giriş sonrası AI API'nin ayakta olup olmadığını kontrol eder */
 export async function probeGeminiApi(): Promise<{ ok: boolean; message: string }> {
   try {

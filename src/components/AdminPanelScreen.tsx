@@ -13,8 +13,9 @@ import {
 import { 
   Users, KeySquare, ShieldAlert, Trash2, CheckCircle, 
   XOctagon, UserCheck, AlertCircle, RefreshCw, Key,
-  Eye, Check, Clipboard, CheckSquare, Save, Loader2, UserPlus, Clock, Database, X
+  Eye, Check, Clipboard, CheckSquare, Save, Loader2, UserPlus, Clock, Database, X, Sparkles
 } from 'lucide-react';
+import { fetchGeminiHealthDetails, GeminiHealthDetails } from '../lib/apiClient';
 import { AdminYetkiSablonTab } from './AdminYetkiSablonTab';
 import { isFirestoreWriteFailure } from '../lib/bekleyenUyelik';
 import { fetchCollection, removeDocument, saveDocument } from '../lib/firebase';
@@ -144,6 +145,24 @@ export const AdminPanelScreen: React.FC<AdminPanelScreenProps> = ({
   const [backupLoading, setBackupLoading] = useState(false);
   const [backupOzeti, setBackupOzeti] = useState<Awaited<ReturnType<typeof fetchVeriKorumaOzeti>> | null>(null);
   const [programYedekleri, setProgramYedekleri] = useState<ProgramVeriYedegi[]>([]);
+
+  const [geminiHealth, setGeminiHealth] = useState<GeminiHealthDetails | null>(null);
+  const [geminiHealthLoading, setGeminiHealthLoading] = useState(false);
+
+  const loadGeminiHealth = useCallback(async () => {
+    setGeminiHealthLoading(true);
+    try {
+      const result = await fetchGeminiHealthDetails();
+      setGeminiHealth(result);
+    } finally {
+      setGeminiHealthLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (uyelikOnly) return;
+    void loadGeminiHealth();
+  }, [uyelikOnly, loadGeminiHealth]);
 
   // User edit state
   const [editingUser, setEditingUser] = useState<Kullanici | null>(null);
@@ -607,6 +626,107 @@ export const AdminPanelScreen: React.FC<AdminPanelScreenProps> = ({
           Kibritçi Güvenlik Altyapısı v1.5
         </span>
       </div>
+
+      {!uyelikOnly && (
+        <div
+          className={`rounded-2xl border p-4 shrink-0 ${
+            geminiHealth?.success
+              ? 'bg-emerald-50 border-emerald-200'
+              : geminiHealth
+                ? 'bg-rose-50 border-rose-200'
+                : 'bg-slate-50 border-slate-200'
+          }`}
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-start gap-3 min-w-0">
+              <div
+                className={`mt-0.5 h-3 w-3 rounded-full shrink-0 ${
+                  geminiHealthLoading
+                    ? 'bg-amber-400 animate-pulse'
+                    : geminiHealth?.success
+                      ? 'bg-emerald-500'
+                      : geminiHealth
+                        ? 'bg-rose-500'
+                        : 'bg-slate-300'
+                }`}
+                aria-hidden
+              />
+              <div className="min-w-0 space-y-1">
+                <h3 className="text-xs font-black text-slate-900 flex items-center gap-1.5">
+                  <Sparkles size={14} className="text-violet-600 shrink-0" />
+                  AI Durumu (Gemini)
+                </h3>
+                {geminiHealthLoading && !geminiHealth ? (
+                  <p className="text-[11px] text-slate-600">Kontrol ediliyor…</p>
+                ) : geminiHealth?.success ? (
+                  <>
+                    <p className="text-[11px] font-semibold text-emerald-800">
+                      {geminiHealth.message || 'Yapay zeka API çalışıyor.'}
+                    </p>
+                    {geminiHealth.keyHint && (
+                      <p className="text-[10px] text-emerald-700">{geminiHealth.keyHint}</p>
+                    )}
+                    {geminiHealth.keyPreview && geminiHealth.keyPreview !== '(tanımsız)' && (
+                      <p className="text-[10px] text-slate-500 font-mono">
+                        Anahtar: {geminiHealth.keyPreview}
+                      </p>
+                    )}
+                  </>
+                ) : geminiHealth ? (
+                  <>
+                    <p className="text-[11px] font-semibold text-rose-800 whitespace-pre-line">
+                      {geminiHealth.error || 'Yapay zeka API yanıt vermiyor.'}
+                    </p>
+                    {geminiHealth.keyHint && (
+                      <p className="text-[10px] text-rose-700">{geminiHealth.keyHint}</p>
+                    )}
+                    <ol className="mt-2 space-y-1 text-[10px] text-slate-700 list-decimal list-inside">
+                      <li>
+                        <a
+                          href="https://aistudio.google.com/apikey"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-blue-700 underline"
+                        >
+                          Google AI Studio
+                        </a>
+                        ’dan yeni Auth key (AQ.…) alın
+                      </li>
+                      <li>
+                        Vercel uygulaması veya{' '}
+                        <a
+                          href="https://vercel.com"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-blue-700 underline"
+                        >
+                          vercel.com
+                        </a>
+                        → kibritci-web → Settings → Environment Variables
+                      </li>
+                      <li>
+                        <code className="bg-white/80 px-1 rounded text-[9px]">GEMINI_API_KEY</code>{' '}
+                        değerini güncelleyin (tırnaksız)
+                      </li>
+                      <li>Deployments → son deploy → Redeploy</li>
+                      <li>Bu sayfada Yenile’ye basın</li>
+                    </ol>
+                  </>
+                ) : null}
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => void loadGeminiHealth()}
+              disabled={geminiHealthLoading}
+              className="shrink-0 text-slate-600 hover:text-slate-900 p-1.5 hover:bg-white/60 rounded transition outline-none cursor-pointer flex items-center gap-1 text-[10px] font-bold"
+            >
+              <RefreshCw size={12} className={geminiHealthLoading ? 'animate-spin' : ''} />
+              Yenile
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="flex-grow bg-white border rounded-2xl flex flex-col shadow-sm">
         
