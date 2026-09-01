@@ -1296,6 +1296,22 @@ export interface EvrakBaglantiGrubu {
   cariUnvan?: string;
 }
 
+/**
+ * Kullanıcının oluşturduğu adlandırılmış evrak klasörü (İnce, Mıcır, Demir…).
+ * Evrak Bağlama zincir ID’lerinden ayrıdır — kalem / nitelik takibi için etiket.
+ */
+export interface EvrakEtiketGrubu {
+  id: string;
+  ad: string;
+  aciklama?: string;
+  saIds: string[];
+  irsaliyeIds: string[];
+  faturaIds: string[];
+  nitelik?: string;
+  createdAt: string;
+  createdBy?: string;
+}
+
 /** Onaylanmış yapay zeka analiz raporu */
 export interface OnayliAnalizRaporu {
   id: string;

@@ -10,7 +10,8 @@ export type EvrakDonusumKaynagi =
   | 'KAPI_EVRAK'
   | 'IR_FATURA'
   | 'MANUEL_BAGLAMA'
-  | 'ARSIV';
+  | 'ARSIV'
+  | 'GRUP_KOPRU';
 
 export type ProvenanceBadge = {
   kind: EvrakDonusumKaynagi | 'IR_SA' | 'FT_ZINCIR' | 'BAGIMSIZ';
@@ -110,6 +111,15 @@ export function resolveFaturaProvenance(ft: {
       label: 'Kapı · fatura',
       className: `${BADGE_BASE} bg-amber-50 text-amber-900 border-amber-200`,
       title: 'Güvenlik kapısından taranmış Ana Firma faturası',
+    });
+  }
+
+  if (kaynak === 'GRUP_KOPRU' || kaynak === 'ARNAVUTKOY_WP') {
+    out.push({
+      kind: 'GRUP_KOPRU',
+      label: 'Arnavutköy köprü',
+      className: `${BADGE_BASE} bg-indigo-50 text-indigo-800 border-indigo-200`,
+      title: 'Grup Köprüsü — WhatsApp muhasebe grubundan içeri alınan fatura',
     });
   }
 

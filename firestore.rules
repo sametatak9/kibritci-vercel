@@ -175,6 +175,9 @@ service cloud.firestore {
     match /evrakBaglantiGruplari/{docId} {
       allow read, write: if canUseFinance();
     }
+    match /evrakEtiketGruplari/{docId} {
+      allow read, write: if canUseFinance();
+    }
     match /onayliAnalizRaporlari/{docId} {
       allow read, write: if canUseFinance();
     }

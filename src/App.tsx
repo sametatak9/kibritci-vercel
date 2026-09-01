@@ -31,6 +31,7 @@ const IrsaliyeGirisScreen = lazy(() => import('./components/IrsaliyeGirisScreen'
 const TCetveliScreen = lazy(() => import('./components/TCetveliScreen').then(m => ({ default: m.TCetveliScreen })));
 const FaturaGirisScreen = lazy(() => import('./components/FaturaGirisScreen').then(m => ({ default: m.FaturaGirisScreen })));
 const EvrakBaglamaScreen = lazy(() => import('./components/EvrakBaglamaScreen').then(m => ({ default: m.EvrakBaglamaScreen })));
+const EvrakEtiketleriScreen = lazy(() => import('./components/EvrakEtiketleriScreen').then(m => ({ default: m.EvrakEtiketleriScreen })));
 const GrupKopruScreen = lazy(() => import('./components/GrupKopruScreen').then(m => ({ default: m.GrupKopruScreen })));
 const TaseronKesintiScreen = lazy(() => import('./components/TaseronKesintiScreen').then(m => ({ default: m.TaseronKesintiScreen })));
 const PersonelKartlariScreen = lazy(() => import('./components/PersonelKartlariScreen').then(m => ({ default: m.PersonelKartlariScreen })));
@@ -60,7 +61,7 @@ import {
   KasaHareketi, AracBakim, Demisbas, KampOdasi, KampKaydi, KampYerleske, KampKat,
   HazirTutanak, CariKart, StokKart, EpostaGonderim, SahaFaaliyeti as SahaFaaliyetiType,
   OperatorFaaliyet, TaseronKesintiRaporu, TaseronEnerjiKaydi, TaseronYemekKaydi, MaaşOdeme, PersonelIslemGecmisi, CariKartIslem, StokKartIslem,
-  EvrakBaglantiGrubu, OnayliAnalizRaporu, ProgramliFaaliyet, KiralikKamyonPuantajKaydi
+  EvrakBaglantiGrubu, EvrakEtiketGrubu, OnayliAnalizRaporu, ProgramliFaaliyet, KiralikKamyonPuantajKaydi
 } from './types/erp';
 
 // Initial Mock Data
@@ -100,6 +101,7 @@ import {
   detectMassKampEvictionDate,
 } from './lib/kampPlacementUtils';
 import { probeGeminiApi } from './lib/apiClient';
+import { hydrateEvrakEtiketGrubu } from './lib/evrakEtiketUtils';
 import {
   hasSubstantialYoklamaData,
   isProductionLive,
@@ -331,6 +333,8 @@ function App() {
   const [evrakBaglamaPrefill, setEvrakBaglamaPrefill] = useState<import('./components/EvrakBaglamaScreen').EvrakBaglamaPrefill | null>(null);
   const [faturalar, setFaturalar] = useState<Fatura[]>([]);
   const [evrakBaglantiGruplari, setEvrakBaglantiGruplari] = useState<EvrakBaglantiGrubu[]>([]);
+  const [evrakEtiketGruplari, setEvrakEtiketGruplari] = useState<EvrakEtiketGrubu[]>([]);
+  const [evrakEtiketGruplariReady, setEvrakEtiketGruplariReady] = useState(false);
   const [onayliAnalizRaporlari, setOnayliAnalizRaporlari] = useState<OnayliAnalizRaporu[]>([]);
   const [kasaHareketleri, setKasaHareketleri] = useState<KasaHareketi[]>([]);
   
@@ -830,6 +834,7 @@ function App() {
           waybillsData,
           invoicesData,
           baglantiData,
+          etiketGrupData,
           analizData,
           cashLogData,
           vehicleData,
@@ -859,6 +864,7 @@ function App() {
           safeLoad(seedCollectionIfEmpty('irsaliyeler', INITIAL_IRSALIYE), [], 'irsaliyeler'),
           safeLoad(seedCollectionIfEmpty('faturalar', INITIAL_FATURA), [], 'faturalar'),
           safeLoad(seedCollectionIfEmpty('evrakBaglantiGruplari', []), [], 'evrakBaglantiGruplari'),
+          safeLoad(seedCollectionIfEmpty('evrakEtiketGruplari', []), [], 'evrakEtiketGruplari'),
           safeLoad(seedCollectionIfEmpty('onayliAnalizRaporlari', []), [], 'onayliAnalizRaporlari'),
           safeLoad(seedCollectionIfEmpty('kasaHareketleri', allowDemoSeed ? INITIAL_KASA : []), [], 'kasaHareketleri'),
           safeLoad(seedCollectionIfEmpty('araclar', INITIAL_ARAC), [], 'araclar'),
@@ -1073,6 +1079,8 @@ function App() {
         setIrsaliyeler(waybillsData);
         setFaturalar(invoicesData);
         setEvrakBaglantiGruplari(baglantiData);
+        setEvrakEtiketGruplari((etiketGrupData || []).map(hydrateEvrakEtiketGrubu));
+        setEvrakEtiketGruplariReady(true);
         setOnayliAnalizRaporlari(analizData);
         setKasaHareketleri(cashLogData);
         setAraclar(vehicleData);
@@ -1281,6 +1289,17 @@ function App() {
             list.push({ id: doc.id, ...doc.data() } as any);
           });
           setEvrakBaglantiGruplari(list);
+        })
+      );
+
+      deferredUnsubs.push(
+        onSnapshot(collection(db, 'evrakEtiketGruplari'), (snapshot) => {
+          const list: EvrakEtiketGrubu[] = [];
+          snapshot.forEach((docSnap) => {
+            list.push(hydrateEvrakEtiketGrubu({ id: docSnap.id, ...(docSnap.data() as object) }));
+          });
+          setEvrakEtiketGruplari(list);
+          setEvrakEtiketGruplariReady(true);
         })
       );
 
@@ -2474,6 +2493,14 @@ function App() {
     });
   };
 
+  const setEvrakEtiketGruplariWithSync = (updater: EvrakEtiketGrubu[] | ((g: EvrakEtiketGrubu[]) => EvrakEtiketGrubu[])) => {
+    setEvrakEtiketGruplari(prev => {
+      const next = typeof updater === 'function' ? updater(prev) : updater;
+      syncListState('evrakEtiketGruplari', prev, next, setEvrakEtiketGruplari);
+      return next;
+    });
+  };
+
   const setOnayliAnalizRaporlariWithSync = (updater: OnayliAnalizRaporu[] | ((r: OnayliAnalizRaporu[]) => OnayliAnalizRaporu[])) => {
     setOnayliAnalizRaporlari(prev => {
       const next = typeof updater === 'function' ? updater(prev) : updater;
@@ -2936,6 +2963,7 @@ function App() {
     if (has('irsaliye', 'fiş', 'fis')) return 'irsaliye_giris';
     if (has('t cetvel', 't-cetvel', 'cetveli')) return 't_cetveli';
     if (has('bağla', 'bagla', 'karşılaştır', 'karsilastir', 'zincir')) return 'evrak_baglama';
+    if (has('etiket', 'nitelik grubu', 'ince grubu')) return 'evrak_etiketleri';
     if (has('köprü', 'kopru', 'sgk grup', 'arnavutköy', 'arnavutkoy')) return 'grup_kopru';
     if (has('fatura')) return 'fatura_giris';
     if (has('sipariş', 'siparis')) return 'siparis_formu';
@@ -3988,10 +4016,24 @@ function App() {
                   faturalar={faturalar}
                   setIrsaliyeler={setIrsaliyelerWithSync}
                   setFaturalar={setFaturalarWithSync}
+                  evrakEtiketGruplari={evrakEtiketGruplari}
+                  setEvrakEtiketGruplari={setEvrakEtiketGruplariWithSync}
                   cariKartlar={cariKartlar}
                   stokKartlar={stokKartlar}
                   currentUser={currentUser}
                   addNotification={addNotification}
+                />
+              )}
+
+              {activeTab === "evrak_etiketleri" && (
+                <EvrakEtiketleriScreen
+                  evrakEtiketGruplari={evrakEtiketGruplari}
+                  setEvrakEtiketGruplari={setEvrakEtiketGruplariWithSync}
+                  satinAlmaTalepleri={satinAlmaTalepleri}
+                  irsaliyeler={irsaliyeler}
+                  faturalar={faturalar}
+                  currentUser={currentUser}
+                  hydrated={evrakEtiketGruplariReady}
                 />
               )}
 

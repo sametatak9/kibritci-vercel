@@ -25,6 +25,7 @@ export const PORTAL_PAGES = [
   { key: "t_cetveli", label: "T Cetveli", group: "FİNANS & ENVANTER" },
   { key: "fatura_giris", label: "Fatura Girişi", group: "FİNANS & ENVANTER" },
   { key: "evrak_baglama", label: "Evrak Bağlama", group: "FİNANS & ENVANTER" },
+  { key: "evrak_etiketleri", label: "Evrak Etiketleri", group: "FİNANS & ENVANTER" },
   { key: "taseron_kesinti", label: "Taşeron Yönetimi", group: "FİNANS & ENVANTER" },
   { key: "cari_stok", label: "Cari ve Stok Kartları", group: "FİNANS & ENVANTER" },
   { key: "kibar_hakedis", label: "ZER YAPI Hakediş", group: "FİNANS & ENVANTER" },

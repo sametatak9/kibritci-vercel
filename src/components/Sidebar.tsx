@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Building2, Users, CalendarCheck2, CreditCard, ShoppingCart, Truck, KeySquare, FileText, Tent, Mail, ChartBar as BarChart3, BookOpen, Contact as Contact2, Package, LogOut, Moon, Sun, Wallet, Hop as Home, ShieldCheck, PenTool, MessageSquare, HardHat, Banknote, Images, Sparkles, Link2, ChevronDown, ChevronRight, Search, Pin, PinOff, Wrench, Gem, Camera, Layers, ClipboardList, Smartphone } from 'lucide-react';
+import { Building2, Users, CalendarCheck2, CreditCard, ShoppingCart, Truck, KeySquare, FileText, Tent, Mail, ChartBar as BarChart3, BookOpen, Contact as Contact2, Package, LogOut, Moon, Sun, Wallet, Hop as Home, ShieldCheck, PenTool, MessageSquare, HardHat, Banknote, Images, Sparkles, Link2, Tags, ChevronDown, ChevronRight, Search, Pin, PinOff, Wrench, Gem, Camera, Layers, ClipboardList, Smartphone } from 'lucide-react';
 import {
   canAccessOnayHavuzu,
   canAccessUyelikAdminPanel,
@@ -82,6 +82,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         { key: "t_cetveli", label: "T Cetveli", icon: BookOpen },
         { key: "fatura_giris", label: "Fatura Girişi", icon: CreditCard },
         { key: "evrak_baglama", label: "Evrak Bağlama", icon: Link2 },
+        { key: "evrak_etiketleri", label: "Evrak Etiketleri", icon: Tags },
         { key: "taseron_kesinti", label: "Taşeron Yönetimi", icon: Wallet },
         { key: "cari_stok", label: "Cari ve Stok Kartları", icon: Package },
         { key: "kibar_hakedis", label: "ZER YAPI Hakediş", icon: CreditCard },

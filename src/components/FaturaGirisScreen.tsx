@@ -95,7 +95,7 @@ export const FaturaGirisScreen: React.FC<FaturaGirisScreenProps> = ({
 
   // Filters
   const [searchTerm, setSearchTerm] = useState("");
-  const [archiveFilter, setArchiveFilter] = useState<'ALL' | 'BAGIMSIZ' | 'CARI_YOK' | 'KAPI'>('ALL');
+  const [archiveFilter, setArchiveFilter] = useState<'ALL' | 'BAGIMSIZ' | 'CARI_YOK' | 'KAPI' | 'KOPRU'>('ALL');
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -558,6 +558,12 @@ export const FaturaGirisScreen: React.FC<FaturaGirisScreenProps> = ({
         ) {
           return false;
         }
+        if (
+          archiveFilter === 'KOPRU' &&
+          !(ft.donusumKaynagi === 'GRUP_KOPRU' || ft.kaynak === 'ARNAVUTKOY_WP')
+        ) {
+          return false;
+        }
         if (!q) return true;
         return (
           String(ft.faturaNo || '').toLocaleLowerCase('tr-TR').includes(q) ||
@@ -871,6 +877,7 @@ export const FaturaGirisScreen: React.FC<FaturaGirisScreenProps> = ({
                   {([
                     ['ALL', 'Tümü'],
                     ['KAPI', 'Kapı taraması'],
+                    ['KOPRU', 'Arnavutköy köprü'],
                     ['BAGIMSIZ', 'Bağımsız'],
                     ['CARI_YOK', 'Cari yok'],
                   ] as const).map(([id, label]) => (

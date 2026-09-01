@@ -38,11 +38,17 @@ WhatsApp grubunu program dinleyemez (resmi API mevcut gruba bot olarak giremez).
 
 1. **SGK giriş:** Kimlik + görev (yoklama) + giriş tarihi forma yazılır, sabit metin gruba atılır, `personelGirisTalepleri` kuyruğu açılır. SGK evrakı gelince buraya bırakılır; grup bildirimi yoksa işlem durur. **Personel kartı Grup Köprüsü’nden yazılmaz.** Evrak, talebe bağlanır ve **Onay → Personel oluşturma** kuyruğuna düşer. Tek insan onayı orada `upsertPersonelAvoidDuplicate` ile Ana Firma kaydını açar.
 2. **SGK çıkış:** Personel + çıkış tarihi gruba bildirilir (`personelCikisTalepleri`). Çıkış evrakı talebe bağlanır; kart ancak Onay → Personel giriş-çıkış’ta pasife alınır.
-3. **Arnavutköy fatura:** Gruptaki fatura buraya bırakılır; firma adına göre açık irsaliyeler önerilir ve bağlanır. Fatura eşlemesi personel yazmaz.
+3. **Arnavutköy fatura:** WhatsApp grubunu program dinlemez; faturayı buraya bırakın. Yükleme → yapay zeka okuma → açık irsaliye önerisi (firma / ünvan) → kaydet. Kayıt **Fatura Girişi** arşivine düşer (`Arnavutköy köprü` süzgeci). İsteğe bağlı aynı anda **Evrak Etiketleri** grubuna (mevcut veya yeni ad) fatura + eşleşen irsaliyeler eklenir. Personel yazılmaz.
 
 ## Evrak bağlama
 
 Satın alma, irsaliye ve fatura **oluşturma** sekmeleri yalın tutulur (belge yaz, listele, raporla). Karşılaştırma ve zincir bağlama **Evrak Bağlama** sekmesindedir: SA ↔ irsaliye ↔ fatura esnek seçilir.
+
+## Evrak etiketleri
+
+Adlandırılmış klasör / etiket (İnce, Mıcır, Demir…). Kullanıcı oluşturur; Firestore `evrakEtiketGruplari` koleksiyonunda saklanır. Her grubun altında satın alma, irsaliye ve fatura satırları **kalem özeti** (ürün + miktar + birim) ile durur — nitelik takibi içindir.
+
+Evrak Bağlama zincir ID’lerinden ayrıdır: bağlama evrakları birbirine kilitler; etiket aynı cinsi bir isim altında toplar. Kenar çubuğunda Evrak Bağlama’nın yanında **Evrak Etiketleri**. Grup Köprüsü fatura kaydında da mevcut gruba ekleme veya yeni ad yazma vardır.
 
 ## Maaş IBAN listesi
 

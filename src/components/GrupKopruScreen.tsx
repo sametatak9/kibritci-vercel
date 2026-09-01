@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { collection, doc, onSnapshot, setDoc, updateDoc } from 'firebase/firestore';
 import { Copy, Check, MessageCircle, Upload, UserPlus, UserMinus, FileText, Link2 } from 'lucide-react';
-import type { CariKart, Fatura, FaturaItem, Irsaliye, Personel, StokKart } from '../types/erp';
+import type { CariKart, EvrakEtiketGrubu, Fatura, FaturaItem, Irsaliye, Personel, StokKart } from '../types/erp';
 import { db, cleanUndefined } from '../lib/firebase';
 import { fetchApiJson } from '../lib/apiClient';
 import { compressImage } from '../lib/imageCompress';
@@ -22,6 +22,7 @@ import {
   SGK_GRUP_ADI,
 } from '../lib/sgkGrupSablon';
 import { eslesmeNedenLabel, suggestIrsaliyelerForFaturaUnvan } from '../lib/faturaIrsaliyeEslesme';
+import { assignDocsToEtiketGrubu } from '../lib/evrakEtiketUtils';
 import { EvrakPageShell, EvrakSectionHeader } from './evrakUi/EvrakScreenChrome';
 import { muhasebeInputClass } from './evrakUi/MuhasebeBelgeForm';
 
@@ -36,6 +37,8 @@ interface GrupKopruScreenProps {
   faturalar: Fatura[];
   setIrsaliyeler: React.Dispatch<React.SetStateAction<Irsaliye[]>>;
   setFaturalar: React.Dispatch<React.SetStateAction<Fatura[]>>;
+  evrakEtiketGruplari?: EvrakEtiketGrubu[];
+  setEvrakEtiketGruplari?: React.Dispatch<React.SetStateAction<EvrakEtiketGrubu[]>>;
   cariKartlar: CariKart[];
   stokKartlar: StokKart[];
   currentUser?: { email?: string };
@@ -62,6 +65,8 @@ export const GrupKopruScreen: React.FC<GrupKopruScreenProps> = ({
   faturalar,
   setIrsaliyeler,
   setFaturalar,
+  evrakEtiketGruplari = [],
+  setEvrakEtiketGruplari,
   cariKartlar,
   stokKartlar,
   currentUser,
@@ -95,6 +100,8 @@ export const GrupKopruScreen: React.FC<GrupKopruScreenProps> = ({
   const [ftParsed, setFtParsed] = useState<any | null>(null);
   const [ftEvrakUrl, setFtEvrakUrl] = useState<string | null>(null);
   const [seciliIrIds, setSeciliIrIds] = useState<string[]>([]);
+  const [etiketGrupId, setEtiketGrupId] = useState('');
+  const [etiketYeniAd, setEtiketYeniAd] = useState('');
 
   useEffect(() => {
     const u1 = onSnapshot(collection(db, 'personelGirisTalepleri'), (snap) => {
@@ -435,14 +442,37 @@ export const GrupKopruScreen: React.FC<GrupKopruScreenProps> = ({
     if (seciliIrIds.length) {
       setIrsaliyeler((prev) => linkIrsaliyelerToFatura(prev, fatura));
     }
+    const etiketAd = etiketYeniAd.trim();
+    let etiketNot = '';
+    if (setEvrakEtiketGruplari && (etiketGrupId || etiketAd)) {
+      const saFromIrs = irsaliyeler
+        .filter((ir) => seciliIrIds.includes(ir.id) && ir.saId)
+        .map((ir) => String(ir.saId));
+      setEvrakEtiketGruplari((prev) =>
+        assignDocsToEtiketGrubu(prev, {
+          grupId: etiketGrupId || undefined,
+          yeniAd: etiketAd || undefined,
+          createdBy: currentUser?.email,
+          faturaIds: [fatura.id],
+          irsaliyeIds: seciliIrIds,
+          saIds: saFromIrs,
+        })
+      );
+      const hedef =
+        evrakEtiketGruplari.find((g) => g.id === etiketGrupId)?.ad || etiketAd;
+      etiketNot = hedef ? ` Evrak Etiketleri → ${hedef}.` : '';
+    }
     setOk(
       seciliIrIds.length
-        ? `${fatura.faturaNo} kaydedildi ve ${seciliIrIds.length} irsaliye eşleştirildi.`
-        : `${fatura.faturaNo} kaydedildi. Eşleşen irsaliye yok; Evrak Bağlama’dan elle bağlayabilirsiniz.`
+        ? `${fatura.faturaNo} kaydedildi ve ${seciliIrIds.length} irsaliye eşleştirildi. Fatura Girişi arşivinde görünür.${etiketNot}`
+        : `${fatura.faturaNo} kaydedildi. Eşleşen irsaliye yok; Evrak Bağlama’dan elle bağlayabilirsiniz. Fatura Girişi arşivinde görünür.${etiketNot}`
     );
     addNotification?.(`Arnavutköy faturası ${fatura.faturaNo} köprüden işlendi.`);
     setFtParsed(null);
+    setFtEvrakUrl(null);
     setSeciliIrIds([]);
+    setEtiketGrupId('');
+    setEtiketYeniAd('');
   };
 
   return (
@@ -704,7 +734,9 @@ export const GrupKopruScreen: React.FC<GrupKopruScreenProps> = ({
           <div>
             <h3 className="text-sm font-semibold text-slate-900">Arnavutköy muhasebe grubu</h3>
             <p className="text-[11px] text-slate-500 mt-0.5">
-              Gruptaki faturayı buraya bırakın. Firma adı, açık irsaliyelerle eşleştirilir; onaylayınca fatura yazılır ve bağ kurulur.
+              Grubu program dinlemez; faturayı buraya bırakın. WhatsApp API mevcut gruba bot olarak giremez.
+              Yüklediğiniz belge okunur, firma / ünvana göre açık irsaliyeler önerilir; kaydedince fatura
+              Fatura Girişi arşivine düşer. İsterseniz etiket grubuna da eklenir.
             </p>
           </div>
           <label className="block text-xs font-bold text-slate-600 cursor-pointer border border-dashed border-slate-300 rounded-xl p-6 text-center hover:bg-slate-50">
@@ -749,6 +781,49 @@ export const GrupKopruScreen: React.FC<GrupKopruScreenProps> = ({
                     ))}
                   </div>
                 )}
+              </div>
+              <div className="rounded-xl border border-slate-100 p-3 space-y-2">
+                <p className="text-[10px] font-bold uppercase text-slate-500">Etiket grubuna ekle (isteğe bağlı)</p>
+                <p className="text-[11px] text-slate-500">
+                  Yeni faturayı ve işaretlenen irsaliyeleri bir nitelik klasörüne koyun — İnce, Mıcır, Demir.
+                  Bu, Evrak Bağlama zinciri değildir.
+                </p>
+                <div className="grid sm:grid-cols-2 gap-2">
+                  <label className="text-[10px] font-bold uppercase text-slate-500">
+                    Kayıtlı grup
+                    <select
+                      className={input}
+                      value={etiketGrupId}
+                      onChange={(e) => {
+                        setEtiketGrupId(e.target.value);
+                        if (e.target.value) setEtiketYeniAd('');
+                      }}
+                    >
+                      <option value="">Seçilmedi</option>
+                      {evrakEtiketGruplari
+                        .slice()
+                        .sort((a, b) => a.ad.localeCompare(b.ad, 'tr-TR'))
+                        .map((g) => (
+                          <option key={g.id} value={g.id}>
+                            {g.ad}
+                            {g.nitelik ? ` · ${g.nitelik}` : ''}
+                          </option>
+                        ))}
+                    </select>
+                  </label>
+                  <label className="text-[10px] font-bold uppercase text-slate-500">
+                    veya yeni ad yazın
+                    <input
+                      className={input}
+                      value={etiketYeniAd}
+                      onChange={(e) => {
+                        setEtiketYeniAd(e.target.value);
+                        if (e.target.value.trim()) setEtiketGrupId('');
+                      }}
+                      placeholder="Örn. İnce Grubu siparişleri"
+                    />
+                  </label>
+                </div>
               </div>
               <button type="button" onClick={kaydetFatura} className="text-xs font-bold px-4 py-2 rounded-lg bg-slate-900 text-white hover:bg-slate-800 cursor-pointer">
                 Faturayı kaydet{seciliIrIds.length ? ` ve ${seciliIrIds.length} irsaliyeyi bağla` : ''}
