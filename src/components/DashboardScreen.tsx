@@ -434,8 +434,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
               </div>
               <div className="grid grid-cols-2 gap-2">
                 {[
-                  { tab: 'irsaliye_giris', label: 'İrsaliye' },
-                  { tab: 'fatura_giris', label: 'Fatura' },
+                  { tab: 'irsaliye_fatura', label: 'İrsaliye & Fatura' },
                   { tab: 'cari_stok', label: 'Cari / Stok' },
                   { tab: 'personel_izin', label: 'İzin Formu' },
                 ].map((link) => (

@@ -27,9 +27,8 @@ const FaaliyetPersonelScreen = lazy(() => import('./components/FaaliyetPersonelS
 const MaasMerkeziScreen = lazy(() => import('./components/MaasMerkeziScreen').then(m => ({ default: m.MaasMerkeziScreen })));
 const PersonelIzinScreen = lazy(() => import('./components/PersonelIzinScreen').then(m => ({ default: m.PersonelIzinScreen })));
 const SatinAlmaScreen = lazy(() => import('./components/SatinAlmaScreen').then(m => ({ default: m.SatinAlmaScreen })));
-const IrsaliyeGirisScreen = lazy(() => import('./components/IrsaliyeGirisScreen').then(m => ({ default: m.IrsaliyeGirisScreen })));
+const IrsaliyeFaturaWorkspaceScreen = lazy(() => import('./components/IrsaliyeFaturaWorkspaceScreen').then(m => ({ default: m.IrsaliyeFaturaWorkspaceScreen })));
 const TCetveliScreen = lazy(() => import('./components/TCetveliScreen').then(m => ({ default: m.TCetveliScreen })));
-const FaturaGirisScreen = lazy(() => import('./components/FaturaGirisScreen').then(m => ({ default: m.FaturaGirisScreen })));
 const TaseronKesintiScreen = lazy(() => import('./components/TaseronKesintiScreen').then(m => ({ default: m.TaseronKesintiScreen })));
 const PersonelKartlariScreen = lazy(() => import('./components/PersonelKartlariScreen').then(m => ({ default: m.PersonelKartlariScreen })));
 const KasaScreen = lazy(() => import('./components/KasaScreen').then(m => ({ default: m.KasaScreen })));
@@ -118,6 +117,13 @@ import {
   isRetiredPortalTab,
 } from './lib/yetkiUtils';
 import {
+  IRSALIYE_FATURA_TAB,
+  canonicalizePortalTab,
+  paneForTab,
+  writeWorkspacePane,
+  type IrsaliyeFaturaPane,
+} from './lib/irsaliyeFaturaNav';
+import {
   dedupeKullanicilarByEmail,
   findKullaniciByEmail,
   hasDuplicateKullaniciEmails,
@@ -197,8 +203,16 @@ function App() {
   const readLastTab = (): string => {
     try {
       const removedTabs = new Set(['evrak_baglama', 'yz_karsilastir']);
-      const normalize = (tab: string) =>
-        removedTabs.has(tab) || isRetiredPortalTab(tab) ? 'ana_sayfa' : tab;
+      const normalize = (tab: string) => {
+        const pane = paneForTab(tab);
+        if (pane) writeWorkspacePane(pane);
+        if (removedTabs.has(tab)) {
+          writeWorkspacePane(tab === 'yz_karsilastir' ? 'karsilastir' : 'birlestir');
+          return IRSALIYE_FATURA_TAB;
+        }
+        if (isRetiredPortalTab(tab)) return 'ana_sayfa';
+        return canonicalizePortalTab(tab);
+      };
       const direct = localStorage.getItem(LAST_TAB_STORAGE_KEY);
       if (direct) return normalize(direct);
       const rawSession = localStorage.getItem('kibritci_portal_session');
@@ -326,6 +340,7 @@ function App() {
   const [satinAlmaTalepleri, setSatinAlmaTalepleri] = useState<SatinAlmaTalebi[]>([]);
   const [irsaliyeler, setIrsaliyeler] = useState<Irsaliye[]>([]);
   const [irsaliyeSaPrefill, setIrsaliyeSaPrefill] = useState<SaIrsaliyeFormPrefill | null>(null);
+  const [workspacePane, setWorkspacePane] = useState<IrsaliyeFaturaPane | undefined>(undefined);
   const [faturalar, setFaturalar] = useState<Fatura[]>([]);
   const [evrakBaglantiGruplari, setEvrakBaglantiGruplari] = useState<EvrakBaglantiGrubu[]>([]);
   const [onayliAnalizRaporlari, setOnayliAnalizRaporlari] = useState<OnayliAnalizRaporu[]>([]);
@@ -2930,9 +2945,8 @@ function App() {
     const has = (...keys: string[]) => keys.some((k) => text.includes(k));
 
     if (has('onay', 'reddedil', 'onaylandı', 'onaylandi', 'imza', 'kapı', 'kapi', 'gate', 'evrak')) return 'onay_islemleri';
-    if (has('irsaliye', 'fiş', 'fis')) return 'irsaliye_giris';
+    if (has('irsaliye', 'fiş', 'fis', 'fatura', 'işçi giriş', 'isci giris')) return IRSALIYE_FATURA_TAB;
     if (has('t cetvel', 't-cetvel', 'cetveli')) return 't_cetveli';
-    if (has('fatura')) return 'fatura_giris';
     if (has('sipariş', 'siparis')) return 'siparis_formu';
     if (has('satın alma', 'satin alma', 'talep', 'po ')) return 'satin_alma';
     if (has('yoklama', 'mesai', 'puantaj')) return 'yoklama';
@@ -2958,7 +2972,13 @@ function App() {
   };
 
   const handleTabNavigation = (targetTab: string) => {
-    const tab = isRetiredPortalTab(targetTab) ? 'ana_sayfa' : targetTab;
+    const pane = paneForTab(targetTab);
+    if (pane) {
+      writeWorkspacePane(pane);
+      setWorkspacePane(pane);
+    }
+    const resolved = canonicalizePortalTab(targetTab);
+    const tab = isRetiredPortalTab(resolved) ? 'ana_sayfa' : resolved;
     try {
       persistLastTab(tab);
     } catch {
@@ -2979,7 +2999,7 @@ function App() {
 
   const openIrsaliyeFromSatinAlma = (sa: SatinAlmaTalebi) => {
     setIrsaliyeSaPrefill(buildSaIrsaliyeFormPrefill(sa, irsaliyeler));
-    handleTabNavigation('irsaliye_giris');
+    handleTabNavigation('irsaliye_giris'); // → irsaliye_fatura / İrsaliye sekmesi
   };
 
   const closePublicGiris = () => {
@@ -3920,8 +3940,9 @@ function App() {
                 />
               )}
 
-              {activeTab === "irsaliye_giris" && (
-                <IrsaliyeGirisScreen 
+              {activeTab === IRSALIYE_FATURA_TAB && (
+                <IrsaliyeFaturaWorkspaceScreen
+                  initialPane={workspacePane}
                   irsaliyeler={irsaliyeler}
                   setIrsaliyeler={setIrsaliyelerWithSync}
                   faturalar={faturalar}
@@ -3935,6 +3956,8 @@ function App() {
                   setStokKartlar={setStokKartlarWithSync}
                   setStokIslemGecmisi={setStokIslemGecmisiWithSync}
                   setCariIslemGecmisi={setCariIslemGecmisiWithSync}
+                  onayliAnalizRaporlari={onayliAnalizRaporlari}
+                  setOnayliAnalizRaporlari={setOnayliAnalizRaporlariWithSync}
                   currentUser={currentUser}
                   addNotification={addNotification}
                   prefillFromSa={irsaliyeSaPrefill}
@@ -3953,25 +3976,6 @@ function App() {
                   setHazirTutanaklar={setHazirTutanaklarWithSync}
                   cariKartlar={cariKartlar}
                   setCariIslemGecmisi={setCariIslemGecmisiWithSync}
-                />
-              )}
-
-              {activeTab === "fatura_giris" && (
-                <FaturaGirisScreen 
-                  faturalar={faturalar}
-                  setFaturalar={setFaturalarWithSync}
-                  irsaliyeler={irsaliyeler}
-                  setIrsaliyeler={setIrsaliyelerWithSync}
-                  evrakBaglantiGruplari={evrakBaglantiGruplari}
-                  setEvrakBaglantiGruplari={setEvrakBaglantiGruplariWithSync}
-                  satinAlmaTalepleri={satinAlmaTalepleri}
-                  cariKartlar={cariKartlar}
-                  setCariKartlar={setCariKartlarWithSync}
-                  stokKartlar={stokKartlar}
-                  setStokKartlar={setStokKartlarWithSync}
-                  setCariIslemGecmisi={setCariIslemGecmisiWithSync}
-                  currentUser={currentUser}
-                  addNotification={addNotification}
                 />
               )}
 
