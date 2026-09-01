@@ -1,20 +1,40 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
-</div>
+# Kibritçi İnşaat ERP
 
-# Run and deploy your AI Studio app
+Kibritçi İnşaat şantiye yönetim uygulaması. React 19 + Vite 6 arayüzü ve Express API aynı Node sürecinde çalışır.
 
-This contains everything you need to run your app locally.
+Kaynak depo: [sametatak9/kibritci_web](https://github.com/sametatak9/kibritci_web)  
+Canlı: [kibritci-web.vercel.app](https://kibritci-web.vercel.app)
 
-View your app in AI Studio: https://ai.studio/apps/84f7bd62-d0d7-423b-9b98-326934f7a0aa
+## Yerelde çalıştırma
 
-## Run Locally
+**Gereksinim:** Node.js 20–22 (`nvm` kullanıyorsanız `.node-version` yeter).
 
-**Prerequisites:**  Node.js
+```bash
+npm install
+npm run dev
+```
 
+Uygulama varsayılan olarak `http://localhost:3000` adresinde açılır. Portu değiştirmek için `PORT` kullanın:
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+```bash
+PORT=43147 npm run dev
+```
+
+İsteğe bağlı sırlar `.env.local` içine konur (şablon: `.env.example`). Tanımlı değilse istemci `firebase-applet-config.json` ile bağlanır.
+
+- `GEMINI_API_KEY` — belge ayrıştırma ve sohbet. Yoksa yalnızca AI kapanır.
+- `FIREBASE_SERVICE_ACCOUNT_JSON` — kurucu/admin uçları (`/api/auth/*`). Yoksa normal e-posta/şifre girişi çalışır.
+
+## Derleme ve üretim
+
+```bash
+npm run lint          # tsc --noEmit
+npm run build         # Vite + Express (Vercel API dahil)
+npm start             # dist/server.cjs
+```
+
+Vercel `vercel.json` ile `dist` çıktısını ve `api/[...path].js` fonksiyonunu kullanır.
+
+## Uyarı
+
+Firebase yapılandırması canlı `kibritci-erp` projesine işaret eder. Yerel geliştirmede gerçek şirket verisine yazmamaya dikkat edin.
